@@ -1,0 +1,15 @@
+# backend/.gitignore
+
+# Node modules
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Environment Variables
+.env
+
+# Docker
+docker-compose.override.yml

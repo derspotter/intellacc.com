@@ -1,0 +1,19 @@
+# .gitignore
+
+# Ignore backend and frontend .env files
+/backend/.env
+/frontend/.env
+
+# Node modules for both backend and frontend
+/backend/node_modules/
+/frontend/node_modules/
+
+# Logs
+logs/
+*.log
+
+# Docker
+docker-compose.override.yml
+
+# Other files to ignore
+.DS_Store

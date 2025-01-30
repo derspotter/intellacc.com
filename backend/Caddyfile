@@ -1,0 +1,13 @@
+{
+    email ${CADDY_EMAIL}
+}
+
+localhost {
+    # Serve frontend files
+    root * /usr/src/app/frontend
+    file_server
+
+    # Reverse proxy API requests to the backend
+    @api path /api/*
+    reverse_proxy @api intellacc_backend:3000
+}

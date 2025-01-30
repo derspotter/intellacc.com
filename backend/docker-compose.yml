@@ -1,0 +1,61 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: intellacc_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - intellacc-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: intellacc_backend
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      PORT: ${NODE_PORT}
+      DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      - ./src:/usr/src/app/src    # Only mount source code for live updates
+    working_dir: /usr/src/app
+    ports:
+      - "${NODE_PORT}:3000"
+    command: ["sh", "-c", "psql $DATABASE_URL -f migrations/initial_migration.sql && npm run start"]    
+    depends_on:
+      - db
+    networks:
+      - intellacc-network
+
+  caddy:
+    image: caddy:latest
+    container_name: intellacc_caddy
+    environment:
+      - ACME_AGREE=true
+      - EMAIL=${CADDY_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    networks:
+      - intellacc-network
+
+networks:
+  intellacc-network:
+    driver: bridge
+
+volumes:
+  db-data:
+  caddy_data:
+  caddy_config:
