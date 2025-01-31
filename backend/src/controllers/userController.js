@@ -132,3 +132,34 @@ exports.makePrediction = async (req, res) => {
       res.status(500).send("Database error: " + err.message);
   }
 };
+
+exports.resolvePrediction = async (req, res) => {
+  const { outcome } = req.body; // ✅ Should be "correct" or "incorrect"
+  const { id } = req.params;
+  const userId = req.user.userId;
+
+  try {
+      // ✅ Check if the user is an admin
+      const adminCheck = await pool.query("SELECT role FROM users WHERE id = $1", [userId]);
+      if (adminCheck.rows.length === 0 || adminCheck.rows[0].role !== "admin") {
+          return res.status(403).json({ message: "Only admins can resolve predictions." });
+      }
+
+      // ✅ Check if prediction exists
+      const predictionQuery = await pool.query("SELECT * FROM predictions WHERE id = $1", [id]);
+      if (predictionQuery.rows.length === 0) {
+          return res.status(404).json({ message: "Prediction not found" });
+      }
+
+      // ✅ Update prediction outcome
+      const result = await pool.query(
+          "UPDATE predictions SET outcome = $1, resolved_at = NOW() WHERE id = $2 RETURNING *",
+          [outcome, id]
+      );
+
+      res.status(200).json(result.rows[0]);
+  } catch (err) {
+      console.error("Error resolving prediction:", err);
+      res.status(500).send("Database error: " + err.message);
+  }
+};

@@ -17,6 +17,8 @@ router.post('/login', userController.loginUser);
 router.get("/me", authenticateJWT, userController.getUserProfile); // Protected user profile route (requires authentication)
 router.post("/predict", authenticateJWT, userController.makePrediction);
 router.post("/events", authenticateJWT, userController.createEvent);
+router.patch("/predictions/:id", authenticateJWT, userController.resolvePrediction);
+
 
 
 
