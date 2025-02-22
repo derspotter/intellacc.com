@@ -3,7 +3,6 @@
 const { Pool } = require('pg');
 
 
-
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
@@ -161,5 +160,46 @@ exports.resolvePrediction = async (req, res) => {
   } catch (err) {
       console.error("Error resolving prediction:", err);
       res.status(500).send("Database error: " + err.message);
+  }
+};
+
+
+exports.getPredictions = async (req, res) => {
+  const userId = req.user.userId; // ✅ Get the logged-in user's ID from the JWT token
+
+  try {
+      let query = "SELECT * FROM predictions WHERE user_id = $1";
+      let values = [userId];
+
+      // ✅ Optional Filtering: Allow filtering by `status=resolved`
+      if (req.query.status === "resolved") {
+          query += " AND outcome IS NOT NULL";
+      } else if (req.query.status === "pending") {
+          query += " AND outcome IS NULL";
+      }
+
+      const result = await pool.query(query, values);
+      res.status(200).json(result.rows);
+  } catch (err) {
+      console.error("Error fetching predictions:", err);
+      res.status(500).send("Database error: " + err.message);
+  }
+};
+
+// Add this new function to your userController
+
+exports.editUserProfile = async (req, res) => {
+  const userId = req.user.userId;
+  const { avatar, bio } = req.body;
+  
+  try {
+    const result = await pool.query(
+      'UPDATE users SET avatar = $1, bio = $2, updated_at = NOW() WHERE id = $3 RETURNING *',
+      [avatar, bio, userId]
+    );
+    res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Error updating profile');
   }
 };
