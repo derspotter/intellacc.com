@@ -24,10 +24,11 @@ services:
       DATABASE_URL: ${DATABASE_URL}
     volumes:
       - ./src:/usr/src/app/src    # Only mount source code for live updates
+      - ./test:/usr/src/app/test # for testing
     working_dir: /usr/src/app
     ports:
       - "${NODE_PORT}:3000"
-    command: ["sh", "-c", "psql $DATABASE_URL -f migrations/initial_migration.sql && npm run start"]    
+    command: ["sh", "-c", "until pg_isready -h db -p 5432; do echo 'Waiting for DB'; sleep 2; done; psql $DATABASE_URL -f migrations/initial_migration.sql && npm run start"]
     depends_on:
       - db
     networks:
@@ -53,7 +54,7 @@ services:
 
 networks:
   intellacc-network:
-    driver: bridge
+    external: true
 
 volumes:
   db-data:

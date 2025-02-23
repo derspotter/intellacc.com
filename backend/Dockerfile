@@ -10,8 +10,8 @@ WORKDIR /usr/src/app
 # Copy package.json and package-lock.json
 COPY package*.json ./
 
-# Force re-install dependencies inside the container
-RUN rm -rf node_modules && npm install
+# Install dependencies
+RUN npm install
 
 # Copy the rest of the application code
 COPY . .

@@ -5,17 +5,23 @@ const pool = new Pool({
 
 // Create a new post
 exports.createPost = async (req, res) => {
-  const { content, image_url } = req.body;
-  const userId = req.user.userId;
   try {
-    const result = await pool.query(
-      'INSERT INTO posts (user_id, content, image_url, created_at) VALUES ($1, $2, $3, NOW()) RETURNING *',
-      [userId, content, image_url]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Error creating post');
+    const { title, content } = req.body;
+    const userId = req.user.id; // Assuming you have user info in req.user from JWT
+    const newPost = await Post.create({
+      title,
+      content,
+      userId,
+    });
+
+    // Emit a notification to all connected clients
+    const io = req.app.get('socketio');
+    io.emit('newPost', newPost); // Emit a 'newPost' event with the new post data
+
+    res.status(201).json(newPost);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error creating post' });
   }
 };
 
