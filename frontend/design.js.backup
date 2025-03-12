@@ -29,9 +29,6 @@ const currentPage = van.state(window.location.hash.slice(1) || 'home');
 const loginError = van.state('');
 const viewReady = van.state(false);
 
-// Add missing data fetched state
-const dataFetched = van.state(false);
-
 // Predictions states
 const predictionsState = van.state([]);
 const predictionsLoadingState = van.state(false);
@@ -324,16 +321,46 @@ const fetchEvents = async () => {
     }
     
     const data = await response.json();
-    eventsState.val = Array.isArray(data) ? data : [];
+    if (Array.isArray(data) && data.length > 0) {
+      eventsState.val = data;
+    } else {
+      // Load test events if API returns empty array or non-array
+      loadTestEvents();
+    }
   } catch (error) {
     console.error('Error fetching events:', error);
-    // Mock events for development
-    eventsState.val = [{
-      id: 1,
-      title: "Will the price of Bitcoin exceed $100,000 by the end of 2025?",
-      closing_date: new Date(2025, 11, 31).toISOString()
-    }];
+    // Load test events for development
+    loadTestEvents();
   }
+};
+
+// Mock events for testing
+const testEvents = [
+  {
+    id: 1,
+    title: "Will the price of Bitcoin exceed $100,000 by the end of 2025?",
+    closing_date: new Date(2025, 11, 31).toISOString()
+  },
+  {
+    id: 2,
+    title: "Will AI systems achieve human-level reasoning by 2030?",
+    closing_date: new Date(2030, 0, 1).toISOString()
+  },
+  {
+    id: 3,
+    title: "Will SpaceX complete a manned mission to Mars by 2035?",
+    closing_date: new Date(2035, 0, 1).toISOString()
+  },
+  {
+    id: 4,
+    title: "Will global average temperatures increase by more than 1.5°C by 2050?",
+    closing_date: new Date(2050, 0, 1).toISOString()
+  }
+];
+
+// Load test events function
+const loadTestEvents = () => {
+  eventsState.val = testEvents;
 };
 
 // Create a prediction
@@ -670,19 +697,22 @@ const LoginPage = () => {
 
 // Create a Predictions page component
 const PredictionsPage = () => {
-  // Reset dataFetched when entering the page
-  if (currentPage.val === 'predictions' && !dataFetched.val) {
-    // Fetch data when the page is loaded
-    setTimeout(() => {
-      if (isLoggedInState.val) {
-        fetchPredictions();
-        fetchEvents();
-        fetchAssignedPredictions();
-        fetchBettingStats();
-        dataFetched.val = true;
-      }
-    }, 10);
-  }
+  // Use a flag to track if we've already fetched data
+  const dataFetchedState = van.state(false);
+  
+  // Fetch data when the page is loaded, but only once
+  setTimeout(() => {
+    if (!dataFetchedState.val && isLoggedInState.val) {
+      dataFetchedState.val = true;
+      
+      // Load data - this will use test events if the API fails
+      // Each function only updates state once, preventing oscillation
+      fetchPredictions();
+      fetchEvents();
+      fetchAssignedPredictions();
+      fetchBettingStats();
+    }
+  }, 10);
   
   // Create a new prediction form
   const NewPredictionForm = () => {
@@ -734,32 +764,81 @@ const PredictionsPage = () => {
           }
         }
       }, [
-        // Display events loading indicator if needed
-        () => eventsState.val.length === 0 
-          ? div({ class: "form-group" }, p("Loading events..."))
-          : div({ class: "form-group" }, [
-              label({ for: "event" }, "Select Event:"),
-              select({
-                id: "event",
-                required: true,
-                disabled: formState.val.submitting,
-                onchange: (e) => {
-                  formState.val = {...formState.val, eventId: e.target.value};
-                }
-              }, [
-                option({ value: "" }, "-- Select an event --"),
-                ...eventsState.val.map(event => 
+        div({ class: "form-group" }, [
+          label({ for: "event" }, "Select Event:"),
+          select({
+            id: "event",
+            required: true,
+            disabled: formState.val.submitting,
+            value: formState.val.eventId,
+            onchange: (e) => {
+              formState.val = {...formState.val, eventId: e.target.value};
+            }
+          }, [
+            option({ value: "" }, "-- Select an event --"),
+            // Use both API events and test events
+            () => {
+              // If API returned events, use those
+              if (eventsState.val && eventsState.val.length > 0) {
+                return eventsState.val.map(event => 
                   option({ value: event.id }, event.title)
-                )
-              ])
-            ]),
-        // ...rest of the form...
+                );
+              }
+              // Otherwise use our test events
+              return testEvents.map(event => 
+                option({ value: event.id }, event.title)
+              );
+            }
+          ])
+        ]),
+        div({ class: "form-group" }, [
+          label({ for: "prediction" }, "Your Prediction:"),
+          input({
+            type: "text",
+            id: "prediction",
+            required: true,
+            disabled: formState.val.submitting,
+            value: formState.val.prediction,
+            placeholder: "e.g., Yes, No, or specific prediction",
+            onchange: (e) => {
+              formState.val = {...formState.val, prediction: e.target.value};
+            }
+          })
+        ]),
+        div({ class: "form-group" }, [
+          label({ for: "confidence" }, `Confidence: ${formState.val.confidence}%`),
+          input({
+            type: "range",
+            id: "confidence",
+            min: "1",
+            max: "100",
+            step: "1",
+            disabled: formState.val.submitting,
+            value: formState.val.confidence,
+            onchange: (e) => {
+              formState.val = {...formState.val, confidence: parseInt(e.target.value)};
+            }
+          })
+        ]),
+        button({
+          type: "submit",
+          disabled: formState.val.submitting,
+          class: "submit-button"
+        }, formState.val.submitting ? "Submitting..." : "Submit Prediction")
       ])
     ]);
   };
   
   // Assigned predictions component
   const AssignedPredictions = () => {
+    // Use a stable loading state that won't oscillate
+    const loadingCompleted = van.state(false);
+    
+    // Set loading completed after a delay to ensure stable UI
+    setTimeout(() => {
+      loadingCompleted.val = true;
+    }, 500);
+    
     const betFormState = van.state({
       assignmentId: null,
       prediction: null,
@@ -897,9 +976,11 @@ const PredictionsPage = () => {
       MonthlyStats(),
       () => betFormState.val.assignmentId ? BetForm() : null,
       
-      () => assignedPredictionsState.val.length === 0 
-        ? p("No assigned predictions for this month.")
-        : div({ class: "prediction-list" }, 
+      () => !loadingCompleted.val
+        ? p("Loading assigned predictions...")
+        : assignedPredictionsState.val.length === 0 
+          ? p("No assigned predictions for this month.")
+          : div({ class: "prediction-list" }, 
             assignedPredictionsState.val.map(assignment => 
               div({ class: "prediction-card" }, [
                 h3(assignment.event),
@@ -916,11 +997,19 @@ const PredictionsPage = () => {
   };
   
   // User's predictions component
-  const UserPredictions = () => 
-    div({ class: "user-predictions" }, [
+  const UserPredictions = () => {
+    // Use a stable loading state that won't oscillate
+    const loadingCompleted = van.state(false);
+    
+    // Set loading completed after a delay to ensure stable UI
+    setTimeout(() => {
+      loadingCompleted.val = true;
+    }, 500);
+    
+    return div({ class: "user-predictions" }, [
       h2("Your Predictions"),
       
-      () => predictionsLoadingState.val 
+      () => !loadingCompleted.val
         ? p("Loading predictions...")
         : predictionsState.val.length === 0 
           ? p("You haven't made any predictions yet.")
@@ -1224,14 +1313,6 @@ const App = () =>
       ])
     ])
   ]);
-
-// Handle clean-up when navigating away from predictions page
-window.addEventListener('hashchange', () => {
-  if (currentPage.val !== 'predictions') {
-    // Reset the data fetched state when navigating away
-    dataFetched.val = false;
-  }
-});
 
 // Export a function returning the design component with posts
 export function createDesign() {
