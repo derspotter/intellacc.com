@@ -6,13 +6,15 @@ const pool = new Pool({
 // Create a new post
 exports.createPost = async (req, res) => {
   try {
-    const { title, content } = req.body;
+    const { content, image_url } = req.body;
     const userId = req.user.id; // Assuming you have user info in req.user from JWT
-    const newPost = await Post.create({
-      title,
-      content,
-      userId,
-    });
+    
+    const result = await pool.query(
+      'INSERT INTO posts (user_id, content, image_url, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING *',
+      [userId, content, image_url]
+    );
+    
+    const newPost = result.rows[0];
 
     // Emit a notification to all connected clients
     const io = req.app.get('socketio');
@@ -90,5 +92,31 @@ exports.deletePost = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).send('Error deleting the post');
+  }
+};
+
+// Get personalized feed of posts from followed users
+exports.getFeed = async (req, res) => {
+  const userId = req.user.userId;
+  
+  try {
+    const result = await pool.query(
+      `SELECT p.*, u.username
+       FROM posts p
+       JOIN users u ON p.user_id = u.id
+       WHERE p.user_id IN (
+         SELECT following_id 
+         FROM follows 
+         WHERE follower_id = $1
+       )
+       OR p.user_id = $1
+       ORDER BY p.created_at DESC`,
+      [userId]
+    );
+    
+    res.status(200).json(result.rows);
+  } catch (err) {
+    console.error("Error getting feed:", err);
+    res.status(500).json({ message: "Internal server error" });
   }
 };

@@ -1,11 +1,36 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Intellacc</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intellacc - Test</title>
 </head>
 <body>
   <div id="app"></div>
-  <script type="module" src="main.js"></script>
+  <script type="module">
+    import { createDesign } from './design.js';
+    import van from './van-1.5.3.min.js';
+    
+    document.addEventListener('DOMContentLoaded', () => {
+      const appEl = document.getElementById('app');
+      appEl.innerHTML = ""; // Clear container
+      
+      // Create the design element once
+      const designEl = createDesign();
+      console.log("Design element:", designEl);
+      
+      // Mount design element to the DOM
+      appEl.appendChild(designEl);
+      
+      // Handle hash changes to re-render if needed
+      window.addEventListener('hashchange', () => {
+        console.log("Hash changed to:", window.location.hash);
+        // Manually trigger reactive state update
+        if (window.updatePageFromHash) {
+          window.updatePageFromHash();
+        }
+      });
+    });
+  </script>
 </body>
 </html>
