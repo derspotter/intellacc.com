@@ -1,5 +1,5 @@
 import van from './van-1.5.3.min.js';
-const { div, header, main, section, h2, ul, li, a, p, span, button, form, input, label } = van.tags;
+const { div, header, main, section, h1, h2, h3, ul, li, a, p, span, button, form, input, label, select, option, textarea, table, tr, th, td } = van.tags;
 
 // CSS moved to external styles.css file
 
@@ -28,6 +28,19 @@ const tokenState = van.state(localStorage.getItem('token') || '');
 const currentPage = van.state(window.location.hash.slice(1) || 'home');
 const loginError = van.state('');
 const viewReady = van.state(false);
+
+// Predictions states
+const predictionsState = van.state([]);
+const predictionsLoadingState = van.state(false);
+const eventsState = van.state([]);
+const assignedPredictionsState = van.state([]);
+const bettingStatsState = van.state({ completed_bets: 0, total_assigned: 0, remaining_bets: 5 });
+
+// Profile states
+const userProfileState = van.state(null);
+const userPredictionsState = van.state([]);
+const followersState = van.state([]);
+const followingState = van.state([]);
 
 // Only log in development
 if (process.env.NODE_ENV !== 'production') {
@@ -192,6 +205,328 @@ window.updatePageFromHash = updatePageFromHash;
 
 window.addEventListener('hashchange', updatePageFromHash);
 
+// Fetch predictions
+const fetchPredictions = async () => {
+  if (!isLoggedInState.val) return;
+  
+  try {
+    predictionsLoadingState.val = true;
+    
+    const response = await fetch('/api/predictions', {
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Cache-Control': 'no-cache'
+      }
+    });
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        tokenState.val = '';
+        isLoggedInState.val = false;
+        throw new Error('Session expired. Please log in again.');
+      }
+      throw new Error(`Failed to fetch predictions: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    predictionsState.val = Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('Error fetching predictions:', error);
+    // Load mock data if in development
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      loadMockPredictions();
+    }
+  } finally {
+    predictionsLoadingState.val = false;
+  }
+};
+
+// Fetch assigned predictions
+const fetchAssignedPredictions = async () => {
+  if (!isLoggedInState.val) return;
+  
+  try {
+    const response = await fetch('/api/predictions/assigned', {
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Cache-Control': 'no-cache'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch assigned predictions: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    assignedPredictionsState.val = Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('Error fetching assigned predictions:', error);
+    // Load mock data if in development
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      assignedPredictionsState.val = [{
+        id: 1,
+        prediction_id: 1,
+        event: "Will the price of Bitcoin exceed $100,000 by the end of 2025?",
+        prediction_value: "Yes",
+        assigned_at: new Date().toISOString()
+      }];
+    }
+  }
+};
+
+// Fetch betting stats
+const fetchBettingStats = async () => {
+  if (!isLoggedInState.val) return;
+  
+  try {
+    const response = await fetch('/api/bets/stats', {
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Cache-Control': 'no-cache'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch betting stats: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    bettingStatsState.val = data;
+  } catch (error) {
+    console.error('Error fetching betting stats:', error);
+    // Default stats
+    bettingStatsState.val = { 
+      completed_bets: 0, 
+      total_assigned: 0, 
+      remaining_bets: 5
+    };
+  }
+};
+
+// Fetch events
+const fetchEvents = async () => {
+  if (!isLoggedInState.val) return;
+  
+  try {
+    const response = await fetch('/api/events', {
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Cache-Control': 'no-cache'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch events: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    eventsState.val = Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('Error fetching events:', error);
+    // Mock events for development
+    eventsState.val = [{
+      id: 1,
+      title: "Will the price of Bitcoin exceed $100,000 by the end of 2025?",
+      closing_date: new Date(2025, 11, 31).toISOString()
+    }];
+  }
+};
+
+// Create a prediction
+const createPrediction = async (event_id, prediction_value, confidence) => {
+  if (!isLoggedInState.val) return null;
+  
+  try {
+    const response = await fetch('/api/predict', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ event_id, prediction_value, confidence })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to create prediction: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    // Add new prediction to the state
+    predictionsState.val = [data, ...predictionsState.val];
+    return data;
+  } catch (error) {
+    console.error('Error creating prediction:', error);
+    return null;
+  }
+};
+
+// Place a bet
+const placeBet = async (assignmentId, confidenceLevel, betOn) => {
+  if (!isLoggedInState.val) return null;
+  
+  try {
+    const response = await fetch(`/api/assignments/${assignmentId}/bet`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ confidenceLevel, betOn })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to place bet: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    // Refresh assigned predictions and stats
+    fetchAssignedPredictions();
+    fetchBettingStats();
+    return data;
+  } catch (error) {
+    console.error('Error placing bet:', error);
+    return null;
+  }
+};
+
+// Fetch user profile
+const fetchUserProfile = async () => {
+  if (!isLoggedInState.val) return;
+  
+  try {
+    const response = await fetch('/api/me', {
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Cache-Control': 'no-cache'
+      }
+    });
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        tokenState.val = '';
+        isLoggedInState.val = false;
+        throw new Error('Session expired. Please log in again.');
+      }
+      throw new Error(`Failed to fetch profile: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    userProfileState.val = data;
+  } catch (error) {
+    console.error('Error fetching profile:', error);
+    // Mock profile for development
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      userProfileState.val = {
+        id: 1,
+        username: 'testuser',
+        email: 'test@example.com',
+        bio: 'This is a test user profile'
+      };
+    }
+  }
+};
+
+// Update user profile
+const updateUserProfile = async (bio) => {
+  if (!isLoggedInState.val) return null;
+  
+  try {
+    const response = await fetch('/api/users/profile', {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ bio })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to update profile: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    userProfileState.val = data;
+    return data;
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    return null;
+  }
+};
+
+// Fetch followers
+const fetchFollowers = async () => {
+  if (!isLoggedInState.val || !userProfileState.val) return;
+  
+  try {
+    const userId = userProfileState.val.id;
+    const response = await fetch(`/api/users/${userId}/followers`, {
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Cache-Control': 'no-cache'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch followers: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    followersState.val = Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('Error fetching followers:', error);
+    followersState.val = []; // Empty array on error
+  }
+};
+
+// Fetch following
+const fetchFollowing = async () => {
+  if (!isLoggedInState.val || !userProfileState.val) return;
+  
+  try {
+    const userId = userProfileState.val.id;
+    const response = await fetch(`/api/users/${userId}/following`, {
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Cache-Control': 'no-cache'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch following: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    followingState.val = Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('Error fetching following:', error);
+    followingState.val = []; // Empty array on error
+  }
+};
+
+// Mock predictions for development
+const loadMockPredictions = () => {
+  predictionsState.val = [
+    {
+      id: 1,
+      event: "Will the price of Bitcoin exceed $100,000 by the end of 2025?",
+      prediction_value: "Yes",
+      confidence: 80,
+      created_at: new Date().toISOString(),
+      outcome: null
+    },
+    {
+      id: 2,
+      event: "Will AI systems achieve human-level reasoning by 2030?",
+      prediction_value: "No",
+      confidence: 65,
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+      outcome: null
+    }
+  ];
+};
+
 // Initial call to set the current page based on hash
 updatePageFromHash();
 
@@ -330,6 +665,551 @@ const LoginPage = () => {
   return main({ class: "main-content" }, loginContent);
 };
 
+// Create a Predictions page component
+const PredictionsPage = () => {
+  // Fetch data when the page is loaded
+  setTimeout(() => {
+    if (isLoggedInState.val) {
+      fetchPredictions();
+      fetchEvents();
+      fetchAssignedPredictions();
+      fetchBettingStats();
+    }
+  }, 10);
+  
+  // Create a new prediction form
+  const NewPredictionForm = () => {
+    const formState = van.state({
+      eventId: '',
+      prediction: '',
+      confidence: 50,
+      submitting: false,
+      error: '',
+      success: ''
+    });
+    
+    return div({ class: "card prediction-form" }, [
+      h2("Make a New Prediction"),
+      
+      () => formState.val.error ? div({ class: "error-message" }, formState.val.error) : null,
+      () => formState.val.success ? div({ class: "success-message" }, formState.val.success) : null,
+      
+      form({
+        onsubmit: async (e) => {
+          e.preventDefault();
+          formState.val = {...formState.val, submitting: true, error: '', success: ''};
+          
+          try {
+            const result = await createPrediction(
+              formState.val.eventId,
+              formState.val.prediction,
+              formState.val.confidence
+            );
+            
+            if (result) {
+              formState.val = {
+                eventId: '',
+                prediction: '',
+                confidence: 50,
+                submitting: false,
+                error: '',
+                success: 'Prediction created successfully!'
+              };
+              // Clear success message after 3 seconds
+              setTimeout(() => {
+                formState.val = {...formState.val, success: ''};
+              }, 3000);
+            } else {
+              formState.val = {...formState.val, submitting: false, error: 'Failed to create prediction'};
+            }
+          } catch (error) {
+            formState.val = {...formState.val, submitting: false, error: error.message};
+          }
+        }
+      }, [
+        div({ class: "form-group" }, [
+          label({ for: "event" }, "Select Event:"),
+          select({
+            id: "event",
+            required: true,
+            disabled: formState.val.submitting,
+            value: formState.val.eventId,
+            onchange: (e) => {
+              formState.val = {...formState.val, eventId: e.target.value};
+            }
+          }, [
+            option({ value: "" }, "-- Select an event --"),
+            () => eventsState.val.map(event => 
+              option({ value: event.id }, event.title)
+            )
+          ])
+        ]),
+        div({ class: "form-group" }, [
+          label({ for: "prediction" }, "Your Prediction:"),
+          input({
+            type: "text",
+            id: "prediction",
+            required: true,
+            disabled: formState.val.submitting,
+            value: formState.val.prediction,
+            placeholder: "e.g., Yes, No, or specific prediction",
+            onchange: (e) => {
+              formState.val = {...formState.val, prediction: e.target.value};
+            }
+          })
+        ]),
+        div({ class: "form-group" }, [
+          label({ for: "confidence" }, `Confidence: ${formState.val.confidence}%`),
+          input({
+            type: "range",
+            id: "confidence",
+            min: "1",
+            max: "100",
+            step: "1",
+            disabled: formState.val.submitting,
+            value: formState.val.confidence,
+            onchange: (e) => {
+              formState.val = {...formState.val, confidence: parseInt(e.target.value)};
+            }
+          })
+        ]),
+        button({
+          type: "submit",
+          disabled: formState.val.submitting,
+          class: "submit-button"
+        }, formState.val.submitting ? "Submitting..." : "Submit Prediction")
+      ])
+    ]);
+  };
+  
+  // Assigned predictions component
+  const AssignedPredictions = () => {
+    const betFormState = van.state({
+      assignmentId: null,
+      prediction: null,
+      confidenceLevel: 5,
+      betOn: '',
+      submitting: false,
+      error: '',
+      success: ''
+    });
+    
+    const startBet = (assignment) => {
+      betFormState.val = {
+        ...betFormState.val,
+        assignmentId: assignment.id,
+        prediction: assignment
+      };
+    };
+    
+    const cancelBet = () => {
+      betFormState.val = {
+        ...betFormState.val,
+        assignmentId: null,
+        prediction: null,
+        betOn: '',
+        error: '',
+        success: ''
+      };
+    };
+    
+    const submitBet = async (e) => {
+      e.preventDefault();
+      betFormState.val = {...betFormState.val, submitting: true, error: '', success: ''};
+      
+      try {
+        const result = await placeBet(
+          betFormState.val.assignmentId,
+          betFormState.val.confidenceLevel,
+          betFormState.val.betOn
+        );
+        
+        if (result) {
+          betFormState.val = {
+            assignmentId: null,
+            prediction: null,
+            confidenceLevel: 5,
+            betOn: '',
+            submitting: false,
+            error: '',
+            success: 'Bet placed successfully!'
+          };
+          // Refresh data
+          fetchAssignedPredictions();
+          fetchBettingStats();
+        } else {
+          betFormState.val = {...betFormState.val, submitting: false, error: 'Failed to place bet'};
+        }
+      } catch (error) {
+        betFormState.val = {...betFormState.val, submitting: false, error: error.message};
+      }
+    };
+    
+    // Bet form component
+    const BetForm = () => {
+      if (!betFormState.val.assignmentId) return null;
+      
+      return div({ class: "bet-form" }, [
+        h3("Place Your Bet"),
+        p(`Prediction: ${betFormState.val.prediction.event}`),
+        p(`Original prediction: ${betFormState.val.prediction.prediction_value}`),
+        
+        () => betFormState.val.error ? div({ class: "error-message" }, betFormState.val.error) : null,
+        () => betFormState.val.success ? div({ class: "success-message" }, betFormState.val.success) : null,
+        
+        form({ onsubmit: submitBet }, [
+          div({ class: "form-group" }, [
+            label({ for: "betOn" }, "Your Bet:"),
+            select({
+              id: "betOn",
+              required: true,
+              disabled: betFormState.val.submitting,
+              value: betFormState.val.betOn,
+              onchange: (e) => {
+                betFormState.val = {...betFormState.val, betOn: e.target.value};
+              }
+            }, [
+              option({ value: "" }, "-- Select your bet --"),
+              option({ value: "yes" }, "Yes"),
+              option({ value: "no" }, "No")
+            ])
+          ]),
+          div({ class: "form-group" }, [
+            label({ for: "confidenceLevel" }, `Confidence: ${betFormState.val.confidenceLevel}/10`),
+            input({
+              type: "range",
+              id: "confidenceLevel",
+              min: "1",
+              max: "10",
+              step: "1",
+              disabled: betFormState.val.submitting,
+              value: betFormState.val.confidenceLevel,
+              onchange: (e) => {
+                betFormState.val = {...betFormState.val, confidenceLevel: parseInt(e.target.value)};
+              }
+            })
+          ]),
+          div({ class: "form-buttons" }, [
+            button({
+              type: "submit",
+              disabled: betFormState.val.submitting,
+              class: "submit-button"
+            }, betFormState.val.submitting ? "Submitting..." : "Place Bet"),
+            button({
+              type: "button",
+              onclick: cancelBet,
+              disabled: betFormState.val.submitting,
+              class: "cancel-button"
+            }, "Cancel")
+          ])
+        ])
+      ]);
+    };
+    
+    // Monthly stats
+    const MonthlyStats = () => 
+      div({ class: "monthly-stats" }, [
+        h3("Monthly Betting Stats"),
+        p([
+          `Completed bets: ${bettingStatsState.val.completed_bets}/${bettingStatsState.val.total_assigned || 5}`,
+          span({ class: "stat-highlight" }, ` (${bettingStatsState.val.remaining_bets} remaining)`)
+        ])
+      ]);
+    
+    return div({ class: "assigned-predictions" }, [
+      h2("Your Assigned Predictions"),
+      MonthlyStats(),
+      () => betFormState.val.assignmentId ? BetForm() : null,
+      
+      () => assignedPredictionsState.val.length === 0 
+        ? p("No assigned predictions for this month.")
+        : div({ class: "prediction-list" }, 
+            assignedPredictionsState.val.map(assignment => 
+              div({ class: "prediction-card" }, [
+                h3(assignment.event),
+                p(`Original prediction: ${assignment.prediction_value}`),
+                p(`Assigned on: ${new Date(assignment.assigned_at).toLocaleDateString()}`),
+                button({
+                  class: "bet-button",
+                  onclick: () => startBet(assignment)
+                }, "Place Bet")
+              ])
+            )
+          )
+    ]);
+  };
+  
+  // User's predictions component
+  const UserPredictions = () => 
+    div({ class: "user-predictions" }, [
+      h2("Your Predictions"),
+      
+      () => predictionsLoadingState.val 
+        ? p("Loading predictions...")
+        : predictionsState.val.length === 0 
+          ? p("You haven't made any predictions yet.")
+          : div({ class: "prediction-list" }, 
+              predictionsState.val.map(prediction => 
+                div({ 
+                  class: `prediction-card ${prediction.outcome ? 'resolved' : 'pending'}`,
+                  'data-outcome': prediction.outcome
+                }, [
+                  h3(prediction.event),
+                  p(`Your prediction: ${prediction.prediction_value}`),
+                  p(`Confidence: ${prediction.confidence}%`),
+                  p(`Created: ${new Date(prediction.created_at).toLocaleDateString()}`),
+                  prediction.outcome 
+                    ? p({ class: `outcome ${prediction.outcome}` }, 
+                        `Outcome: ${prediction.outcome.charAt(0).toUpperCase() + prediction.outcome.slice(1)}`
+                      )
+                    : p({ class: "pending" }, "Status: Pending")
+                ])
+              )
+            )
+    ]);
+  
+  // Predictions content
+  const content = [
+    h1("Predictions & Betting"),
+    div({ class: "predictions-container" }, [
+      div({ class: "predictions-column" }, [
+        NewPredictionForm(),
+        UserPredictions()
+      ]),
+      div({ class: "predictions-column" }, [
+        AssignedPredictions()
+      ])
+    ])
+  ];
+  
+  return main({ class: "main-content" }, content);
+};
+
+// Create a Profile page component
+const ProfilePage = () => {
+  // Fetch profile data when the page is loaded
+  setTimeout(() => {
+    if (isLoggedInState.val) {
+      fetchUserProfile();
+      fetchPredictions();
+      
+      // Fetch followers/following after profile is loaded (needs user ID)
+      setTimeout(() => {
+        if (userProfileState.val) {
+          fetchFollowers();
+          fetchFollowing();
+        }
+      }, 100);
+    }
+  }, 10);
+  
+  // Profile editing component
+  const ProfileEditor = () => {
+    const editState = van.state({
+      editing: false,
+      bio: userProfileState.val?.bio || '',
+      submitting: false,
+      error: '',
+      success: ''
+    });
+    
+    const startEditing = () => {
+      editState.val = {
+        ...editState.val,
+        editing: true,
+        bio: userProfileState.val?.bio || '',
+        error: '',
+        success: ''
+      };
+    };
+    
+    const cancelEditing = () => {
+      editState.val = {
+        ...editState.val,
+        editing: false,
+        error: '',
+        success: ''
+      };
+    };
+    
+    const saveProfile = async (e) => {
+      e.preventDefault();
+      editState.val = {...editState.val, submitting: true, error: '', success: ''};
+      
+      try {
+        const result = await updateUserProfile(editState.val.bio);
+        
+        if (result) {
+          editState.val = {
+            ...editState.val,
+            editing: false,
+            submitting: false,
+            error: '',
+            success: 'Profile updated successfully!'
+          };
+          // Clear success message after 3 seconds
+          setTimeout(() => {
+            editState.val = {...editState.val, success: ''};
+          }, 3000);
+        } else {
+          editState.val = {...editState.val, submitting: false, error: 'Failed to update profile'};
+        }
+      } catch (error) {
+        editState.val = {...editState.val, submitting: false, error: error.message};
+      }
+    };
+    
+    return div({ class: "profile-editor" }, [
+      () => editState.val.error ? div({ class: "error-message" }, editState.val.error) : null,
+      () => editState.val.success ? div({ class: "success-message" }, editState.val.success) : null,
+      
+      () => editState.val.editing 
+        ? form({ onsubmit: saveProfile }, [
+            div({ class: "form-group" }, [
+              label({ for: "bio" }, "Bio:"),
+              textarea({
+                id: "bio",
+                rows: 4,
+                disabled: editState.val.submitting,
+                value: editState.val.bio,
+                onchange: (e) => {
+                  editState.val = {...editState.val, bio: e.target.value};
+                }
+              })
+            ]),
+            div({ class: "form-buttons" }, [
+              button({
+                type: "submit",
+                disabled: editState.val.submitting,
+                class: "submit-button"
+              }, editState.val.submitting ? "Saving..." : "Save Profile"),
+              button({
+                type: "button",
+                onclick: cancelEditing,
+                disabled: editState.val.submitting,
+                class: "cancel-button"
+              }, "Cancel")
+            ])
+          ])
+        : button({
+            onclick: startEditing,
+            class: "edit-button"
+          }, "Edit Profile")
+    ]);
+  };
+  
+  // User info component
+  const UserInfo = () => 
+    div({ class: "user-info" }, [
+      h2("Profile"),
+      
+      () => !userProfileState.val 
+        ? p("Loading profile...")
+        : div([
+            h3(userProfileState.val.username),
+            p({ class: "email" }, userProfileState.val.email),
+            div({ class: "bio" }, [
+              h4("Bio"),
+              p(userProfileState.val.bio || "No bio provided")
+            ]),
+            ProfileEditor()
+          ])
+    ]);
+  
+  // Network component (followers/following)
+  const Network = () => 
+    div({ class: "network" }, [
+      h3("Your Network"),
+      
+      div({ class: "network-stats" }, [
+        div({ class: "stat" }, [
+          span({ class: "stat-label" }, "Followers: "),
+          span({ class: "stat-value" }, followersState.val.length)
+        ]),
+        div({ class: "stat" }, [
+          span({ class: "stat-label" }, "Following: "),
+          span({ class: "stat-value" }, followingState.val.length)
+        ])
+      ]),
+      
+      div({ class: "network-tabs" }, [
+        h4("Followers"),
+        () => followersState.val.length === 0 
+          ? p("No followers yet.")
+          : ul({ class: "user-list" }, 
+              followersState.val.map(user => 
+                li({ class: "user-item" }, [
+                  div({ class: "username" }, user.username),
+                  div({ class: "user-bio" }, user.bio || "No bio")
+                ])
+              )
+            ),
+        
+        h4("Following"),
+        () => followingState.val.length === 0 
+          ? p("Not following anyone yet.")
+          : ul({ class: "user-list" }, 
+              followingState.val.map(user => 
+                li({ class: "user-item" }, [
+                  div({ class: "username" }, user.username),
+                  div({ class: "user-bio" }, user.bio || "No bio")
+                ])
+              )
+            )
+      ])
+    ]);
+  
+  // Profile predictions component
+  const ProfilePredictions = () => 
+    div({ class: "profile-predictions" }, [
+      h3("Your Predictions"),
+      
+      () => predictionsLoadingState.val 
+        ? p("Loading predictions...")
+        : predictionsState.val.length === 0 
+          ? p("You haven't made any predictions yet.")
+          : div({ class: "prediction-list-compact" }, 
+              predictionsState.val.slice(0, 5).map(prediction => 
+                div({ 
+                  class: `prediction-item ${prediction.outcome ? 'resolved' : 'pending'}`,
+                  'data-outcome': prediction.outcome
+                }, [
+                  div({ class: "prediction-event" }, prediction.event),
+                  div({ class: "prediction-details" }, [
+                    span(`${prediction.prediction_value} (${prediction.confidence}%)`),
+                    prediction.outcome 
+                      ? span({ class: `outcome ${prediction.outcome}` }, prediction.outcome)
+                      : span({ class: "pending" }, "Pending")
+                  ])
+                ])
+              )
+            ),
+      
+      button({
+        onclick: () => {
+          window.location.hash = 'predictions';
+        },
+        class: "view-all-button"
+      }, "View All Predictions")
+    ]);
+  
+  // Profile content
+  const content = [
+    h1("My Profile"),
+    div({ class: "profile-container" }, [
+      div({ class: "profile-column main" }, [
+        UserInfo(),
+        ProfilePredictions()
+      ]),
+      div({ class: "profile-column sidebar" }, [
+        Network()
+      ])
+    ])
+  ];
+  
+  return main({ class: "main-content" }, content);
+};
+
 // Create a main content page component
 const MainPage = () => {
   const content = [
@@ -353,7 +1233,17 @@ const App = () =>
         Sidebar(),
         // This function runs whenever currentPage.val changes
         () => {
-          return currentPage.val === 'login' ? LoginPage() : MainPage();
+          // Handle routing based on the current page
+          switch(currentPage.val) {
+            case 'login':
+              return LoginPage();
+            case 'predictions':
+              return PredictionsPage();
+            case 'profile':
+              return ProfilePage();
+            default:
+              return MainPage();
+          }
         }
       ])
     ])

@@ -35,6 +35,20 @@ io.on('connection', (socket) => {
       timestamp: new Date().toISOString()
     });
   });
+  
+  // Join predictions room
+  socket.on('join-predictions', () => {
+    socket.join('predictions');
+    console.log('User joined predictions room');
+  });
+  
+  // Join profile room (for personalized updates)
+  socket.on('join-profile', (userId) => {
+    if (userId) {
+      socket.join(`user-${userId}`);
+      console.log(`User ${userId} joined their profile room`);
+    }
+  });
 
   socket.on('disconnect', () => {
     console.log('User disconnected');
@@ -60,8 +74,8 @@ app.get('/', async (req, res) => {
 // Additional Routes
 app.use('/api', require('./routes/api'));
 
-// Attach io instance to app
-app.set('socketio', io);
+// Attach io instance to app for controllers to use
+app.set('io', io);
 
 server.listen(port, () => {
   console.log(`Intellacc Backend running on port ${port}`);

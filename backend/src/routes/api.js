@@ -3,8 +3,9 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
-const postController = require('../controllers/postController'); // New controller for posts
-const commentController = require('../controllers/commentController'); // New comment controller
+const postController = require('../controllers/postController');
+const commentController = require('../controllers/commentController');
+const predictionsController = require('../controllers/predictionsController');
 const authenticateJWT = require("../middleware/auth");
 
 // Base test route
@@ -26,16 +27,17 @@ router.get("/users/:id/followers", authenticateJWT, userController.getFollowers)
 router.get("/users/:id/following", authenticateJWT, userController.getFollowing);
 
 // Prediction/Events Routes
-router.post("/predict", authenticateJWT, userController.makePrediction);
-router.post("/events", authenticateJWT, userController.createEvent);
-router.patch("/predictions/:id", authenticateJWT, userController.resolvePrediction);
-router.get("/predictions", authenticateJWT, userController.getPredictions);
+router.post("/predict", authenticateJWT, predictionsController.createPrediction);
+router.post("/events", authenticateJWT, predictionsController.createEvent);
+router.get("/events", authenticateJWT, predictionsController.getEvents);
+router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
+router.get("/predictions", authenticateJWT, predictionsController.getUserPredictions);
 
 // Assigned Predictions & Betting System
-router.post("/predictions/assign", authenticateJWT, userController.assignPredictions);
-router.get("/predictions/assigned", authenticateJWT, userController.getAssignedPredictions);
-router.post("/assignments/:id/bet", authenticateJWT, userController.placeBet);
-router.get("/bets/stats", authenticateJWT, userController.getMonthlyBettingStats);
+router.post("/predictions/assign", authenticateJWT, userController.assignPredictions); // Keep in userController
+router.get("/predictions/assigned", authenticateJWT, predictionsController.getAssignedPredictions);
+router.post("/assignments/:id/bet", authenticateJWT, predictionsController.placeBet);
+router.get("/bets/stats", authenticateJWT, predictionsController.getMonthlyBettingStats);
 
 // Post Routes
 router.post("/posts", authenticateJWT, postController.createPost);
