@@ -669,7 +669,8 @@ const LoginPage = () => {
 const PredictionsPage = () => {
   // Fetch data when the page is loaded
   setTimeout(() => {
-    if (isLoggedInState.val) {
+    if (!dataFetched.val && isLoggedInState.val) {
+      dataFetched.val = true;
       fetchPredictions();
       fetchEvents();
       fetchAssignedPredictions();
