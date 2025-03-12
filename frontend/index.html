@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Intellacc - Test</title>
+  <meta name="theme-color" content="#0000ff" />
+  <title>Intellacc - Social Network with Prediction Markets</title>
+  <!-- Link to the external stylesheet -->
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <div id="app"></div>
@@ -16,15 +19,19 @@
       appEl.innerHTML = ""; // Clear container
       
       // Create the design element once
-      const designEl = createDesign();
-      console.log("Design element:", designEl);
+      const designElements = createDesign();
       
-      // Mount design element to the DOM
-      appEl.appendChild(designEl);
+      // Handle array of elements returned from createDesign
+      if (Array.isArray(designElements)) {
+        designElements.forEach(element => {
+          appEl.appendChild(element);
+        });
+      } else {
+        appEl.appendChild(designElements);
+      }
       
       // Handle hash changes to re-render if needed
       window.addEventListener('hashchange', () => {
-        console.log("Hash changed to:", window.location.hash);
         // Manually trigger reactive state update
         if (window.updatePageFromHash) {
           window.updatePageFromHash();

@@ -1,8 +1,12 @@
 // socket-client.js
+import van from "./van-1.5.3.min.js";
 import { io } from "https://cdn.skypack.dev/socket.io-client@4.8.1";
+
 const { div, text } = van;
 
-const socket = io("http://localhost:3000", {
+// Use relative URL for the socket connection to work in any environment
+const socket = io("/", {
+  path: "/socket.io",
   transports: ["websocket"],
   reconnection: true,
 });
@@ -41,12 +45,19 @@ socket.on("disconnect", () => {
   messages.val = [...messages.val, "Disconnected from server"];
 });
 
-// Create a reactive UI that renders messages
-document.getElementById("app").appendChild(
-  div(
-    div(text("VanJS + Socket.IO Demo")),
-    div(
-      van.for(messages, (msg) => div(text(msg)))
-    )
-  )
-);
+// Wait for the DOM to be fully loaded before accessing #app
+document.addEventListener("DOMContentLoaded", () => {
+  const appEl = document.getElementById("app");
+  if (appEl) {
+    appEl.appendChild(
+      div(
+        div(text("VanJS + Socket.IO Demo")),
+        div(
+          van.for(messages, (msg) => div(text(msg)))
+        )
+      )
+    );
+  } else {
+    console.error("Element with id 'app' not found");
+  }
+});
