@@ -1,6 +1,10 @@
 # Use the official Node.js 23 Alpine image as the base
 FROM node:23-alpine
 
+# Set environment variable to indicate we're in Docker
+ENV DOCKER_ENV=true
+ENV NODE_ENV=development
+
 # Set the working directory inside the container
 WORKDIR /app
 
@@ -17,4 +21,4 @@ COPY . .
 EXPOSE 5173
 
 # Run Vite in development mode (hot-reload enabled)
-CMD ["npm", "run", "dev"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

@@ -82,11 +82,19 @@ exports.createEvent = async (req, res) => {
 
 // Get all available events
 exports.getEvents = async (req, res) => {
+  console.log('getEvents called');
   try {
+    console.log('User ID:', req.user.userId);
     const result = await pool.query(
       "SELECT * FROM events WHERE outcome IS NULL AND closing_date > NOW() ORDER BY closing_date ASC"
     );
-    res.status(200).json(result.rows);
+    console.log('Events result:', result.rows);
+    if (result.rows.length === 0) {
+      console.log('No events found');
+      res.status(404).json({ message: "No events found" });
+    } else {
+      res.status(200).json(result.rows);
+    }
   } catch (err) {
     console.error("Error fetching events:", err);
     res.status(500).send("Database error: " + err.message);

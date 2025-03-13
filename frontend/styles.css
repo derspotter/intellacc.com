@@ -536,3 +536,76 @@ select, textarea {
 .edit-button {
   margin: 1rem 0 0 0;
 }
+
+/* Admin styles */
+.admin-section {
+  margin-bottom: 2rem;
+  border-left: 4px solid var(--blue-bg);
+}
+
+.admin-section h2 {
+  color: var(--blue-bg);
+  font-size: 1.3rem;
+  margin-bottom: 1rem;
+}
+
+.event-form {
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.events-management {
+  margin-top: 1.5rem;
+}
+
+.event-item {
+  border: 1px solid var(--border-color);
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background-color: white;
+}
+
+.event-item h4 {
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+}
+
+.event-details {
+  font-style: italic;
+  margin: 0.5rem 0;
+  color: var(--secondary-text);
+}
+
+.event-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.event-resolved {
+  font-weight: bold;
+  color: var(--success-color);
+  margin-top: 0.5rem;
+}
+
+.resolve-button {
+  font-size: 0.9rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.resolve-button.yes {
+  background-color: var(--success-color);
+  color: white;
+  border-color: var(--success-color);
+}
+
+.resolve-button.no {
+  background-color: var(--error-color);
+  color: white;
+  border-color: var(--error-color);
+}
+
+.resolve-button:hover {
+  opacity: 0.9;
+}

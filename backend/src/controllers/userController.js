@@ -73,7 +73,7 @@ exports.getUserProfile = async (req, res) => {
     const userId = req.user.userId; // Extract user ID from token
 
     const result = await pool.query(
-      "SELECT id, username, email FROM users WHERE id = $1",
+      "SELECT id, username, email, role FROM users WHERE id = $1",
       [userId]
     );
 
@@ -85,50 +85,6 @@ exports.getUserProfile = async (req, res) => {
   } catch (err) {
     console.error("Error fetching user profile:", err);
     res.status(500).json({ message: "Internal Server Error" });
-  }
-};
-
-exports.createEvent = async (req, res) => {
-  const { title, details, closing_date } = req.body;  // ✅ Change from `name` to `title`
-
-  try {
-      const result = await pool.query(
-          "INSERT INTO events (title, details, closing_date) VALUES ($1, $2, $3) RETURNING *",
-          [title, details, closing_date]  // ✅ Use `title` instead of `name`
-      );
-      res.status(201).json(result.rows[0]);
-  } catch (err) {
-      console.error("Error creating event:", err);
-      res.status(500).send("Database error: " + err.message);
-  }
-};
-
-
-
-exports.makePrediction = async (req, res) => {
-  const { event_id, prediction_value, confidence } = req.body;
-  const userId = req.user.userId;
-
-  try {
-      // ✅ Fetch the event title instead of "name"
-      const eventQuery = await pool.query("SELECT title FROM events WHERE id = $1", [event_id]);
-
-      if (eventQuery.rows.length === 0) {
-          return res.status(400).json({ message: "Invalid event_id" });
-      }
-
-      const eventTitle = eventQuery.rows[0].title;  // ✅ Change from `name` to `title`
-
-      // ✅ Insert prediction into database
-      const result = await pool.query(
-          "INSERT INTO predictions (user_id, event_id, event, prediction_value, confidence) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-          [userId, event_id, eventTitle, prediction_value, confidence]  // ✅ Use `eventTitle`
-      );
-
-      res.status(201).json(result.rows[0]);
-  } catch (err) {
-      console.error("Error saving prediction:", err);
-      res.status(500).send("Database error: " + err.message);
   }
 };
 

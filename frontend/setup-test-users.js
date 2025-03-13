@@ -1,12 +1,7 @@
 // setup-test-users.js - Script to create test users and content
 // Run with: node setup-test-users.js
 
-// Use localhost when running directly, backend hostname in Docker
-const isDocker = process.env.DOCKER === 'true';
-const API_HOST = isDocker ? 'backend' : 'localhost';
-const API_BASE = `http://${API_HOST}:3000/api`;
-
-console.log(`Using API endpoint: ${API_BASE}`);
+const API_BASE = 'http://backend:3000/api'; // Direct connection to backend service
 
 // Test user data
 const users = [

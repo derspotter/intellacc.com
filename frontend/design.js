@@ -1,5 +1,5 @@
 import van from './van-1.5.3.min.js';
-const { div, header, main, section, h1, h2, h3, ul, li, a, p, span, button, form, input, label, select, option, textarea, table, tr, th, td } = van.tags;
+const { div, header, main, section, h1, h2, h3, h4, ul, li, a, p, span, button, form, input, label, select, option, textarea, table, tr, th, td } = van.tags;
 
 // CSS moved to external styles.css file
 
@@ -28,9 +28,10 @@ const tokenState = van.state(localStorage.getItem('token') || '');
 const currentPage = van.state(window.location.hash.slice(1) || 'home');
 const loginError = van.state('');
 const viewReady = van.state(false);
-
-// Add missing data fetched state
 const dataFetched = van.state(false);
+
+// Add admin state
+const isAdminState = van.state(false);
 
 // Predictions states
 const predictionsState = van.state([]);
@@ -38,6 +39,16 @@ const predictionsLoadingState = van.state(false);
 const eventsState = van.state([]);
 const assignedPredictionsState = van.state([]);
 const bettingStatsState = van.state({ completed_bets: 0, total_assigned: 0, remaining_bets: 5 });
+
+// New prediction form state (moved outside component to persist across re-renders)
+const newPredictionFormState = van.state({
+  eventId: '',
+  prediction: '',
+  confidence: 50,
+  submitting: false,
+  error: '',
+  success: ''
+});
 
 // Profile states
 const userProfileState = van.state(null);
@@ -50,15 +61,23 @@ if (process.env.NODE_ENV !== 'production') {
   console.log('Initial page state:', currentPage.val);
 }
 
-// Check if user is logged in
+// Check if user is logged in and if they're an admin
 const checkAuth = () => {
   const token = localStorage.getItem('token');
   if (token) {
     tokenState.val = token;
     isLoggedInState.val = true;
+    
+    // Check if the user is an admin by verifying with the backend
+    // We'll do this by checking the user profile - the fetchUserProfile function
+    // now handles setting isAdminState.val based on the role
+    console.log('checkAuth: Fetching user profile to check admin status');
+    fetchUserProfile();
+    
     return true;
   }
   isLoggedInState.val = false;
+  isAdminState.val = false;
   return false;
 };
 
@@ -312,6 +331,7 @@ const fetchEvents = async () => {
   if (!isLoggedInState.val) return;
   
   try {
+    console.log("Fetching events...");
     const response = await fetch('/api/events', {
       headers: {
         'Authorization': `Bearer ${tokenState.val}`,
@@ -324,7 +344,15 @@ const fetchEvents = async () => {
     }
     
     const data = await response.json();
-    eventsState.val = Array.isArray(data) ? data : [];
+    console.log("Fetched events:", data);
+    
+    if (Array.isArray(data)) {
+      eventsState.val = data;
+      console.log("Updated events state:", eventsState.val);
+    } else {
+      console.error("Events data is not an array:", data);
+      eventsState.val = [];
+    }
   } catch (error) {
     console.error('Error fetching events:', error);
     // Mock events for development
@@ -398,6 +426,7 @@ const fetchUserProfile = async () => {
   if (!isLoggedInState.val) return;
   
   try {
+    console.log('Fetching user profile...');
     const response = await fetch('/api/me', {
       headers: {
         'Authorization': `Bearer ${tokenState.val}`,
@@ -416,7 +445,18 @@ const fetchUserProfile = async () => {
     }
     
     const data = await response.json();
+    console.log('User profile data received:', data);
+    console.log('Role in profile:', data.role);
     userProfileState.val = data;
+    
+    // Explicitly update admin state based on role
+    if (data.role === 'admin') {
+      console.log('Setting isAdminState to TRUE');
+      isAdminState.val = true;
+    } else {
+      console.log('Setting isAdminState to FALSE');
+      isAdminState.val = false;
+    }
   } catch (error) {
     console.error('Error fetching profile:', error);
     // Mock profile for development
@@ -533,47 +573,67 @@ const loadMockPredictions = () => {
 // Initial call to set the current page based on hash
 updatePageFromHash();
 
-// Login function
+// Login function - simplified and improved for better error handling
 const login = async (email, password) => {
   try {
     loginError.val = '';
+    console.log(`Attempting login for: ${email}`);
     
     const response = await fetch('/api/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email, password }),
+      // Ensure no caching of login requests
+      cache: 'no-store'
     });
-
+    
+    console.log(`Login response status: ${response.status}`);
+    
+    // Handle failed responses
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Login failed');
+      let errorMessage = 'Login failed';
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.message || errorData.error || errorMessage;
+      } catch (e) {
+        // If not JSON, try to get text
+        try {
+          errorMessage = await response.text() || errorMessage;
+        } catch {
+          // Fallback if text retrieval fails
+        }
+      }
+      throw new Error(errorMessage);
     }
 
+    // Parse successful response
     const data = await response.json();
-
-    // Store the token in localStorage
+    console.log('Login successful!');
+    
+    if (!data.token) {
+      throw new Error('No token received from server');
+    }
+    
+    // Store the token and update state
     localStorage.setItem('token', data.token);
     tokenState.val = data.token;
     isLoggedInState.val = true;
     
+    // Immediately fetch user profile to ensure admin status is correctly updated
+    console.log('Fetching profile immediately after login');
+    await fetchUserProfile();
+    
     // Navigate to home page
     window.location.hash = 'home';
     
-    // Fetch posts after login
+    // Refresh data after login
     fetchPosts();
     
   } catch (error) {
-    // Log error in development
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('Login error:', error);
-    }
-
-    // Provide a more user-friendly error message for network errors
-    if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      loginError.val = 'Network error. Please check your connection or contact administrator.';
-    } else {
-      loginError.val = error.message;
-    }
+    console.error('Login error:', error);
+    loginError.val = error.message || 'Login failed';
   }
 };
 
@@ -676,6 +736,7 @@ const PredictionsPage = () => {
     setTimeout(() => {
       if (isLoggedInState.val) {
         fetchPredictions();
+        // Always fetch events to ensure fresh data
         fetchEvents();
         fetchAssignedPredictions();
         fetchBettingStats();
@@ -686,35 +747,32 @@ const PredictionsPage = () => {
   
   // Create a new prediction form
   const NewPredictionForm = () => {
-    const formState = van.state({
-      eventId: '',
-      prediction: '',
-      confidence: 50,
-      submitting: false,
-      error: '',
-      success: ''
-    });
+    
+    // Make sure we have the latest events when the form is shown
+    if (eventsState.val.length === 0) {
+      fetchEvents();
+    }
     
     return div({ class: "card prediction-form" }, [
       h2("Make a New Prediction"),
       
-      () => formState.val.error ? div({ class: "error-message" }, formState.val.error) : null,
-      () => formState.val.success ? div({ class: "success-message" }, formState.val.success) : null,
+      () => newPredictionFormState.val.error ? div({ class: "error-message" }, newPredictionFormState.val.error) : null,
+      () => newPredictionFormState.val.success ? div({ class: "success-message" }, newPredictionFormState.val.success) : null,
       
       form({
         onsubmit: async (e) => {
           e.preventDefault();
-          formState.val = {...formState.val, submitting: true, error: '', success: ''};
+          newPredictionFormState.val = {...newPredictionFormState.val, submitting: true, error: '', success: ''};
           
           try {
             const result = await createPrediction(
-              formState.val.eventId,
-              formState.val.prediction,
-              formState.val.confidence
+              newPredictionFormState.val.eventId,
+              newPredictionFormState.val.prediction,
+              newPredictionFormState.val.confidence
             );
             
             if (result) {
-              formState.val = {
+              newPredictionFormState.val = {
                 eventId: '',
                 prediction: '',
                 confidence: 50,
@@ -724,36 +782,83 @@ const PredictionsPage = () => {
               };
               // Clear success message after 3 seconds
               setTimeout(() => {
-                formState.val = {...formState.val, success: ''};
+                newPredictionFormState.val = {...newPredictionFormState.val, success: ''};
               }, 3000);
             } else {
-              formState.val = {...formState.val, submitting: false, error: 'Failed to create prediction'};
+              newPredictionFormState.val = {...newPredictionFormState.val, submitting: false, error: 'Failed to create prediction'};
             }
           } catch (error) {
-            formState.val = {...formState.val, submitting: false, error: error.message};
+            newPredictionFormState.val = {...newPredictionFormState.val, submitting: false, error: error.message};
           }
         }
       }, [
         // Display events loading indicator if needed
         () => eventsState.val.length === 0 
-          ? div({ class: "form-group" }, p("Loading events..."))
+          ? div({ class: "form-group" }, [
+              p("Loading events..."),
+              button({ 
+                type: "button",
+                onclick: () => fetchEvents(),
+                class: "submit-button" 
+              }, "Refresh Events")
+            ])
           : div({ class: "form-group" }, [
               label({ for: "event" }, "Select Event:"),
+              // Following exactly the example pattern
               select({
                 id: "event",
                 required: true,
-                disabled: formState.val.submitting,
-                onchange: (e) => {
-                  formState.val = {...formState.val, eventId: e.target.value};
-                }
+                disabled: newPredictionFormState.val.submitting,
+                oninput: e => newPredictionFormState.val = {...newPredictionFormState.val, eventId: e.target.value}
               }, [
-                option({ value: "" }, "-- Select an event --"),
+                option({selected: () => newPredictionFormState.val.eventId === "", value: ""}, "-- Select an event --"),
                 ...eventsState.val.map(event => 
-                  option({ value: event.id }, event.title)
+                  option({
+                    selected: () => newPredictionFormState.val.eventId === event.id.toString(), 
+                    value: event.id.toString()
+                  }, event.title)
                 )
               ])
             ]),
-        // ...rest of the form...
+        // Add the prediction value and confidence fields
+        div({ class: "form-group" }, [
+          label({ for: "prediction" }, "Your Prediction:"),
+          select({
+            id: "prediction",
+            required: true,
+            disabled: newPredictionFormState.val.submitting,
+            value: newPredictionFormState.val.prediction, // Set the current value
+            onchange: (e) => {
+              newPredictionFormState.val = {...newPredictionFormState.val, prediction: e.target.value};
+            }
+          }, [
+            option({ value: "" }, "-- Select your prediction --"),
+            option({ value: "Yes" }, "Yes"),
+            option({ value: "No" }, "No")
+          ])
+        ]),
+        div({ class: "form-group" }, [
+          label({ for: "confidence" }, `Confidence: ${newPredictionFormState.val.confidence}%`),
+          input({
+            type: "range",
+            id: "confidence",
+            min: "1",
+            max: "100",
+            step: "1",
+            disabled: newPredictionFormState.val.submitting,
+            value: newPredictionFormState.val.confidence,
+            onchange: (e) => {
+              newPredictionFormState.val = {...newPredictionFormState.val, confidence: parseInt(e.target.value)};
+            }
+          })
+        ]),
+        div({ class: "form-group" }, [
+          button({
+            type: "submit",
+            disabled: newPredictionFormState.val.submitting || !newPredictionFormState.val.eventId || !newPredictionFormState.val.prediction,
+            class: "submit-button"
+          }, newPredictionFormState.val.submitting ? "Submitting..." : "Submit Prediction")
+        ])
       ])
     ]);
   };
@@ -944,11 +1049,158 @@ const PredictionsPage = () => {
             )
     ]);
   
-  // Predictions content
+  // Admin Event Management Component
+  const AdminEventManagement = () => {
+    // Skip rendering if not an admin
+    if (!isAdminState.val) return null;
+    
+    const eventFormState = van.state({
+      title: '',
+      details: '',
+      closingDate: '',
+      submitting: false,
+      error: '',
+      success: ''
+    });
+    
+    const submitEvent = async (e) => {
+      e.preventDefault();
+      eventFormState.val = {...eventFormState.val, submitting: true, error: '', success: ''};
+      
+      try {
+        const result = await createEvent(
+          eventFormState.val.title,
+          eventFormState.val.details,
+          eventFormState.val.closingDate
+        );
+        
+        if (result) {
+          eventFormState.val = {
+            title: '',
+            details: '',
+            closingDate: '',
+            submitting: false,
+            error: '',
+            success: 'Event created successfully!'
+          };
+          // Clear success message after 3 seconds
+          setTimeout(() => {
+            eventFormState.val = {...eventFormState.val, success: ''};
+          }, 3000);
+        } else {
+          eventFormState.val = {...eventFormState.val, submitting: false, error: 'Failed to create event'};
+        }
+      } catch (error) {
+        eventFormState.val = {...eventFormState.val, submitting: false, error: error.message};
+      }
+    };
+    
+    return div({ class: "admin-section card" }, [
+      h2("Admin: Event Management"),
+      
+      // Event creation form
+      div({ class: "event-form" }, [
+        h3("Create New Event"),
+        
+        () => eventFormState.val.error ? div({ class: "error-message" }, eventFormState.val.error) : null,
+        () => eventFormState.val.success ? div({ class: "success-message" }, eventFormState.val.success) : null,
+        
+        form({ onsubmit: submitEvent }, [
+          div({ class: "form-group" }, [
+            label({ for: "eventTitle" }, "Event Title:"),
+            input({
+              type: "text",
+              id: "eventTitle",
+              required: true,
+              disabled: eventFormState.val.submitting,
+              value: eventFormState.val.title,
+              onchange: (e) => {
+                eventFormState.val = {...eventFormState.val, title: e.target.value};
+              },
+              placeholder: "e.g., Will the price of Bitcoin exceed $100,000 by the end of 2025?"
+            })
+          ]),
+          div({ class: "form-group" }, [
+            label({ for: "eventDetails" }, "Details (Optional):"),
+            textarea({
+              id: "eventDetails",
+              rows: 3,
+              disabled: eventFormState.val.submitting,
+              value: eventFormState.val.details,
+              onchange: (e) => {
+                eventFormState.val = {...eventFormState.val, details: e.target.value};
+              },
+              placeholder: "Add details about the event or criteria for resolution"
+            })
+          ]),
+          div({ class: "form-group" }, [
+            label({ for: "closingDate" }, "Closing Date:"),
+            input({
+              type: "date",
+              id: "closingDate",
+              required: true,
+              disabled: eventFormState.val.submitting,
+              value: eventFormState.val.closingDate,
+              onchange: (e) => {
+                eventFormState.val = {...eventFormState.val, closingDate: e.target.value};
+              },
+              min: new Date().toISOString().split('T')[0] // Today's date as minimum
+            })
+          ]),
+          button({
+            type: "submit",
+            disabled: eventFormState.val.submitting,
+            class: "submit-button"
+          }, eventFormState.val.submitting ? "Creating..." : "Create Event")
+        ])
+      ]),
+      
+      // Events list for management
+      div({ class: "events-management" }, [
+        h3("Manage Events"),
+        
+        () => eventsState.val.length === 0 
+          ? p("No events available. Create one above.")
+          : div({ class: "events-list" }, 
+              eventsState.val.map(event => 
+                div({ class: "event-item" }, [
+                  h4(event.title),
+                  p(`Closing: ${new Date(event.closing_date).toLocaleDateString()}`),
+                  p({ class: "event-details" }, event.details || "No additional details"),
+                  
+                  event.outcome 
+                    ? p({ class: "event-resolved" }, `Resolved: ${event.outcome}`)
+                    : div({ class: "event-actions" }, [
+                        // Only show resolve buttons if event isn't resolved
+                        button({
+                          onclick: () => resolveEvent(event.id, 'yes'),
+                          class: "resolve-button yes"
+                        }, "Resolve as YES"),
+                        button({
+                          onclick: () => resolveEvent(event.id, 'no'),
+                          class: "resolve-button no"
+                        }, "Resolve as NO")
+                      ])
+                ])
+              )
+            )
+      ])
+    ]);
+  };
+  
+  // Update the predictions content to include admin section
   const content = [
     h1("Predictions & Betting"),
+    
+    // Insert admin section at the top if user is admin
+    () => {
+      console.log('Checking admin status in PredictionsPage render:', isAdminState.val);
+      return isAdminState.val ? AdminEventManagement() : null;
+    },
+    
     div({ class: "predictions-container" }, [
       div({ class: "predictions-column" }, [
+        // Show prediction form for everyone - both admins and normal users
         NewPredictionForm(),
         UserPredictions()
       ]),
@@ -1233,11 +1485,69 @@ window.addEventListener('hashchange', () => {
   }
 });
 
+// Add function to create a new event
+const createEvent = async (title, details, closingDate) => {
+  if (!isLoggedInState.val || !isAdminState.val) return null;
+  
+  try {
+    const response = await fetch('/api/events', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ title, details, closing_date: closingDate })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to create event: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    // Add new event to the state
+    eventsState.val = [...eventsState.val, data];
+    return data;
+  } catch (error) {
+    console.error('Error creating event:', error);
+    return null;
+  }
+};
+
+// Add function to resolve event
+const resolveEvent = async (eventId, outcome) => {
+  if (!isLoggedInState.val || !isAdminState.val) return null;
+  
+  try {
+    const response = await fetch(`/api/events/${eventId}/resolve`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${tokenState.val}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ outcome })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to resolve event: ${response.statusText || 'Server error'}`);
+    }
+    
+    const data = await response.json();
+    // Update events list
+    fetchEvents();
+    return data;
+  } catch (error) {
+    console.error('Error resolving event:', error);
+    return null;
+  }
+};
+
 // Export a function returning the design component with posts
 export function createDesign() {
   // Initialize app state
   checkAuth();
   updatePageFromHash();
+  
+  // Remove the toggleAdmin function - we'll use the backend to determine admin status
   
   // Fetch posts
   setTimeout(() => {
