@@ -20,6 +20,87 @@
   box-sizing: border-box;
 }
 
+/* Login Form Styles */
+.login-container {
+  max-width: 400px;
+  margin: 3rem auto;
+  padding: 2rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: white;
+}
+
+.login-container h1 {
+  text-align: center;
+  margin-bottom: 1.5rem;
+  font-size: 1.8rem;
+}
+
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  font-size: 1rem;
+}
+
+.form-actions {
+  margin-top: 2rem;
+}
+
+.form-actions button {
+  width: 100%;
+  padding: 0.75rem;
+  background-color: var(--blue-bg);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.form-actions button:hover {
+  opacity: 0.9;
+}
+
+.form-actions button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.error-message {
+  background-color: var(--error-color);
+  color: white;
+  padding: 0.75rem;
+  margin-bottom: 1.5rem;
+  border-radius: 3px;
+  font-size: 0.9rem;
+}
+
+.register-link {
+  text-align: center;
+  margin-top: 1.5rem;
+  font-size: 0.9rem;
+  color: var(--secondary-text);
+}
+
+.register-link a {
+  color: var(--blue-bg);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* Fix for [object HTMLDivElement] display issue */
 .posts-list > *:not(.loading):not(.error):not(.empty-list):not(.posts-container):not(.posts-card) {
   display: none;

@@ -14,6 +14,7 @@ import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
 import NetworkTabs from '../components/profile/NetworkTabs';
 import ProfilePredictions from '../components/profile/ProfilePredictions';
+import LoginForm from '../components/auth/LoginForm';
 
 // Update page from hash
 export const updatePageFromHash = () => {
@@ -48,15 +49,7 @@ export default function Router() {
       PostsList()
     ]),
     
-    login: () => {
-      // Login page content without layout
-      const formState = van.state({ email: '', password: '', submitting: false });
-      
-      return van.tags.div({ class: "login-container" }, [
-        van.tags.h1("Sign In"),
-        // Login form content here
-      ]);
-    },
+    login: () => LoginForm(),
     
     predictions: () => van.tags.div({ class: "predictions-page" }, [
       van.tags.h1("Predictions & Betting"),
