@@ -5,39 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0000ff" />
   <title>Intellacc - Social Network with Prediction Markets</title>
-  <!-- Link to the external stylesheet -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <div id="app"></div>
-  <script type="module">
-    import { createDesign } from './design.js';
-    import van from './van-1.5.3.min.js';
-    
-    document.addEventListener('DOMContentLoaded', () => {
-      const appEl = document.getElementById('app');
-      appEl.innerHTML = ""; // Clear container
-      
-      // Create the design element once
-      const designElements = createDesign();
-      
-      // Handle array of elements returned from createDesign
-      if (Array.isArray(designElements)) {
-        designElements.forEach(element => {
-          appEl.appendChild(element);
-        });
-      } else {
-        appEl.appendChild(designElements);
-      }
-      
-      // Handle hash changes to re-render if needed
-      window.addEventListener('hashchange', () => {
-        // Manually trigger reactive state update
-        if (window.updatePageFromHash) {
-          window.updatePageFromHash();
-        }
-      });
-    });
-  </script>
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>

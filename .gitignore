@@ -17,3 +17,15 @@ docker-compose.override.yml
 
 # Other files to ignore
 .DS_Store
+
+# Design files
+design/*
+
+# Test files
+test/*
+
+# Legacy files
+legacy/*
+
+# VSCode files
+.vscode/*

@@ -10,7 +10,11 @@ const authenticateJWT = require("../middleware/auth");
 
 // Base test route
 router.get("/", (req, res) => {
-    res.json({ message: "API is working!" });
+});
+
+// Health check route
+router.get("/health-check", (req, res) => {
+    res.status(200).json({ status: 'ok', message: 'Server is healthy' });
 });
 
 // User Routes

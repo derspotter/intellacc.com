@@ -1,4 +1,4 @@
-# Use the official Node.js 18 Alpine image as the base
+# Use the official Node.js 23 Alpine image as the base
 FROM node:23-alpine
 
 # Install PostgreSQL client
@@ -7,10 +7,10 @@ RUN apk add --no-cache postgresql-client
 # Set the working directory inside the container
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json
+# Copy package.json and package-lock.json (if it exists)
 COPY package*.json ./
 
-# Install dependencies
+# First generate package-lock.json if it doesn't exist, then use ci
 RUN npm install
 
 # Copy the rest of the application code
