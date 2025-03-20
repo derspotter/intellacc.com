@@ -22,10 +22,10 @@ export default function Sidebar() {
       
       // Authenticated user items
       () => isLoggedInState.val 
-        ? [
+        ? div({ class: "auth-items" }, [  // Changed class name
             div({ class: "sidebar-item" }, a({ href: "#profile" }, "My Profile")),
             div({ class: "sidebar-item" }, button({ onclick: logout }, "Logout"))
-          ] 
+          ])
         : div({ class: "sidebar-item" }, a({ href: "#login" }, "Login"))
     ])
   ]);

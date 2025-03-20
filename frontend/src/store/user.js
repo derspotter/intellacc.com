@@ -12,14 +12,20 @@ const userStore = {
   
   actions: {
     async fetchUserProfile() {
-      if (!auth.isLoggedInState.val) return;
+      if (!auth.isLoggedInState.val) return null;
       
       this.state.loading.val = true;
       
       try {
-        const profile = await api.user.getProfile();
-        this.state.profile.val = profile;
-        return profile;
+        const profile = await api.users.getProfile();
+        
+        if (profile) {
+          this.state.profile.val = profile;
+          return profile;
+        } else {
+          console.warn('Profile data is undefined or null');
+          return null;
+        }
       } catch (error) {
         console.error('Error fetching profile:', error);
         
@@ -31,6 +37,7 @@ const userStore = {
             email: 'test@example.com',
             bio: 'This is a test user profile'
           };
+          return this.state.profile.val;
         }
         return null;
       } finally {

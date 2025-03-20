@@ -1,6 +1,6 @@
 // src/services/auth.js
 import van from 'vanjs-core';
-import api from './api';
+import { api } from './api';
 import userStore from '../store/user';
 
 // Create reactive state for auth
@@ -65,15 +65,37 @@ export function checkAuth() {
  */
 export async function login(email, password) {
   try {
-    const { token } = await api.auth.login(email, password);
+    console.log('Login attempt with:', email);
+    
+    if (!email || !password) {
+      return { 
+        success: false, 
+        error: 'Email and password are required'
+      };
+    }
+    
+    const response = await api.auth.login(email, password);
+    console.log('Login response:', response);
+    
+    if (!response || !response.token) {
+      return { 
+        success: false, 
+        error: 'Invalid server response'
+      };
+    }
     
     // Save token and update state
-    saveToken(token);
+    saveToken(response.token);
     
     // Fetch user profile after login
-    await userStore.actions.fetchUserProfile.call(userStore);
+    try {
+      await userStore.actions.fetchUserProfile.call(userStore);
+    } catch (profileError) {
+      console.warn('Could not fetch profile after login:', profileError);
+      // Continue with login success even if profile fetch fails
+    }
     
-    // Add this line to navigate to home page after login
+    // Navigate to home page after login
     window.location.hash = 'home';
     
     return { success: true };
@@ -81,7 +103,7 @@ export async function login(email, password) {
     console.error('Login error:', error);
     return { 
       success: false, 
-      error: error.message || 'Login failed'
+      error: error.message || 'Login failed. Please check your credentials.'
     };
   }
 }

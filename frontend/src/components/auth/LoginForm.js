@@ -1,103 +1,95 @@
 // src/components/auth/LoginForm.js
 import van from 'vanjs-core';
-import { login } from '../../services/auth';
+const { div, h1, form, label, input, button, p, a } = van.tags;
+import auth from '../../services/auth';
 
 /**
- * Login form component
- * Handles user authentication with email/password
+ * Login form component with improved input handling
  */
 const LoginForm = () => {
-  const formState = van.state({ 
-    email: '', 
-    password: '', 
-    submitting: false, 
-    error: '' 
-  });
+  // Use separate state for each field
+  const email = van.state('');
+  const password = van.state('');
+  const submitting = van.state(false);
+  const error = van.state('');
   
-  return van.tags.div({ class: "login-container" }, [
-    van.tags.h1("Sign In"),
+  // Handle form submission
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    submitting.val = true;
+    error.val = '';
     
-    // Show error message if present
-    () => formState.val.error ? 
-      van.tags.div({ class: "error-message" }, formState.val.error) : null,
-    
-    van.tags.form({
-      onsubmit: async (e) => {
-        e.preventDefault();
-        formState.val = {...formState.val, submitting: true, error: ''};
-        
-        try {
-          // Call login function from auth service
-          const result = await login(formState.val.email, formState.val.password);
-          if (result.success) {
-            // Redirect to home page on success
-            window.location.hash = '#';
-          } else {
-            formState.val = {
-              ...formState.val, 
-              submitting: false, 
-              error: result.message || 'Login failed'
-            };
-          }
-        } catch (error) {
-          formState.val = {
-            ...formState.val, 
-            submitting: false, 
-            error: error.message || 'Login failed'
-          };
-        }
+    try {
+      // Call login function from auth service
+      const result = await auth.login(email.val, password.val);
+      
+      if (result.success) {
+        // Redirect to home page on success
+        window.location.hash = '#';
+      } else {
+        error.val = result.error || 'Login failed';
+        submitting.val = false;
       }
-    }, [
-      van.tags.div({ class: "form-group" }, [
-        van.tags.label({ for: "email" }, "Email"),
-        van.tags.input({
-          id: "email",
-          type: "email",
-          value: formState.val.email,
-          disabled: formState.val.submitting,
-          oninput: (e) => {
-            formState.val = {...formState.val, email: e.target.value};
-          },
-          required: true,
-          placeholder: "Enter your email"
-        })
-      ]),
+    } catch (err) {
+      error.val = err.message || 'Login failed';
+      submitting.val = false;
+    }
+  };
+  
+  return div({ class: "login-page" }, 
+    div({ class: "login-container" }, [
+      h1("Sign In"),
       
-      van.tags.div({ class: "form-group" }, [
-        van.tags.label({ for: "password" }, "Password"),
-        van.tags.input({
-          id: "password",
-          type: "password",
-          value: formState.val.password,
-          disabled: formState.val.submitting,
-          oninput: (e) => {
-            formState.val = {...formState.val, password: e.target.value};
-          },
-          required: true,
-          placeholder: "Enter your password"
-        })
-      ]),
+      // Show error message if present
+      () => error.val ? 
+        div({ class: "error-message" }, error.val) : null,
       
-      van.tags.div({ class: "form-actions" }, [
-        van.tags.button({
-          type: "submit",
-          disabled: formState.val.submitting,
-          class: "btn-primary"
-        }, formState.val.submitting ? "Signing in..." : "Sign In"),
+      form({ onsubmit: handleSubmit }, [
+        div({ class: "form-group" }, [
+          label({ for: "email" }, "Email"),
+          // Key change: using a standard DOM event handler
+          input({
+            id: "email",
+            type: "email",
+            // Don't bind value directly in VanJS
+            onchange: (e) => { email.val = e.target.value },
+            disabled: submitting.val,  // Simple boolean value
+            required: true,
+            placeholder: "Enter your email"
+          })
+        ]),
         
-        van.tags.p({ class: "register-link" }, [
-          "Don't have an account? ",
-          van.tags.a({ 
-            href: "#register",
-            onclick: (e) => {
-              e.preventDefault();
-              window.location.hash = 'register';
-            }
-          }, "Register here")
+        div({ class: "form-group" }, [
+          label({ for: "password" }, "Password"),
+          // Key change: using a standard DOM event handler 
+          input({
+            id: "password",
+            type: "password",
+            // Don't bind value directly in VanJS
+            onchange: (e) => { password.val = e.target.value },
+            disabled: submitting.val,  // Simple boolean value
+            required: true,
+            placeholder: "Enter your password"
+          })
+        ]),
+        
+        div({ class: "form-actions" }, [
+          button({
+            type: "submit",
+            disabled: submitting.val,  // Simple boolean
+            class: "btn-primary"
+          }, () => submitting.val ? "Signing in..." : "Sign In"),
+          
+          p({ class: "register-link" }, [
+            "Don't have an account? ",
+            a({ 
+              href: "#register"
+            }, "Register here")
+          ])
         ])
       ])
     ])
-  ]);
+  );
 };
 
 export default LoginForm;

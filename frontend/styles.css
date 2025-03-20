@@ -21,9 +21,17 @@
 }
 
 /* Login Form Styles */
+.login-page {
+  background-color: var(--blue-bg);
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .login-container {
   max-width: 400px;
-  margin: 3rem auto;
   padding: 2rem;
   border: 1px solid var(--border-color);
   border-radius: 4px;
@@ -59,15 +67,13 @@
 }
 
 .form-actions button {
-  width: 100%;
   padding: 0.75rem;
+  width: 100%;
   background-color: var(--blue-bg);
   color: white;
   border: none;
-  border-radius: 3px;
   font-size: 1rem;
   cursor: pointer;
-  transition: opacity 0.2s;
 }
 
 .form-actions button:hover {
@@ -99,11 +105,6 @@
   color: var(--blue-bg);
   text-decoration: underline;
   cursor: pointer;
-}
-
-/* Fix for [object HTMLDivElement] display issue */
-.posts-list > *:not(.loading):not(.error):not(.empty-list):not(.posts-container):not(.posts-card) {
-  display: none;
 }
 
 html {
@@ -218,6 +219,12 @@ body {
   padding: 1rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   width: 100%;
+}
+
+.auth-items {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar-item:hover {
@@ -360,11 +367,6 @@ button {
   border: 1px solid var(--border-color);
   padding: 0.25rem 0.5rem;
   cursor: pointer;
-  margin: 0.5rem;
-}
-
-button:hover {
-  background: #eee;
 }
 
 .fade-in {
@@ -622,3 +624,4 @@ select, textarea {
 .edit-button {
   margin: 1rem 0 0 0;
 }
+

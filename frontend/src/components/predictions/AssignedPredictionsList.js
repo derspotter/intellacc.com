@@ -4,6 +4,10 @@ import Card from '../common/Card';
 import Button from '../common/Button';
 import predictionsStore from '../../store/predictions';  // Direct store import
 
+// Initialization flags
+let assignedPredictionsInitialized = false;
+let bettingStatsInitialized = false;
+
 /**
  * Component for assigned predictions that need betting
  */
@@ -23,12 +27,20 @@ export default function AssignedPredictionsList() {
     success: ''
   });
   
-  // Fetch assigned predictions if needed
-  if (assignedPredictions.val.length === 0) {
+  // Fetch assigned predictions only once if needed
+  if (assignedPredictions.val.length === 0 && !assignedPredictionsInitialized) {
+    assignedPredictionsInitialized = true;
     setTimeout(() => {
       predictionsStore.actions.fetchAssignedPredictions.call(predictionsStore);
-      predictionsStore.actions.fetchBettingStats.call(predictionsStore);
     }, 0);
+  }
+  
+  // Fetch betting stats only once if needed
+  if (!bettingStats.val.remaining_bets && !bettingStatsInitialized) {
+    bettingStatsInitialized = true;
+    setTimeout(() => {
+      predictionsStore.actions.fetchBettingStats.call(predictionsStore);
+    }, 100); // Slight delay to stagger API calls
   }
   
   // Start betting on a prediction

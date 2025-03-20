@@ -9,70 +9,106 @@ const predictionsStore = {
     events: van.state([]),
     bettingStats: van.state({ completed_bets: 0, total_assigned: 0, remaining_bets: 5 }),
     loading: van.state(false),
-    error: van.state(null)
+    error: van.state(null),
+    userPredictions: van.state([])
   },
   
   actions: {
     async fetchPredictions() {
+      this.state.loading.val = true;
+      this.state.error.val = '';
+      
       try {
-        if (!auth.isLoggedInState.val) return [];
+        // Check if in development mode
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          this.actions.loadMockPredictions.call(this);
+          return;
+        }
         
-        this.state.loading.val = true;
+        // Production mode - try API
+        if (!api || !api.predictions) {
+          throw new Error('API not available');
+        }
         
         const predictions = await api.predictions.getAll();
-        this.state.predictions.val = Array.isArray(predictions) ? predictions : [];
-        
-        return this.state.predictions.val;
+        this.state.predictions.val = predictions;
       } catch (error) {
         console.error('Error fetching predictions:', error);
-        this.actions.loadMockPredictions();
-        return [];
+        this.state.error.val = `${error.message || 'Failed to fetch predictions'}`;
+        
+        // Fall back to mock data if API fails
+        this.actions.loadMockPredictions.call(this);
       } finally {
         this.state.loading.val = false;
       }
     },
     
     loadMockPredictions() {
+      // Ensure we have access to state
+      if (!this || !this.state) {
+        console.error('Invalid context in loadMockPredictions');
+        return;
+      }
+      
       this.state.predictions.val = [
         {
-          id: 1,
-          event: "Will the price of Bitcoin exceed $100,000 by the end of 2025?",
-          prediction_value: "Yes",
-          confidence: 80,
-          created_at: new Date().toISOString(),
-          outcome: null
+          id: 'mock-1',
+          title: 'Stock Market Prediction',
+          description: 'The S&P 500 will increase by at least 10% by the end of the year',
+          confidence: 0.75,
+          createdAt: new Date().toISOString(),
+          createdBy: 'user1'
         },
         {
-          id: 2,
-          event: "Will AI systems achieve human-level reasoning by 2030?",
-          prediction_value: "No",
-          confidence: 65,
-          created_at: new Date(Date.now() - 86400000).toISOString(),
-          outcome: null
+          id: 'mock-2',
+          title: 'Technology Trend',
+          description: 'Augmented reality will see mainstream consumer adoption within 18 months',
+          confidence: 0.65,
+          createdAt: new Date().toISOString(),
+          createdBy: 'user1'
         }
       ];
     },
     
     async fetchEvents() {
       try {
-        if (!auth.isLoggedInState.val) return [];
+        // Check authentication but don't return early - still use test events even if not logged in
+        if (!auth.isLoggedInState.val) {
+          console.log('Not logged in, loading test events');
+          this.actions.loadTestEvents.call(this);
+          return this.state.events.val;
+        }
         
+        console.log('Fetching events from API');
         const events = await api.events.getAll();
-        this.state.events.val = Array.isArray(events) ? events : [];
         
-        if (this.state.events.val.length === 0) {
-          this.actions.loadTestEvents();
+        if (Array.isArray(events) && events.length > 0) {
+          console.log('Received events from API:', events.length);
+          this.state.events.val = events;
+        } else {
+          console.log('No events from API, using test events');
+          this.actions.loadTestEvents.call(this);
         }
         
         return this.state.events.val;
       } catch (error) {
         console.error('Error fetching events:', error);
-        this.actions.loadTestEvents();
+        console.log('Falling back to test events');
+        this.actions.loadTestEvents.call(this);
         return this.state.events.val;
       }
     },
     
     loadTestEvents() {
+      // Make sure 'this' and 'this.state' exist
+      if (!this || !this.state || !this.state.events) {
+        console.error('Invalid context in loadTestEvents');
+        return;
+      }
+      
+      console.log('Loading test events');
+      
+      // Set test events directly
       this.state.events.val = [
         {
           id: 1,
@@ -83,8 +119,15 @@ const predictionsStore = {
           id: 2,
           title: "Will AI systems achieve human-level reasoning by 2030?",
           closing_date: new Date(2030, 0, 1).toISOString()
+        },
+        {
+          id: 3,
+          title: "Will remote work remain above 30% of total workforce by 2026?",
+          closing_date: new Date(2026, 0, 1).toISOString()
         }
       ];
+      
+      console.log('Test events loaded:', this.state.events.val);
     },
     
     async createPrediction(event_id, prediction_value, confidence) {
@@ -196,6 +239,35 @@ const predictionsStore = {
       } catch (error) {
         console.error('Error placing bet:', error);
         throw error;
+      }
+    },
+    
+    async fetchUserPredictions(userId) {
+      this.state.loading.val = true;
+      this.state.error.val = '';
+      
+      try {
+        // Check if in development mode
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          this.state.userPredictions.val = this.state.predictions.val;
+          return;
+        }
+        
+        // Production mode - try API
+        if (!api || !api.predictions) {
+          throw new Error('API not available');
+        }
+        
+        const userPredictions = await api.predictions.getByUser(userId);
+        this.state.userPredictions.val = userPredictions;
+      } catch (error) {
+        console.error('Error fetching user predictions:', error);
+        this.state.error.val = `${error.message || 'Failed to fetch user predictions'}`;
+        
+        // Fall back to mock data
+        this.state.userPredictions.val = this.state.predictions.val.slice(0, 2);
+      } finally {
+        this.state.loading.val = false;
       }
     }
   }

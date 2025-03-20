@@ -176,6 +176,18 @@ export const api = {
       request(`/posts/${postId}/comments`, { method: 'POST', body: { content } })
   },
   
+  // Events endpoints
+  events: {
+    getAll: () => 
+      request('/events'),
+      
+    create: (eventData) => 
+      request('/events', { method: 'POST', body: eventData }),
+      
+    resolve: (eventId, outcome) =>
+      request(`/events/${eventId}`, { method: 'PATCH', body: { outcome } })
+  },
+  
   // Predictions endpoints
   predictions: {
     getAll: () => 
@@ -201,15 +213,6 @@ export const api = {
       
     getBettingStats: () => 
       request('/bets/stats')
-  },
-  
-  // Events endpoints
-  events: {
-    getAll: () => 
-      request('/events'),
-      
-    create: (title, details, closing_date) => 
-      request('/events', { method: 'POST', body: { title, details, closing_date } })
   }
 };
 

@@ -21,11 +21,5 @@ export default function Header() {
       div({ class: "header-item" }, ["License", div({}, "MIT")]),
       div({ class: "subtitle" }, "A social network with prediction markets")
     ]),
-    div({ class: "header-nav" }, [
-      () => isLoggedInState.val ? Button({
-        onclick: logout,
-        className: "logout-button"
-      }, "Logout") : null
-    ])
   ]);
 }

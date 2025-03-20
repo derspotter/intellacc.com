@@ -1,19 +1,18 @@
-// src/components/predictions/AdminEventManagement.js
 import van from 'vanjs-core';
-const { div, h2, h3, h4, p, form, input, textarea, label } = van.tags;
-import Card from '../common/Card';
+const { div, form, select, option, label, input, span } = van.tags;
 import Button from '../common/Button';
-import predictionsStore from '../../store/predictions';  // Direct store import
+import Card from '../common/Card';
+import predictionsStore from '../../store/predictions';
 
 /**
- * Admin component for managing prediction events
+ * Form for creating new predictions
  */
-export default function AdminEventManagement() {
-  // Form state
-  const eventFormState = van.state({
-    title: '',
-    details: '',
-    closingDate: '',
+export default function CreatePredictionForm() {
+  // Use a single form state object to reduce re-renders
+  const formState = van.state({
+    eventId: '',
+    prediction: '',
+    confidence: 50,
     submitting: false,
     error: '',
     success: ''
@@ -22,164 +21,148 @@ export default function AdminEventManagement() {
   // Get store state directly
   const events = predictionsStore.state.events;
   
-  // Fetch events if needed
-  if (events.val.length === 0) {
-    setTimeout(() => predictionsStore.actions.fetchEvents.call(predictionsStore), 0);
-  }
+  // Fetch events only once on component mount
+  van.derive(() => {
+    if (events.val.length === 0) {
+      predictionsStore.actions.fetchEvents.call(predictionsStore);
+    }
+  });
   
   // Form submission handler
   const handleSubmit = async (e) => {
     e.preventDefault();
     
     // Validate form
-    if (!eventFormState.val.title) {
-      eventFormState.val = {...eventFormState.val, error: 'Please enter an event title'};
+    if (!formState.val.eventId) {
+      formState.val = {...formState.val, error: 'Please select an event'};
       return;
     }
     
-    if (!eventFormState.val.closingDate) {
-      eventFormState.val = {...eventFormState.val, error: 'Please select a closing date'};
+    if (!formState.val.prediction) {
+      formState.val = {...formState.val, error: 'Please select your prediction'};
       return;
     }
     
-    // Submit event
-    eventFormState.val = {...eventFormState.val, submitting: true, error: ''};
+    // Submit prediction
+    formState.val = {...formState.val, submitting: true, error: ''};
     
     try {
-      await predictionsStore.actions.createEvent.call(predictionsStore,
-        eventFormState.val.title,
-        eventFormState.val.details,
-        eventFormState.val.closingDate
+      await predictionsStore.actions.createPrediction.call(predictionsStore,
+        formState.val.eventId,
+        formState.val.prediction,
+        formState.val.confidence
       );
       
       // Reset form on success
-      eventFormState.val = {
-        title: '',
-        details: '',
-        closingDate: '',
+      formState.val = {
+        eventId: '',
+        prediction: '',
+        confidence: 50,
         submitting: false,
         error: '',
-        success: 'Event created successfully!'
+        success: 'Prediction created successfully!'
       };
-      
-      // Refresh events
-      predictionsStore.actions.fetchEvents.call(predictionsStore);
       
       // Clear success message after 3 seconds
       setTimeout(() => {
-        eventFormState.val = {...eventFormState.val, success: ''};
+        formState.val = {...formState.val, success: ''};
       }, 3000);
-    } catch (error) {
-      eventFormState.val = {
-        ...eventFormState.val, 
+    } catch (e) {
+      formState.val = {
+        ...formState.val, 
         submitting: false, 
-        error: error.message || 'Failed to create event'
+        error: e.message || 'Failed to create prediction'
       };
-    }
-  };
-  
-  // Resolve event
-  const handleResolveEvent = async (eventId, outcome) => {
-    try {
-      await predictionsStore.actions.resolveEvent.call(predictionsStore, eventId, outcome);
-      predictionsStore.actions.fetchEvents.call(predictionsStore); // Refresh events list
-    } catch (error) {
-      console.error('Error resolving event:', error);
-      // Could show an error toast here
     }
   };
   
   return Card({
-    className: "admin-section",
+    title: "Make a New Prediction",
+    className: "prediction-form",
     children: [
-      h2("Admin: Event Management"),
+      // Error/success message
+      () => formState.val.error ? 
+        div({ class: "error-message" }, formState.val.error) : null,
+      () => formState.val.success ? 
+        div({ class: "success-message" }, formState.val.success) : null,
       
-      // Event creation form
-      div({ class: "event-form" }, [
-        h3("Create New Event"),
-        
-        // Error/success message
-        () => eventFormState.val.error ? 
-          div({ class: "error-message" }, eventFormState.val.error) : null,
-        () => eventFormState.val.success ? 
-          div({ class: "success-message" }, eventFormState.val.success) : null,
-        
-        form({ onsubmit: handleSubmit, class: "create-event-form" }, [
-          div({ class: "form-group" }, [
-            label({ for: "eventTitle" }, "Event Title:"),
-            input({
-              type: "text",
-              id: "eventTitle",
+      // Prediction form
+      form({ onsubmit: handleSubmit }, [
+        // Events dropdown
+        div({ class: "form-group" }, [
+          label({ for: "event" }, "Select Event:"),
+          () => events.val.length === 0 ?
+            div({ class: "loading-events" }, [
+              span("Loading events..."),
+              Button({ 
+                onclick: () => predictionsStore.actions.fetchEvents.call(predictionsStore),
+                className: "refresh-button small" 
+              }, "↻")
+            ]) :
+            select({
+              id: "event",
               required: true,
-              disabled: eventFormState.val.submitting,
-              value: eventFormState.val.title,
-              onchange: (e) => eventFormState.val = {...eventFormState.val, title: e.target.value},
-              placeholder: "e.g., Will the price of Bitcoin exceed $100,000 by the end of 2025?"
-            })
-          ]),
-          
-          div({ class: "form-group" }, [
-            label({ for: "eventDetails" }, "Details (Optional):"),
-            textarea({
-              id: "eventDetails",
-              rows: 3,
-              disabled: eventFormState.val.submitting,
-              value: eventFormState.val.details,
-              onchange: (e) => eventFormState.val = {...eventFormState.val, details: e.target.value},
-              placeholder: "Add details about the event or criteria for resolution"
-            })
-          ]),
-          
-          div({ class: "form-group" }, [
-            label({ for: "closingDate" }, "Closing Date:"),
-            input({
-              type: "date",
-              id: "closingDate",
-              required: true,
-              disabled: eventFormState.val.submitting,
-              value: eventFormState.val.closingDate,
-              onchange: (e) => eventFormState.val = {...eventFormState.val, closingDate: e.target.value},
-              min: new Date().toISOString().split('T')[0] // Today's date as minimum
-            })
-          ]),
-          
-          Button({
-            type: "submit",
-            disabled: eventFormState.val.submitting,
-            className: "submit-button"
-          }, eventFormState.val.submitting ? "Creating..." : "Create Event")
-        ])
-      ]),
-      
-      // Events list for management
-      div({ class: "events-management" }, [
-        h3("Manage Events"),
+              disabled: formState.val.submitting,
+              value: formState.val.eventId,
+              onchange: (e) => {
+                // Create a new state object to trigger a single update
+                formState.val = {...formState.val, eventId: e.target.value};
+              }
+            }, [
+              option({ value: "" }, "-- Select an event --"),
+              ...events.val.map(event => 
+                option({ value: event.id }, event.title)
+              )
+            ])
+        ]),
         
-        () => events.val.length === 0 ? 
-          p("No events available. Create one above.") :
-          div({ class: "events-list" }, 
-            events.val.map(event => 
-              div({ class: "event-item" }, [
-                h4(event.title),
-                p(`Closing: ${new Date(event.closing_date).toLocaleDateString()}`),
-                p({ class: "event-details" }, event.details || "No additional details"),
-                
-                event.outcome ? 
-                  p({ class: "event-resolved" }, `Resolved: ${event.outcome}`) :
-                  div({ class: "event-actions" }, [
-                    // Only show resolve buttons if event isn't resolved
-                    Button({
-                      onclick: () => handleResolveEvent(event.id, 'yes'),
-                      className: "resolve-button yes"
-                    }, "Resolve as YES"),
-                    Button({
-                      onclick: () => handleResolveEvent(event.id, 'no'),
-                      className: "resolve-button no"
-                    }, "Resolve as NO")
-                  ])
-              ])
-            )
-          )
+        // Prediction dropdown
+        div({ class: "form-group" }, [
+          label({ for: "prediction" }, "Your Prediction:"),
+          select({
+            id: "prediction",
+            required: true,
+            disabled: formState.val.submitting,
+            value: formState.val.prediction,
+            onchange: (e) => {
+              formState.val = {...formState.val, prediction: e.target.value};
+            }
+          }, [
+            option({ value: "" }, "-- Select your prediction --"),
+            option({ value: "Yes" }, "Yes"),
+            option({ value: "No" }, "No")
+          ])
+        ]),
+        
+        // Confidence slider
+        div({ class: "form-group" }, [
+          label({ for: "confidence" }, [
+            "Confidence: ",
+            span({ class: "confidence-value" }, `${formState.val.confidence}%`)
+          ]),
+          input({
+            type: "range",
+            id: "confidence",
+            min: "1",
+            max: "100",
+            step: "1",
+            disabled: formState.val.submitting,
+            value: formState.val.confidence,
+            onchange: (e) => {
+              formState.val = {
+                ...formState.val, 
+                confidence: parseInt(e.target.value)
+              };
+            }
+          })
+        ]),
+        
+        // Submit button
+        Button({
+          type: "submit",
+          disabled: formState.val.submitting,
+          className: "submit-button"
+        }, formState.val.submitting ? "Submitting..." : "Submit Prediction")
       ])
     ]
   });
