@@ -1,9 +1,6 @@
 // backend/src/controllers/predictionsController.js
 
-const { Pool } = require('pg');
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+const db = require('../db');
 
 // Get all predictions for current user
 exports.getUserPredictions = async (req, res) => {
@@ -23,7 +20,7 @@ exports.getUserPredictions = async (req, res) => {
     // Add sorting
     query += " ORDER BY created_at DESC";
 
-    const result = await pool.query(query, values);
+    const result = await db.query(query, values);
     res.status(200).json(result.rows);
   } catch (err) {
     console.error("Error fetching predictions:", err);
@@ -38,7 +35,7 @@ exports.createPrediction = async (req, res) => {
 
   try {
     // Fetch the event title
-    const eventQuery = await pool.query("SELECT title FROM events WHERE id = $1", [event_id]);
+    const eventQuery = await db.query("SELECT title FROM events WHERE id = $1", [event_id]);
 
     if (eventQuery.rows.length === 0) {
       return res.status(400).json({ message: "Invalid event_id" });
@@ -47,7 +44,7 @@ exports.createPrediction = async (req, res) => {
     const eventTitle = eventQuery.rows[0].title;
 
     // Insert prediction into database
-    const result = await pool.query(
+    const result = await db.query(
       "INSERT INTO predictions (user_id, event_id, event, prediction_value, confidence) VALUES ($1, $2, $3, $4, $5) RETURNING *",
       [userId, event_id, eventTitle, prediction_value, confidence]
     );
@@ -69,7 +66,7 @@ exports.createEvent = async (req, res) => {
   const { title, details, closing_date } = req.body;
 
   try {
-    const result = await pool.query(
+    const result = await db.query(
       "INSERT INTO events (title, details, closing_date) VALUES ($1, $2, $3) RETURNING *",
       [title, details, closing_date]
     );
@@ -85,7 +82,7 @@ exports.getEvents = async (req, res) => {
   console.log('getEvents called');
   try {
     console.log('User ID:', req.user.userId);
-    const result = await pool.query(
+    const result = await db.query(
       "SELECT * FROM events WHERE outcome IS NULL AND closing_date > NOW() ORDER BY closing_date ASC"
     );
     console.log('Events result:', result.rows);
@@ -109,19 +106,19 @@ exports.resolvePrediction = async (req, res) => {
 
   try {
     // Check if the user is an admin
-    const adminCheck = await pool.query("SELECT role FROM users WHERE id = $1", [userId]);
+    const adminCheck = await db.query("SELECT role FROM users WHERE id = $1", [userId]);
     if (adminCheck.rows.length === 0 || adminCheck.rows[0].role !== "admin") {
       return res.status(403).json({ message: "Only admins can resolve predictions." });
     }
 
     // Check if prediction exists
-    const predictionQuery = await pool.query("SELECT * FROM predictions WHERE id = $1", [id]);
+    const predictionQuery = await db.query("SELECT * FROM predictions WHERE id = $1", [id]);
     if (predictionQuery.rows.length === 0) {
       return res.status(404).json({ message: "Prediction not found" });
     }
 
     // Update prediction outcome
-    const result = await pool.query(
+    const result = await db.query(
       "UPDATE predictions SET outcome = $1, resolved_at = NOW() WHERE id = $2 RETURNING *",
       [outcome, id]
     );
@@ -143,7 +140,7 @@ exports.getAssignedPredictions = async (req, res) => {
   const userId = req.user.userId;
   
   try {
-    const result = await pool.query(
+    const result = await db.query(
       `SELECT 
         ap.*,
         p.event,
@@ -186,46 +183,46 @@ exports.placeBet = async (req, res) => {
   
   try {
     // Start transaction
-    await pool.query('BEGIN');
+    await db.query('BEGIN');
     
     // Check if assignment exists and belongs to the user
-    const assignmentCheck = await pool.query(
+    const assignmentCheck = await db.query(
       `SELECT ap.* FROM assigned_predictions ap
        WHERE ap.id = $1 AND ap.user_id = $2 AND ap.completed = FALSE`,
       [assignmentId, userId]
     );
     
     if (assignmentCheck.rows.length === 0) {
-      await pool.query('ROLLBACK');
+      await db.query('ROLLBACK');
       return res.status(404).json({ message: "Assignment not found or already completed" });
     }
     
     const assignment = assignmentCheck.rows[0];
     
     // Check if prediction is still open
-    const predictionCheck = await pool.query(
+    const predictionCheck = await db.query(
       'SELECT * FROM predictions WHERE id = $1 AND outcome IS NULL',
       [assignment.prediction_id]
     );
     
     if (predictionCheck.rows.length === 0) {
-      await pool.query('ROLLBACK');
+      await db.query('ROLLBACK');
       return res.status(400).json({ message: "Prediction is already resolved" });
     }
     
     // Check if user already bet on this prediction
-    const betCheck = await pool.query(
+    const betCheck = await db.query(
       'SELECT * FROM bets WHERE user_id = $1 AND prediction_id = $2',
       [userId, assignment.prediction_id]
     );
     
     if (betCheck.rows.length > 0) {
-      await pool.query('ROLLBACK');
+      await db.query('ROLLBACK');
       return res.status(400).json({ message: "You already placed a bet on this prediction" });
     }
     
     // Create bet record
-    const betResult = await pool.query(
+    const betResult = await db.query(
       `INSERT INTO bets 
        (user_id, prediction_id, confidence_level, bet_on, created_at, assignment_id) 
        VALUES ($1, $2, $3, $4, NOW(), $5) 
@@ -234,7 +231,7 @@ exports.placeBet = async (req, res) => {
     );
     
     // Mark assignment as completed
-    await pool.query(
+    await db.query(
       `UPDATE assigned_predictions 
        SET completed = TRUE, completed_at = NOW() 
        WHERE id = $1`,
@@ -242,7 +239,7 @@ exports.placeBet = async (req, res) => {
     );
     
     // Commit transaction
-    await pool.query('COMMIT');
+    await db.query('COMMIT');
     
     // Emit socket event for real-time updates
     if (req.app.get('io')) {
@@ -255,7 +252,7 @@ exports.placeBet = async (req, res) => {
     });
     
   } catch (err) {
-    await pool.query('ROLLBACK');
+    await db.query('ROLLBACK');
     console.error("Error placing bet:", err);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -270,7 +267,7 @@ exports.getMonthlyBettingStats = async (req, res) => {
     const currentDate = new Date();
     const monthYear = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
     
-    const result = await pool.query(
+    const result = await db.query(
       `SELECT 
         COUNT(CASE WHEN completed = TRUE THEN 1 END) AS completed_bets,
         COUNT(*) AS total_assigned,

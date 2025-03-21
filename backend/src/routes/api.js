@@ -5,6 +5,7 @@ const router = express.Router();
 const userController = require('../controllers/userController');
 const postController = require('../controllers/postController');
 const commentController = require('../controllers/commentController');
+const likeController = require('../controllers/likeController');
 const predictionsController = require('../controllers/predictionsController');
 const authenticateJWT = require("../middleware/auth");
 
@@ -56,5 +57,11 @@ router.post("/posts/:postId/comments", authenticateJWT, commentController.create
 router.get("/posts/:postId/comments", authenticateJWT, commentController.getComments);
 router.patch("/posts/:postId/comments/:commentId", authenticateJWT, commentController.updateComment);
 router.delete("/posts/:postId/comments/:commentId", authenticateJWT, commentController.deleteComment);
+
+// Like Routes
+router.post("/posts/:postId/like", authenticateJWT, likeController.likePost);
+router.delete("/posts/:postId/like", authenticateJWT, likeController.unlikePost);
+router.get("/posts/:postId/like/status", authenticateJWT, likeController.checkLikeStatus);
+router.get("/posts/:postId/likes", authenticateJWT, likeController.getLikesCount);
 
 module.exports = router;

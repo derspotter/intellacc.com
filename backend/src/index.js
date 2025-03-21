@@ -1,28 +1,37 @@
 const express = require('express');
-const { Pool } = require('pg');
-const http = require('http'); // Import the http module
-const socketIo = require('socket.io'); // Import Socket.IO
+const http = require('http');
+const socketIo = require('socket.io');
+const socketMiddleware = require('./middleware/socketMiddleware');
+const db = require('./db');
 
 const app = express();
 const port = process.env.NODE_PORT || 3000;
 
-// PostgreSQL Pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+// PostgreSQL connection is handled by db module
 
 // Create HTTP server
 const server = http.createServer(app);
 
-// Initialize Socket.IO
+// Initialize Socket.IO with proper CORS configuration
 const io = socketIo(server, {
   cors: {
     origin: "*", // Allow all origins for testing
-    methods: ["GET", "POST"]
-  }
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    credentials: true
+  },
+  // Support all transport methods
+  transports: ['websocket', 'polling'],
+  // Improve connection reliability
+  pingTimeout: 30000,
+  pingInterval: 25000
 });
 
-// Socket.IO logic
+// Store the io instance globally to easily access it for debugging
+global.socketIoInstance = io;
+
+console.log('Socket.IO initialized successfully');
+
+// Socket.IO connection handler
 io.on('connection', (socket) => {
   console.log('A user connected');
 
@@ -55,28 +64,34 @@ io.on('connection', (socket) => {
   });
 });
 
-// Middleware
+// Middleware registration - order matters!
+// 1. Basic middleware
 app.use(express.json());
+
+// 2. Apply Socket.IO middleware early in the pipeline
+console.log('Setting up Socket.IO middleware');
+const socketMw = socketMiddleware(io);
+app.use(socketMw);
+
+// 3. Store io on app for reliable access
+console.log('Storing Socket.IO instance on app');
+app.set('io', io);
+
+// Routes
+app.use('/api', require('./routes/api'));
 
 // Example Route
 app.get('/', async (req, res) => {
   try {
-    const client = await pool.connect();
-    const result = await client.query('SELECT NOW()');
+    const result = await db.query('SELECT NOW()');
     res.send(`Intellacc Backend Running. Database Time: ${result.rows[0].now}`);
-    client.release();
   } catch (err) {
     console.error(err);
     res.status(500).send('Server Error');
   }
 });
 
-// Additional Routes
-app.use('/api', require('./routes/api'));
-
-// Attach io instance to app for controllers to use
-app.set('io', io);
-
+// Start server
 server.listen(port, () => {
   console.log(`Intellacc Backend running on port ${port}`);
 });

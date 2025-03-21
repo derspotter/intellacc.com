@@ -1,36 +1,54 @@
-const { Pool } = require('pg');
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+const db = require('../db');
 
 // Create a new post
 exports.createPost = async (req, res) => {
   try {
     const { content, image_url } = req.body;
-    const userId = req.user.id; // Assuming you have user info in req.user from JWT
     
-    const result = await pool.query(
+    // Input validation
+    if (!content || content.trim() === '') {
+      return res.status(400).json({ message: 'Content is required' });
+    }
+    
+    // Get user ID from authenticated user
+    const userId = req.user.id;
+    
+    console.log('Creating post with:', { userId, content, image_url });
+    
+    const result = await db.query(
       'INSERT INTO posts (user_id, content, image_url, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING *',
       [userId, content, image_url]
     );
     
     const newPost = result.rows[0];
 
-    // Emit a notification to all connected clients
-    const io = req.app.get('socketio');
-    io.emit('newPost', newPost); // Emit a 'newPost' event with the new post data
+    // Post creation is now handled solely through REST API
+    // No Socket.IO events are emitted for post creation
+    // Socket.IO will be reserved for notifications and other real-time features
 
+    console.log('Post created successfully:', newPost);
     res.status(201).json(newPost);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Error creating post' });
+    console.error('Error in createPost controller:', error);
+    console.error('Stack trace:', error.stack);
+    
+    // Send detailed error in development, but hide details in production
+    if (process.env.NODE_ENV === 'development') {
+      res.status(500).json({ 
+        message: 'Error creating post', 
+        error: error.message,
+        stack: error.stack 
+      });
+    } else {
+      res.status(500).json({ message: 'Error creating post' });
+    }
   }
 };
 
 // Retrieve all posts (e.g., a feed)
 exports.getPosts = async (req, res) => {
   try {
-    const result = await pool.query(
+    const result = await db.query(
       'SELECT * FROM posts ORDER BY created_at DESC'
     );
     res.status(200).json(result.rows);
@@ -44,7 +62,7 @@ exports.getPosts = async (req, res) => {
 exports.getPostById = async (req, res) => {
   const postId = req.params.id;
   try {
-    const result = await pool.query(
+    const result = await db.query(
       'SELECT * FROM posts WHERE id = $1',
       [postId]
     );
@@ -63,7 +81,7 @@ exports.updatePost = async (req, res) => {
   const postId = req.params.id;
   const { content, image_url } = req.body;
   try {
-    const result = await pool.query(
+    const result = await db.query(
       'UPDATE posts SET content = $1, image_url = $2, updated_at = NOW() WHERE id = $3 RETURNING *',
       [content, image_url, postId]
     );
@@ -81,7 +99,7 @@ exports.updatePost = async (req, res) => {
 exports.deletePost = async (req, res) => {
   const postId = req.params.id;
   try {
-    const result = await pool.query(
+    const result = await db.query(
       'DELETE FROM posts WHERE id = $1 RETURNING *',
       [postId]
     );
@@ -100,7 +118,7 @@ exports.getFeed = async (req, res) => {
   const userId = req.user.userId;
   
   try {
-    const result = await pool.query(
+    const result = await db.query(
       `SELECT p.*, u.username
        FROM posts p
        JOIN users u ON p.user_id = u.id

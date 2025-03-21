@@ -1,19 +1,14 @@
 // backend/src/controllers/userController.js
 
-const { Pool } = require('pg');
-
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+const db = require('../db');
+const bcrypt = require('bcrypt');
 
 // Create a new user
-const bcrypt = require('bcrypt');
 exports.createUser = async (req, res) => {
   const { username, email, password } = req.body;  // Change "password_hash" to "password"
   try {
     const hashedPassword = await bcrypt.hash(password, 10); // Hash the password before storing
-    const result = await pool.query(
+    const result = await db.query(
       'INSERT INTO users (username, email, password_hash, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING *',
       [username, email, hashedPassword]  // Save hashed password
     );
@@ -29,7 +24,7 @@ exports.createUser = async (req, res) => {
 exports.getUser = async (req, res) => {
   const userId = req.params.id;
   try {
-    const result = await pool.query('SELECT id, username, email, created_at, updated_at FROM users WHERE id = $1', [userId]);
+    const result = await db.query('SELECT id, username, email, created_at, updated_at FROM users WHERE id = $1', [userId]);
     if (result.rows.length === 0) {
       return res.status(404).send('User not found');
     }
@@ -47,7 +42,7 @@ const jwt = require('jsonwebtoken');
 exports.loginUser = async (req, res) => {
   const { email, password } = req.body;
   try {
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
     if (result.rows.length === 0) {
       return res.status(400).send('User not found');
     }
@@ -72,7 +67,7 @@ exports.getUserProfile = async (req, res) => {
   try {
     const userId = req.user.userId; // Extract user ID from token
 
-    const result = await pool.query(
+    const result = await db.query(
       "SELECT id, username, email, role FROM users WHERE id = $1",
       [userId]
     );
@@ -107,7 +102,7 @@ exports.resolvePrediction = async (req, res) => {
       }
 
       // ✅ Update prediction outcome
-      const result = await pool.query(
+      const result = await db.query(
           "UPDATE predictions SET outcome = $1, resolved_at = NOW() WHERE id = $2 RETURNING *",
           [outcome, id]
       );
@@ -134,7 +129,7 @@ exports.getPredictions = async (req, res) => {
           query += " AND outcome IS NULL";
       }
 
-      const result = await pool.query(query, values);
+      const result = await db.query(query, values);
       res.status(200).json(result.rows);
   } catch (err) {
       console.error("Error fetching predictions:", err);
@@ -149,7 +144,7 @@ exports.editUserProfile = async (req, res) => {
   const { bio } = req.body;
   
   try {
-    const result = await pool.query(
+    const result = await db.query(
       'UPDATE users SET bio = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
       [bio, userId]
     );
@@ -188,7 +183,7 @@ exports.followUser = async (req, res) => {
     }
     
     // Create follow relationship
-    const result = await pool.query(
+    const result = await db.query(
       'INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) RETURNING *',
       [followerId, followingId]
     );
@@ -206,7 +201,7 @@ exports.unfollowUser = async (req, res) => {
   const followingId = req.params.id;
   
   try {
-    const result = await pool.query(
+    const result = await db.query(
       'DELETE FROM follows WHERE follower_id = $1 AND following_id = $2 RETURNING *',
       [followerId, followingId]
     );
@@ -227,7 +222,7 @@ exports.getFollowers = async (req, res) => {
   const userId = req.params.id;
   
   try {
-    const result = await pool.query(
+    const result = await db.query(
       `SELECT u.id, u.username, u.bio 
       FROM follows f 
       JOIN users u ON f.follower_id = u.id 
@@ -247,7 +242,7 @@ exports.getFollowing = async (req, res) => {
   const userId = req.params.id;
   
   try {
-    const result = await pool.query(
+    const result = await db.query(
       `SELECT u.id, u.username, u.bio 
       FROM follows f 
       JOIN users u ON f.following_id = u.id 
@@ -318,7 +313,7 @@ exports.assignPredictions = async (req, res) => {
     const assignedPredictions = [];
     
     for (const pred of availablePredictions.rows) {
-      const result = await pool.query(
+      const result = await db.query(
         `INSERT INTO assigned_predictions 
          (user_id, prediction_id, assigned_at, month_year) 
          VALUES ($1, $2, NOW(), $3) 
@@ -345,7 +340,7 @@ exports.getAssignedPredictions = async (req, res) => {
   const userId = req.user.userId;
   
   try {
-    const result = await pool.query(
+    const result = await db.query(
       `SELECT 
         ap.*,
         p.event,
@@ -467,7 +462,7 @@ exports.getMonthlyBettingStats = async (req, res) => {
     const currentDate = new Date();
     const monthYear = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
     
-    const result = await pool.query(
+    const result = await db.query(
       `SELECT 
         COUNT(CASE WHEN completed = TRUE THEN 1 END) AS completed_bets,
         COUNT(*) AS total_assigned,
