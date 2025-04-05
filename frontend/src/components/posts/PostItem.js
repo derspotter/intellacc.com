@@ -8,9 +8,19 @@ import postsStore from '../../store/posts';  // Import the store object directly
  * Single post component
  */
 export default function PostItem({ post }) {
+  // Check if this post is liked
+  van.derive(() => {
+    postsStore.actions.checkLikeStatus.call(postsStore, post.id);
+  });
+  
   // Create a bound helper function for delete
   const handleDeletePost = (postId) => {
     postsStore.actions.deletePost.call(postsStore, postId);
+  };
+  
+  // Handle like button click
+  const handleLikeToggle = (postId) => {
+    postsStore.actions.toggleLike.call(postsStore, postId);
   };
 
   return Card({
@@ -24,9 +34,19 @@ export default function PostItem({ post }) {
       post.image_url ? div({ class: "post-image" }, 
         van.tags.img({ src: post.image_url, alt: "Post image" })
       ) : null,
+      div({ class: "post-stats" }, [
+        span({ class: "post-stat" }, `${post.like_count || 0} likes`),
+        span({ class: "post-stat" }, `${post.comment_count || 0} comments`),
+      ]),
       div({ class: "post-actions" }, [
         button({ class: "post-action", onclick: () => {} }, "💬 Comment"),
-        button({ class: "post-action", onclick: () => {} }, "👍 Like"),
+        () => {
+          const isLiked = postsStore.state.likeStatus.val[post.id];
+          return button({ 
+            class: `post-action ${isLiked ? 'liked' : ''}`, 
+            onclick: () => handleLikeToggle(post.id) 
+          }, isLiked ? "❤️ Liked" : "🤍 Like");
+        },
         () => isAdminState.val ? 
           button({ 
             class: "post-action delete", 

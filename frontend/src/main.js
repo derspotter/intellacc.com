@@ -4,14 +4,16 @@ import { checkAuth } from './services/auth';
 import { initializeSocket } from './services/socket';
 import Router from './router';
 
-// Initialize store
+// Initialize store before anything else
 initializeStore();
 
-// Check authentication
+// Check authentication status early
 checkAuth();
 
-// Initialize socket for real-time features
-initializeSocket();
+// Initialize socket for real-time features (can be done lazily)
+setTimeout(() => {
+  initializeSocket();
+}, 100);
 
 // Mount the application
 document.addEventListener('DOMContentLoaded', () => {

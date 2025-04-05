@@ -7,11 +7,11 @@ RUN apk add --no-cache postgresql-client
 # Set the working directory inside the container
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json (if it exists)
-COPY package*.json ./
+# Copy package.json and npmrc for faster, quieter installs
+COPY package*.json .npmrc ./
 
-# First generate package-lock.json if it doesn't exist, then use ci
-RUN npm install
+# Install dependencies with less output
+RUN npm install --no-fund --no-audit --loglevel=error
 
 # Copy the rest of the application code
 COPY . .

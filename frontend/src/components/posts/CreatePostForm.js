@@ -1,91 +1,76 @@
 import van from 'vanjs-core';
-const { form, textarea, div } = van.tags;
+const { textarea, div, pre } = van.tags;
 import Button from '../common/Button';
 import Card from '../common/Card';
-import postsStore from '../../store/posts';  // Direct store import
+import postsStore from '../../store/posts';
 
-/**
- * Form for creating new posts
- */
 export default function CreatePostForm() {
-  const formState = van.state({
-    content: '',
-    image_url: '',
-    submitting: false,
-    error: '',
-    success: ''
-  });
-  
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!formState.val.content.trim()) {
-      formState.val = {...formState.val, error: 'Post content cannot be empty'};
-      return;
-    }
-    
-    formState.val = {...formState.val, submitting: true, error: ''};
-    
-    try {
-      // Just use the store directly
-      await postsStore.actions.createPost.call(postsStore, 
-        formState.val.content, 
-        formState.val.image_url || null
-      );
-      
-      // Reset form on success
-      formState.val = {
-        content: '',
-        image_url: '',
-        submitting: false,
-        error: '',
-        success: 'Post created successfully!'
-      };
-      
-      // Clear success message after 3 seconds
-      setTimeout(() => {
-        formState.val = {...formState.val, success: ''};
-      }, 3000);
-    } catch (error) {
-      formState.val = {
-        ...formState.val, 
-        submitting: false, 
-        error: error.message || 'Failed to create post'
-      };
-    }
-  };
+  // Add state for debugging info
+  const text = van.state("");
+  const error = van.state("");
+  const debugInfo = van.state("");
   
   return Card({
     title: "Create Post",
     className: "create-post-card",
     children: [
-      // Error/success message
-      () => formState.val.error ? 
-        div({ class: "error-message" }, formState.val.error) : null,
-      () => formState.val.success ? 
-        div({ class: "success-message" }, formState.val.success) : null,
-        
-      // Post form
-      form({ onsubmit: handleSubmit, class: "post-form" }, [
-        div({ class: "form-group" }, [
-          textarea({
-            placeholder: "What's on your mind?",
-            value: formState.val.content,
-            onchange: (e) => formState.val = {...formState.val, content: e.target.value},
-            disabled: formState.val.submitting,
-            rows: 3,
-            class: "post-textarea"
-          })
-        ]),
-        
-        div({ class: "form-actions" }, [
-          Button({
-            type: "submit",
-            disabled: formState.val.submitting,
-            className: "submit-button"
-          }, formState.val.submitting ? "Posting..." : "Post")
-        ])
-      ])
+      // Error display
+      () => error.val ? div({ class: "error-message" }, error.val) : null,
+      
+      // Textarea
+      textarea({
+        placeholder: "What's on your mind?",
+        value: text,
+        oninput: e => text.val = e.target.value,
+        rows: 3,
+        class: "post-textarea"
+      }),
+      
+      // Action buttons
+      div({ class: "form-actions" }, [
+        // Enhanced post button with direct style attributes
+        van.tags.button({
+          type: "button",
+          onclick: async () => {
+            if (!text.val.trim()) {
+              error.val = "Post content cannot be empty";
+              return;
+            }
+            
+            error.val = "";
+            debugInfo.val = "Sending post...";
+            
+            try {
+              await postsStore.actions.createPost.call(postsStore, text.val, null);
+              text.val = "";
+              debugInfo.val = "Post created successfully!";
+            } catch (err) {
+              // Detailed error information
+              error.val = `Error: ${err.message}`;
+              debugInfo.val = `Full error: ${JSON.stringify(err, null, 2)}`;
+              console.error("POST ERROR OBJECT:", err);
+            }
+          },
+          style: `
+            background-color: #0000ff;
+            color: white;
+            font-weight: bold;
+            border: none;
+            padding: 8px 16px;
+            font-size: 16px;
+            min-width: 100px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+          `
+        }, "POST"),
+      ]),
+      
+      // Debug information display
+      () => debugInfo.val ? 
+        div({ class: "debug-info", style: "margin-top: 10px; font-size: 12px; overflow: auto; max-height: 200px; background: #f7f7f7; padding: 8px; border-radius: 4px;" }, [
+          div({ style: "font-weight: bold" }, "Debug Info:"),
+          pre({ style: "margin: 0; white-space: pre-wrap;" }, debugInfo.val)
+        ]) : null
     ]
   });
 }

@@ -4,7 +4,6 @@ const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
 const postController = require('../controllers/postController');
-const commentController = require('../controllers/commentController');
 const likeController = require('../controllers/likeController');
 const predictionsController = require('../controllers/predictionsController');
 const authenticateJWT = require("../middleware/auth");
@@ -39,7 +38,7 @@ router.patch("/predictions/:id", authenticateJWT, predictionsController.resolveP
 router.get("/predictions", authenticateJWT, predictionsController.getUserPredictions);
 
 // Assigned Predictions & Betting System
-router.post("/predictions/assign", authenticateJWT, userController.assignPredictions); // Keep in userController
+router.post("/predictions/assign", authenticateJWT, predictionsController.assignPredictions);
 router.get("/predictions/assigned", authenticateJWT, predictionsController.getAssignedPredictions);
 router.post("/assignments/:id/bet", authenticateJWT, predictionsController.placeBet);
 router.get("/bets/stats", authenticateJWT, predictionsController.getMonthlyBettingStats);
@@ -52,11 +51,12 @@ router.get("/posts/:id", authenticateJWT, postController.getPostById);         /
 router.patch("/posts/:id", authenticateJWT, postController.updatePost);        // Update a post
 router.delete("/posts/:id", authenticateJWT, postController.deletePost);       // Delete a post
 
-// Comment Routes
-router.post("/posts/:postId/comments", authenticateJWT, commentController.createComment);
-router.get("/posts/:postId/comments", authenticateJWT, commentController.getComments);
-router.patch("/posts/:postId/comments/:commentId", authenticateJWT, commentController.updateComment);
-router.delete("/posts/:postId/comments/:commentId", authenticateJWT, commentController.deleteComment);
+// Comment Routes (using unified posts/comments model)
+router.get("/posts/:id/comments", authenticateJWT, postController.getComments);         // Get direct comments for a post
+router.get("/posts/:id/comments/tree", authenticateJWT, postController.getCommentTree); // Get nested comment tree
+
+// Note: Creating comments now uses the same endpoint as creating posts
+// Just include parent_id in the request body to create a comment/reply
 
 // Like Routes
 router.post("/posts/:postId/like", authenticateJWT, likeController.likePost);
