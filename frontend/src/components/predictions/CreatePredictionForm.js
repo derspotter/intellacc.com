@@ -144,8 +144,9 @@ export default function CreatePredictionForm() {
         Button({
           type: "submit",
           disabled: submitting.val,
-          className: "submit-button"
-        }, () => submitting.val ? "Submitting..." : "Submit Prediction")
+          className: "submit-button",
+          children: () => submitting.val ? "Submitting..." : "Submit Prediction"
+        })
       ])
     ]
   });

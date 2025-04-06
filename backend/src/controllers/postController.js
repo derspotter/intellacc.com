@@ -45,6 +45,15 @@ exports.createPost = async (req, res) => {
     
     const newPost = result.rows[0];
 
+    // Fetch the username to include in the response
+    const userResult = await db.query('SELECT username FROM users WHERE id = $1', [newPost.user_id]);
+    if (userResult.rows.length > 0) {
+      newPost.username = userResult.rows[0].username;
+    } else {
+      // Handle case where user might not be found (optional, but good practice)
+      newPost.username = 'Unknown User'; 
+    }
+
     // If this is a comment, increment the parent's comment_count
     if (parentId) {
       await db.query(
@@ -82,14 +91,33 @@ exports.createPost = async (req, res) => {
 
 // Retrieve all top-level posts (e.g., a feed)
 exports.getPosts = async (req, res) => {
+  console.log("--- ENTERING getPosts function ---"); // Add entry log
+  const userId = req.user.id; // Get current user's ID
   try {
+    console.log("getPosts called with userId:", userId);
+    
     const result = await db.query(
-      `SELECT p.*, u.username 
+      `SELECT p.*, u.username,
+              CASE WHEN EXISTS (SELECT 1 FROM likes 
+                                WHERE post_id = p.id AND user_id = $1) 
+                   THEN true 
+                   ELSE false 
+              END AS liked_by_user
        FROM posts p
        JOIN users u ON p.user_id = u.id
        WHERE p.parent_id IS NULL AND p.is_comment = FALSE
-       ORDER BY p.created_at DESC`
+       ORDER BY p.created_at DESC`,
+      [userId] // Pass userId for the subquery
     );
+    
+    // Log the raw result which should now include liked_by_user from the query
+    console.log("Raw query result:", result.rows.map(post => ({
+      id: post.id,
+      user_id: post.user_id,
+      liked_by_user: post.liked_by_user
+    })));
+    
+    // Send the direct query result
     res.status(200).json(result.rows);
   } catch (err) {
     console.error(err);
@@ -154,11 +182,19 @@ exports.deletePost = async (req, res) => {
 
 // Get personalized feed of posts from followed users
 exports.getFeed = async (req, res) => {
+  console.log("--- ENTERING getFeed function ---"); // Add entry log
   const userId = req.user.id; // Using standardized user object
-  
+
   try {
+    console.log("getFeed called with userId:", userId);
+    
     const result = await db.query(
-      `SELECT p.*, u.username
+      `SELECT p.*, u.username,
+              CASE WHEN EXISTS (SELECT 1 FROM likes 
+                                WHERE post_id = p.id AND user_id = $1) 
+                   THEN true 
+                   ELSE false 
+              END AS liked_by_user
        FROM posts p
        JOIN users u ON p.user_id = u.id
        WHERE (p.user_id IN (
@@ -173,6 +209,13 @@ exports.getFeed = async (req, res) => {
       [userId]
     );
     
+    // Log the raw result which should include liked_by_user from the query
+    console.log("Raw feed query result:", result.rows.map(post => ({
+      id: post.id,
+      liked_by_user: post.liked_by_user
+    })));
+    
+    // Send the direct query result
     res.status(200).json(result.rows);
   } catch (err) {
     console.error("Error getting feed:", err);
@@ -184,27 +227,42 @@ exports.getFeed = async (req, res) => {
 exports.getComments = async (req, res) => {
   const postId = req.params.id;
   
+  console.log(`--- GETTING COMMENTS for post ID: ${postId} ---`);
+  
   try {
     // Verify post exists
+    console.log(`Checking if post ${postId} exists...`);
     const postCheck = await db.query('SELECT * FROM posts WHERE id = $1', [postId]);
     
+    console.log(`Post check result: Found ${postCheck.rows.length} post(s)`);
+    
     if (postCheck.rows.length === 0) {
+      console.log(`Post ${postId} not found, returning 404`);
       return res.status(404).json({ message: 'Post not found' });
     }
     
     // Get direct comments for this post
-    const result = await db.query(
-      `SELECT p.*, u.username, u.profile_image 
-       FROM posts p
-       JOIN users u ON p.user_id = u.id
-       WHERE p.parent_id = $1
-       ORDER BY p.created_at ASC`,
-      [postId]
-    );
+    console.log(`Fetching comments for post ${postId}...`);
     
-    res.status(200).json(result.rows);
+    try {
+      const result = await db.query(
+        `SELECT p.*, u.username 
+         FROM posts p
+         JOIN users u ON p.user_id = u.id
+         WHERE p.parent_id = $1
+         ORDER BY p.created_at ASC`,
+        [postId]
+      );
+      
+      console.log(`Found ${result.rows.length} comments for post ${postId}`);
+      res.status(200).json(result.rows);
+    } catch (queryError) {
+      console.error('SQL error fetching comments:', queryError);
+      return res.status(500).json({ message: 'Database error fetching comments', error: queryError.message });
+    }
   } catch (error) {
-    console.error('Error fetching comments:', error);
+    console.error('Error in getComments controller:', error);
+    console.error('Stack trace:', error.stack);
     res.status(500).json({ message: 'Error fetching comments' });
   }
 };
@@ -228,8 +286,7 @@ exports.getCommentTree = async (req, res) => {
          -- Base case: direct replies to the post
          SELECT 
            p.*, 
-           u.username, 
-           u.profile_image,
+           u.username,
            1 AS level
          FROM posts p
          JOIN users u ON p.user_id = u.id
@@ -240,8 +297,7 @@ exports.getCommentTree = async (req, res) => {
          -- Recursive case: replies to comments
          SELECT 
            p.*, 
-           u.username, 
-           u.profile_image,
+           u.username,
            ct.level + 1
          FROM posts p
          JOIN users u ON p.user_id = u.id

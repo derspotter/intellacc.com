@@ -28,7 +28,25 @@ const postsStore = {
         }
         
         const posts = await api.posts.getAll();
+        console.log('Posts from API:', posts); // Debug log for API response
         this.state.posts.val = Array.isArray(posts) ? posts : [];
+        
+        // Initialize like status from liked_by_user field
+        if (auth.isLoggedInState.val && this.state.posts.val.length > 0) {
+          const newLikeStatus = {...this.state.likeStatus.val};
+          this.state.posts.val.forEach(post => {
+            // Use liked_by_user from backend response if available
+            console.log(`Post ${post.id} data:`, post); // Debug log for each post
+            if (post.liked_by_user !== undefined) {
+              console.log(`Post ${post.id} - liked_by_user found:`, post.liked_by_user);
+              newLikeStatus[post.id] = post.liked_by_user;
+            } else {
+              console.log(`Post ${post.id} - liked_by_user NOT found`);
+            }
+          });
+          this.state.likeStatus.val = newLikeStatus;
+        }
+        
         return this.state.posts.val;
       } catch (error) {
         console.error('Error fetching posts:', error);
@@ -200,12 +218,15 @@ const postsStore = {
         
         const response = await api.posts.getLikeStatus(postId);
         
+        // Handle both response formats (liked or isLiked) for backward compatibility
+        const isLiked = response.isLiked !== undefined ? response.isLiked : (response.liked || false);
+        
         // Update the like status
         this.state.likeStatus.val = {
           ...this.state.likeStatus.val,
-          [postId]: response.liked || false
+          [postId]: isLiked
         };
-        return response.liked;
+        return isLiked;
       } catch (error) {
         console.error('Error checking like status:', error);
         return false;
