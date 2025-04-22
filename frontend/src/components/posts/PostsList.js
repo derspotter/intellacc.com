@@ -11,11 +11,10 @@ export default function PostsList() {
   const loading = postsStore.state.loading;
   const error = postsStore.state.error;
   
-  // Fetch posts if needed (similar to PredictionsList approach)
-  if (posts.val.length === 0 && !loading.val) {
-    console.log('PostsList: Fetching posts data');
-    setTimeout(() => postsStore.actions.fetchPosts.call(postsStore), 0);
-  }
+  // Call fetchPosts on component mount
+  van.derive(() => {
+    postsStore.actions.fetchPosts.call(postsStore);
+  });
   
   // Define the rendering functions separately for clarity
   const renderLoading = () => {

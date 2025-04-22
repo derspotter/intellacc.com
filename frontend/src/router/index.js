@@ -1,11 +1,9 @@
 import van from 'vanjs-core';
 import MainLayout from '../components/layout/MainLayout';
-import { currentPageState } from '../store';
+import { currentPageState } from '../store'; // Updated import path
 import { isLoggedInState, isAdminState } from '../services/auth';
-import { getStore } from '../store';
 
-// Import all components directly
-import LoginForm from '../components/auth/LoginForm';
+// Import page content components
 import PostsList from '../components/posts/PostsList';
 import CreatePostForm from '../components/posts/CreatePostForm';
 import PredictionsList from '../components/predictions/PredictionsList';
@@ -16,94 +14,105 @@ import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
 import NetworkTabs from '../components/profile/NetworkTabs';
 import ProfilePredictions from '../components/profile/ProfilePredictions';
-
-// Use shorthand for tag functions
-const { div, h1, h2, p, button } = van.tags;
+import LoginForm from '../components/auth/LoginForm';
 
 // Update page from hash
 export const updatePageFromHash = () => {
-  const page = window.location.hash.slice(1) || 'home';
-  currentPageState.val = page;
-  
-  // Preload store for current page
-  if (page === 'predictions') getStore('predictions');
-  if (page === 'profile') getStore('user');
-  if (page === 'home') getStore('posts');
+  currentPageState.val = window.location.hash.slice(1) || 'home';
 };
-
-// Initialize on page load
-updatePageFromHash();
 
 // Keep global reference
 window.updatePageFromHash = updatePageFromHash;
 
+/**
+ * Router component that renders content into the main layout
+ */
 export default function Router() {
+  // Page content state
   const editMode = van.state(false);
   
   // Define page contents
-  const pages = {
-    home: () => div({ class: "home-page" }, [
-      h1("Welcome to Intellacc"),
-      () => isLoggedInState.val 
-        ? CreatePostForm() 
-        : div({ class: "login-notice" }, [
-            p("Log in to create posts and see personalized content"),
-            button({ onclick: () => { window.location.hash = 'login' }}, "Log In")
-          ]),
-      h2("Recent Posts"),
+  const pageContents = {
+    home: () => van.tags.div({ class: "home-page" }, [
+      van.tags.h1("Welcome to Intellacc"),
+      
+      // Only show post creation for logged in users
+      () => isLoggedInState.val ? CreatePostForm() : 
+        van.tags.div({ class: "login-notice" }, [
+          van.tags.p("Log in to create posts and see personalized content"),
+          van.tags.button({
+            onclick: () => { window.location.hash = 'login'; }
+          }, "Log In")
+        ]),
+      
+      van.tags.h2("Recent Posts"),
       PostsList()
     ]),
     
     login: () => LoginForm(),
     
-    predictions: () => div({ class: "predictions-page" }, [
-      h1("Predictions & Betting"),
+    predictions: () => van.tags.div({ class: "predictions-page" }, [
+      van.tags.h1("Predictions & Betting"),
+      
+      // Admin section - only visible to admins
       () => isAdminState.val ? AdminEventManagement() : null,
-      div({ class: "predictions-container" }, [
-        div({ class: "predictions-column" }, [
-          CreatePredictionForm(), 
+      
+      van.tags.div({ class: "predictions-container" }, [
+        van.tags.div({ class: "predictions-column" }, [
+          CreatePredictionForm(),
           PredictionsList()
         ]),
-        div({ class: "predictions-column" }, [
+        
+        van.tags.div({ class: "predictions-column" }, [
           AssignedPredictionsList()
         ])
       ])
     ]),
     
-    profile: () => div({ class: "profile-page" }, [
-      h1("My Profile"),
-      div({ class: "profile-container" }, [
-        div({ class: "profile-column main" }, [
+    profile: () => van.tags.div({ class: "profile-page" }, [
+      van.tags.h1("My Profile"),
+      
+      van.tags.div({ class: "profile-container" }, [
+        van.tags.div({ class: "profile-column main" }, [
+          // Toggle between profile view and editor based on state
           () => editMode.val 
-            ? ProfileEditor({ onCancel: () => editMode.val = false })
+            ? ProfileEditor({ onCancel: () => editMode.val = false }) 
             : ProfileCard({ onEdit: () => editMode.val = true }),
+          
           ProfilePredictions()
         ]),
-        div({ class: "profile-column sidebar" }, [
+        
+        van.tags.div({ class: "profile-column sidebar" }, [
           NetworkTabs()
         ])
       ])
     ]),
     
-    notFound: () => div({ class: "not-found-page" }, [
-      h1("404 - Page Not Found"),
-      p("The page you're looking for doesn't exist."),
-      button({ onclick: () => { window.location.hash = 'home' }}, "Back to Home")
+    // 404 page for unknown routes
+    notFound: () => van.tags.div({ class: "not-found-page" }, [
+      van.tags.h1("404 - Page Not Found"),
+      van.tags.p("The page you're looking for doesn't exist."),
+      van.tags.button({
+        onclick: () => { window.location.hash = 'home'; }
+      }, "Back to Home")
     ])
   };
   
-  // Render the appropriate page content
-  return () => {
-    const page = currentPageState.val;
-    
-    // Special case for login (no layout)
-    if (page === 'login') {
-      return pages.login();
+  // Determine which content to render
+  const renderContent = () => {
+    // Special case for login page (no layout)
+    if (currentPageState.val === 'login') {
+      return pageContents.login();
     }
     
-    // Wrap other pages in layout
+    // Get content for current page or show 404
+    const content = pageContents[currentPageState.val] || pageContents.notFound;
+    
+    // Wrap content in layout
     return MainLayout({ 
-      children: (pages[page] || pages.notFound)()
+      children: content()
     });
   };
+  
+  return renderContent;
 }

@@ -33,8 +33,6 @@ async function request(endpoint, options = {}) {
     ...options.headers
   };
   
-
-  
   // Add authentication if token exists
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -61,33 +59,16 @@ async function request(endpoint, options = {}) {
     if (!response.ok) {
       // Handle authentication errors
       if (response.status === 401) {
-        // Try to parse error response
-        try {
-          const errorData = await response.json();
-          console.log('Authentication error:', errorData);
-          
-          // Clear token on authentication failure
-          clearToken();
-          
-          // Show a notification to the user (if available)
-          if (window.showNotification) {
-            window.showNotification('Session expired. Please log in again.', 'error');
-          }
-          
-          // Redirect to login
-          window.location.hash = 'login';
-          
-          throw new ApiError(
-            response.status,
-            errorData.message || 'Session expired. Please log in again.',
-            errorData
-          );
-        } catch (e) {
-          // If parsing fails, proceed with generic handling
-          clearToken();
-          window.location.hash = 'login';
-          throw new ApiError(response.status, 'Session expired. Please log in again.');
-        }
+        // Clear token on authentication failure
+        clearToken();
+        
+        // Redirect to login
+        window.location.hash = 'login';
+        
+        throw new ApiError(
+          response.status,
+          'Session expired. Please log in again.'
+        );
       }
       
       // Try to parse error response
@@ -188,54 +169,11 @@ export const api = {
     delete: (id) => 
       request(`/posts/${id}`, { method: 'DELETE' }),
       
-    /**
-     * Get direct comments for a post
-     */
     getComments: (postId) => 
       request(`/posts/${postId}/comments`),
       
-    /**
-     * Get nested comment tree for a post
-     */
-    getCommentTree: (postId, maxDepth = 10) => 
-      request(`/posts/${postId}/comments/tree?maxDepth=${maxDepth}`),
-      
-    /**
-     * Create a comment on a post or reply to a comment
-     * With our unified model, comments are just posts with a parent_id
-     */
-    createComment: (parentId, content) => 
-      request(`/posts`, { 
-        method: 'POST', 
-        body: { 
-          content, 
-          parent_id: parentId 
-        } 
-      }),
-      
-    /**
-     * Update a post or comment
-     */
-    updateComment: (commentId, content) => 
-      request(`/posts/${commentId}`, { method: 'PATCH', body: { content } }),
-      
-    /**
-     * Delete a post or comment
-     */
-    deleteComment: (commentId) => 
-      request(`/posts/${commentId}`, { method: 'DELETE' }),
-      
-    likePost: (postId) => 
-      request(`/posts/${postId}/like`, { method: 'POST' }),
-      
-    unlikePost: (postId) => 
-      request(`/posts/${postId}/like`, { method: 'DELETE' }),
-      
-    getLikeStatus: (postId) => 
-      request(`/posts/${postId}/like/status`, { method: 'GET' }),
-      
-    getLikesCount: (postId) => 
-      request(`/posts/${postId}/likes`, { method: 'GET' })
+    createComment: (postId, content) => 
+      request(`/posts/${postId}/comments`, { method: 'POST', body: { content } })
   },
   
   // Events endpoints

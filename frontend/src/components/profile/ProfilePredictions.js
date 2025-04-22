@@ -8,8 +8,10 @@ import predictionsStore from '../../store/predictions';
  * Component to display predictions on profile page
  */
 export default function ProfilePredictions() {
-  // Fetch predictions if needed - the action handles avoiding re-fetches
-  setTimeout(() => predictionsStore.actions.fetchPredictions.call(predictionsStore), 0);
+  // Fetch predictions if needed
+  if (predictionsStore.state.predictions.val.length === 0 && !predictionsStore.state.loading.val) {
+    setTimeout(() => predictionsStore.actions.fetchPredictions.call(predictionsStore), 0);
+  }
   
   return Card({
     title: "Your Predictions",

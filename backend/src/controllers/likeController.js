@@ -119,11 +119,7 @@ exports.checkLikeStatus = async (req, res) => {
     // Get post with like count and check if user has liked it in one query
     const postAndLikeInfo = await db.query(
       `SELECT p.*, 
-              CASE WHEN EXISTS (SELECT 1 FROM likes 
-                                WHERE post_id = $1 AND user_id = $2) 
-                   THEN true 
-                   ELSE false 
-              END AS liked_by_user
+              (SELECT COUNT(*) > 0 FROM likes WHERE post_id = $1 AND user_id = $2) as is_liked
        FROM posts p 
        WHERE p.id = $1`,
       [postId, userId]
@@ -136,8 +132,7 @@ exports.checkLikeStatus = async (req, res) => {
     const post = postAndLikeInfo.rows[0];
 
     return res.status(200).json({
-      liked: post.liked_by_user,  // Keep 'liked' for backward compatibility with existing code
-      isLiked: post.liked_by_user, // Also include isLiked since we've updated the store to use this
+      isLiked: post.is_liked,
       likeCount: post.like_count
     });
   } catch (error) {

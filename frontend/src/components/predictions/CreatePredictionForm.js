@@ -2,151 +2,98 @@ import van from 'vanjs-core';
 const { div, form, select, option, label, input, span } = van.tags;
 import Button from '../common/Button';
 import Card from '../common/Card';
-import predictionsStore from '../../store/predictions';  // Direct store import
+import predictionsStore from '../../store/predictions';
 
 /**
  * Form for creating new predictions
  */
 export default function CreatePredictionForm() {
-  // Use separate state for each field - this prevents the entire form from re-rendering
-  // when just one field changes
-  const eventId = van.state('');
-  const prediction = van.state('');
-  const confidence = van.state(50);
-  const submitting = van.state(false);
-  const error = van.state('');
-  const success = van.state('');
-  
-  // Get store state directly
+  const formState = van.state({
+    eventId: '', prediction: '', confidence: 50,
+    submitting: false, error: '', success: ''
+  });
   const events = predictionsStore.state.events;
   
-  // Fetch events if needed
   if (events.val.length === 0) {
     setTimeout(() => predictionsStore.actions.fetchEvents.call(predictionsStore), 0);
   }
   
-  // Form submission handler
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // Validate form
-    if (!eventId.val) {
-      error.val = 'Please select an event';
+    if (!formState.val.eventId || !formState.val.prediction) { 
+      formState.val.error = !formState.val.eventId ? 'Please select an event' : 'Please select your prediction';
       return;
     }
     
-    if (!prediction.val) {
-      error.val = 'Please select your prediction';
-      return;
-    }
-    
-    // Submit prediction
-    submitting.val = true;
-    error.val = '';
+    formState.val.submitting = true;
+    formState.val.error = '';
     
     try {
-      await predictionsStore.actions.createPrediction.call(predictionsStore,
-        eventId.val,
-        prediction.val,
-        confidence.val
+      await predictionsStore.actions.createPrediction.call(
+        predictionsStore,
+        formState.val.eventId,
+        formState.val.prediction,
+        formState.val.confidence
       );
       
-      // Reset form on success
-      eventId.val = '';
-      prediction.val = '';
-      confidence.val = 50;
-      submitting.val = false;
-      success.val = 'Prediction created successfully!';
-      
-      // Clear success message after 3 seconds
-      setTimeout(() => {
-        success.val = '';
-      }, 3000);
+      formState.val = {...formState.val, eventId: '', prediction: '', confidence: 50, 
+                        submitting: false, success: 'Prediction created successfully!'};
+      setTimeout(() => formState.val.success = '', 3000);
     } catch (e) {
-      submitting.val = false;
-      error.val = e.message || 'Failed to create prediction';
+      formState.val.submitting = false;
+      formState.val.error = e.message || 'Failed to create prediction';
     }
   };
   
-  // Create event options dynamically
-  const EventOptions = () => [
-    option({ value: "" }, "-- Select an event --"),
-    ...events.val.map(event => 
-      option({ value: event.id }, event.title)
-    )
-  ];
-  
   return Card({
-    title: "Make a New Prediction",
     className: "prediction-form",
     children: [
-      // Error/success message
-      () => error.val ? 
-        div({ class: "error-message" }, error.val) : null,
-      () => success.val ? 
-        div({ class: "success-message" }, success.val) : null,
+      () => formState.val.error ? div({ class: "error-message" }, formState.val.error) : null,
+      () => formState.val.success ? div({ class: "success-message" }, formState.val.success) : null,
       
-      // Prediction form
       form({ onsubmit: handleSubmit }, [
-        // Events dropdown
         div({ class: "form-group" }, [
-          label({ for: "event" }, "Select Event:"),
-          () => events.val.length === 0 ?
-            div({ class: "loading-events" }, [
-              span("Loading events..."),
-              Button({ 
-                onclick: () => predictionsStore.actions.fetchEvents.call(predictionsStore),
-                className: "refresh-button small" 
-              }, "↻")
-            ]) :
-            select({
-              id: "event",
-              required: true,
-              disabled: submitting.val,
-              onchange: e => { eventId.val = e.target.value; }
-            }, EventOptions())
+          label({ for: "eventId" }, "Select Event:"),
+          events.val.length === 0 
+            ? div({ class: "loading-events" }, [
+                span("Loading events..."),
+                Button({ onclick: () => predictionsStore.actions.fetchEvents.call(predictionsStore),
+                       className: "refresh-button small" }, "↻")
+              ])
+            : select({
+                id: "eventId", required: true, disabled: formState.val.submitting,
+                value: () => formState.val.eventId, onchange: e => formState.val.eventId = e.target.value
+              }, [
+                option({ value: "" }, "-- Select an event --"),
+                ...events.val.map(event => option({ value: event.id }, event.title))
+              ])
         ]),
         
-        // Prediction dropdown
         div({ class: "form-group" }, [
           label({ for: "prediction" }, "Your Prediction:"),
           select({
-            id: "prediction",
-            required: true,
-            disabled: submitting.val,
-            onchange: e => { prediction.val = e.target.value; }
+            id: "prediction", required: true, disabled: formState.val.submitting,
+            value: () => formState.val.prediction, onchange: e => formState.val.prediction = e.target.value
           }, [
             option({ value: "" }, "-- Select your prediction --"),
-            option({ value: "Yes" }, "Yes"),
-            option({ value: "No" }, "No")
+            option({ value: "Yes" }, "Yes"), option({ value: "No" }, "No")
           ])
         ]),
         
-        // Confidence slider
         div({ class: "form-group" }, [
-          label({ for: "confidence" }, [
-            "Confidence: ",
-            () => span({ class: "confidence-value" }, `${confidence.val}%`)
-          ]),
+          label({ for: "confidence" }, ["Confidence: ", 
+            span({ class: "confidence-value" }, () => `${formState.val.confidence}%`)]),
           input({
-            type: "range",
-            id: "confidence",
-            min: 1,
-            max: 100,
-            step: 1,
-            disabled: submitting.val,
-            value: confidence,
-            oninput: e => confidence.val = parseInt(e.target.value)
+            type: "range", id: "confidence", min: "1", max: "100", step: "1",
+            disabled: formState.val.submitting, value: () => formState.val.confidence,
+            oninput: e => formState.val.confidence = parseInt(e.target.value)
           })
         ]),
         
-        // Submit button
         Button({
-          type: "submit",
-          disabled: submitting.val,
-          className: "submit-button",
-          children: () => submitting.val ? "Submitting..." : "Submit Prediction"
-        })
+          type: "submit", disabled: formState.val.submitting, className: "submit-button"
+        }, () => formState.val.submitting ? "Submitting..." : "Submit Prediction")
       ])
     ]
   });

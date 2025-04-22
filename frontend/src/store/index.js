@@ -1,70 +1,41 @@
-// src/store/index.js
-import van from 'vanjs-core';
+// Import directly from the modules folder
 import navigationStore from './navigation';
-
-// Only navigationStore is loaded eagerly (needed for all pages)
-const stores = {
-  navigation: navigationStore
-};
-
-// Create reactive state for loaded store modules
-const loadedStores = van.state({
-  navigation: navigationStore
-});
+import postsStore from './posts'; 
+import predictionsStore from './predictions';
+import userStore from './user';
 
 /**
- * Get or load a specific store module
- * @param {string} storeName - Name of the store to load
- * @returns {Promise<Object>} - The store module
- */
-export async function getStore(storeName) {
-  // Return from cache if already loaded
-  if (stores[storeName]) {
-    return stores[storeName];
-  }
-  
-  // Dynamically import the requested store
-  try {
-    switch(storeName) {
-      case 'posts':
-        stores.posts = (await import('./posts')).default;
-        break;
-      case 'predictions':
-        stores.predictions = (await import('./predictions')).default;
-        break;
-      case 'user':
-        stores.user = (await import('./user')).default;
-        break;
-      default:
-        console.warn(`Unknown store module: ${storeName}`);
-        return null;
-    }
-    
-    // Update the reactive state
-    loadedStores.val = {...loadedStores.val, [storeName]: stores[storeName]};
-    return stores[storeName];
-  } catch (error) {
-    console.error(`Failed to load store module: ${storeName}`, error);
-    return null;
-  }
-}
-
-/**
- * Initialize navigation store only
+ * Initialize all stores and make global
  */
 export function initializeStore() {
+  // Bind the method to ensure proper "this" context
   const boundUpdatePageFromHash = navigationStore.actions.updatePageFromHash.bind(navigationStore);
+  
+  // Listen for hash changes with the bound function
   window.addEventListener('hashchange', boundUpdatePageFromHash);
+  
+  // Make the same bound function available globally
   window.updatePageFromHash = boundUpdatePageFromHash;
+  
+  // Initial page update using the bound function
   boundUpdatePageFromHash();
   
-  return stores;
+  // Return store object
+  return {
+    posts: postsStore,
+    predictions: predictionsStore,
+    navigation: navigationStore,
+    user: userStore
+  };
 }
+
+// Create and export global store
+const store = initializeStore();
 
 // Re-export commonly used state for convenience
 export const currentPageState = navigationStore.state.currentPage;
 export const isViewReadyState = navigationStore.state.viewReady;
+export const postsState = postsStore.state.posts;
+export const loadingPostsState = postsStore.state.loading;
 
-// Export loadedStores state and getter function
-export { loadedStores };
-export default stores;
+export default store;

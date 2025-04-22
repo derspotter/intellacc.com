@@ -1,7 +1,6 @@
 import van from 'vanjs-core';
 import api from '../services/api';
-import { getTokenData, isLoggedInState } from '../services/auth';
-import { registerSocketEventHandler } from '../services/socket';
+import auth from '../services/auth';
 
 const predictionsStore = {
   state: {
@@ -14,46 +13,24 @@ const predictionsStore = {
     userPredictions: van.state([])
   },
   
-  init() {
-    // Register socket event handler for new predictions
-    registerSocketEventHandler('newPrediction', (prediction) => {
-      // Only update if the prediction belongs to the current user
-      const userData = getTokenData();
-      if (userData && prediction.user_id === userData.id) {
-        console.log('Received new prediction via socket:', prediction);
-        
-        // Check if prediction already exists to avoid duplicates
-        const existingIndex = this.state.predictions.val.findIndex(p => p.id === prediction.id);
-        if (existingIndex === -1) {
-          // Not a duplicate, add it to the list
-          this.state.predictions.val = [prediction, ...this.state.predictions.val];
-        }
-      }
-    });
-    
-    return this;
-  },
-  
   actions: {
     async fetchPredictions() {
-      // Prevent fetch if already loading or if predictions exist
-      if (this.state.loading.val || this.state.predictions.val.length > 0) {
-        console.log('Skipping fetch: Already loading or predictions exist.');
-        return;
-      }
-      
       this.state.loading.val = true;
       this.state.error.val = '';
       
       try {
-        // Try to use the real API regardless of environment
+        // Check if in development mode
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          this.actions.loadMockPredictions.call(this);
+          return;
+        }
+        
+        // Production mode - try API
         if (!api || !api.predictions) {
           throw new Error('API not available');
         }
         
-        console.log('Fetching predictions from API...');
         const predictions = await api.predictions.getAll();
-        console.log('Received predictions from API:', predictions);
         this.state.predictions.val = predictions;
       } catch (error) {
         console.error('Error fetching predictions:', error);
@@ -96,7 +73,7 @@ const predictionsStore = {
     async fetchEvents() {
       try {
         // Check authentication but don't return early - still use test events even if not logged in
-        if (!isLoggedInState.val) {
+        if (!auth.isLoggedInState.val) {
           console.log('Not logged in, loading test events');
           this.actions.loadTestEvents.call(this);
           return this.state.events.val;
@@ -155,21 +132,15 @@ const predictionsStore = {
     
     async createPrediction(event_id, prediction_value, confidence) {
       try {
-        if (!isLoggedInState.val) return null;
+        if (!auth.isLoggedInState.val) return null;
         
-        console.log('Creating prediction:', { event_id, prediction_value, confidence });
         const prediction = await api.predictions.create(
           event_id, prediction_value, confidence
         );
-        console.log('Prediction created successfully:', prediction);
         
-        // State update is now handled SOLELY by the socket event handler
-        // const existingIndex = this.state.predictions.val.findIndex(p => p.id === prediction.id);
-        // if (existingIndex === -1) {
-        //   this.state.predictions.val = [prediction, ...this.state.predictions.val];
-        // }
+        this.state.predictions.val = [prediction, ...this.state.predictions.val];
         
-        return prediction; // Return prediction so form can react
+        return prediction;
       } catch (error) {
         console.error('Error creating prediction:', error);
         throw error;
@@ -178,7 +149,7 @@ const predictionsStore = {
     
     async fetchAssignedPredictions() {
       try {
-        if (!isLoggedInState.val) return [];
+        if (!auth.isLoggedInState.val) return [];
         
         const assigned = await api.predictions.getAssigned();
         this.state.assignedPredictions.val = Array.isArray(assigned) ? assigned : [];
@@ -200,7 +171,7 @@ const predictionsStore = {
     
     async fetchBettingStats() {
       try {
-        if (!isLoggedInState.val) return null;
+        if (!auth.isLoggedInState.val) return null;
         
         const stats = await api.predictions.getBettingStats();
         this.state.bettingStats.val = stats;
@@ -220,7 +191,7 @@ const predictionsStore = {
     
     async createEvent(title, details, closingDate) {
       try {
-        if (!isLoggedInState.val) return null;
+        if (!auth.isLoggedInState.val) return null;
         
         const event = await api.events.create({
           title,
@@ -238,7 +209,7 @@ const predictionsStore = {
     
     async resolveEvent(eventId, outcome) {
       try {
-        if (!isLoggedInState.val) return null;
+        if (!auth.isLoggedInState.val) return null;
         
         const result = await api.events.resolve(eventId, outcome);
         
@@ -255,7 +226,7 @@ const predictionsStore = {
     
     async placeBet(assignmentId, confidenceLevel, betOn) {
       try {
-        if (!isLoggedInState.val) return null;
+        if (!auth.isLoggedInState.val) return null;
         
         const result = await api.predictions.placeBet(
           assignmentId, confidenceLevel, betOn
@@ -302,4 +273,4 @@ const predictionsStore = {
   }
 };
 
-export default predictionsStore.init();
+export default predictionsStore;

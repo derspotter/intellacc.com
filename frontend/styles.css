@@ -293,116 +293,9 @@ p {
   padding-bottom: 1rem;
 }
 
-/* Predictions styles */
-.predictions-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.predictions-header h3 {
-  margin: 0;
-}
-
-.refresh-button {
-  transition: transform 0.3s var(--transition-timing);
-}
-
-.refresh-button:hover {
-  transform: rotate(180deg);
-  color: var(--blue-bg);
-}
-
-.refresh-button:active {
-  transform: rotate(360deg);
-}
-
 .post-title {
   font-weight: bold;
   margin-bottom: 0.25rem;
-}
-
-/* Post Card Styles */
-.post-card {
-  margin-bottom: 1.5rem;
-  padding: 1rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.post-header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-
-.post-author {
-  font-weight: bold;
-}
-
-.post-date {
-  color: var(--secondary-text);
-  font-size: 0.875rem;
-}
-
-.post-content {
-  margin-bottom: 1rem;
-  white-space: pre-line;
-}
-
-.post-image {
-  margin-bottom: 1rem;
-}
-
-.post-image img {
-  max-width: 100%;
-  border-radius: 4px;
-}
-
-.post-stats {
-  display: flex;
-  margin-bottom: 0.75rem;
-  font-size: 0.875rem;
-  color: var(--secondary-text);
-}
-
-.post-stat {
-  margin-right: 1rem;
-}
-
-.post-actions {
-  display: flex;
-  justify-content: flex-start;
-  gap: 0.5rem;
-}
-
-.post-action {
-  border: none;
-  background: none;
-  padding: 0.5rem 0.75rem;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  display: flex;
-  align-items: center;
-  transition: background-color 0.2s, color 0.2s;
-}
-
-.post-action:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-.post-action.liked {
-  color: #e74c3c;
-  font-weight: bold;
-}
-
-.post-action.delete:hover {
-  background-color: rgba(231, 76, 60, 0.1);
-  color: #e74c3c;
 }
 
 .post-meta {
@@ -599,9 +492,6 @@ h3 {
 .bet-button {
   margin-top: 0.5rem;
 }
-
-/* Comment Styles - Import from separate file */
-@import './src/styles/comments.css';
 
 /* Profile Styles */
 .profile-container {
