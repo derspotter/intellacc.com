@@ -29,3 +29,7 @@ legacy/*
 
 # VSCode files
 .vscode/*
+.aider*
+
+# windsurf rules
+.windsurfrules

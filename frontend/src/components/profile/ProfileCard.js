@@ -29,8 +29,10 @@ export default function ProfileCard({ onEdit }) {
           ]),
           Button({
             onclick: onEdit,
-            className: "edit-profile-button"
-          }, "Edit Profile")
+            className: "edit-profile-button",
+            variant: "primary", // Add primary variant
+            children: "Edit Profile" // Pass text via children prop
+          })
         ])
     ]
   });

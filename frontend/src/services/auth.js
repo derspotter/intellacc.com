@@ -2,6 +2,8 @@
 import van from 'vanjs-core';
 import { api } from './api';
 import userStore from '../store/user';
+import { updatePageFromHash } from '../router'; // Import updatePageFromHash
+import { getStore } from '../store';
 
 // Create reactive state for auth
 export const isLoggedInState = van.state(!!localStorage.getItem('token'));
@@ -94,9 +96,24 @@ export async function login(email, password) {
       console.warn('Could not fetch profile after login:', profileError);
       // Continue with login success even if profile fetch fails
     }
+
+    // Fetch posts after login
+    try {
+      const postsStore = await getStore('posts'); // Get the posts store instance
+      // Ensure store is loaded before calling action
+      if (postsStore && postsStore.actions && postsStore.actions.fetchPosts) {
+        await postsStore.actions.fetchPosts.call(postsStore);
+      } else {
+        console.error("Posts store or fetchPosts action not available after login.");
+      }
+    } catch (postsError) {
+      console.warn('Could not fetch posts after login:', postsError);
+    }
     
     // Navigate to home page after login
     window.location.hash = 'home';
+    // Explicitly call updatePageFromHash to ensure page state and data are loaded
+    updatePageFromHash();
     
     return { success: true };
   } catch (error) {

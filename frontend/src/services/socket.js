@@ -19,6 +19,28 @@ const eventHandlers = {
   notification: []
 };
 
+/**
+ * Register a handler for a socket event
+ * @param {string} eventName - The name of the event to listen for
+ * @param {Function} handler - The handler function to call when the event is received
+ * @returns {Function} - Function to remove the handler
+ */
+export function registerSocketEventHandler(eventName, handler) {
+  if (!eventHandlers[eventName]) {
+    eventHandlers[eventName] = [];
+  }
+  
+  eventHandlers[eventName].push(handler);
+  
+  // Return function to unregister
+  return () => {
+    const index = eventHandlers[eventName].indexOf(handler);
+    if (index !== -1) {
+      eventHandlers[eventName].splice(index, 1);
+    }
+  };
+}
+
 // Socket.IO instance
 let socket = null;
 
@@ -62,10 +84,18 @@ function createSocketConnection() {
     try {
       /**
        * Socket.IO Connection Configuration
-       * Frontend: 5173 (Vite)
+       * 
+      * Frontend: 5173 (Vite)
        * Backend: 3000 (Socket.IO server)
        */
-      socket = io('http://localhost:3000', {
+      // Use origin-based connection to work in both dev and production
+      const socketUrl = window.location.hostname === 'localhost' 
+        ? 'http://localhost:3000'  // Development
+        : window.location.origin;   // Production (same origin)
+      
+      console.log('Creating Socket.IO connection to:', socketUrl);
+      
+      socket = io(socketUrl, {
         path: '/socket.io',
         transports: ['websocket'],
         reconnection: true,
@@ -124,19 +154,8 @@ function setupSocketHandlers() {
     addMessage(`Broadcast: ${JSON.stringify(data)}`);
   });
   
-  // New post event
-  socket.on('newPost', (data) => {
-    addMessage(`New post: ${data.content || JSON.stringify(data)}`);
-    
-    // Update posts in store if available
-    if (store.posts) {
-      const posts = store.posts.state.posts.val;
-      store.posts.state.posts.val = [data, ...posts];
-    }
-    
-    // Notify registered handlers
-    notifyHandlers('newPost', data);
-  });
+  // We are no longer using socket for post updates
+  // Socket is now reserved for notifications and other real-time features
   
   // New prediction event
   socket.on('newPrediction', (data) => {

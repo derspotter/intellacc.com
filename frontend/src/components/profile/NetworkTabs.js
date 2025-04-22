@@ -53,8 +53,8 @@ export default function NetworkTabs() {
     return ul({ class: "user-list" }, 
       users.map(user => 
         li({ class: "user-item" }, [
-          div({ class: "username" }, user.username),
-          div({ class: "user-bio" }, user.bio || "No bio")
+          p({ class: "username" }, user.username),
+          p({ class: "user-bio" }, user.bio || "No bio")
         ])
       )
     );

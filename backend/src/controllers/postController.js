@@ -1,9 +1,9 @@
 const db = require('../db');
 
-// Create a new post
+// Create a new post or comment
 exports.createPost = async (req, res) => {
   try {
-    const { content, image_url } = req.body;
+    const { content, image_url, parent_id } = req.body;
     
     // Input validation
     if (!content || content.trim() === '') {
@@ -13,20 +13,64 @@ exports.createPost = async (req, res) => {
     // Get user ID from authenticated user
     const userId = req.user.id;
     
-    console.log('Creating post with:', { userId, content, image_url });
+    // Default values for a regular post
+    let parentId = null;
+    let depth = 0;
+    let isComment = false;
+    let postId = null;
     
+    // If parent_id exists, this is a comment
+    if (parent_id) {
+      // Verify parent exists and get its depth
+      const parentResult = await db.query('SELECT * FROM posts WHERE id = $1', [parent_id]);
+      
+      if (parentResult.rows.length === 0) {
+        return res.status(404).json({ message: 'Parent post not found' });
+      }
+      
+      const parentPost = parentResult.rows[0];
+      parentId = parent_id;
+      depth = parentPost.depth + 1;
+      isComment = true;
+      postId = parentPost.id;
+    }
+    
+    console.log('Creating post/comment with:', { userId, content, image_url, parentId, depth, isComment });
+    
+    // Insert the post or comment
     const result = await db.query(
-      'INSERT INTO posts (user_id, content, image_url, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING *',
-      [userId, content, image_url]
+      'INSERT INTO posts (user_id, content, image_url, parent_id, depth, is_comment, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) RETURNING *',
+      [userId, content, image_url, parentId, depth, isComment]
     );
     
     const newPost = result.rows[0];
 
-    // Post creation is now handled solely through REST API
-    // No Socket.IO events are emitted for post creation
-    // Socket.IO will be reserved for notifications and other real-time features
+    // Fetch the username to include in the response
+    const userResult = await db.query('SELECT username FROM users WHERE id = $1', [newPost.user_id]);
+    if (userResult.rows.length > 0) {
+      newPost.username = userResult.rows[0].username;
+    } else {
+      // Handle case where user might not be found (optional, but good practice)
+      newPost.username = 'Unknown User'; 
+    }
 
-    console.log('Post created successfully:', newPost);
+    // If this is a comment, increment the parent's comment_count
+    if (parentId) {
+      await db.query(
+        'UPDATE posts SET comment_count = comment_count + 1 WHERE id = $1',
+        [parentId]
+      );
+      
+      // Handle via socket.io for real-time updates
+      if (req.io) {
+        req.io.to(`post:${parentId}`).emit('new_comment', newPost);
+      }
+    } else if (req.io) {
+      // Emit new post event for timeline updates
+      req.io.emit('new_post', newPost);
+    }
+
+    console.log('Post/comment created successfully:', newPost);
     res.status(201).json(newPost);
   } catch (error) {
     console.error('Error in createPost controller:', error);
@@ -35,26 +79,49 @@ exports.createPost = async (req, res) => {
     // Send detailed error in development, but hide details in production
     if (process.env.NODE_ENV === 'development') {
       res.status(500).json({ 
-        message: 'Error creating post', 
+        message: 'Error creating post/comment', 
         error: error.message,
         stack: error.stack 
       });
     } else {
-      res.status(500).json({ message: 'Error creating post' });
+      res.status(500).json({ message: 'Error creating post/comment' });
     }
   }
 };
 
-// Retrieve all posts (e.g., a feed)
+// Retrieve all top-level posts (e.g., a feed)
 exports.getPosts = async (req, res) => {
+  console.log("--- ENTERING getPosts function ---"); // Add entry log
+  const userId = req.user.id; // Get current user's ID
   try {
+    console.log("getPosts called with userId:", userId);
+    
     const result = await db.query(
-      'SELECT * FROM posts ORDER BY created_at DESC'
+      `SELECT p.*, u.username,
+              CASE WHEN EXISTS (SELECT 1 FROM likes 
+                                WHERE post_id = p.id AND user_id = $1) 
+                   THEN true 
+                   ELSE false 
+              END AS liked_by_user
+       FROM posts p
+       JOIN users u ON p.user_id = u.id
+       WHERE p.parent_id IS NULL AND p.is_comment = FALSE
+       ORDER BY p.created_at DESC`,
+      [userId] // Pass userId for the subquery
     );
+    
+    // Log the raw result which should now include liked_by_user from the query
+    console.log("Raw query result:", result.rows.map(post => ({
+      id: post.id,
+      user_id: post.user_id,
+      liked_by_user: post.liked_by_user
+    })));
+    
+    // Send the direct query result
     res.status(200).json(result.rows);
   } catch (err) {
     console.error(err);
-    res.status(500).send('Error fetching posts');
+    res.status(500).json({ message: 'Error fetching posts' });
   }
 };
 
@@ -115,26 +182,159 @@ exports.deletePost = async (req, res) => {
 
 // Get personalized feed of posts from followed users
 exports.getFeed = async (req, res) => {
-  const userId = req.user.userId;
-  
+  console.log("--- ENTERING getFeed function ---"); // Add entry log
+  const userId = req.user.id; // Using standardized user object
+
   try {
+    console.log("getFeed called with userId:", userId);
+    
     const result = await db.query(
-      `SELECT p.*, u.username
+      `SELECT p.*, u.username,
+              CASE WHEN EXISTS (SELECT 1 FROM likes 
+                                WHERE post_id = p.id AND user_id = $1) 
+                   THEN true 
+                   ELSE false 
+              END AS liked_by_user
        FROM posts p
        JOIN users u ON p.user_id = u.id
-       WHERE p.user_id IN (
+       WHERE (p.user_id IN (
          SELECT following_id 
          FROM follows 
          WHERE follower_id = $1
        )
-       OR p.user_id = $1
+       OR p.user_id = $1)
+       AND p.parent_id IS NULL
+       AND p.is_comment = FALSE
        ORDER BY p.created_at DESC`,
       [userId]
     );
     
+    // Log the raw result which should include liked_by_user from the query
+    console.log("Raw feed query result:", result.rows.map(post => ({
+      id: post.id,
+      liked_by_user: post.liked_by_user
+    })));
+    
+    // Send the direct query result
     res.status(200).json(result.rows);
   } catch (err) {
     console.error("Error getting feed:", err);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Get comments for a post (direct replies only)
+exports.getComments = async (req, res) => {
+  const postId = req.params.id;
+  
+  console.log(`--- GETTING COMMENTS for post ID: ${postId} ---`);
+  
+  try {
+    // Verify post exists
+    console.log(`Checking if post ${postId} exists...`);
+    const postCheck = await db.query('SELECT * FROM posts WHERE id = $1', [postId]);
+    
+    console.log(`Post check result: Found ${postCheck.rows.length} post(s)`);
+    
+    if (postCheck.rows.length === 0) {
+      console.log(`Post ${postId} not found, returning 404`);
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    
+    // Get direct comments for this post
+    console.log(`Fetching comments for post ${postId}...`);
+    
+    try {
+      const result = await db.query(
+        `SELECT p.*, u.username 
+         FROM posts p
+         JOIN users u ON p.user_id = u.id
+         WHERE p.parent_id = $1
+         ORDER BY p.created_at ASC`,
+        [postId]
+      );
+      
+      console.log(`Found ${result.rows.length} comments for post ${postId}`);
+      res.status(200).json(result.rows);
+    } catch (queryError) {
+      console.error('SQL error fetching comments:', queryError);
+      return res.status(500).json({ message: 'Database error fetching comments', error: queryError.message });
+    }
+  } catch (error) {
+    console.error('Error in getComments controller:', error);
+    console.error('Stack trace:', error.stack);
+    res.status(500).json({ message: 'Error fetching comments' });
+  }
+};
+
+// Get a full comment tree (with nesting) for a post
+exports.getCommentTree = async (req, res) => {
+  const postId = req.params.id;
+  const maxDepth = req.query.maxDepth ? parseInt(req.query.maxDepth, 10) : 10; // Default max depth to 10
+  
+  try {
+    // Verify post exists
+    const postCheck = await db.query('SELECT * FROM posts WHERE id = $1', [postId]);
+    
+    if (postCheck.rows.length === 0) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    
+    // Get all comments for this post with their depth, up to maxDepth
+    const result = await db.query(
+      `WITH RECURSIVE comment_tree AS (
+         -- Base case: direct replies to the post
+         SELECT 
+           p.*, 
+           u.username,
+           1 AS level
+         FROM posts p
+         JOIN users u ON p.user_id = u.id
+         WHERE p.parent_id = $1
+         
+         UNION ALL
+         
+         -- Recursive case: replies to comments
+         SELECT 
+           p.*, 
+           u.username,
+           ct.level + 1
+         FROM posts p
+         JOIN users u ON p.user_id = u.id
+         JOIN comment_tree ct ON p.parent_id = ct.id
+         WHERE ct.level < $2
+       )
+       SELECT * FROM comment_tree
+       ORDER BY level ASC, created_at ASC`,
+      [postId, maxDepth]
+    );
+    
+    // Organize comments into a nested structure
+    const commentMap = {};
+    const rootComments = [];
+    
+    // First pass: create a map of all comments
+    result.rows.forEach(comment => {
+      comment.replies = [];
+      commentMap[comment.id] = comment;
+    });
+    
+    // Second pass: build the tree structure
+    result.rows.forEach(comment => {
+      // Direct replies to the post
+      if (comment.parent_id === parseInt(postId)) {
+        rootComments.push(comment);
+      } else {
+        // Replies to comments
+        if (commentMap[comment.parent_id]) {
+          commentMap[comment.parent_id].replies.push(comment);
+        }
+      }
+    });
+    
+    res.status(200).json(rootComments);
+  } catch (error) {
+    console.error('Error fetching comment tree:', error);
+    res.status(500).json({ message: 'Error fetching comment tree' });
   }
 };

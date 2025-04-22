@@ -14,13 +14,21 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS posts (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
     image_url VARCHAR(255),
     like_count INTEGER DEFAULT 0,
     comment_count INTEGER DEFAULT 0,
+    depth INTEGER DEFAULT 0,
+    is_comment BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
+
+-- Add indexes for better performance on hierarchical queries
+CREATE INDEX IF NOT EXISTS idx_posts_parent_id ON posts(parent_id);
+CREATE INDEX IF NOT EXISTS idx_posts_is_comment ON posts(is_comment);
+CREATE INDEX IF NOT EXISTS idx_posts_depth ON posts(depth);
 
 CREATE TABLE IF NOT EXISTS topics (
     id SERIAL PRIMARY KEY,
@@ -51,7 +59,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
-    event TEXT NOT NULL, -- ✅ Stores event name
+    event TEXT NOT NULL, -- Stores event name
     prediction_value TEXT NOT NULL,
     confidence INTEGER CHECK (confidence BETWEEN 0 AND 100),
     created_at TIMESTAMP DEFAULT NOW(),
@@ -99,18 +107,10 @@ CREATE TABLE IF NOT EXISTS likes (
     UNIQUE(user_id, post_id) -- Ensure a user can only like a post once
 );
 
-CREATE TABLE IF NOT EXISTS comments (
-    id SERIAL PRIMARY KEY,
-    post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
 -- All tables above already have the necessary columns
 
 -- Triggers to update denormalized counts
+DROP TRIGGER IF EXISTS after_like_insert_or_delete ON likes;
 CREATE OR REPLACE FUNCTION update_post_like_count()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -127,20 +127,3 @@ CREATE TRIGGER after_like_insert_or_delete
 AFTER INSERT OR DELETE ON likes
 FOR EACH ROW
 EXECUTE FUNCTION update_post_like_count();
-
-CREATE OR REPLACE FUNCTION update_post_comment_count()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF (TG_OP = 'INSERT') THEN
-        UPDATE posts SET comment_count = comment_count + 1 WHERE id = NEW.post_id;
-    ELSIF (TG_OP = 'DELETE') THEN
-        UPDATE posts SET comment_count = comment_count - 1 WHERE id = OLD.post_id;
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER after_comment_insert_or_delete
-AFTER INSERT OR DELETE ON comments
-FOR EACH ROW
-EXECUTE FUNCTION update_post_comment_count();

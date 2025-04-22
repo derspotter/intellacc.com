@@ -285,3 +285,85 @@ exports.getMonthlyBettingStats = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// Assign a prediction to a specific user (Admin only)
+exports.assignPredictions = async (req, res) => {
+  const { prediction_id, target_user_id } = req.body;
+  const requesting_user_id = req.user.userId;
+
+  // Basic Input Validation
+  if (!prediction_id || !target_user_id) {
+    return res.status(400).json({ message: "Missing prediction_id or target_user_id in request body." });
+  }
+
+  try {
+    // 1. Check if the requesting user is an admin
+    const adminCheck = await db.query("SELECT role FROM users WHERE id = $1", [requesting_user_id]);
+    if (adminCheck.rows.length === 0 || adminCheck.rows[0].role !== "admin") {
+      return res.status(403).json({ message: "Only admins can assign predictions." });
+    }
+
+    // Start transaction
+    await db.query('BEGIN');
+
+    // 2. Check if the target user exists
+    const targetUserCheck = await db.query("SELECT id FROM users WHERE id = $1", [target_user_id]);
+    if (targetUserCheck.rows.length === 0) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ message: `Target user with ID ${target_user_id} not found.` });
+    }
+
+    // 3. Check if the prediction exists and is not resolved
+    const predictionCheck = await db.query("SELECT id FROM predictions WHERE id = $1 AND outcome IS NULL", [prediction_id]);
+    if (predictionCheck.rows.length === 0) {
+      await db.query('ROLLBACK');
+      return res.status(404).json({ message: `Prediction with ID ${prediction_id} not found or is already resolved.` });
+    }
+
+    // 4. Check if this prediction is already assigned to this user and not completed
+    const existingAssignmentCheck = await db.query(
+      "SELECT id FROM assigned_predictions WHERE prediction_id = $1 AND user_id = $2 AND completed = FALSE",
+      [prediction_id, target_user_id]
+    );
+    if (existingAssignmentCheck.rows.length > 0) {
+      await db.query('ROLLBACK');
+      return res.status(409).json({ message: "This prediction is already assigned to this user and is pending completion." });
+    }
+
+    // 5. Insert the new assignment
+    const result = await db.query(
+      "INSERT INTO assigned_predictions (user_id, prediction_id) VALUES ($1, $2) RETURNING *",
+      [target_user_id, prediction_id]
+    );
+
+    // Commit transaction
+    await db.query('COMMIT');
+
+    // Optionally: Emit a socket event to notify the target user
+    // if (req.app.get('io')) { ... }
+
+    res.status(201).json(result.rows[0]);
+
+  } catch (err) {
+    await db.query('ROLLBACK'); // Rollback on any error
+    console.error("Error assigning prediction:", err);
+    res.status(500).send("Database error: " + err.message);
+  }
+};
+
+// ADMIN: Delete all predictions (for testing only)
+exports.deleteAllPredictions = async (req, res) => {
+  const userId = req.user.userId;
+  // Check if the user is an admin
+  const adminCheck = await db.query("SELECT role FROM users WHERE id = $1", [userId]);
+  if (adminCheck.rows.length === 0 || adminCheck.rows[0].role !== "admin") {
+    return res.status(403).json({ message: "Only admins can delete all predictions." });
+  }
+  try {
+    await db.query("DELETE FROM predictions");
+    res.status(200).json({ message: "All predictions deleted." });
+  } catch (err) {
+    console.error("Error deleting all predictions:", err);
+    res.status(500).json({ message: "Database error: " + err.message });
+  }
+};

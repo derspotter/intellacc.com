@@ -70,14 +70,17 @@ export default function ProfileEditor({ onCancel }) {
           Button({
             type: "submit",
             disabled: editState.val.submitting,
-            className: "submit-button"
-          }, editState.val.submitting ? "Saving..." : "Save Profile"),
+            className: "submit-button",
+            variant: "primary", // Apply primary style to Save button
+            children: editState.val.submitting ? "Saving..." : "Save Profile" // Pass text via children prop
+          }),
           Button({
             type: "button",
             onclick: onCancel,
             disabled: editState.val.submitting,
-            className: "cancel-button"
-          }, "Cancel")
+            className: "cancel-button",
+            children: "Cancel" // Pass text via children prop
+          })
         ])
       ])
     ]

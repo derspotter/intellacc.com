@@ -8,11 +8,9 @@ import predictionsStore from '../../store/predictions';
  * Component to display predictions on profile page
  */
 export default function ProfilePredictions() {
-  // Fetch predictions if needed
-  if (predictionsStore.state.predictions.val.length === 0 && !predictionsStore.state.loading.val) {
-    setTimeout(() => predictionsStore.actions.fetchPredictions.call(predictionsStore), 0);
-  }
-  
+  // Fetch predictions if needed - the action handles avoiding re-fetches
+  // Fetch predictions if needed - the action handles avoiding re-fetches
+  predictionsStore.actions.fetchPredictions.call(predictionsStore);
   return Card({
     title: "Your Predictions",
     className: "profile-predictions",
@@ -47,8 +45,10 @@ export default function ProfilePredictions() {
       // View all button
       Button({
         onclick: () => { window.location.hash = 'predictions'; },
-        className: "view-all-button"
-      }, "View All Predictions")
+        className: "view-all-button",
+        variant: "primary", // Apply primary style
+        children: "View All Predictions" // Pass text via children prop
+      })
     ]
   });
 }

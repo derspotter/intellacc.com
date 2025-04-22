@@ -12,7 +12,6 @@ export default function Sidebar() {
     div({ class: "sidebar-logo" }, "INTELLACC"),
     div({ class: "sidebar-content" }, [
       div({ class: "sidebar-item" }, a({ href: "#home" }, "Home")),
-      div({ class: "sidebar-item" }, a({ href: "#posts" }, "All Posts")),
       div({ class: "sidebar-item" }, a({ href: "#predictions" }, "Predictions")),
       
       // Admin-only section
