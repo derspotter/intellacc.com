@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "socket.io-client": "^4.8.1",
-    "vanjs-core": "^1.5.3"
+    "vanjs-core": "^1.5.3",
+    "vanjs-ext": "^0.6.2"
   },
   "devDependencies": {
     "vite": "^6.1.1",

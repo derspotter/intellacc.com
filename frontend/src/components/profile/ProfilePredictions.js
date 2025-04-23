@@ -1,37 +1,60 @@
 import van from 'vanjs-core';
-const { div, h3, p, span } = van.tags;
+import * as vanX from 'vanjs-ext';
+const { div, p, span } = van.tags;
 import Card from '../common/Card';
 import Button from '../common/Button';
 import predictionsStore from '../../store/predictions';
 
 /**
- * Component to display predictions on profile page
+ * Predictions display component - simplified version
+ * Used in both profile view and predictions page with identical appearance
+ * 
+ * @param {Object} props - Component properties
+ * @param {number} [props.limit=5] - Limit the number of predictions shown (null = no limit)
+ * @param {boolean} [props.showViewAll=true] - Whether to show the View All button
+ * @param {string} [props.title='Your Predictions'] - Card title
+ * @param {string} [props.className=''] - Additional CSS classes
  */
-export default function ProfilePredictions() {
-  // Fetch predictions if needed - the action handles avoiding re-fetches
+export default function ProfilePredictions(props = {}) {
+  // Default props with VanX
+  const config = vanX.reactive({
+    limit: props.limit !== undefined ? props.limit : 5,
+    showViewAll: props.showViewAll !== undefined ? props.showViewAll : true,
+    title: props.title || 'Your Predictions',
+    className: props.className || ''
+  });
+  
   // Fetch predictions if needed - the action handles avoiding re-fetches
   predictionsStore.actions.fetchPredictions.call(predictionsStore);
+  
+  // Reference store state for reactivity
+  const predictions = predictionsStore.state.predictions;
+  const loading = predictionsStore.state.loading;
+
   return Card({
-    title: "Your Predictions",
-    className: "profile-predictions",
+    title: config.title,
+    className: `predictions-list ${config.className}`,
     children: [
       // Loading state
-      () => predictionsStore.state.loading.val ? 
-        p("Loading predictions...") : null,
+      () => loading.val ? p("Loading predictions...") : null,
       
       // Empty state
-      () => !predictionsStore.state.loading.val && predictionsStore.state.predictions.val.length === 0 ? 
+      () => !loading.val && predictions.val.length === 0 ? 
         p("You haven't made any predictions yet.") : null,
       
-      // Predictions preview (top 5)
-      () => !predictionsStore.state.loading.val && predictionsStore.state.predictions.val.length > 0 ? 
-        div({ class: "prediction-list-compact" }, 
-          predictionsStore.state.predictions.val.slice(0, 5).map(prediction => 
+      // Predictions list
+      () => !loading.val && predictions.val.length > 0 ? (() => {
+        // Apply limit if specified
+        const items = config.limit ? predictions.val.slice(0, config.limit) : predictions.val;
+        
+        // Always use the compact prediction item style
+        return div({ class: "prediction-list-compact" }, 
+          items.map(prediction => 
             div({ 
               class: `prediction-item ${prediction.outcome ? 'resolved' : 'pending'}`,
               'data-outcome': prediction.outcome
             }, [
-              div({ class: "prediction-event" }, prediction.event),
+              div({ class: "prediction-event" }, prediction.event || prediction.title || "Unknown event"),
               div({ class: "prediction-details" }, [
                 span(`${prediction.prediction_value} (${prediction.confidence}%)`),
                 prediction.outcome ? 
@@ -40,15 +63,17 @@ export default function ProfilePredictions() {
               ])
             ])
           )
-        ) : null,
+        );
+      })() : null,
       
-      // View all button
-      Button({
-        onclick: () => { window.location.hash = 'predictions'; },
-        className: "view-all-button",
-        variant: "primary", // Apply primary style
-        children: "View All Predictions" // Pass text via children prop
-      })
+      // View all button - only shown if showViewAll is true and we have predictions
+      () => config.showViewAll && !loading.val && predictions.val.length > 0 ?
+        Button({
+          onclick: () => { window.location.hash = 'predictions'; },
+          className: "view-all-button",
+          variant: "primary",
+          children: "View All Predictions"
+        }) : null
     ]
   });
 }

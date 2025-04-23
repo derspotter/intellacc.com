@@ -612,7 +612,7 @@ h3 {
 }
 
 .profile-column.main {
-  flex: 2;
+  flex: 1; /* Changed from flex: 2 to flex: 1 */
 }
 
 .profile-column.sidebar {

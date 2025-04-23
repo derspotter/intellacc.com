@@ -177,9 +177,6 @@ const predictionsStore = {
         );
         console.log('Prediction created successfully:', prediction);
         
-        // Optimistic update of the new prediction to state
-        this.state.predictions.val = [prediction, ...this.state.predictions.val];
-        
         return prediction; // Return prediction so form can react
       } catch (error) {
         console.error('Error creating prediction:', error);

@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS predictions (
     confidence INTEGER CHECK (confidence BETWEEN 0 AND 100),
     created_at TIMESTAMP DEFAULT NOW(),
     resolved_at TIMESTAMP,
-    outcome TEXT CHECK (outcome IN ('correct', 'incorrect', 'pending'))
+    outcome TEXT CHECK (outcome IN ('correct', 'incorrect', 'pending')),
+    UNIQUE(user_id, event_id) -- Ensure a user can only predict an event once
 );
 
 CREATE TABLE IF NOT EXISTS follows (

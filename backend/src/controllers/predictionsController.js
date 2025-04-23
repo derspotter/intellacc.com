@@ -34,6 +34,16 @@ exports.createPrediction = async (req, res) => {
   const userId = req.user.userId;
 
   try {
+    // Check if the user has already predicted this event
+    const existingPrediction = await db.query(
+      "SELECT id FROM predictions WHERE user_id = $1 AND event_id = $2",
+      [userId, event_id]
+    );
+
+    if (existingPrediction.rows.length > 0) {
+      return res.status(409).json({ message: "You have already made a prediction for this event." });
+    }
+
     // Fetch the event title
     const eventQuery = await db.query("SELECT title FROM events WHERE id = $1", [event_id]);
 
@@ -56,6 +66,10 @@ exports.createPrediction = async (req, res) => {
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    // Check for unique constraint violation (optional but good practice)
+    if (err.code === '23505') { // PostgreSQL unique violation error code
+        return res.status(409).json({ message: "You have already made a prediction for this event (database constraint)." });
+    }
     console.error("Error saving prediction:", err);
     res.status(500).send("Database error: " + err.message);
   }

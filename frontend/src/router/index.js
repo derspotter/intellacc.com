@@ -8,14 +8,13 @@ import { getStore } from '../store';
 import LoginForm from '../components/auth/LoginForm';
 import PostsList from '../components/posts/PostsList';
 import CreatePostForm from '../components/posts/CreatePostForm';
-import PredictionsList from '../components/predictions/PredictionsList';
+// Replace PredictionsList with ProfilePredictions
+import ProfilePredictions from '../components/profile/ProfilePredictions';
 import CreatePredictionForm from '../components/predictions/CreatePredictionForm';
-// import AssignedPredictionsList from '../components/predictions/AssignedPredictionsList'; // Removed import
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
 import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
 import NetworkTabs from '../components/profile/NetworkTabs';
-import ProfilePredictions from '../components/profile/ProfilePredictions';
 
 // Use shorthand for tag functions
 const { div, h1, h2, p, button } = van.tags;
@@ -105,7 +104,12 @@ export default function Router() {
         ]),
         // Column 2: Predictions List
         div({ class: "predictions-column" }, [
-          PredictionsList()
+          // Use ProfilePredictions with no limit and no view all button
+          ProfilePredictions({
+            limit: null,
+            showViewAll: false,
+            title: 'Your Predictions'
+          })
         ])
       ])
     ]),
@@ -121,7 +125,14 @@ export default function Router() {
             () => editMode.val
               ? ProfileEditor({ onCancel: () => editMode.val = false })
               : ProfileCard({ onEdit: () => editMode.val = true }),
-            ProfilePredictions()
+            // Use ProfilePredictions with compact mode (default settings work fine)
+            ProfilePredictions({
+              compact: true,
+              limit: 5,
+              showViewAll: true,
+              title: 'Your Predictions',
+              className: 'profile-predictions'
+            })
           ]),
           div({ class: "profile-column sidebar" }, [
             NetworkTabs()
