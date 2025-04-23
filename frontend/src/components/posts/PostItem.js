@@ -102,7 +102,7 @@ export default function PostItem({ post }) {
       });
       return commentsList;
     } else if (!isLoading) {
-      return span("No comments yet.");
+      return span({ class: "no-comments-yet" }, "No comments yet.");
     }
     return null; // Should not happen if isLoading is true and no comments
   };

@@ -9,7 +9,9 @@ const predictionsStore = {
     assignedPredictions: van.state([]),
     events: van.state([]),
     bettingStats: van.state({ completed_bets: 0, total_assigned: 0, remaining_bets: 5 }),
-    loading: van.state(false),
+    loading: van.state(false), // Restored generic loading state
+    loadingEvents: van.state(false), // Added specific loading state for events
+    loadingAssigned: van.state(false), // Added specific loading state for assigned predictions
     error: van.state(null),
     userPredictions: van.state([])
   },
@@ -94,6 +96,14 @@ const predictionsStore = {
     },
     
     async fetchEvents() {
+      // Prevent fetch if already loading
+      if (this.state.loadingEvents.val) {
+        console.log('Skipping fetchEvents: Already loading.');
+        return;
+      }
+      this.state.loadingEvents.val = true;
+      this.state.error.val = null; // Reset error specific to this fetch if needed
+
       try {
         // Check authentication but don't return early - still use test events even if not logged in
         if (!isLoggedInState.val) {
@@ -115,10 +125,14 @@ const predictionsStore = {
         
         return this.state.events.val;
       } catch (error) {
+         // Keep original catch block in case needed later, but unreachable with forced test data
         console.error('Error fetching events:', error);
         console.log('Falling back to test events');
         this.actions.loadTestEvents.call(this);
         return this.state.events.val;
+      } finally {
+         // Ensure loading state is reset (also done above in debug block)
+        this.state.loadingEvents.val = false;
       }
     },
     
@@ -174,24 +188,39 @@ const predictionsStore = {
     },
     
     async fetchAssignedPredictions() {
+       // Prevent fetch if already loading
+      if (this.state.loadingAssigned.val) {
+        console.log('Skipping fetchAssignedPredictions: Already loading.');
+        return;
+      }
+      this.state.loadingAssigned.val = true;
+      this.state.error.val = null; // Reset error
+
       try {
-        if (!isLoggedInState.val) return [];
-        
+        if (!isLoggedInState.val) {
+           this.state.loadingAssigned.val = false; // Reset loading if not logged in
+           return [];
+        }
+
         const assigned = await api.predictions.getAssigned();
         this.state.assignedPredictions.val = Array.isArray(assigned) ? assigned : [];
         
         return this.state.assignedPredictions.val;
       } catch (error) {
         console.error('Error fetching assigned predictions:', error);
+        this.state.error.val = error.message || 'Failed to fetch assigned predictions';
+        // Consider if fallback is still needed or just show error
         this.state.assignedPredictions.val = [{
           id: 1,
           prediction_id: 1,
-          event: "Will the price of Bitcoin exceed $100,000 by the end of 2025?",
+          event: "Fallback: Will Bitcoin exceed $100,000 by the end of 2025?",
           prediction_value: "Yes",
-          assigned_at: new Date().toISOString()
+          assigned_at: new Date().toISOString(),
+          event_id: 1 // Add fallback event_id if needed
         }];
-        
         return this.state.assignedPredictions.val;
+      } finally {
+         this.state.loadingAssigned.val = false; // Ensure loading state is reset
       }
     },
     

@@ -10,7 +10,7 @@ import PostsList from '../components/posts/PostsList';
 import CreatePostForm from '../components/posts/CreatePostForm';
 import PredictionsList from '../components/predictions/PredictionsList';
 import CreatePredictionForm from '../components/predictions/CreatePredictionForm';
-import AssignedPredictionsList from '../components/predictions/AssignedPredictionsList';
+// import AssignedPredictionsList from '../components/predictions/AssignedPredictionsList'; // Removed import
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
 import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
@@ -35,8 +35,25 @@ export const updatePageFromHash = async () => {
         store.actions.fetchPosts.call(store); // No need to await the fetch itself here
       }
     } else if (page === 'predictions') {
-      await getStore('predictions'); // Preload predictions store
-      // Add similar initial fetch logic for predictions if needed
+      const store = await getStore('predictions'); // Preload predictions store
+      // Fetch events and assigned predictions if logged in and needed
+      if (isLoggedInState.val && store && store.state && store.actions) {
+        // Fetch Events
+        if (store.actions.fetchEvents && store.state.events?.val?.length === 0 && !store.state.loadingEvents?.val) {
+           console.log("Router: Fetching initial events for predictions page...");
+           store.actions.fetchEvents.call(store);
+        }
+        // Fetch Assigned Predictions
+        if (store.actions.fetchAssignedPredictions && store.state.assignedPredictions?.val?.length === 0 && !store.state.loadingAssigned?.val) {
+           console.log("Router: Fetching initial assigned predictions...");
+           store.actions.fetchAssignedPredictions.call(store);
+        }
+        // Optional: Fetch general predictions list if needed by PredictionsList component
+        if (store.actions.fetchPredictions && store.state.predictions?.val?.length === 0 && !store.state.loading?.val) {
+           console.log("Router: Fetching initial predictions list...");
+           store.actions.fetchPredictions.call(store);
+        }
+      }
     } else if (page === 'profile' && isLoggedInState.val) {
       const userStore = await getStore('user');
        // Fetch profile only if needed (e.g., userStore.state.profile.val is null)
@@ -82,12 +99,13 @@ export default function Router() {
       h1("Predictions & Betting"),
       () => isAdminState.val ? AdminEventManagement() : null,
       div({ class: "predictions-container" }, [
+        // Column 1: Create Form
         div({ class: "predictions-column" }, [
-          CreatePredictionForm(), 
-          PredictionsList()
+          CreatePredictionForm()
         ]),
+        // Column 2: Predictions List
         div({ class: "predictions-column" }, [
-          AssignedPredictionsList()
+          PredictionsList()
         ])
       ])
     ]),

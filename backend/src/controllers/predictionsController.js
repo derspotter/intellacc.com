@@ -141,14 +141,15 @@ exports.getAssignedPredictions = async (req, res) => {
   
   try {
     const result = await db.query(
-      `SELECT 
+      `SELECT
         ap.*,
         p.event,
         p.prediction_value,
-        p.outcome
-      FROM 
+        p.outcome,
+        p.event_id -- Add event_id here
+      FROM
         assigned_predictions ap
-      JOIN 
+      JOIN
         predictions p ON ap.prediction_id = p.id
       WHERE 
         ap.user_id = $1 AND ap.completed = FALSE AND p.outcome IS NULL

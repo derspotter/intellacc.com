@@ -26,13 +26,8 @@ const postsStore = {
         ...this.state.commentListVisible.val,
         [postId]: !currentStatus
       };
-      // Ensure comment form is hidden when list is shown
-      if (!currentStatus) {
-        this.state.commentFormVisible.val = {
-          ...this.state.commentFormVisible.val,
-          [postId]: false
-        };
-      }
+      // No longer hiding comment form when list is shown
+      // This allows both the comment list and form to be visible at the same time
     },
 
     /**

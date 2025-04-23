@@ -327,7 +327,7 @@ p {
 
 /* Post Card Styles */
 .post-card {
-  margin-top: 1rem; /* Added padding to the top */
+  margin-top: 2rem; /* Added padding to the top */
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   /* Padding inherited from .card */
 }
@@ -593,6 +593,10 @@ h3 {
 }
 
 /* Comment Styles - Import from separate file */
+.no-comments-yet {
+  margin-top: 1rem;
+  display: block; /* Add display: block to ensure margin-top applies correctly to an inline span */
+}
 
 /* Profile Styles */
 .profile-container {
@@ -783,3 +787,44 @@ textarea {
   margin-top: 0.5rem; /* Adjust value as needed */
   margin-bottom: 0.5rem; /* Add space below the textarea */
 }
+
+/* --- Prediction Form Toggle --- */
+.prediction-form .card-header { /* Assuming Card component has a header */
+  position: relative; /* Needed for absolute positioning of the toggle */
+}
+
+.prediction-toggle-container {
+  display: flex; /* Keep flex display */
+  width: max-content; /* Make container only as wide as its content */
+  margin-left: auto; /* Align the container itself to the right */
+  margin-bottom: 1rem; /* Add space below the toggle */
+  gap: 5px; /* Space between buttons */
+  background-color: #f0f0f0; /* Optional: Keep background or remove */
+  padding: 4px;
+  border-radius: 6px;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.toggle-button {
+  padding: 5px 10px;
+  border: 1px solid transparent; /* Start transparent */
+  border-radius: 4px;
+  background-color: transparent; /* Default transparent */
+  color: #555;
+  cursor: pointer;
+  font-size: 0.85em;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.toggle-button:hover {
+  background-color: #e0e0e0;
+}
+
+.toggle-button.active {
+  background-color: var(--primary-color, #007bff); /* Use primary color if defined */
+  color: white;
+  border-color: var(--primary-dark, #0056b3); /* Darker border for active */
+  font-weight: bold;
+  box-shadow: 0 1px 1px rgba(0,0,0,0.1);
+}
+/* --- End Prediction Form Toggle --- */
