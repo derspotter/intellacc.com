@@ -13,7 +13,8 @@ const predictionsStore = {
     loadingEvents: van.state(false), // Added specific loading state for events
     loadingAssigned: van.state(false), // Added specific loading state for assigned predictions
     error: van.state(null),
-    userPredictions: van.state([])
+    userPredictions: van.state([]),
+    initialFetchDone: van.state(false) // Flag to track if initial fetch has been attempted
   },
   
   init() {
@@ -38,9 +39,20 @@ const predictionsStore = {
   
   actions: {
     async fetchPredictions() {
-      // Prevent fetch if already loading or if predictions exist
-      if (this.state.loading.val || this.state.predictions.val.length > 0) {
-        console.log('Skipping fetch: Already loading or predictions exist.');
+      if (this.state.loading.val) {
+        console.log('Skipping fetchPredictions: Already loading.');
+        return;
+      }
+      // If initial fetch is marked done and predictions exist, no need to fetch again.
+      if (this.state.initialFetchDone.val && this.state.predictions.val.length > 0) {
+        console.log('Skipping fetchPredictions: Initial fetch completed and predictions exist.');
+        return;
+      }
+      // If predictions somehow exist (e.g. from cache/SSR) but initialFetchDone is false,
+      // mark it as done and skip fetching to avoid overwriting potentially newer cache.
+      if (this.state.predictions.val.length > 0 && !this.state.initialFetchDone.val) {
+        console.log('Skipping fetchPredictions: Predictions exist, marking initialFetchDone as true.');
+        this.state.initialFetchDone.val = true;
         return;
       }
       
@@ -57,12 +69,14 @@ const predictionsStore = {
         const predictions = await api.predictions.getAll();
         console.log('Received predictions from API:', predictions);
         this.state.predictions.val = predictions;
+        this.state.initialFetchDone.val = true; // Mark initial fetch as attempted/completed
       } catch (error) {
         console.error('Error fetching predictions:', error);
         this.state.error.val = `${error.message || 'Failed to fetch predictions'}`;
         
         // Fall back to mock data if API fails
         this.actions.loadMockPredictions.call(this);
+        this.state.initialFetchDone.val = true; // Mark initial fetch as attempted/completed even if fallback
       } finally {
         this.state.loading.val = false;
       }

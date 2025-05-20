@@ -5,25 +5,41 @@ import TextInput from '../common/TextInput';
 import { isAdminState } from '../../services/auth';
 import postsStore from '../../store/posts';
 import auth from '../../services/auth';
+import LikeButton from './LikeButton';
+
+// LikeButton is now in a completely separate file for better isolation
 
 /**
- * Single post component
+ * Single post component with optimized rendering
  */
 export default function PostItem({ post }) {
   // State for comment input
   const commentInput = van.state('');
+  
+  // Like state and handler for the post
+  const likeState = van.state(!!post.liked_by_user);
+  const likeCount = van.state(Number(post.like_count) || 0);
 
-  // Debug log for like status
-  console.log(`Post ${post.id} - liked_by_user:`, post.liked_by_user, 'store likeStatus:', postsStore.state.likeStatus.val[post.id]);
-
+  // Handle like button click
+  const handleLikeToggle = async (postId) => {
+    try {
+      const newLikeState = !likeState.val;
+      likeState.val = newLikeState;
+      likeCount.val = newLikeState ? likeCount.val + 1 : Math.max(0, likeCount.val - 1);
+      
+      // Call the store action to update the like status
+      await postsStore.actions.toggleLike.call(postsStore, postId);
+    } catch (error) {
+      console.error('Error toggling like:', error);
+      // Revert the UI state on error
+      likeState.val = !likeState.val;
+      likeCount.val = likeState.val ? likeCount.val + 1 : Math.max(0, likeCount.val - 1);
+    }
+  };
+  
   // Create a bound helper function for delete
   const handleDeletePost = (postId) => {
     postsStore.actions.deletePost.call(postsStore, postId);
-  };
-  
-  // Handle like button click
-  const handleLikeToggle = (postId) => {
-    postsStore.actions.toggleLike.call(postsStore, postId);
   };
 
   // Handle posting a new comment
@@ -35,28 +51,19 @@ export default function PostItem({ post }) {
       await postsStore.actions.createComment.call(postsStore, postId, content);
       commentInput.val = ''; // Clear input field
       postsStore.actions.toggleCommentFormVisibility.call(postsStore, postId); // Hide form after posting via store
-      // No need to clear container here, reactivity handles it
 
       // If the comments list was showing, refresh it
       if (postsStore.state.commentListVisible.val[postId]) {
-         // Re-fetch or just update locally? Let's re-render based on store state.
          // The store action already updated the comment count and potentially the list.
-         // No explicit render call needed, reactivity handles it
       }
-      // Note: The comment count span updates reactively via the store.
-
     } catch (error) {
       console.error("Error posting comment:", error);
-      // Show error to user? (Optional)
-      // Maybe add error message to commentFormContainer?
-      // van.add(commentFormContainer, span({ style: "color: red;" }, `Error: ${error.message}`)); // Add error reactively?
     }
   };
 
   // Handle clicking the comment count
   const handleShowComments = (postId) => {
     postsStore.actions.toggleCommentListVisibility.call(postsStore, postId); // Toggle list visibility via store
-    // No need to clear containers here, reactivity handles it
 
     if (postsStore.state.commentListVisible.val[postId]) {
       const existingComments = postsStore.state.comments.val[postId];
@@ -67,7 +74,6 @@ export default function PostItem({ post }) {
         postsStore.actions.fetchComments.call(postsStore, postId)
           .catch(error => {
             console.error('Error fetching comments:', error);
-            // Handle error display reactively?
           });
       }
     }
@@ -76,7 +82,6 @@ export default function PostItem({ post }) {
   // Handle clicking the "Comment" button
   const handleShowCommentForm = (postId) => {
     postsStore.actions.toggleCommentFormVisibility.call(postsStore, postId); // Toggle form visibility via store
-    // No need to clear containers here, reactivity handles it
   };
 
   // Handle clicking "Expand All" / "Collapse All"
@@ -84,12 +89,20 @@ export default function PostItem({ post }) {
     postsStore.actions.toggleExpandCollapseAll.call(postsStore, postId);
   };
 
-  // Reactive rendering for comments list
+  // Comment data helper functions
+  // Using these functions helps isolate reactivity to specific parts of the UI
+  const getCommentListVisible = (postId) => postsStore.state.commentListVisible.val[postId] || false;
+  const getCommentFormVisible = (postId) => postsStore.state.commentFormVisible.val[postId] || false;
+  const getCommentLoading = (postId) => postsStore.state.commentLoading.val[postId] || false;
+  const getComments = (postId) => postsStore.state.comments.val[postId] || [];
+  
+  // Optimized reactive rendering for comments list
   const commentsListContent = (postId) => {
-    if (!postsStore.state.commentListVisible.val[postId]) return null; // Hide if state is false
+    // Use our helper functions to get the current state
+    if (!getCommentListVisible(postId)) return null; // Hide if state is false
 
-    const currentComments = postsStore.state.comments.val[postId] || [];
-    const isLoading = postsStore.state.commentLoading.val[postId];
+    const currentComments = getComments(postId);
+    const isLoading = getCommentLoading(postId);
 
     if (isLoading && !currentComments.length) {
       return span("Loading comments...");
@@ -107,9 +120,10 @@ export default function PostItem({ post }) {
     return null; // Should not happen if isLoading is true and no comments
   };
 
-  // Reactive rendering for comment form
+  // Optimized reactive rendering for comment form
   const commentFormContent = (postId) => {
-    if (!postsStore.state.commentFormVisible.val[postId]) return null; // Hide if state is false
+    // Use our helper function to get the current state
+    if (!getCommentFormVisible(postId)) return null; // Hide if state is false
 
     const commentFormEl = form({
         class: "comment-form",
@@ -130,6 +144,9 @@ export default function PostItem({ post }) {
     return commentFormEl;
   };
 
+  
+  // We're using the separated LikeButton component now
+
   return Card({
     className: "post-card",
     children: [
@@ -148,8 +165,6 @@ export default function PostItem({ post }) {
           style: "cursor: pointer;",
           onclick: () => handleShowComments(post.id) // Use new handler
         }, `${post.comment_count || 0} comments`), // Display the count from the current post/comment object
-        // New span for expand all
-        // Wrapper div for right-alignment
         div({ style: "margin-left: auto;" },
           // Reactive "Expand/Collapse All" button
           () => {
@@ -167,35 +182,19 @@ export default function PostItem({ post }) {
           class: "post-action",
           onclick: () => handleShowCommentForm(post.id) // Use new handler
         }, "💬 Comment"),
-        () => {
-          // Prioritize the store's like status over the post's liked_by_user field
-          // This ensures that toggled state is reflected immediately in the UI
-          const isLiked = postsStore.state.likeStatus.val[post.id] !== undefined
-              ? postsStore.state.likeStatus.val[post.id]
-              : post.liked_by_user;
-
-          console.log(`Rendering like button for post ${post.id}: Store status=${postsStore.state.likeStatus.val[post.id]}, Post status=${post.liked_by_user}, Using=${isLiked}`);
-
-          return button({
-            class: "post-action like-button",
-            onclick: (e) => {
-              e.target.classList.add('animate-like');
-              setTimeout(() => e.target.classList.remove('animate-like'), 300);
-              handleLikeToggle(post.id);
-            }
-          }, isLiked ? "🩶 Like" : "🤍 Like");
-        },
+        // Like button component
+        LikeButton({ postId: post.id }),
         () => isAdminState.val ?
           button({
             class: "post-action delete",
             onclick: () => handleDeletePost(post.id)
           }, "🗑️ Delete") : null
       ]),
-      // Reactive comments list and form container
-      () => div({ class: "comments-section" }, [
+      // Comments section - using van.derive for isolated reactivity
+      van.derive(() => div({ class: "comments-section" }, [
         div({ class: "comment-form-container" }, commentFormContent(post.id)),
         div({ class: "comments-list-container" }, commentsListContent(post.id))
-      ])
-    ]
+      ])),
+    ],
   });
 }

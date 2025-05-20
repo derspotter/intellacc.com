@@ -39,8 +39,13 @@ export default function PostsList() {
   const renderPosts = () => {
     if (posts.val.length > 0) {
       // Very important: Wrap posts in a div container instead of returning an array
+      // and memoize each PostItem so it only re-renders when its specific post changes
       return van.tags.div({ class: "posts-container" },
-        posts.val.map(post => PostItem({ post }))
+        posts.val.map(post => {
+          // We're still going to create a new post item each time - let Van handle updates
+          // This way when store state changes, just that specific post will update
+          return PostItem({ post });
+        })
       );
     }
     return null;

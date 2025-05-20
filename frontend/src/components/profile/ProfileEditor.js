@@ -9,38 +9,49 @@ import userStore from '../../store/user';
  */
 export default function ProfileEditor({ onCancel }) {
   const editState = van.state({
-    bio: userStore.state.profile.val?.bio || '',
+    // bio: userStore.state.profile.val?.bio || '', // No longer driving textarea value directly
     submitting: false,
     error: '',
     success: ''
   });
   
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    editState.val = {...editState.val, submitting: true, error: ''};
+  const bioTextareaId = "profile-bio-textarea"; // ID for the textarea
+  const bioInputState = van.state(userStore.state.profile.val?.bio || '');
+
+  const handleSubmit = async () => { // No 'e' needed if called directly
     
+    const currentBio = bioInputState.val;
+
+    editState.val = {...editState.val, submitting: true, error: '', success: ''};
+
     try {
-      await userStore.actions.updateUserProfile.call(userStore, editState.val.bio);
-      
-      editState.val = {
-        ...editState.val,
-        submitting: false,
-        error: '',
-        success: 'Profile updated successfully!'
-      };
-      
-      // Return to profile view after brief delay
-      setTimeout(() => {
-        if (onCancel) onCancel();
-      }, 1500);
+      // Use the 'currentBio' obtained from the textarea for the update
+      const success = await userStore.actions.updateUserProfile.call(userStore, currentBio);
+
+      if (success) {
+        onCancel(); // Call the passed-in onCancel function
+        // Optionally, you might want to reset editState here if ProfileEditor is reused
+        // For now, we just transition away.
+        // editState.val = { submitting: false, success: '', error: '' }; // Example reset
+      } else {
+        editState.val = {
+          ...editState.val,
+          submitting: false,
+          error: (userStore.state.error && typeof userStore.state.error.val === 'string' && userStore.state.error.val) || 'Failed to update profile. Please try again.',
+          success: ''
+        };
+      }
     } catch (error) {
       editState.val = {
         ...editState.val, 
         submitting: false, 
-        error: error.message || 'Failed to update profile'
+        error: error.message || 'An unexpected error occurred.',
+        success: ''
       };
     }
   };
+
+  // Initial value is now set by bioInputState and the 'value' binding on textarea.
   
   return Card({
     title: "Edit Profile",
@@ -53,26 +64,29 @@ export default function ProfileEditor({ onCancel }) {
         div({ class: "success-message" }, editState.val.success) : null,
       
       // Edit form
-      form({ onsubmit: handleSubmit, class: "profile-form" }, [
+      form({ 
+        // No onsubmit for now
+        class: "profile-form" 
+      }, [
         div({ class: "form-group" }, [
-          label({ for: "bio" }, "Bio:"),
+          label({ for: bioTextareaId }, "Bio:"), // Use id for 'for'
           textarea({
-            id: "bio",
+            id: bioTextareaId,
             rows: 4,
             class: "bio-textarea",
             disabled: editState.val.submitting,
-            value: editState.val.bio,
-            onchange: (e) => editState.val = {...editState.val, bio: e.target.value}
+            value: bioInputState,
+            oninput: e => bioInputState.val = e.target.value
           })
-        ]),
-        
+        ]), // Comma added here to separate the form-group div from the form-buttons div
         div({ class: "form-buttons" }, [
           Button({
-            type: "submit",
+            type: "button", // Explicitly button, not submit
+            onclick: handleSubmit, // Call handleSubmit directly
             disabled: editState.val.submitting,
             className: "submit-button",
-            variant: "primary", // Apply primary style to Save button
-            children: editState.val.submitting ? "Saving..." : "Save Profile" // Pass text via children prop
+            variant: "primary",
+            children: editState.val.submitting ? "Saving..." : "Save Profile"
           }),
           Button({
             type: "button",

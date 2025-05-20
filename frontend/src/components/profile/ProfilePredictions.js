@@ -25,7 +25,9 @@ export default function ProfilePredictions(props = {}) {
   });
   
   // Fetch predictions if needed - the action handles avoiding re-fetches
+  if (!predictionsStore.state.initialFetchDone.val) {
   predictionsStore.actions.fetchPredictions.call(predictionsStore);
+}
   
   // Reference store state for reactivity
   const predictions = predictionsStore.state.predictions;

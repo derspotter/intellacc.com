@@ -1,13 +1,30 @@
 import van from 'vanjs-core';
 import api from '../services/api';
 import auth from '../services/auth';
+import * as vanX from 'vanjs-ext';
 
 const postsStore = {
+  // List of change listeners
+  _listeners: [],
+  
+  // Add change listener function
+  onStateChange(listener) {
+    this._listeners.push(listener);
+    return () => {
+      this._listeners = this._listeners.filter(l => l !== listener);
+    };
+  },
+  
+  // Notify all listeners of a state change
+  _notifyListeners() {
+    this._listeners.forEach(listener => listener());
+  },
   state: {
     posts: van.state([]),
     loading: van.state(false),
     error: van.state(null),
-    likeStatus: van.state({}),
+    // Use reactive object to manage individual like statuses
+    likeStatus: vanX.reactive({}),
     comments: van.state({}),      // Store comments by postId
     commentLoading: van.state({}), // Track loading state by postId
     commentListVisible: van.state({}), // Track comment list visibility by postId
@@ -57,13 +74,12 @@ const postsStore = {
         const posts = await api.posts.getAll();
         this.state.posts.val = Array.isArray(posts) ? posts : [];
         if (auth.isLoggedInState.val && this.state.posts.val.length > 0) {
-          const newLikeStatus = {...this.state.likeStatus.val};
+          // Initialize reactive like statuses for posts
+          const statuses = {};
           this.state.posts.val.forEach(post => {
-            if (post.liked_by_user !== undefined) {
-              newLikeStatus[post.id] = post.liked_by_user;
-            }
+            if (post.liked_by_user !== undefined) statuses[post.id] = post.liked_by_user;
           });
-          this.state.likeStatus.val = newLikeStatus;
+          Object.assign(this.state.likeStatus, statuses);
         }
         return this.state.posts.val;
       } catch (error) {
@@ -125,34 +141,42 @@ const postsStore = {
       }
     },
 
-    async toggleLike(postId) {
+    async toggleLike(itemId) {
+      console.log(`[Store Action] toggleLike called for itemId: ${itemId}`);
+      if (!auth.isLoggedInState.val) {
+        console.log('[Store Action] User not logged in.');
+        return false;
+      }
+      const current = this.state.likeStatus[itemId] || false;
+      this.state.likeStatus[itemId] = !current;  // optimistic status toggle
+      console.log(`[Store Action] likeStatus toggled for itemId ${itemId}: ${current} -> ${this.state.likeStatus[itemId]}`);
+      console.log('[Store Action] Current likeStatus map:', this.state.likeStatus);
+      // Update like_count on post
+      const idx = this.state.posts.val.findIndex(p => p.id === itemId);
+      let originalCount;
+      if (idx !== -1) {
+        originalCount = this.state.posts.val[idx].like_count || 0;
+        const newCount = !current ? originalCount + 1 : Math.max(0, originalCount - 1);
+        const updatedPost = { ...this.state.posts.val[idx], like_count: newCount, liked_by_user: !current };
+        const newArr = [...this.state.posts.val]; newArr[idx] = updatedPost;
+        this.state.posts.val = newArr;
+        console.log(`[Store Action] post ${itemId} like_count updated: ${originalCount} -> ${newCount}`);
+      }
       try {
-        if (!auth.isLoggedInState.val) return false;
-        const postIndex = this.state.posts.val.findIndex(post => post.id === postId);
-        if (postIndex === -1) return false;
-        const post = this.state.posts.val[postIndex];
-        const currentStatus = this.state.likeStatus.val[postId] || false;
-        const updatedPost = { ...post, like_count: currentStatus ? Math.max(0, post.like_count - 1) : post.like_count + 1 };
-        const newPosts = [...this.state.posts.val];
-        newPosts[postIndex] = updatedPost;
-        this.state.posts.val = newPosts;
-        this.state.likeStatus.val = { ...this.state.likeStatus.val, [postId]: !currentStatus };
-        try {
-          if (currentStatus) {
-            await api.posts.unlikePost(postId);
-          } else {
-            await api.posts.likePost(postId);
-          }
-          return true;
-        } catch (error) {
-          console.error('Error toggling like:', error);
-          newPosts[postIndex] = post; // Revert
-          this.state.posts.val = newPosts;
-          this.state.likeStatus.val = { ...this.state.likeStatus.val, [postId]: currentStatus };
-          return false;
+        if (!current) await api.posts.likePost(itemId);
+        else await api.posts.unlikePost(itemId);
+        return true;
+      } catch (err) {
+        console.error('[Store Action] toggleLike API error:', err);
+        console.log(`[Store Action] Reverting likeStatus for itemId ${itemId} back to ${current}`);
+        console.log('[Store Action] Current likeStatus map after revert:', this.state.likeStatus);
+        // revert
+        this.state.likeStatus[itemId] = current;
+        if (idx !== -1) {
+          const reverted = { ...this.state.posts.val[idx], like_count: originalCount, liked_by_user: current };
+          const revertArr = [...this.state.posts.val]; revertArr[idx] = reverted;
+          this.state.posts.val = revertArr;
         }
-      } catch (error) {
-        console.error('Error in toggle like:', error);
         return false;
       }
     },
@@ -160,13 +184,13 @@ const postsStore = {
     async checkLikeStatus(postId) {
       try {
         if (!auth.isLoggedInState.val || !postId) return;
-        if (this.state.likeStatus.val[postId] !== undefined) return;
-        const response = await api.posts.getLikeStatus(postId);
-        const isLiked = response.isLiked !== undefined ? response.isLiked : (response.liked || false);
-        this.state.likeStatus.val = { ...this.state.likeStatus.val, [postId]: isLiked };
+        if (this.state.likeStatus[postId] !== undefined) return;
+        const resp = await api.posts.getLikeStatus(postId);
+        const isLiked = resp.isLiked !== undefined ? resp.isLiked : (resp.liked || false);
+        this.state.likeStatus[postId] = isLiked;
         return isLiked;
       } catch (error) {
-        console.error('Error checking like status:', error);
+        console.error('[Store Action] checkLikeStatus error:', error);
         return false;
       }
     },
@@ -177,6 +201,14 @@ const postsStore = {
         this.state.commentLoading.val = { ...this.state.commentLoading.val, [postId]: true };
         const comments = await api.posts.getComments(postId);
         this.state.comments.val = { ...this.state.comments.val, [postId]: comments };
+
+        // Initialize likeStatus for fetched comments
+        if (Array.isArray(comments)) {
+          comments.forEach(comment => {
+            // Set reactive like status for each comment
+            this.state.likeStatus[comment.id] = comment.liked_by_user !== undefined ? comment.liked_by_user : false;
+          });
+        }
         return comments;
       } catch (error) {
         console.error('Error fetching comments:', error);
@@ -186,13 +218,13 @@ const postsStore = {
       }
     },
 
-    async createComment(postId, content) {
+    async createComment(parentId, content) {
       try {
         if (!auth.isLoggedInState.val) throw new Error('You must be logged in to comment');
         if (!content || content.trim() === '') throw new Error('Comment cannot be empty');
-        const comment = await api.posts.createComment(postId, content);
+        const newComment = await api.posts.createComment(parentId, content);
         let parentUpdated = false;
-        const postIndex = this.state.posts.val.findIndex(p => p.id === postId);
+        const postIndex = this.state.posts.val.findIndex(p => p.id === parentId);
         if (postIndex !== -1) {
           const parentPost = this.state.posts.val[postIndex];
           const updatedParentPost = { ...parentPost, comment_count: (parentPost.comment_count || 0) + 1 };
@@ -203,7 +235,7 @@ const postsStore = {
         } else {
           for (const parentListId in this.state.comments.val) {
             const commentsList = this.state.comments.val[parentListId];
-            const parentCommentIndex = commentsList.findIndex(c => c.id === postId);
+            const parentCommentIndex = commentsList.findIndex(c => c.id === parentId);
             if (parentCommentIndex !== -1) {
               const parentComment = commentsList[parentCommentIndex];
               const updatedParentComment = { ...parentComment, comment_count: (parentComment.comment_count || 0) + 1 };
@@ -216,12 +248,17 @@ const postsStore = {
           }
         }
         if (!parentUpdated) {
-          console.warn(`Parent item with ID ${postId} not found in state.posts or state.comments cache. Count not updated dynamically.`);
+          console.warn(`Parent item with ID ${parentId} not found in state.posts or state.comments cache. Count not updated dynamically.`);
         }
-        const currentParentComments = this.state.comments.val[postId] || [];
-        const updatedParentCommentList = [...currentParentComments, comment];
-        this.state.comments.val = { ...this.state.comments.val, [postId]: updatedParentCommentList };
-        return comment;
+        const existingComments = this.state.comments.val[parentId] || [];
+        this.state.comments.val = {
+          ...this.state.comments.val,
+          [parentId]: [newComment, ...existingComments] // Add to the beginning
+        };
+
+        // Initialize like status for the new comment
+        this.state.likeStatus[newComment.id] = newComment.liked_by_user !== undefined ? newComment.liked_by_user : false;
+        return newComment;
       } catch (error) {
         console.error('Error creating comment:', error);
         throw error;
