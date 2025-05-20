@@ -311,6 +311,8 @@ const postsStore = {
     async expandAllComments(parentId) {
       const fetchAndExpand = async (id) => {
         this.state.commentListVisible.val = { ...this.state.commentListVisible.val, [id]: true };
+        // Mark this id as fully expanded
+        this.state.allCommentsExpanded.val = { ...this.state.allCommentsExpanded.val, [id]: true };
         const alreadyLoaded = this.state.comments.val[id];
         const isLoading = this.state.commentLoading.val[id];
         let commentsToProcess = [];
@@ -355,6 +357,8 @@ const postsStore = {
     collapseAllComments(parentId) {
       const collapseRecursive = (id) => {
         this.state.commentListVisible.val = { ...this.state.commentListVisible.val, [id]: false };
+        // Mark this id as not fully expanded
+        this.state.allCommentsExpanded.val = { ...this.state.allCommentsExpanded.val, [id]: false };
         const cachedChildren = this.state.comments.val[id];
         if (cachedChildren && cachedChildren.length > 0) {
           for (const comment of cachedChildren) {
@@ -369,7 +373,7 @@ const postsStore = {
 
       try {
         collapseRecursive(parentId);
-        this.state.allCommentsExpanded.val = { ...this.state.allCommentsExpanded.val, [parentId]: false };
+        // Parent collapse recorded in recursive call
       } catch (error) {
         console.error(`Error during collapseAllComments for ${parentId}:`, error);
       }

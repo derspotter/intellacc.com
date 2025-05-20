@@ -166,13 +166,14 @@ export default function PostItem({ post }) {
           onclick: () => handleShowComments(post.id) // Use new handler
         }, `${post.comment_count || 0} comments`), // Display the count from the current post/comment object
         div({ style: "margin-left: auto;" },
-          // Reactive "Expand/Collapse All" button
           () => {
+            // Only show expand/collapse for items with children
+            if (!(post.comment_count > 0)) return null;
             const isExpanded = postsStore.state.allCommentsExpanded.val[post.id] || false;
             return span({
-              class: "post-stat expand-all-comments", // Class still useful
+              class: "post-stat expand-all-comments",
               style: "cursor: pointer;",
-              onclick: () => handleToggleExpandCollapseAll(post.id) // Use toggle handler
+              onclick: () => handleToggleExpandCollapseAll(post.id)
             }, isExpanded ? "Collapse All" : "Expand All");
           }
         )
