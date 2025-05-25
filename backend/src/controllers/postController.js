@@ -4,45 +4,45 @@ const db = require('../db');
 exports.createPost = async (req, res) => {
   try {
     const { content, image_url, parent_id } = req.body;
-    
+
     // Input validation
     if (!content || content.trim() === '') {
       return res.status(400).json({ message: 'Content is required' });
     }
-    
+
     // Get user ID from authenticated user
     const userId = req.user.id;
-    
+
     // Default values for a regular post
     let parentId = null;
     let depth = 0;
     let isComment = false;
     let postId = null;
-    
+
     // If parent_id exists, this is a comment
     if (parent_id) {
       // Verify parent exists and get its depth
       const parentResult = await db.query('SELECT * FROM posts WHERE id = $1', [parent_id]);
-      
+
       if (parentResult.rows.length === 0) {
         return res.status(404).json({ message: 'Parent post not found' });
       }
-      
+
       const parentPost = parentResult.rows[0];
       parentId = parent_id;
       depth = parentPost.depth + 1;
       isComment = true;
       postId = parentPost.id;
     }
-    
+
     console.log('Creating post/comment with:', { userId, content, image_url, parentId, depth, isComment });
-    
+
     // Insert the post or comment
     const result = await db.query(
       'INSERT INTO posts (user_id, content, image_url, parent_id, depth, is_comment, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) RETURNING *',
       [userId, content, image_url, parentId, depth, isComment]
     );
-    
+
     const newPost = result.rows[0];
 
     // Fetch the username to include in the response
@@ -51,7 +51,7 @@ exports.createPost = async (req, res) => {
       newPost.username = userResult.rows[0].username;
     } else {
       // Handle case where user might not be found (optional, but good practice)
-      newPost.username = 'Unknown User'; 
+      newPost.username = 'Unknown User';
     }
 
     // If this is a comment, increment the parent's comment_count
@@ -60,7 +60,7 @@ exports.createPost = async (req, res) => {
         'UPDATE posts SET comment_count = comment_count + 1 WHERE id = $1',
         [parentId]
       );
-      
+
       // Handle via socket.io for real-time updates
       if (req.io) {
         req.io.to(`post:${parentId}`).emit('new_comment', newPost);
@@ -75,13 +75,13 @@ exports.createPost = async (req, res) => {
   } catch (error) {
     console.error('Error in createPost controller:', error);
     console.error('Stack trace:', error.stack);
-    
+
     // Send detailed error in development, but hide details in production
     if (process.env.NODE_ENV === 'development') {
-      res.status(500).json({ 
-        message: 'Error creating post/comment', 
+      res.status(500).json({
+        message: 'Error creating post/comment',
         error: error.message,
-        stack: error.stack 
+        stack: error.stack
       });
     } else {
       res.status(500).json({ message: 'Error creating post/comment' });
@@ -95,7 +95,7 @@ exports.getPosts = async (req, res) => {
   const userId = req.user.id; // Get current user's ID
   try {
     console.log("getPosts called with userId:", userId);
-    
+
     const result = await db.query(
       `SELECT p.*, u.username,
               CASE WHEN EXISTS (SELECT 1 FROM likes 
@@ -109,14 +109,14 @@ exports.getPosts = async (req, res) => {
        ORDER BY p.created_at DESC`,
       [userId] // Pass userId for the subquery
     );
-    
+
     // Log the raw result which should now include liked_by_user from the query
     console.log("Raw query result:", result.rows.map(post => ({
       id: post.id,
       user_id: post.user_id,
       liked_by_user: post.liked_by_user
     })));
-    
+
     // Send the direct query result
     res.status(200).json(result.rows);
   } catch (err) {
@@ -187,7 +187,7 @@ exports.getFeed = async (req, res) => {
 
   try {
     console.log("getFeed called with userId:", userId);
-    
+
     const result = await db.query(
       `SELECT p.*, u.username,
               CASE WHEN EXISTS (SELECT 1 FROM likes 
@@ -208,13 +208,13 @@ exports.getFeed = async (req, res) => {
        ORDER BY p.created_at DESC`,
       [userId]
     );
-    
+
     // Log the raw result which should include liked_by_user from the query
     console.log("Raw feed query result:", result.rows.map(post => ({
       id: post.id,
       liked_by_user: post.liked_by_user
     })));
-    
+
     // Send the direct query result
     res.status(200).json(result.rows);
   } catch (err) {
@@ -226,24 +226,24 @@ exports.getFeed = async (req, res) => {
 // Get comments for a post (direct replies only)
 exports.getComments = async (req, res) => {
   const postId = req.params.id;
-  
+
   console.log(`--- GETTING COMMENTS for post ID: ${postId} ---`);
-  
+
   try {
     // Verify post exists
     console.log(`Checking if post ${postId} exists...`);
     const postCheck = await db.query('SELECT * FROM posts WHERE id = $1', [postId]);
-    
+
     console.log(`Post check result: Found ${postCheck.rows.length} post(s)`);
-    
+
     if (postCheck.rows.length === 0) {
       console.log(`Post ${postId} not found, returning 404`);
       return res.status(404).json({ message: 'Post not found' });
     }
-    
+
     // Get direct comments for this post
     console.log(`Fetching comments for post ${postId}...`);
-    
+
     try {
       const result = await db.query(
         `SELECT p.*, u.username 
@@ -253,7 +253,7 @@ exports.getComments = async (req, res) => {
          ORDER BY p.created_at ASC`,
         [postId]
       );
-      
+
       console.log(`Found ${result.rows.length} comments for post ${postId}`);
       res.status(200).json(result.rows);
     } catch (queryError) {
@@ -271,15 +271,15 @@ exports.getComments = async (req, res) => {
 exports.getCommentTree = async (req, res) => {
   const postId = req.params.id;
   const maxDepth = req.query.maxDepth ? parseInt(req.query.maxDepth, 10) : 10; // Default max depth to 10
-  
+
   try {
     // Verify post exists
     const postCheck = await db.query('SELECT * FROM posts WHERE id = $1', [postId]);
-    
+
     if (postCheck.rows.length === 0) {
       return res.status(404).json({ message: 'Post not found' });
     }
-    
+
     // Get all comments for this post with their depth, up to maxDepth
     const result = await db.query(
       `WITH RECURSIVE comment_tree AS (
@@ -308,17 +308,17 @@ exports.getCommentTree = async (req, res) => {
        ORDER BY level ASC, created_at ASC`,
       [postId, maxDepth]
     );
-    
+
     // Organize comments into a nested structure
     const commentMap = {};
     const rootComments = [];
-    
+
     // First pass: create a map of all comments
     result.rows.forEach(comment => {
       comment.replies = [];
       commentMap[comment.id] = comment;
     });
-    
+
     // Second pass: build the tree structure
     result.rows.forEach(comment => {
       // Direct replies to the post
@@ -331,7 +331,7 @@ exports.getCommentTree = async (req, res) => {
         }
       }
     });
-    
+
     res.status(200).json(rootComments);
   } catch (error) {
     console.error('Error fetching comment tree:', error);

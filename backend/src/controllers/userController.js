@@ -171,7 +171,12 @@ exports.unfollowUser = async (req, res) => {
 
 // Get followers of a user
 exports.getFollowers = async (req, res) => {
-  const userId = req.params.id;
+  const userIdParam = req.params.id;
+  const userId = parseInt(userIdParam, 10);
+
+  if (isNaN(userId)) {
+    return res.status(400).json({ message: "Invalid user ID format" });
+  }
   
   try {
     const result = await db.query(
