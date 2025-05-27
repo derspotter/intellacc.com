@@ -1,6 +1,6 @@
 const request = require('supertest');
 const app = require('../src/index'); // Assuming your Express app is exported from index.js
-const db = require('../src/config/db'); // Assuming db connection pool is exported
+const db = require('../src/db'); // Correct path to db connection pool
 
 // Use a flag to ensure seeding only runs once per test execution
 let isSeeded = false;

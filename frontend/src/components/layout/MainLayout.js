@@ -1,6 +1,6 @@
 import van from 'vanjs-core';
 const { div } = van.tags;
-import Header from './Header';
+// import Header from './Header'; 
 import Sidebar from './Sidebar';
 
 /**
@@ -12,7 +12,7 @@ import Sidebar from './Sidebar';
 export default function MainLayout({ children }) {
   return div({ class: "app-container" }, [
     div({ class: "wrapper" }, [
-      Header(),
+      // Header(), 
       div({ class: "content-container" }, [
         Sidebar(),
         div({ class: "main-content" }, children)

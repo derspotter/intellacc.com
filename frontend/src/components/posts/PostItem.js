@@ -2,10 +2,11 @@ import van from 'vanjs-core';
 const { div, span, button, ul, li, form } = van.tags;
 import Card from '../common/Card';
 import TextInput from '../common/TextInput';
-import { isAdminState } from '../../services/auth';
+import { isAdminState, getTokenData } from '../../services/auth';
 import postsStore from '../../store/posts';
 import auth from '../../services/auth';
 import LikeButton from './LikeButton';
+import EditPostForm from './EditPostForm';
 
 // LikeButton is now in a completely separate file for better isolation
 
@@ -19,6 +20,27 @@ export default function PostItem({ post }) {
   // Like state and handler for the post
   const likeState = van.state(!!post.liked_by_user);
   const likeCount = van.state(Number(post.like_count) || 0);
+
+  // Check if current user owns this post
+  const isCurrentUserPost = () => {
+    const tokenData = getTokenData();
+    return tokenData && tokenData.userId === post.user_id;
+  };
+
+  // Check if this post is being edited
+  const isEditing = () => {
+    return postsStore.state.editingPostId.val === post.id;
+  };
+
+  // Handle starting edit mode
+  const handleStartEdit = () => {
+    postsStore.actions.startEditingPost.call(postsStore, post.id);
+  };
+
+  // Handle canceling edit mode
+  const handleCancelEdit = () => {
+    postsStore.actions.cancelEditingPost.call(postsStore);
+  };
 
   // Handle like button click
   const handleLikeToggle = async (postId) => {
@@ -147,6 +169,14 @@ export default function PostItem({ post }) {
   
   // We're using the separated LikeButton component now
 
+  // If post is being edited, show edit form instead
+  if (isEditing()) {
+    return EditPostForm({ 
+      post, 
+      onCancel: handleCancelEdit 
+    });
+  }
+
   return Card({
     className: "post-card",
     children: [
@@ -182,9 +212,15 @@ export default function PostItem({ post }) {
         button({ // Comment button - clicking shows form
           class: "post-action",
           onclick: () => handleShowCommentForm(post.id) // Use new handler
-        }, "💬 Comment"),
+        }, "Comment"),
         // Like button component
         LikeButton({ postId: post.id }),
+        // Edit button - only show for post owner
+        () => isCurrentUserPost() ?
+          button({
+            class: "post-action edit",
+            onclick: handleStartEdit
+          }, "Edit") : null,
         () => isAdminState.val ?
           button({
             class: "post-action delete",

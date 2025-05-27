@@ -134,7 +134,17 @@ export async function login(email, password) {
  */
 export async function register(username, email, password) {
   try {
+    console.log('Registration attempt with:', { username, email });
+    
+    if (!username || !email || !password) {
+      return { 
+        success: false, 
+        error: 'Username, email, and password are required'
+      };
+    }
+    
     const user = await api.auth.register(username, email, password);
+    console.log('Registration response:', user);
     
     // Login after successful registration
     return login(email, password);

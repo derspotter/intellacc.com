@@ -1,3 +1,5 @@
+/* filepath: /home/justus/Nextcloud/intellacc.com/frontend/styles.css */
+
 /* CSS Custom Properties */
 :root {
   --blue-bg: rgb(255, 255, 255);
@@ -293,9 +295,8 @@ button:disabled,
   min-height: 100vh;
   width: 100%;
   display: flex;
-  align-items: flex-start; /* Changed from center */
+  align-items: center;
   justify-content: center;
-  padding-top: 15vh; /* Added */
 }
 
 .login-container {
@@ -347,54 +348,9 @@ button:disabled,
 }
 
 .register-link a {
-  color: #007bff;
+  color: var(--blue-bg);
   text-decoration: underline;
   cursor: pointer;
-}
-
-.login-link {
-  text-align: center;
-  margin-top: 1.5rem;
-  font-size: 0.9rem;
-  color: var(--secondary-text);
-}
-
-.login-link a {
-  color: #007bff;
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-/* Sign Up Form */
-.signup-page {
-  background-color: var(--blue-bg);
-  min-height: 100vh;
-  width: 100%;
-  display: flex;
-  align-items: flex-start; /* Changed from center */
-  justify-content: center;
-  padding-top: 15vh; /* Added */
-}
-
-.signup-container {
-  max-width: 400px;
-  padding: 2rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
-  background-color: white;
-}
-
-.signup-container h1 {
-  text-align: center;
-  margin-bottom: 1.5rem;
-  font-size: 1.8rem;
-}
-
-.field-error {
-  color: var(--error-color);
-  font-size: 0.8rem;
-  margin-top: 0.25rem;
-  display: block;
 }
 
 /* Posts */

@@ -6,6 +6,7 @@ import { getStore } from '../store';
 
 // Import all components directly
 import LoginForm from '../components/auth/LoginForm';
+import SignUpForm from '../components/auth/SignUpForm';
 import PostsList from '../components/posts/PostsList';
 import CreatePostForm from '../components/posts/CreatePostForm';
 // Replace PredictionsList with ProfilePredictions
@@ -15,6 +16,7 @@ import AdminEventManagement from '../components/predictions/AdminEventManagement
 import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
 import NetworkTabs from '../components/profile/NetworkTabs';
+import SettingsPage from '../components/settings/SettingsPage';
 
 // Use shorthand for tag functions
 const { div, h1, h2, p, button } = van.tags;
@@ -80,7 +82,6 @@ export default function Router() {
     home: () => {
       // Fetching logic is now handled by updatePageFromHash on route change
       return div({ class: "home-page" }, [
-        h1("Welcome to Intellacc"),
         () => isLoggedInState.val
           ? CreatePostForm()
           : div({ class: "login-notice" }, [
@@ -93,6 +94,8 @@ export default function Router() {
     },
     
     login: () => LoginForm(),
+    signup: () => SignUpForm(),
+    settings: () => SettingsPage(),
     
     predictions: () => div({ class: "predictions-page" }, [
       h1("Predictions & Betting"),
@@ -152,9 +155,9 @@ export default function Router() {
   return () => {
     const page = currentPageState.val;
     
-    // Special case for login (no layout)
-    if (page === 'login') {
-      return pages.login();
+    // Special case for login and signup (no layout)
+    if (page === 'login' || page === 'signup') {
+      return pages[page] ? pages[page]() : pages.notFound();
     }
     
     // Wrap other pages in layout

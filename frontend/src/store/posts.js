@@ -29,7 +29,9 @@ const postsStore = {
     commentLoading: van.state({}), // Track loading state by postId
     commentListVisible: van.state({}), // Track comment list visibility by postId
     commentFormVisible: van.state({}), // Track comment form visibility by postId
-    allCommentsExpanded: van.state({}) // Track if expand all is active for a post ID
+    allCommentsExpanded: van.state({}), // Track if expand all is active for a post ID
+    initialFetchAttempted: van.state(false), // Track if initial fetch has been attempted
+    editingPostId: van.state(null) // Track which post is being edited
   },
   
   actions: {
@@ -65,6 +67,7 @@ const postsStore = {
      * @returns {Promise<Array>} Posts
      */
     async fetchPosts() {
+      this.state.initialFetchAttempted.val = true; // Mark that an attempt to fetch is being made
       try {
         this.state.loading.val = true;
         this.state.error.val = null;
@@ -377,7 +380,100 @@ const postsStore = {
       } catch (error) {
         console.error(`Error during collapseAllComments for ${parentId}:`, error);
       }
-    } // End collapseAllComments
+    }, // End collapseAllComments
+
+    // --- Edit Post Actions ---
+
+    /**
+     * Start editing a post
+     * @param {number} postId - The ID of the post to edit
+     */
+    startEditingPost(postId) {
+      this.state.editingPostId.val = postId;
+    },
+
+    /**
+     * Cancel editing a post
+     */
+    cancelEditingPost() {
+      this.state.editingPostId.val = null;
+    },
+
+    /**
+     * Update an existing post
+     * @param {number} postId - The ID of the post to update
+     * @param {string} content - The new content for the post
+     * @param {string|null} image_url - The new image URL (optional)
+     * @returns {Promise<Object>} Updated post
+     */
+    async updatePost(postId, content, image_url = null) {
+      try {
+        if (!auth.isLoggedInState.val) {
+          throw new Error('You must be logged in to edit posts');
+        }
+
+        if (!content || content.trim() === '') {
+          throw new Error('Post content cannot be empty');
+        }
+
+        this.state.loading.val = true;
+        this.state.error.val = null;
+
+        // Find the post in the current state for optimistic update
+        const postIndex = this.state.posts.val.findIndex(post => post.id === postId);
+        let originalPost = null;
+
+        if (postIndex !== -1) {
+          originalPost = { ...this.state.posts.val[postIndex] };
+          
+          // Optimistic update
+          const optimisticPost = {
+            ...originalPost,
+            content: content.trim(),
+            image_url,
+            updated_at: new Date().toISOString()
+          };
+
+          const newPosts = [...this.state.posts.val];
+          newPosts[postIndex] = optimisticPost;
+          this.state.posts.val = newPosts;
+        }
+
+        try {
+          // Make API call
+          const updatedPost = await api.posts.update(postId, content.trim(), image_url);
+          
+          // Update with actual server response
+          if (postIndex !== -1) {
+            const newPosts = [...this.state.posts.val];
+            newPosts[postIndex] = updatedPost;
+            this.state.posts.val = newPosts;
+          }
+
+          // Clear editing state
+          this.state.editingPostId.val = null;
+
+          return updatedPost;
+        } catch (apiError) {
+          // Revert optimistic update on error
+          if (postIndex !== -1 && originalPost) {
+            const newPosts = [...this.state.posts.val];
+            newPosts[postIndex] = originalPost;
+            this.state.posts.val = newPosts;
+          }
+
+          console.error('API Error updating post:', apiError);
+          const errorMessage = apiError.response?.message || apiError.message || 'Failed to update post';
+          throw new Error(errorMessage);
+        }
+      } catch (error) {
+        console.error('Error updating post:', error);
+        this.state.error.val = error.message;
+        throw error;
+      } finally {
+        this.state.loading.val = false;
+      }
+    }
   } // End actions
 };
 

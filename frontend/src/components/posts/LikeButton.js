@@ -33,6 +33,6 @@ export default function LikeButton({ postId }) {
     }
   }, () => {
     const label = like() ? 'Liked' : 'Like';
-    return `${like() ? '❤️' : '🤍'} ${label}`;
+    return `${label}`;
   });
 }

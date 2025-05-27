@@ -1,0 +1,835 @@
+
+/* CSS Custom Properties */
+:root {
+  --blue-bg: rgb(255, 255, 255);
+  --black-bg: #000;
+  --text-color: #000;
+  --border-color: #000;
+  --error-color: #ff0000;
+  --success-color: #008800;
+  --secondary-text: #555;
+  --card-bg: #f9f9f9;
+  --pending-color: #888;
+  --correct-color: #0a0;
+  --incorrect-color: #c00;
+  --primary-dark: #0056b3;
+  --border-radius: 4px;
+  --box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  --transition: 0.2s ease;
+}
+
+/* Dark Mode */
+body.dark-mode {
+  --blue-bg: #121212;
+  --black-bg: #1e1e1e;
+  --text-color: #e0e0e0;
+  --border-color: #444;
+  --card-bg: #1e1e1e;
+  --secondary-text: #aaa;
+  background-color: var(--blue-bg);
+  color: var(--text-color);
+}
+
+/* Global Reset & Base Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Avenir', sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  line-height: 1.5;
+  background-color: var(--blue-bg);
+  overflow-x: hidden;
+}
+
+/* Typography */
+h2 {
+  margin: 1.5rem 0 1rem;
+  font-size: 1rem;
+  font-weight: bold;
+}
+
+a {
+  color: var(--text-color);
+  text-decoration: underline;
+}
+
+p {
+  margin: 1rem 0;
+  max-width: 70ch;
+}
+
+ul {
+  list-style-type: none;
+  margin-left: 1rem;
+}
+
+li {
+  margin: 0.5rem 0;
+}
+
+/* Form Elements */
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="search"],
+input[type="number"],
+input[type="tel"],
+input[type="url"],
+select,
+textarea {
+  font-family: inherit;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 1rem;
+  border-radius: var(--border-radius);
+  background-color: var(--card-bg);
+  color: var(--text-color);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--blue-bg);
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: #f0f0f0;
+}
+
+textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+.login-page {
+  background-color: var(--blue-bg);
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-container {
+  max-width: 400px;
+  padding: 2rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: white;
+}
+
+.login-container h1 {
+  text-align: center;
+  margin-bottom: 1.5rem;
+  font-size: 1.8rem;
+}
+
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+
+/*
+.form-group input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  font-size: 1rem;
+}
+*/
+
+.form-actions {
+  margin-top: 2rem;
+}
+
+.form-actions button {
+  padding: 0.75rem;
+  width: 100%;
+  background-color: var(--blue-bg);
+  color: white;
+  border: none;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.form-actions button:hover {
+  opacity: 0.9;
+}
+
+.form-actions button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.error-message {
+  background-color: var(--error-color);
+  color: white;
+  padding: 0.75rem;
+  margin-bottom: 1.5rem;
+  border-radius: 3px;
+  font-size: 0.9rem;
+}
+
+.register-link {
+  text-align: center;
+  margin-top: 1.5rem;
+  font-size: 0.9rem;
+  color: var(--secondary-text);
+}
+
+.register-link a {
+  color: var(--blue-bg);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  line-height: 1.5;
+  background-color: var(--blue-bg);
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  /* font-family removed here, will be handled by global style */
+}
+
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  padding-top: 10vh;
+}
+
+.header-content {
+  display: grid;
+  grid-template-columns: auto 100px 100px;
+}
+
+.header-item {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border-color);
+}
+
+.title {
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+.subtitle {
+  font-size: 0.9rem;
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border-color);
+  padding: 0.5rem 1rem;
+}
+
+.header-nav {
+  display: flex;     
+  text-align: right;
+  padding: 0.5rem 2rem;
+  width: 100%;
+  justify-content: center;
+}
+
+.nav {
+  width: 50%;
+  justify-content: center;
+}
+
+/* Layout with sidebar */
+.app-container {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+}
+
+/* New container for sidebar and main content */
+.content-container {
+  display: flex;
+  align-items: flex-start; /* This ensures both start at the same height */
+  width: 100%;
+  /* Ensure consistent sizing */
+  box-sizing: border-box;
+  flex-grow: 1;
+  /* Force layout to be consistent regardless of content */
+}
+
+/* The sidebar has fixed width */
+.sidebar {
+  background-color: var(--black-bg);
+  color: white;
+  width: 25%;
+  text-align: center;
+  overflow-y: auto;
+  box-sizing: border-box; /* Include padding in width calculation */
+}
+
+.sidebar-logo {
+  padding: 2rem 1rem;
+  font-size: 1.5rem;
+  font-weight: bold;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.sidebar-content {
+  padding: 0 1rem 2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.sidebar-item {
+  padding: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  width: 100%;
+}
+
+.auth-items {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.sidebar a {
+  color: white;
+  text-decoration: none;
+  display: block;
+}
+
+/* Content wrapper has fixed width and is centered */
+.content-wrapper {
+  /* Fixed width */
+  margin: 0 auto; /* Center the content wrapper */
+  flex-shrink: 0;
+  /* Don't allow shrinking */
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.main-content {
+  background: white;
+  padding: 2rem;
+  margin: 0;
+  width: 50%;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+  transition: opacity 0.15s ease-in-out;
+  opacity: 1;
+}
+
+.contents {
+  margin-bottom: 2rem;
+}
+
+h2 {
+  margin: 1.5rem 0 1rem;
+  font-size: 1rem;
+  font-weight: bold;
+}
+
+ul {
+  list-style-type: none;
+  margin-left: 1rem;
+}
+
+li {
+  margin: 0.5rem 0;
+}
+
+a {
+  color: var(--text-color);
+  text-decoration: underline;
+}
+
+p {
+  margin: 1rem 0;
+  max-width: 70ch;
+}
+
+.post {
+  margin-bottom: 2rem;
+  border-bottom: 1px dashed var(--border-color);
+  padding-bottom: 2rem;
+}
+
+/* Predictions styles */
+.predictions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.predictions-header h3 {
+  margin: 0;
+}
+
+.refresh-button {
+  transition: transform 0.3s var(--transition-timing);
+}
+
+.refresh-button:hover {
+  transform: rotate(180deg);
+  color: var(--blue-bg);
+}
+
+.refresh-button:active {
+  transform: rotate(360deg);
+}
+
+.post-title {
+  font-weight: bold;
+  margin-bottom: 0.25rem;
+}
+
+/* Post Card Styles */
+.post-card {
+  margin-top: 2rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.post-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.post-author {
+  font-weight: bold;
+}
+
+.post-date {
+  color: var(--secondary-text);
+  font-size: 0.875rem;
+}
+
+.post-content {
+  margin-bottom: 1rem;
+  white-space: pre-line;
+  word-break: break-word;
+}
+
+.post-image {
+  margin-bottom: 1rem;
+}
+
+.post-image img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+.post-stats {
+  display: flex;
+  margin-bottom: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--secondary-text);
+}
+
+.post-stat {
+  margin-right: 1rem;
+}
+
+.post-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+  justify-content: flex-start;
+}
+
+.post-action {
+  background-color: #f8f9fa;
+  color: #495057;
+  border: 1px solid #dee2e6;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  transition: background-color 0.3s ease;
+}
+
+.post-action:hover {
+  background-color: #e9ecef;
+}
+
+.post-action.liked {
+  color: #e74c3c;
+  background-color: #fff5f5;
+  border-color: #fed7d7;
+}
+
+.post-action.liked:hover {
+  background-color: #fee2e2;
+}
+
+.post-action.delete:hover {
+  background-color: rgba(231, 76, 60, 0.1);
+  color: #e74c3c;
+  border-color: #fed7d7;
+}
+
+.post-meta {
+  font-size: 0.8rem;
+  color: var(--secondary-text);
+}
+
+.loading {
+  font-style: italic;
+  color: var(--secondary-text);
+}
+
+.error {
+  color: var(--error-color);
+  border: 1px solid var(--error-color);
+  padding: 0.5rem;
+  margin: 1rem 0;
+}
+
+.login-notice {
+  border: 1px dashed var(--border-color);
+  padding: 1rem;
+  margin: 1rem 0;
+  text-align: center;
+}
+
+/* Base button style */
+button,
+.button { /* Adding a class for button-like elements that are not <button> */
+  font-family: inherit; /* Inherit from global font-family */
+  background: white;
+  border: 1px solid var(--border-color);
+  padding: 0.5rem 1rem; /* Standardized padding */
+  cursor: pointer;
+  font-size: 1rem; /* Standardized font size */
+  color: var(--text-color);
+  border-radius: 3px; /* Consistent border radius */
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+}
+
+button:hover,
+.button:hover {
+  opacity: 0.9;
+}
+
+button:disabled,
+.button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* Button Variants */
+.button-primary {
+  background-color: var(--blue-bg);
+  color: white;
+  border: none;
+}
+
+.button-primary:hover:not(:disabled) {
+  background-color: var(--blue-bg); /* Keep blue, opacity handles hover */
+  opacity: 0.8;
+}
+
+.button-secondary {
+  background-color: #f0f0f0; /* Example for cancel/secondary */
+  color: var(--text-color);
+  border-color: #ccc;
+}
+.button-secondary:hover:not(:disabled) {
+  background-color: #e0e0e0;
+}
+
+.form-actions button { /* Specific to login form, can use .button-primary */
+  width: 100%;
+}
+
+.view-all-button { /* Can use base button or a variant */
+  display: block;
+  margin: 1rem auto;
+}
+
+/* Common Form Element Styles */
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="search"],
+input[type="number"],
+input[type="tel"],
+input[type="url"],
+select,
+textarea {
+  font-family: inherit; /* Inherit from global font-family */
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 1rem;
+  border-radius: 3px;
+  background-color: var(--card-bg); /* Or white if preferred for inputs */
+  color: var(--text-color);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus,
+input[type="search"]:focus,
+input[type="number"]:focus,
+input[type="tel"]:focus,
+input[type="url"]:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--blue-bg); /* Or a focus color variable */
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25); /* Example focus ring */
+}
+
+input[type="text"]:disabled,
+input[type="password"]:disabled,
+input[type="email"]:disabled,
+/* ... other input types ... */
+select:disabled,
+textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: #f0f0f0;
+}
+
+/* Specific overrides if needed */
+textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.comment-input {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.edit-button { /* This seems to be a wrapper/margin class, not a button itself */
+  margin: 1rem 0 0 0;
+}
+
+/* --- Prediction Form Toggle --- */
+.prediction-form .card-header { /* Assuming Card component has a header */
+  position: relative; /* Needed for absolute positioning of the toggle */
+}
+
+.prediction-toggle-container {
+  display: flex;
+  width: max-content;
+  margin-left: auto;
+  margin-bottom: 1rem;
+  gap: 5px;
+  background-color: #f0f0f0;
+  padding: 4px;
+  border-radius: 6px;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.toggle-button { /* This is a button, apply base styles and modify */
+  /* padding: 5px 10px; */ /* Base button has padding, adjust if needed */
+  border: 1px solid transparent;
+  /* border-radius: 4px; */ /* Base button has radius */
+  background-color: transparent;
+  color: #555;
+  /* cursor: pointer; */ /* Base button */
+  font-size: 0.85em; /* Specific font size */
+  /* transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease; */ /* Base button */
+}
+
+.toggle-button:hover:not(:disabled) {
+  background-color: #e0e0e0;
+}
+
+.toggle-button.active {
+  background-color: var(--primary-color, var(--blue-bg)); /* Use --blue-bg as fallback */
+  color: white;
+  border-color: var(--primary-dark, #0056b3); /* Define --primary-dark or use a darker shade of --blue-bg */
+  font-weight: bold;
+  box-shadow: 0 1px 1px rgba(0,0,0,0.1);
+}
+/* --- End Prediction Form Toggle --- */
+
+/* Edit Post Form Styles */
+.edit-post-form {
+  margin-bottom: 1rem;
+}
+
+.edit-post-header {
+  font-size: 1.1rem;
+  font-weight: bold;
+  margin-bottom: 1rem;
+  color: var(--text-color);
+}
+
+.edit-form .form-group {
+  margin-bottom: 1rem;
+}
+
+.edit-textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 0.75rem;
+  border: 2px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+  background-color: var(--card-bg);
+  color: var(--text-color);
+  transition: border-color 0.3s ease;
+}
+
+.edit-textarea:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.edit-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.edit-form .form-buttons {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+/* Apply .button and .button-primary or .button-secondary to these buttons in HTML */
+
+.card-title {
+  color: var(--text-color);
+  font-size: 1.2rem; /* Give titles a slightly larger size */
+  font-weight: bold;
+  margin-bottom: 1rem; /* Add space below title */
+  padding-bottom: 0.5rem; /* Add padding below title */
+  border-bottom: 1px solid var(--border-color); /* Add a separator line */
+}
+
+.card-content {
+  padding: 1rem; /* Ensuring this is set to 1rem */
+}
+
+.prediction-form {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--card-bg);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.prediction-form h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: var(--text-color);
+}
+
+.prediction-form label {
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+  color: var(--text-color);
+}
+
+.prediction-form input,
+.prediction-form select,
+.prediction-form textarea {
+  margin-bottom: 1rem;
+}
+
+.prediction-form .form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.prediction-form button {
+  flex: 1;
+}
+
+/* Specific styles for the prediction result card */
+.prediction-result {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--card-bg);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.prediction-result h4 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: var(--text-color);
+}
+
+.prediction-result p {
+  margin: 0.5rem 0;
+  color: var(--text-color);
+}
+
+.prediction-result .result-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.result-action {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: #f0f0f0;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.result-action:hover {
+  background-color: #e0e0e0;
+}
+
+.result-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

@@ -147,18 +147,51 @@ exports.getPostById = async (req, res) => {
 exports.updatePost = async (req, res) => {
   const postId = req.params.id;
   const { content, image_url } = req.body;
+  const userId = req.user.id;
+
   try {
+    // Input validation
+    if (!content || content.trim() === '') {
+      return res.status(400).json({ message: 'Content is required' });
+    }
+
+    // First, check if the post exists and get its owner
+    const postCheck = await db.query(
+      'SELECT user_id FROM posts WHERE id = $1',
+      [postId]
+    );
+
+    if (postCheck.rows.length === 0) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    // Check if the current user owns the post
+    const postOwnerId = postCheck.rows[0].user_id;
+    if (postOwnerId !== userId) {
+      return res.status(403).json({ message: 'You can only edit your own posts' });
+    }
+
+    // Update the post
     const result = await db.query(
       'UPDATE posts SET content = $1, image_url = $2, updated_at = NOW() WHERE id = $3 RETURNING *',
       [content, image_url, postId]
     );
-    if (result.rows.length === 0) {
-      return res.status(404).send('Post not found');
+
+    // Fetch the username to include in the response
+    const userResult = await db.query('SELECT username FROM users WHERE id = $1', [result.rows[0].user_id]);
+    if (userResult.rows.length > 0) {
+      result.rows[0].username = userResult.rows[0].username;
     }
+
+    // Emit real-time update if socket.io is available
+    if (req.io) {
+      req.io.emit('post_updated', result.rows[0]);
+    }
+
     res.status(200).json(result.rows[0]);
   } catch (err) {
-    console.error(err);
-    res.status(500).send('Error updating the post');
+    console.error('Error updating post:', err);
+    res.status(500).json({ message: 'Error updating the post' });
   }
 };
 

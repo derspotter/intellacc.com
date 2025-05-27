@@ -83,7 +83,7 @@ const LoginForm = () => {
           p({ class: "register-link" }, [
             "Don't have an account? ",
             a({ 
-              href: "#register"
+              href: "#signup"
             }, "Register here")
           ])
         ])

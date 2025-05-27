@@ -19,6 +19,7 @@ router.get("/health-check", (req, res) => {
 
 // User Routes
 router.post("/users", userController.createUser);
+router.post("/users/register", userController.createUser); // Alias for registration
 router.get("/users/:id", authenticateJWT, userController.getUser);
 router.post('/login', userController.loginUser);
 router.get("/me", authenticateJWT, userController.getUserProfile);

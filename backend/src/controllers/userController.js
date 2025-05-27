@@ -7,15 +7,58 @@ const { generateToken } = require('../utils/jwt');
 // Create a new user
 exports.createUser = async (req, res) => {
   const { username, email, password } = req.body;
+  
+  // Validate required fields
+  if (!username || !email || !password) {
+    return res.status(400).json({ 
+      message: 'Username, email, and password are required' 
+    });
+  }
+  
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ 
+      message: 'Please provide a valid email address' 
+    });
+  }
+  
+  // Validate password length
+  if (password.length < 6) {
+    return res.status(400).json({ 
+      message: 'Password must be at least 6 characters long' 
+    });
+  }
+  
   try {
-    const hashedPassword = await bcrypt.hash(password, 10); // Hash the password before storing
+    // Check if user already exists
+    const existingUser = await db.query(
+      'SELECT id FROM users WHERE email = $1 OR username = $2',
+      [email, username]
+    );
+    
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ 
+        message: 'User with this email or username already exists' 
+      });
+    }
+    
+    const hashedPassword = await bcrypt.hash(password, 10);
     const result = await db.query(
-      'INSERT INTO users (username, email, password_hash, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING *',
+      'INSERT INTO users (username, email, password_hash, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, username, email, created_at',
       [username, email, hashedPassword]
     );
-    res.status(201).json(result.rows[0]);
+    res.status(201).json({ user: result.rows[0] });
   } catch (err) {
-    console.error(err);
+    console.error('User creation error:', err);
+    
+    // Handle database constraint errors
+    if (err.code === '23505') { // Unique constraint violation
+      return res.status(400).json({ 
+        message: 'User with this email or username already exists' 
+      });
+    }
+    
     res.status(500).json({ message: 'Error creating user' });
   }
 };

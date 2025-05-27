@@ -13,6 +13,7 @@ export default function Sidebar() {
     div({ class: "sidebar-content" }, [
       div({ class: "sidebar-item" }, a({ href: "#home" }, "Home")),
       div({ class: "sidebar-item" }, a({ href: "#predictions" }, "Predictions")),
+      div({ class: "sidebar-item" }, a({ href: "#settings" }, "Settings")),
       
       // Admin-only section
       () => isLoggedInState.val && isAdminState.val 
@@ -21,7 +22,7 @@ export default function Sidebar() {
       
       // Authenticated user items
       () => isLoggedInState.val 
-        ? div({ class: "auth-items" }, [  // Changed class name
+        ? div({ class: "auth-items" }, [  
             div({ class: "sidebar-item" }, a({ href: "#profile" }, "My Profile")),
             div({ class: "sidebar-item" }, button({ onclick: logout }, "Logout"))
           ])

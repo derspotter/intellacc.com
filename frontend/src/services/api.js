@@ -141,7 +141,7 @@ export const api = {
       request('/login', { method: 'POST', body: { email, password } }),
       
     register: (username, email, password) => 
-      request('/users', { method: 'POST', body: { username, email, password } })
+      request('/users/register', { method: 'POST', body: { username, email, password } })
   },
   
   // Users endpoints

@@ -1,7 +1,7 @@
 // setup-test-users.js - Script to create test users and content
 // Run with: node setup-test-users.js
 
-const API_BASE = 'http://backend:3000/api'; // Direct connection to backend service
+const API_BASE = 'http://localhost:3000/api'; // Connect to API server in the same container
 
 // Test user data
 const users = [
