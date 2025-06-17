@@ -1,5 +1,5 @@
 import van from 'vanjs-core';
-const { div, form, textarea, label } = van.tags;
+const { div, form, textarea, label, button } = van.tags;
 import Button from '../common/Button';
 import Card from '../common/Card';
 import userStore from '../../store/user';
@@ -81,10 +81,9 @@ export default function ProfileEditor({ onCancel }) {
         ]), // Comma added here to separate the form-group div from the form-buttons div
         div({ class: "form-buttons" }, [
           Button({
-            type: "button", // Explicitly button, not submit
-            onclick: handleSubmit, // Call handleSubmit directly
+            type: "button",
+            onclick: handleSubmit,
             disabled: editState.val.submitting,
-            className: "submit-button",
             variant: "primary",
             children: editState.val.submitting ? "Saving..." : "Save Profile"
           }),
@@ -92,8 +91,7 @@ export default function ProfileEditor({ onCancel }) {
             type: "button",
             onclick: onCancel,
             disabled: editState.val.submitting,
-            className: "cancel-button",
-            children: "Cancel" // Pass text via children prop
+            children: "Cancel"
           })
         ])
       ])

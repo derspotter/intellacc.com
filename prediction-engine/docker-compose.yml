@@ -1,0 +1,20 @@
+services:
+  prediction-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: intellacc_prediction_engine
+    env_file:
+      - ../backend/.env
+    environment:
+      - RUST_LOG=info
+    ports:
+      - "3001:3001"
+    depends_on:
+      - db
+    networks:
+      - intellacc-network
+
+networks:
+  intellacc-network:
+    external: true

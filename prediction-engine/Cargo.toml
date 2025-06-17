@@ -1,0 +1,28 @@
+[package]
+name = "prediction_engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Async runtime - The foundation for async Rust (like Node.js event loop)
+tokio = { version = "1.0", features = ["full"] }
+
+# Web framework - Modern, clean API for building REST APIs
+axum = { version = "0.7", features = ["default"] }
+
+# Serialization - Converting Rust structs to/from JSON (like JSON.stringify)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database - PostgreSQL driver with compile-time checked queries
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling - Better error types than standard library
+anyhow = "1.0"
+
+# HTTP types and utilities
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }

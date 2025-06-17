@@ -70,12 +70,14 @@ export default function ProfilePredictions(props = {}) {
       
       // View all button - only shown if showViewAll is true and we have predictions
       () => config.showViewAll && !loading.val && predictions.val.length > 0 ?
-        Button({
-          onclick: () => { window.location.hash = 'predictions'; },
-          className: "view-all-button",
-          variant: "primary",
-          children: "View All Predictions"
-        }) : null
+        div({ class: "predictions-actions" }, [
+          Button({
+            onclick: () => { window.location.hash = 'predictions'; },
+            className: "view-all-button",
+            variant: "primary", 
+            children: "View All Predictions"
+          })
+        ]) : null
     ]
   });
 }

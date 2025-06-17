@@ -24,13 +24,17 @@ docker network create intellacc-network
 # Start development environment (without prediction engine for faster builds)
 docker compose -f docker-compose-dev.yml up -d
 
+# OR start full stack including prediction engine
+docker compose up -d
+
 # Access the application
 # Frontend: http://localhost:5173
 # Backend API: http://localhost:3000/api
+# Prediction Engine: http://localhost:3001/health
 # Health check: http://localhost:3000/api/health-check
 
 # Stop services
-docker compose -f docker-compose-dev.yml down
+docker compose -f docker-compose-dev.yml down  # or docker compose down for full stack
 ```
 
 ## Development Commands
@@ -54,6 +58,10 @@ docker compose -f docker-compose-dev.yml down
 - **Event Creation**: Users can create new prediction events via frontend form
 - **Enhanced Routing**: Event creation integrated into predictions page
 - **Docker Optimization**: Separate dev compose file for faster development
+- **Prediction Engine**: Rust-based service for prediction accuracy calculations (port 3001)
+- **SOTA Dark Mode**: Complete dark mode implementation with proper theming
+- **Enhanced Predictions List**: Improved styling and layout for predictions display
+- **Profile Editor Improvements**: Better button layout and form styling
 
 ## Code Style
 - Indentation: 2 spaces
@@ -105,6 +113,29 @@ Button({
   children: () => submitting.val ? "Creating..." : "Create"  // ✅ Named prop
 })
 ```
+
+### Dark Mode Implementation
+**Approach**: Use CSS custom properties for consistent theming
+```css
+:root {
+  --card-bg: #ffffff;
+  --text-color: #000;
+  --border-color: #000;
+}
+
+body.dark-mode {
+  --card-bg: #1e1e1e;
+  --text-color: #e0e0e0;
+  --border-color: #444;
+}
+```
+
+### Prediction Engine Integration
+The Rust-based prediction engine provides:
+- User accuracy calculations
+- Leaderboard functionality  
+- Real-time prediction processing
+- Health monitoring endpoints
 
 ## Key Directories
 - `/frontend/src/components/` - VanJS components organized by feature

@@ -92,18 +92,35 @@ const predictionsStore = {
       this.state.predictions.val = [
         {
           id: 'mock-1',
+          event: 'Will the S&P 500 increase by at least 10% by the end of 2024?',
           title: 'Stock Market Prediction',
           description: 'The S&P 500 will increase by at least 10% by the end of the year',
-          confidence: 0.75,
-          createdAt: new Date().toISOString(),
+          prediction_value: 'Yes',
+          confidence: 75,
+          outcome: 'correct',
+          created_at: new Date().toISOString(),
           createdBy: 'user1'
         },
         {
           id: 'mock-2',
+          event: 'Will AR see mainstream consumer adoption within 18 months?',
           title: 'Technology Trend',
           description: 'Augmented reality will see mainstream consumer adoption within 18 months',
-          confidence: 0.65,
-          createdAt: new Date().toISOString(),
+          prediction_value: 'No',
+          confidence: 65,
+          outcome: null,
+          created_at: new Date().toISOString(),
+          createdBy: 'user1'
+        },
+        {
+          id: 'mock-3',
+          event: 'Will Bitcoin exceed $100,000 by end of 2024?',
+          title: 'Crypto Prediction',
+          description: 'Bitcoin price prediction for end of year',
+          prediction_value: 'Yes',
+          confidence: 80,
+          outcome: 'incorrect',
+          created_at: new Date().toISOString(),
           createdBy: 'user1'
         }
       ];
