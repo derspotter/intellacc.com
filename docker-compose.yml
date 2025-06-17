@@ -5,3 +5,5 @@ include:
     project_directory: ./frontend
   - path: ./backend/docker-compose.yml
     project_directory: ./backend
+  - path: ./prediction-engine/docker-compose.yml
+    project_directory: ./prediction-engine

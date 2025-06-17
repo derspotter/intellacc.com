@@ -12,6 +12,7 @@ import CreatePostForm from '../components/posts/CreatePostForm';
 // Replace PredictionsList with ProfilePredictions
 import ProfilePredictions from '../components/profile/ProfilePredictions';
 import CreatePredictionForm from '../components/predictions/CreatePredictionForm';
+import CreateEventForm from '../components/predictions/CreateEventForm';
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
 import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
@@ -100,20 +101,17 @@ export default function Router() {
     predictions: () => div({ class: "predictions-page" }, [
       h1("Predictions & Betting"),
       () => isAdminState.val ? AdminEventManagement() : null,
-      div({ class: "predictions-container" }, [
-        // Column 1: Create Form
-        div({ class: "predictions-column" }, [
-          CreatePredictionForm()
-        ]),
-        // Column 2: Predictions List
-        div({ class: "predictions-column" }, [
-          // Use ProfilePredictions with no limit and no view all button
-          ProfilePredictions({
-            limit: null,
-            showViewAll: false,
-            title: 'Your Predictions'
-          })
-        ])
+      div({ class: "cards-container" }, [
+        // Event Creation Form - available to all logged-in users
+        () => isLoggedInState.val ? CreateEventForm() : null,
+        // Prediction Form - will be styled as a card
+        CreatePredictionForm(),
+        // Predictions List - will be styled as a card
+        ProfilePredictions({
+          limit: null,
+          showViewAll: false,
+          title: 'Your Predictions'
+        })
       ])
     ]),
     

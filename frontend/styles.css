@@ -127,7 +127,7 @@ button,
   font-size: 1rem;
   color: var(--text-color);
   border-radius: var(--border-radius);
-  transition: all var(--transition);
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
 }
 
 button:hover,
@@ -137,18 +137,19 @@ button:hover,
 
 button:disabled,
 .button:disabled {
-  background-color: #ccc;
+  background-color: white;
   cursor: not-allowed;
   opacity: 0.7;
 }
 
 .button-primary {
   background-color: var(--blue-bg);
-  color: white;
-  border: none;
+  color: black;
+  border: 1px solid var(--border-color);
 }
 
 .button-primary:hover:not(:disabled) {
+  background-color: var(--blue-bg);
   opacity: 0.8;
 }
 
@@ -285,6 +286,7 @@ button:disabled,
   width: 100%;
   display: flex;
   flex-direction: column;
+  justify-content: space-around;
 }
 
 /* Login Form */
@@ -529,7 +531,6 @@ button:disabled,
 
 .prediction-form {
   margin: 1rem 0;
-  padding: 1rem;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
   background-color: var(--card-bg);
@@ -622,57 +623,201 @@ button:disabled,
 }
 
 .toggle-button.active {
-  background-color: var(--blue-bg);
+  background-color: var(--primary-dark);
   color: white;
   border-color: var(--primary-dark);
   font-weight: bold;
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
 }
 
-/* Edit Forms */
-.edit-post-form {
-  margin-bottom: 1rem;
+/* Prediction Items */
+.prediction-item {
+  margin: 1rem 0;
+  border-left: 4px solid var(--pending-color);
+  transition: border-color var(--transition);
 }
 
-.edit-post-header {
-  font-size: 1.1rem;
-  font-weight: bold;
-  margin-bottom: 1rem;
-  color: var(--text-color);
+.prediction-item.pending {
+  border-left-color: var(--pending-color);
 }
 
-.edit-form .form-group {
-  margin-bottom: 1rem;
+.prediction-item.correct {
+  border-left-color: var(--correct-color);
 }
 
-.edit-textarea {
-  width: 100%;
-  min-height: 120px;
-  border: 2px solid var(--border-color);
+.prediction-item.incorrect {
+  border-left-color: var(--incorrect-color);
 }
 
-.edit-textarea:focus {
-  border-color: #007bff;
-}
-
-.edit-form .form-buttons {
+.prediction-header {
   display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-}
-
-/* Cards */
-.card-title {
-  color: var(--text-color);
-  font-size: 1.2rem;
-  font-weight: bold;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 1rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border-color);
 }
 
+.prediction-event {
+  font-weight: bold;
+  font-size: 1.1rem;
+  color: var(--text-color);
+}
+
+.prediction-status {
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--border-radius);
+  font-size: 0.8rem;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.prediction-status.pending {
+  background-color: var(--pending-color);
+  color: white;
+}
+
+.prediction-status.correct {
+  background-color: var(--correct-color);
+  color: white;
+}
+
+.prediction-status.incorrect {
+  background-color: var(--incorrect-color);
+  color: white;
+}
+
+.prediction-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1rem;
+}
+
+.prediction-value,
+.prediction-confidence,
+.prediction-date {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.prediction-details .label {
+  font-weight: bold;
+  font-size: 0.9rem;
+  color: var(--secondary-text);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.prediction-details .value {
+  font-size: 1rem;
+  color: var(--text-color);
+  font-weight: 500;
+}
+
+/* Success message for CreatePredictionForm */
+.success-message {
+  background-color: var(--success-color);
+  color: white;
+  padding: 0.75rem;
+  margin-bottom: 1.5rem;
+  border-radius: var(--border-radius);
+  font-size: 0.9rem;
+}
+
+/* Confidence slider styling */
+.prediction-form input[type="range"] {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: #ddd;
+  outline: none;
+  margin: 0.5rem 0;
+}
+
+.prediction-form input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--primary-dark);
+  cursor: pointer;
+}
+
+.prediction-form input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--primary-dark);
+  cursor: pointer;
+  border: none;
+}
+
+.confidence-value {
+  font-weight: bold;
+  color: var(--primary-dark);
+}
+
+/* Submit button specific styling */
+.submit-button {
+  width: 100%;
+  margin-top: 1rem;
+  color: black;
+}
+
+/* Card Layout - Horizontal alignment for prediction cards */
+.card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background-color: var(--card-bg);
+  box-shadow: var(--box-shadow);
+  margin: 1rem 0;
+}
+
+.card-title {
+  padding: 1rem;
+}
+
 .card-content {
   padding: 1rem;
+}
+
+/* Container for horizontally aligned cards */
+.cards-container {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+/* Individual card sizing for horizontal layout */
+.cards-container .card {
+  flex: 1;
+  min-width: 300px;
+  margin: 0;
+}
+
+/* Specific styling for prediction form and items when in horizontal layout */
+.cards-container .prediction-form {
+  flex: 1;
+  max-width: 45%;
+}
+
+.cards-container .prediction-item {
+  flex: 1;
+  max-width: 45%;
+}
+
+/* Responsive behavior - stack on smaller screens */
+@media (max-width: 768px) {
+  .cards-container {
+    flex-direction: column;
+  }
+  
+  .cards-container .prediction-form,
+  .cards-container .prediction-item {
+    max-width: 100%;
+  }
 }
 
 /* Utility Classes */

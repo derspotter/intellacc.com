@@ -1,0 +1,8 @@
+# Simplified docker-compose for development without prediction-engine
+# Usage: docker compose -f docker-compose-dev.yml up -d
+
+include:
+  - path: ./frontend/docker-compose.yml
+    project_directory: ./frontend
+  - path: ./backend/docker-compose.yml
+    project_directory: ./backend
