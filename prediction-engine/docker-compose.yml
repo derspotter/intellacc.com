@@ -14,7 +14,10 @@ services:
       - db
     networks:
       - intellacc-network
+      - default
 
 networks:
   intellacc-network:
     external: true
+  default:
+    driver: bridge

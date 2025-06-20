@@ -58,7 +58,11 @@ docker compose -f docker-compose-dev.yml down  # or docker compose down for full
 - **Event Creation**: Users can create new prediction events via frontend form
 - **Enhanced Routing**: Event creation integrated into predictions page
 - **Docker Optimization**: Separate dev compose file for faster development
-- **Prediction Engine**: Rust-based service for prediction accuracy calculations (port 3001)
+- **Prediction Engine**: Fully functional Rust-based service with professional-grade analytics (port 3001)
+- **Metaculus API Integration**: Successfully importing questions with proper JSON parsing
+- **Brier Score Implementation**: Industry-standard prediction accuracy measurement
+- **Enhanced Leaderboards**: Multi-timeframe performance tracking with caching
+- **Real-time Updates**: WebSocket infrastructure for live score broadcasting
 - **SOTA Dark Mode**: Complete dark mode implementation with proper theming
 - **Enhanced Predictions List**: Improved styling and layout for predictions display
 - **Profile Editor Improvements**: Better button layout and form styling
@@ -130,12 +134,46 @@ body.dark-mode {
 }
 ```
 
-### Prediction Engine Integration
-The Rust-based prediction engine provides:
-- User accuracy calculations
-- Leaderboard functionality  
-- Real-time prediction processing
-- Health monitoring endpoints
+### Enhanced Prediction Engine Integration
+The Rust-based prediction engine provides professional-grade features:
+
+**Core Scoring:**
+- Brier score calculations for proper prediction accuracy
+- Calibration scoring for confidence interval analysis
+- Multi-timeframe accuracy (daily, weekly, monthly, all-time)
+- Time-weighted scoring with decay for recent predictions
+
+**Real-time Features:**
+- WebSocket connections for live leaderboard updates
+- Real-time score recalculation on prediction resolution
+- Live broadcasting of sync events and score changes
+
+**Metaculus Integration:**
+- Daily automated sync with Metaculus.com API
+- Manual sync endpoints for immediate updates
+- Category-specific synchronization (politics, economics, science, etc.)
+- Automatic event creation from imported questions
+
+**Domain Expertise:**
+- User expertise tracking across different prediction topics
+- Domain-specific leaderboards (politics expert, tech expert, etc.)
+- Cross-domain performance comparison
+- Minimum prediction thresholds for expertise qualification
+
+**Performance Optimization:**
+- In-memory caching with 5-minute TTL for frequently accessed data
+- Automatic cache invalidation on data updates
+- Batch processing for bulk score recalculations
+- Async processing for non-blocking operations
+
+**Available Endpoints:**
+- GET /enhanced-leaderboard - Leaderboard with Brier scores
+- GET /user/:id/enhanced-accuracy - Full user analytics
+- GET /user/:id/calibration - Calibration curve data
+- GET /user/:id/expertise - Domain-specific expertise
+- GET /domain/:name/experts - Top experts in domain
+- GET /metaculus/sync - Manual Metaculus sync
+- GET /ws - WebSocket for real-time updates
 
 ## Key Directories
 - `/frontend/src/components/` - VanJS components organized by feature

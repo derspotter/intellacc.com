@@ -8,7 +8,7 @@ edition = "2024"
 tokio = { version = "1.0", features = ["full"] }
 
 # Web framework - Modern, clean API for building REST APIs
-axum = { version = "0.7", features = ["default"] }
+axum = { version = "0.7", features = ["default", "ws"] }
 
 # Serialization - Converting Rust structs to/from JSON (like JSON.stringify)
 serde = { version = "1.0", features = ["derive"] }
@@ -26,3 +26,19 @@ anyhow = "1.0"
 # HTTP types and utilities
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
+
+# WebSocket support for real-time updates
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+
+# HTTP client for Metaculus API
+reqwest = { version = "0.12", features = ["json"] }
+
+# Background job scheduling
+tokio-cron-scheduler = "0.13"
+
+# Advanced math operations for Brier scoring
+statrs = "0.17"
+
+# Caching
+moka = { version = "0.12", features = ["future"] }
