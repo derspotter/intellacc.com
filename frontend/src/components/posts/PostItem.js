@@ -1,5 +1,5 @@
 import van from 'vanjs-core';
-const { div, span, button, ul, li, form } = van.tags;
+const { div, span, button, ul, li, form, a } = van.tags;
 import Card from '../common/Card';
 import TextInput from '../common/TextInput';
 import { isAdminState, getTokenData } from '../../services/auth';
@@ -181,7 +181,19 @@ export default function PostItem({ post }) {
     className: "post-card",
     children: [
       div({ class: "post-header" }, [
-        div({ class: "post-author" }, post.username || 'Anonymous'),
+        div({ class: "post-author" }, [
+          // Make username clickable to go to user profile
+          post.user_id ? 
+            a({ 
+              href: `#user/${post.user_id}`,
+              class: "username-link",
+              onclick: (e) => {
+                e.preventDefault();
+                window.location.hash = `user/${post.user_id}`;
+              }
+            }, post.username || 'Anonymous') :
+            span(post.username || 'Anonymous')
+        ]),
         div({ class: "post-date" }, new Date(post.created_at).toLocaleDateString())
       ]),
       div({ class: "post-content" }, post.content),

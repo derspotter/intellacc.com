@@ -1,6 +1,7 @@
 import van from 'vanjs-core';
 import MainLayout from '../components/layout/MainLayout';
 import { currentPageState } from '../store';
+import navigationStore from '../store/navigation';
 import { isLoggedInState, isAdminState } from '../services/auth';
 import { getStore } from '../store';
 
@@ -14,9 +15,7 @@ import ProfilePredictions from '../components/profile/ProfilePredictions';
 import CreatePredictionForm from '../components/predictions/CreatePredictionForm';
 import CreateEventForm from '../components/predictions/CreateEventForm';
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
-import ProfileCard from '../components/profile/ProfileCard';
-import ProfileEditor from '../components/profile/ProfileEditor';
-import NetworkTabs from '../components/profile/NetworkTabs';
+import ProfilePage from '../components/profile/ProfilePage';
 import SettingsPage from '../components/settings/SettingsPage';
 
 // Use shorthand for tag functions
@@ -24,8 +23,13 @@ const { div, h1, h2, p, button } = van.tags;
 
 // Update page from hash (now async to handle store loading and initial fetch)
 export const updatePageFromHash = async () => {
-  const page = window.location.hash.slice(1) || 'home';
-  currentPageState.val = page;
+  const hash = window.location.hash.slice(1) || 'home';
+  const page = hash.split('/')[0]; // Get the base page (e.g., 'user' from 'user/123')
+  
+  // Update navigation store state
+  navigationStore.actions.updatePageFromHash.call(navigationStore);
+  
+  currentPageState.val = hash;
 
   // Preload store and potentially fetch initial data based on route
   try {
@@ -115,32 +119,7 @@ export default function Router() {
       ])
     ]),
     
-    profile: () => {
-      // Fetching logic is now handled by updatePageFromHash on route change
-      const editMode = van.state(false); // Keep editMode state local to profile page
-
-      return div({ class: "profile-page" }, [
-        h1("My Profile"),
-        div({ class: "profile-container" }, [
-          div({ class: "profile-column main" }, [
-            () => editMode.val
-              ? ProfileEditor({ onCancel: () => editMode.val = false })
-              : ProfileCard({ onEdit: () => editMode.val = true }),
-            // Use ProfilePredictions with compact mode (default settings work fine)
-            ProfilePredictions({
-              compact: true,
-              limit: 5,
-              showViewAll: true,
-              title: 'Your Predictions',
-              className: 'profile-predictions'
-            })
-          ]),
-          div({ class: "profile-column sidebar" }, [
-            NetworkTabs()
-          ])
-        ])
-      ])
-    },
+    profile: () => ProfilePage(),
     
     notFound: () => div({ class: "not-found-page" }, [
       h1("404 - Page Not Found"),
@@ -151,11 +130,21 @@ export default function Router() {
   
   // Render the appropriate page content
   return () => {
-    const page = currentPageState.val;
+    const hash = currentPageState.val;
+    const parts = hash.split('/');
+    const page = parts[0];
     
     // Special case for login and signup (no layout)
     if (page === 'login' || page === 'signup') {
       return pages[page] ? pages[page]() : pages.notFound();
+    }
+    
+    // Handle user profile routes
+    if (page === 'user' && parts[1]) {
+      const userId = parts[1];
+      return MainLayout({ 
+        children: ProfilePage({ userId })
+      });
     }
     
     // Wrap other pages in layout

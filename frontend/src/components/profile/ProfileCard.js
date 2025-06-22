@@ -5,11 +5,15 @@ import Button from '../common/Button';
 import userStore from '../../store/user';
 
 /**
- * User profile card component
+ * User profile card component - reusable for current user and public profiles
  */
-export default function ProfileCard({ onEdit }) {
-  // Fetch user profile if needed
-  if (!userStore.state.profile.val) {
+export default function ProfileCard({ onEdit, user, followButton }) {
+  // If no user prop provided, use current user data (existing behavior)
+  const isCurrentUser = !user;
+  const userData = user || userStore.state.profile.val;
+  
+  // Fetch current user profile if needed (only for current user)
+  if (isCurrentUser && !userStore.state.profile.val) {
     setTimeout(() => userStore.actions.fetchUserProfile.call(userStore), 0);
   }
   
@@ -18,21 +22,23 @@ export default function ProfileCard({ onEdit }) {
     className: "profile-card",
     children: [
       // Loading state
-      () => !userStore.state.profile.val ? 
+      () => !userData ? 
         p("Loading profile...") :
         div({ class: "profile-content" }, [
-          h3({ class: "username" }, userStore.state.profile.val.username),
-          p({ class: "email" }, userStore.state.profile.val.email),
+          h3({ class: "username" }, userData.username),
+          userData.email ? p({ class: "email" }, userData.email) : null,
           div({ class: "bio-section" }, [
             h4("Bio"),
-            p({ class: "bio" }, userStore.state.profile.val.bio || "No bio provided")
+            p({ class: "bio" }, userData.bio || "No bio provided")
           ]),
-          Button({
-            onclick: onEdit,
-            className: "edit-profile-button",
-            variant: "primary", // Add primary variant
-            children: "Edit Profile" // Pass text via children prop
-          })
+          // Show edit button for current user, follow button for others
+          isCurrentUser ? 
+            Button({
+              onclick: onEdit,
+              className: "edit-profile-button",
+              variant: "primary",
+              children: "Edit Profile"
+            }) : followButton
         ])
     ]
   });

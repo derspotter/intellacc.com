@@ -53,10 +53,9 @@ export async function getStore(storeName) {
  * Initialize navigation store only
  */
 export function initializeStore() {
-  const boundUpdatePageFromHash = navigationStore.actions.updatePageFromHash.bind(navigationStore);
-  window.addEventListener('hashchange', boundUpdatePageFromHash);
-  window.updatePageFromHash = boundUpdatePageFromHash;
-  boundUpdatePageFromHash();
+  // Don't set up hash change listeners here - they will be set up in main.js
+  // Just initialize the navigation store state
+  navigationStore.actions.updatePageFromHash.call(navigationStore);
   
   return stores;
 }

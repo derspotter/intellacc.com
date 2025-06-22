@@ -27,9 +27,5 @@ document.addEventListener('DOMContentLoaded', () => {
   updatePageFromHash();
   
   // Handle subsequent hash changes
-  window.addEventListener('hashchange', () => {
-    if (window.updatePageFromHash) {
-      window.updatePageFromHash();
-    }
-  });
+  window.addEventListener('hashchange', updatePageFromHash);
 });

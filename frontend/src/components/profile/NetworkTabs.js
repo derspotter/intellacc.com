@@ -1,87 +1,110 @@
 import van from 'vanjs-core';
-const { div, h3, h4, p, ul, li, span } = van.tags;
+const { div, h3, h4, p, span, button } = van.tags;
 import Card from '../common/Card';
+import UserCard from './UserCard';
 import userStore from '../../store/user';
+import auth from '../../services/auth';
 import api from '../../services/api';
 
 /**
  * Component to display user's network (followers and following)
+ * @param {Object} props
+ * @param {number} [props.userId] - User ID to display network for (if not provided, uses current user)
  */
-export default function NetworkTabs() {
+export default function NetworkTabs({ userId } = {}) {
+  // Determine if this is for current user or another user
+  const isCurrentUser = !userId;
+  const targetUserId = userId || (auth.getTokenData()?.userId);
+  
   // Active tab state
   const activeTab = van.state('followers');
   
-  // Add error state
+  // Local state for public user network data
+  const followers = van.state([]);
+  const following = van.state([]);
   const error = van.state('');
+  const loading = van.state(false);
   
-  // Fetch network data if needed
-  if (userStore.state.followers.val.length === 0 && userStore.state.following.val.length === 0) {
-    // Use a safer approach to fetch data
-    setTimeout(() => {
-      try {
-        // Check if we're in development mode
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-          // Mock data for development
-          userStore.state.followers.val = [
-            { username: 'follower1', bio: 'I follow you' },
-            { username: 'follower2', bio: 'Another follower' }
-          ];
-          userStore.state.following.val = [
-            { username: 'following1', bio: 'You follow me' },
-            { username: 'following2', bio: 'Another person you follow' }
-          ];
-        } else {
-          // Only try to fetch if the API is available
-          if (api && api.user) {
-            userStore.actions.fetchFollowers.call(userStore);
-            userStore.actions.fetchFollowing.call(userStore);
-          }
-        }
-      } catch (err) {
-        console.error('Error loading network data:', err);
-        error.val = 'Could not load network data';
+  // Manual load function
+  const loadNetworkData = async () => {
+    if (!targetUserId || loading.val) return;
+    
+    try {
+      loading.val = true;
+      error.val = '';
+      
+      if (isCurrentUser) {
+        // Use store for current user
+        await userStore.actions.fetchFollowers.call(userStore);
+        await userStore.actions.fetchFollowing.call(userStore);
+      } else {
+        // Fetch directly for other users
+        const [followersData, followingData] = await Promise.all([
+          api.users.getFollowers(targetUserId),
+          api.users.getFollowing(targetUserId)
+        ]);
+        followers.val = followersData;
+        following.val = followingData;
       }
-    }, 0);
-  }
+    } catch (err) {
+      console.error('Error loading network data:', err);
+      error.val = 'Could not load network data';
+    } finally {
+      loading.val = false;
+    }
+  };
   
-  // User list component
-  const UserList = ({ users }) => {
+  // Simple user list component without follow buttons
+  const UserList = ({ users, title }) => {
     if (!users || users.length === 0) {
-      return p("No users found.");
+      return div({ class: "no-users" }, `No ${title.toLowerCase()} yet.`);
     }
     
-    return ul({ class: "user-list" }, 
+    return div({ class: "user-list" }, 
       users.map(user => 
-        li({ class: "user-item" }, [
-          p({ class: "username" }, user.username),
-          p({ class: "user-bio" }, user.bio || "No bio")
+        div({ class: "user-item simple" }, [
+          div({ class: "user-info" }, [
+            h4({ class: "username" }, user.username),
+            p({ class: "user-bio" }, user.bio || "No bio")
+          ])
         ])
       )
     );
   };
   
+  // Get the appropriate data source
+  const getFollowers = () => isCurrentUser ? userStore.state.followers.val : followers.val;
+  const getFollowing = () => isCurrentUser ? userStore.state.following.val : following.val;
+  
   return Card({
-    title: "Your Network",
+    title: isCurrentUser ? "Your Network" : "Network",
     className: "network-tabs",
     children: [
       // Error message
       () => error.val ? div({ class: "error-message" }, error.val) : null,
       
+      // Load button
+      button({
+        onclick: loadNetworkData,
+        disabled: () => loading.val,
+        className: "load-network-button"
+      }, () => loading.val ? "Loading..." : "Load Network Data"),
+      
       // Network stats
       div({ class: "network-stats" }, [
         div({ 
-          class: `tab ${activeTab.val === 'followers' ? 'active' : ''}`,
+          class: () => `tab ${activeTab.val === 'followers' ? 'active' : ''}`,
           onclick: () => activeTab.val = 'followers'
         }, [
           "Followers: ",
-          span({ class: "count" }, userStore.state.followers.val.length)
+          span({ class: "count" }, () => getFollowers().length)
         ]),
         div({ 
-          class: `tab ${activeTab.val === 'following' ? 'active' : ''}`,
+          class: () => `tab ${activeTab.val === 'following' ? 'active' : ''}`,
           onclick: () => activeTab.val = 'following'
         }, [
           "Following: ",
-          span({ class: "count" }, userStore.state.following.val.length)
+          span({ class: "count" }, () => getFollowing().length)
         ])
       ]),
       
@@ -90,15 +113,15 @@ export default function NetworkTabs() {
         // Followers tab
         () => activeTab.val === 'followers' ? 
           div({ class: "followers-tab" }, [
-            h4("People following you"),
-            UserList({ users: userStore.state.followers.val })
+            h4(isCurrentUser ? "People following you" : "Followers"),
+            UserList({ users: getFollowers(), title: "followers" })
           ]) : null,
         
         // Following tab
         () => activeTab.val === 'following' ? 
           div({ class: "following-tab" }, [
-            h4("People you follow"),
-            UserList({ users: userStore.state.following.val })
+            h4(isCurrentUser ? "People you follow" : "Following"),
+            UserList({ users: getFollowing(), title: "following" })
           ]) : null
       ])
     ]
