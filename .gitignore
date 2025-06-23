@@ -3,6 +3,7 @@
 # Ignore backend and frontend .env files
 /backend/.env
 /frontend/.env
+/prediction-engine/.env
 
 # Node modules for both backend and frontend
 /backend/node_modules/

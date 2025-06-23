@@ -31,6 +31,9 @@ struct AppState {
 // This is our main function - but notice the #[tokio::main] attribute!
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load environment variables from .env file
+    dotenv::dotenv().ok();
+    
     println!("🦀 Starting Prediction Engine...");
 
     // Get database URL from environment variable

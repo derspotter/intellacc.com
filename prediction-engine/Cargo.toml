@@ -42,3 +42,6 @@ statrs = "0.17"
 
 # Caching
 moka = { version = "0.12", features = ["future"] }
+
+# Environment variables
+dotenv = "0.15"

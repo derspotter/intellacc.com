@@ -4,6 +4,7 @@ use serde::Deserialize;
 use sqlx::{PgPool, Row};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use std::env;
 
 // Metaculus API response structures for /api/posts/
 #[derive(Debug, Deserialize)]
@@ -138,10 +139,16 @@ pub struct MetaculusClient {
 
 impl MetaculusClient {
     pub fn new() -> Self {
+        dotenv::dotenv().ok();
         Self {
             client: Client::new(),
             base_url: "https://www.metaculus.com/api".to_string(),
         }
+    }
+
+    fn get_api_token(&self) -> Result<String> {
+        env::var("METACULUS_API_TOKEN")
+            .map_err(|_| anyhow::anyhow!("METACULUS_API_TOKEN environment variable not set"))
     }
 
     // Fetch open questions from Metaculus with proper pagination
@@ -156,10 +163,11 @@ impl MetaculusClient {
         loop {
             println!("🔍 Fetching from: {}", url);
             
+            let token = self.get_api_token()?;
             let response: MetaculusResponse = self.client
                 .get(&url)
                 .header("User-Agent", "Intellacc-PredictionEngine/1.0")
-                .header("Authorization", "Token 7bee5896b77e5541bc918ac797fad206a3cc564b")
+                .header("Authorization", format!("Token {}", token))
                 .send()
                 .await?
                 .json()
@@ -212,10 +220,11 @@ impl MetaculusClient {
             url = format!("{}&limit={}", url, limit);
         }
 
+        let token = self.get_api_token()?;
         let response: MetaculusResponse = self.client
             .get(&url)
             .header("User-Agent", "Intellacc-PredictionEngine/1.0")
-            .header("Authorization", "Token 7bee5896b77e5541bc918ac797fad206a3cc564b")
+            .header("Authorization", format!("Token {}", token))
             .send()
             .await?
             .json()
@@ -384,10 +393,11 @@ impl MetaculusClient {
             println!("📄 Processing batch {} from: {}", page, url);
             
             // Fetch one batch at a time
+            let token = self.get_api_token()?;
             let response: MetaculusResponse = self.client
                 .get(&url)
                 .header("User-Agent", "Intellacc-PredictionEngine/1.0")
-                .header("Authorization", "Token 7bee5896b77e5541bc918ac797fad206a3cc564b")
+                .header("Authorization", format!("Token {}", token))
                 .send()
                 .await?
                 .json()
