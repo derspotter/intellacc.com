@@ -74,6 +74,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/enhanced-leaderboard", get(get_enhanced_leaderboard))
         // .route("/ws", get(websocket_handler)) // Temporarily disabled
         .route("/metaculus/sync", get(manual_metaculus_sync))
+        .route("/metaculus/bulk-import", get(manual_bulk_import_endpoint))
+        .route("/metaculus/limited-import", get(manual_limited_import_endpoint))
         .route("/metaculus/sync-categories", get(manual_category_sync))
         // .route("/user/:user_id/expertise", get(get_user_domain_expertise))
         // .route("/domain/:domain/experts", get(get_domain_experts))
@@ -94,7 +96,8 @@ async fn main() -> anyhow::Result<()> {
     println!("  GET /leaderboard - Get basic leaderboard");
     println!("  GET /enhanced-leaderboard - Get enhanced leaderboard with Brier scores");
     // println!("  GET /ws - WebSocket for real-time updates");
-    println!("  GET /metaculus/sync - Manual sync with Metaculus API");
+    println!("  GET /metaculus/sync - Manual sync with Metaculus API (150 recent questions)");
+    println!("  GET /metaculus/bulk-import - Complete import of ALL Metaculus questions");
     println!("  GET /metaculus/sync-categories - Manual category sync");
     // println!("  GET /user/:user_id/expertise - Get user's domain expertise");
     // println!("  GET /domain/:domain/experts - Get top experts in domain");
@@ -386,6 +389,85 @@ async fn manual_metaculus_sync(
             Err((
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "Failed to sync with Metaculus"}))
+            ))
+        }
+    }
+}
+
+// Manual Metaculus bulk import endpoint
+async fn manual_bulk_import_endpoint(
+    State(app_state): State<AppState>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    println!("🚀 Bulk import endpoint called");
+    
+    match metaculus::manual_bulk_import(&app_state.db).await {
+        Ok(count) => {
+            // Clear cache since new data was added
+            app_state.cache.invalidate_all();
+            
+            // Broadcast update to WebSocket clients
+            let msg = json!({
+                "type": "metaculus_bulk_import",
+                "count": count,
+                "timestamp": chrono::Utc::now()
+            }).to_string();
+            let _ = app_state.tx.send(msg);
+
+            Ok(Json(json!({
+                "success": true,
+                "message": format!("Successfully imported {} questions from Metaculus (bulk import)", count),
+                "count": count,
+                "type": "bulk_import"
+            })))
+        },
+        Err(e) => {
+            eprintln!("Metaculus bulk import error: {}", e);
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to perform bulk import from Metaculus"}))
+            ))
+        }
+    }
+}
+
+// Manual Metaculus limited import endpoint
+async fn manual_limited_import_endpoint(
+    State(app_state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let max_batches: u32 = params.get("batches")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5); // Default to 5 batches for testing
+        
+    println!("🚀 Limited import endpoint called with max_batches: {}", max_batches);
+    
+    match metaculus::manual_limited_import(&app_state.db, max_batches).await {
+        Ok(count) => {
+            // Clear cache since new data was added
+            app_state.cache.invalidate_all();
+            
+            // Broadcast update to WebSocket clients
+            let msg = json!({
+                "type": "metaculus_limited_import",
+                "count": count,
+                "max_batches": max_batches,
+                "timestamp": chrono::Utc::now()
+            }).to_string();
+            let _ = app_state.tx.send(msg);
+
+            Ok(Json(json!({
+                "success": true,
+                "message": format!("Successfully imported {} questions from Metaculus (limited to {} batches)", count, max_batches),
+                "count": count,
+                "max_batches": max_batches,
+                "type": "limited_import"
+            })))
+        },
+        Err(e) => {
+            eprintln!("Metaculus limited import error: {}", e);
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to perform limited import from Metaculus"}))
             ))
         }
     }

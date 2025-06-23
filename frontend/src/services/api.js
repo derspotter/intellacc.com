@@ -240,8 +240,10 @@ export const api = {
   
   // Events endpoints
   events: {
-    getAll: () => 
-      request('/events'),
+    getAll: (search = '') => {
+      const url = search ? `/events?search=${encodeURIComponent(search)}` : '/events';
+      return request(url);
+    },
       
     create: (eventData) => 
       request('/events', { method: 'POST', body: eventData }),

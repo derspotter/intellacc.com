@@ -88,7 +88,7 @@ const userStore = {
       if (!auth.isLoggedInState.val || !this.state.profile.val) return;
       
       try {
-        const followers = await api.user.getFollowers();
+        const followers = await api.users.getFollowers(this.state.profile.val.id);
         this.state.followers.val = Array.isArray(followers) ? followers : [];
       } catch (error) {
         this.state.followers.val = []; // Empty array on error
@@ -99,7 +99,7 @@ const userStore = {
       if (!auth.isLoggedInState.val || !this.state.profile.val) return;
       
       try {
-        const following = await api.user.getFollowing();
+        const following = await api.users.getFollowing(this.state.profile.val.id);
         this.state.following.val = Array.isArray(following) ? following : [];
       } catch (error) {
         this.state.following.val = []; // Empty array on error

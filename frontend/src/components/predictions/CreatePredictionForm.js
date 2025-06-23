@@ -19,11 +19,22 @@ export default function CreatePredictionForm() {
     submitting: false,
     error: '',
     success: '',
-    displayMode: 'voluntary'
+    displayMode: 'voluntary',
+    searchTerm: '',
+    showDropdown: false
   });
   
   // --- Store References ---
   const { events, assignedPredictions, loadingEvents, loadingAssigned, predictions } = predictionsStore.state;
+
+  // --- Search handlers ---
+  const handleSearch = async (searchTerm) => {
+    state.searchTerm = searchTerm;
+    state.eventId = ''; // Clear selection when searching
+    if (state.displayMode === 'voluntary') {
+      await predictionsStore.actions.fetchEvents.call(predictionsStore, searchTerm);
+    }
+  };
 
   // --- Form submission ---
   const handleSubmit = async (e) => {
@@ -42,6 +53,7 @@ export default function CreatePredictionForm() {
       );
       state.eventId = state.prediction = '';
       state.confidence = 50;
+      state.searchTerm = '';
       state.success = 'Prediction created successfully!';
       setTimeout(() => state.success = '', 3000);
     } catch (err) {
@@ -60,7 +72,15 @@ export default function CreatePredictionForm() {
         ['voluntary', 'assigned'].map(mode => 
           button({
             class: () => `toggle-button ${state.displayMode === mode ? 'active' : ''}`,
-            onclick: () => { state.displayMode = mode; state.eventId = ''; }
+            onclick: async () => { 
+              state.displayMode = mode; 
+              state.eventId = ''; 
+              state.searchTerm = '';
+              // Fetch events when switching to voluntary mode
+              if (mode === 'voluntary' && isLoggedInState.val) {
+                await predictionsStore.actions.fetchEvents.call(predictionsStore, '');
+              }
+            }
           }, mode.charAt(0).toUpperCase() + mode.slice(1))
         )
       ),
@@ -71,42 +91,69 @@ export default function CreatePredictionForm() {
 
       // Form
       form({ onsubmit: handleSubmit }, [
-        // Event dropdown with reactive display
+        // Event search and selection
         div({ class: "form-group" },
-          label({ for: "event" }, () => `Select ${state.displayMode === 'voluntary' ? 'Event' : 'Assignment'}:`),
+          label({ for: "event-search" }, () => `Search ${state.displayMode === 'voluntary' ? 'Events' : 'Assignments'}:`),
           
-          // Dropdown with reactive options - this pattern now works reliably
+          // Conditionally render search input for voluntary predictions
+          () => state.displayMode === 'voluntary' ? input({
+            type: "text",
+            id: "event-search",
+            placeholder: "Search questions by keyword...",
+            value: () => state.searchTerm,
+            oninput: e => handleSearch(e.target.value),
+            disabled: state.submitting || !isLoggedInState.val
+          }) : null,
+          
+          // Event selection dropdown - reactive based on search results
           () => {
-            const userPredictionEventIds = new Set(predictions.val.map(p => p.event_id));
-            const availableEvents = events.val.filter(event => !userPredictionEventIds.has(event.id));
-            
-            const dataList = state.displayMode === 'voluntary' ? availableEvents : assignedPredictions.val;
-            const loading = state.displayMode === 'voluntary' ? loadingEvents.val : loadingAssigned.val;
-            
-            return select({
-              id: "event",
-              required: true,
-              onchange: e => state.eventId = e.target.value,
-              disabled: state.submitting || !isLoggedInState.val
-            }, [
-              option({ value: '' }, "-- Select --"),
+            if (state.displayMode === 'voluntary') {
+              const userPredictionEventIds = new Set(predictions.val.map(p => p.event_id));
+              const availableEvents = events.val.filter(event => !userPredictionEventIds.has(event.id));
               
-              // Status option
-              !isLoggedInState.val ? option({ value: '', disabled: true }, "Please log in") :
-              loading ? option({ value: '', disabled: true }, "Loading...") :
-              dataList.length === 0 ? option(
-                { value: '', disabled: true },
-                state.displayMode === 'voluntary' ? 
-                  (events.val.length > 0 ? 'No more events to predict' : 'No open events') : 
-                  'No pending assignments'
-              ) : null,
-              
-              // Map data to options
-              ...(dataList.map(item => option({
-                value: String(state.displayMode === 'voluntary' ? item.id : item.event_id),
-                selected: () => state.eventId === String(state.displayMode === 'voluntary' ? item.id : item.event_id)
-              }, state.displayMode === 'voluntary' ? item.title : (item.event || `Assignment ${item.id}`))))
-            ]);
+              return select({
+                id: "event",
+                required: true,
+                onchange: e => state.eventId = e.target.value,
+                disabled: state.submitting || !isLoggedInState.val,
+                style: "margin-top: 8px;"
+              }, [
+                option({ value: '' }, "-- Select Event --"),
+                
+                // Status options
+                !isLoggedInState.val ? option({ value: '', disabled: true }, "Please log in") :
+                loadingEvents.val ? option({ value: '', disabled: true }, "Searching...") :
+                availableEvents.length === 0 ? option(
+                  { value: '', disabled: true },
+                  state.searchTerm ? 'No events found for your search' : 'No events available'
+                ) : null,
+                
+                // Map available events to options
+                ...availableEvents.map(event => option({
+                  value: String(event.id),
+                  selected: () => state.eventId === String(event.id)
+                }, event.title.length > 80 ? event.title.substring(0, 80) + '...' : event.title))
+              ]);
+            } else {
+              // Assigned predictions dropdown (no search needed)
+              return select({
+                id: "event",
+                required: true,
+                onchange: e => state.eventId = e.target.value,
+                disabled: state.submitting || !isLoggedInState.val
+              }, [
+                option({ value: '' }, "-- Select Assignment --"),
+                
+                !isLoggedInState.val ? option({ value: '', disabled: true }, "Please log in") :
+                loadingAssigned.val ? option({ value: '', disabled: true }, "Loading...") :
+                assignedPredictions.val.length === 0 ? option({ value: '', disabled: true }, 'No pending assignments') : null,
+                
+                ...assignedPredictions.val.map(item => option({
+                  value: String(item.event_id),
+                  selected: () => state.eventId === String(item.event_id)
+                }, item.event || `Assignment ${item.id}`))
+              ]);
+            }
           }
         ),
 

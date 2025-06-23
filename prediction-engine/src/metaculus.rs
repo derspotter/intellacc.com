@@ -12,7 +12,7 @@ struct MetaculusResponse {
     next: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct MetaculusPost {
     id: i32,
     title: String,
@@ -48,10 +48,12 @@ struct MetaculusPost {
     html_metadata_json: Option<serde_json::Value>,
     #[serde(default)]
     projects: Option<serde_json::Value>,
+    #[serde(default)]
+    categories: Vec<String>,
     question: Option<MetaculusQuestion>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct MetaculusQuestion {
     id: i32,
     title: String,
@@ -142,14 +144,14 @@ impl MetaculusClient {
         }
     }
 
-    // Fetch open questions from Metaculus
-    pub async fn fetch_open_questions(&self, limit: Option<u32>) -> Result<Vec<MetaculusQuestion>> {
+    // Fetch open questions from Metaculus with proper pagination
+    pub async fn fetch_open_questions(&self, limit: Option<u32>) -> Result<Vec<(MetaculusQuestion, MetaculusPost)>> {
         let mut all_questions = Vec::new();
-        let mut url = format!("{}/posts/?status=open&order_by=-created_time", self.base_url);
+        let mut url = format!("{}/posts/?status=open&order_by=-id", self.base_url);
         
-        if let Some(limit) = limit {
-            url = format!("{}&limit={}", url, limit);
-        }
+        // Set a reasonable per-page limit for API requests
+        let per_page_limit = limit.unwrap_or(100).min(100);
+        url = format!("{}&limit={}", url, per_page_limit);
 
         loop {
             println!("🔍 Fetching from: {}", url);
@@ -163,34 +165,46 @@ impl MetaculusClient {
                 .json()
                 .await?;
 
-            // Extract questions from posts
+            // Extract questions from posts, keeping both question and post data
             for post in response.results {
-                if let Some(question) = post.question {
-                    // Use the question as-is since we fixed the struct parsing
-                    all_questions.push(question);
+                if let Some(question) = post.question.clone() {
+                    all_questions.push((question, post));
                 }
             }
 
-            // Break if no more pages or we've reached our limit
-            if response.next.is_none() || (limit.is_some() && all_questions.len() >= limit.unwrap() as usize) {
+            println!("📊 Collected {} questions so far", all_questions.len());
+
+            // Check if we should continue pagination
+            let should_continue = if let Some(target_limit) = limit {
+                // If we have a limit, check if we've reached it
+                all_questions.len() < target_limit as usize && response.next.is_some()
+            } else {
+                // If no limit, continue until no more pages
+                response.next.is_some()
+            };
+
+            if !should_continue {
                 break;
             }
 
-            url = response.next.unwrap();
+            // Use the next URL from the response, but ensure it uses HTTPS
+            url = response.next.unwrap().replace("http://", "https://");
 
             // Rate limiting - be respectful to Metaculus API
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(750)).await;
         }
 
-        if let Some(limit) = limit {
-            all_questions.truncate(limit as usize);
+        // If we have a limit, ensure we don't exceed it
+        if let Some(target_limit) = limit {
+            all_questions.truncate(target_limit as usize);
         }
 
+        println!("✅ Finished fetching: {} total questions", all_questions.len());
         Ok(all_questions)
     }
 
     // Fetch questions by category
-    pub async fn fetch_questions_by_category(&self, category: &str, limit: Option<u32>) -> Result<Vec<MetaculusQuestion>> {
+    pub async fn fetch_questions_by_category(&self, category: &str, limit: Option<u32>) -> Result<Vec<(MetaculusQuestion, MetaculusPost)>> {
         let mut url = format!("{}/posts/?status=open&categories={}&order_by=-created_time", 
                             self.base_url, category);
         
@@ -207,11 +221,11 @@ impl MetaculusClient {
             .json()
             .await?;
 
-        // Extract questions from posts
+        // Extract questions from posts, keeping both question and post data
         let mut questions = Vec::new();
         for post in response.results {
-            if let Some(question) = post.question {
-                questions.push(question);
+            if let Some(question) = post.question.clone() {
+                questions.push((question, post));
             }
         }
 
@@ -219,7 +233,7 @@ impl MetaculusClient {
     }
 
     // Convert Metaculus question to our internal event format
-    fn convert_to_event(&self, question: &MetaculusQuestion) -> PredictionEvent {
+    fn convert_to_event(&self, question: &MetaculusQuestion, post: &MetaculusPost) -> PredictionEvent {
         let close_time = question.scheduled_close_time.as_ref()
             .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
             .map(|dt| dt.with_timezone(&Utc));
@@ -232,6 +246,13 @@ impl MetaculusClient {
             .unwrap_or(&format!("Imported from Metaculus: {}", question.title))
             .clone();
 
+        // Extract category from post categories, default to "general" if none
+        let category = if !post.categories.is_empty() {
+            post.categories[0].clone()
+        } else {
+            "general".to_string()
+        };
+
         PredictionEvent {
             title: question.title.clone(),
             description,
@@ -239,32 +260,33 @@ impl MetaculusClient {
             metaculus_url: format!("https://www.metaculus.com/questions/{}/", question.id),
             close_time,
             resolve_time,
-            category: "Metaculus".to_string(),
+            category,
             event_type: question.question_type.clone(),
             status: question.status.clone(),
         }
     }
 
     // Store fetched questions in our database
-    pub async fn store_questions_in_db(&self, pool: &PgPool, questions: Vec<MetaculusQuestion>) -> Result<usize> {
+    pub async fn store_questions_in_db(&self, pool: &PgPool, questions_with_posts: Vec<(MetaculusQuestion, MetaculusPost)>) -> Result<usize> {
         let mut stored_count = 0;
 
         // First, ensure we have a default topic for Metaculus imports
         let topic_id = self.ensure_metaculus_topic(pool).await?;
 
-        for question in questions {
-            let event = self.convert_to_event(&question);
+        for (question, post) in questions_with_posts {
+            let event = self.convert_to_event(&question, &post);
             
-            // Check if we already have this question (search by title + Metaculus reference)
+            // Check if we already have this question by Metaculus ID (more reliable)
+            let metaculus_id_pattern = format!("Metaculus ID: {}", event.metaculus_id);
             let existing = sqlx::query(
-                "SELECT id FROM events WHERE title = $1 AND details LIKE '%Metaculus ID: %'"
+                "SELECT id FROM events WHERE details LIKE $1"
             )
-            .bind(&event.title)
+            .bind(format!("%{}%", metaculus_id_pattern))
             .fetch_optional(pool)
             .await?;
 
             if existing.is_some() {
-                println!("📝 Skipping existing question: {}", event.title);
+                println!("📝 Skipping existing question (ID: {}): {}", event.metaculus_id, event.title);
                 continue;
             }
 
@@ -285,12 +307,12 @@ impl MetaculusClient {
                 event.event_type
             );
 
-            // Insert new event
+            // Insert new event with category
             let result = sqlx::query(
                 r#"
                 INSERT INTO events (
-                    topic_id, title, details, closing_date, outcome
-                ) VALUES ($1, $2, $3, $4, $5)
+                    topic_id, title, details, closing_date, outcome, category
+                ) VALUES ($1, $2, $3, $4, $5, $6)
                 "#
             )
             .bind(topic_id)
@@ -298,6 +320,7 @@ impl MetaculusClient {
             .bind(&enhanced_details)
             .bind(event.close_time)
             .bind(if event.status == "resolved" { Some("pending") } else { None })
+            .bind(&event.category)
             .execute(pool)
             .await;
 
@@ -341,15 +364,93 @@ impl MetaculusClient {
         Ok(topic.get("id"))
     }
 
+    // Complete initial import - fetch ALL open questions from Metaculus in batches
+    pub async fn complete_initial_import(&self, pool: &PgPool) -> Result<usize> {
+        self.complete_initial_import_with_limit(pool, None).await
+    }
+
+    // Complete initial import with optional batch limit for testing
+    pub async fn complete_initial_import_with_limit(&self, pool: &PgPool, max_batches: Option<u32>) -> Result<usize> {
+        println!("🚀 Starting complete Metaculus import...");
+        if let Some(limit) = max_batches {
+            println!("📊 Limited to {} batches for testing", limit);
+        }
+        
+        let mut total_stored = 0;
+        let mut url = format!("{}/posts/?status=open&order_by=-id&limit=100", self.base_url);
+        let mut page = 1;
+        
+        loop {
+            println!("📄 Processing batch {} from: {}", page, url);
+            
+            // Fetch one batch at a time
+            let response: MetaculusResponse = self.client
+                .get(&url)
+                .header("User-Agent", "Intellacc-PredictionEngine/1.0")
+                .header("Authorization", "Token 7bee5896b77e5541bc918ac797fad206a3cc564b")
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            // Extract questions from posts, keeping both question and post data
+            let mut questions = Vec::new();
+            for post in response.results {
+                if let Some(question) = post.question.clone() {
+                    questions.push((question, post));
+                }
+            }
+
+            if questions.is_empty() {
+                println!("✅ No more questions found. Import complete!");
+                break;
+            }
+
+            println!("📥 Fetched {} questions from batch {}", questions.len(), page);
+            
+            // Store this batch in database immediately
+            let stored_count = self.store_questions_in_db(pool, questions).await?;
+            total_stored += stored_count;
+            
+            println!("💾 Stored {} new questions from batch {} (total so far: {})", 
+                    stored_count, page, total_stored);
+
+            // Check if we've reached the batch limit
+            if let Some(max_batches) = max_batches {
+                if page >= max_batches {
+                    println!("📊 Reached batch limit of {}. Stopping import.", max_batches);
+                    break;
+                }
+            }
+
+            // Check if there's a next page
+            if response.next.is_none() {
+                println!("📄 Reached last page. Import complete!");
+                break;
+            }
+
+            // Use the next URL from the response, but ensure it uses HTTPS
+            url = response.next.unwrap().replace("http://", "https://");
+            page += 1;
+
+            // Rate limiting - be respectful during bulk import
+            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+        }
+        
+        println!("🎉 Complete import finished! Total new questions imported: {}", total_stored);
+        Ok(total_stored)
+    }
+
     // Daily sync job - fetch and store new questions
     pub async fn daily_sync(&self, pool: &PgPool) -> Result<usize> {
         println!("🔄 Starting daily Metaculus sync...");
         
-        // Fetch latest 50 open questions
-        let questions = self.fetch_open_questions(Some(50)).await?;
+        // For daily sync, fetch more questions to catch new ones
+        // Use ID ordering to get highest numbered questions first
+        let questions = self.fetch_open_questions(Some(150)).await?;
         println!("📥 Fetched {} questions from Metaculus", questions.len());
         
-        // Store in database
+        // Store in database (duplicates will be skipped)
         let stored_count = self.store_questions_in_db(pool, questions).await?;
         println!("💾 Stored {} new questions in database", stored_count);
         
@@ -401,6 +502,18 @@ pub async fn start_daily_sync_job(pool: PgPool) -> Result<()> {
 
     println!("⏰ Daily Metaculus sync job started (runs at 6 AM UTC)");
     Ok(())
+}
+
+// Manual bulk import function for initial setup
+pub async fn manual_bulk_import(pool: &PgPool) -> Result<usize> {
+    let client = MetaculusClient::new();
+    client.complete_initial_import(pool).await
+}
+
+// Manual limited import function for testing
+pub async fn manual_limited_import(pool: &PgPool, max_batches: u32) -> Result<usize> {
+    let client = MetaculusClient::new();
+    client.complete_initial_import_with_limit(pool, Some(max_batches)).await
 }
 
 // Manual sync function for testing

@@ -126,7 +126,7 @@ const predictionsStore = {
       ];
     },
     
-    async fetchEvents() {
+    async fetchEvents(search = '') {
       // Prevent fetch if already loading
       if (this.state.loadingEvents.val) {
         console.log('Skipping fetchEvents: Already loading.');
@@ -136,33 +136,28 @@ const predictionsStore = {
       this.state.error.val = null; // Reset error specific to this fetch if needed
 
       try {
-        // Check authentication but don't return early - still use test events even if not logged in
-        if (!isLoggedInState.val) {
-          console.log('Not logged in, loading test events');
-          this.actions.loadTestEvents.call(this);
-          return this.state.events.val;
-        }
+        // Always try API first, even if not logged in (but it will fail gracefully)
+        console.log('Fetching events from API with search:', search);
+        const events = await api.events.getAll(search);
         
-        console.log('Fetching events from API');
-        const events = await api.events.getAll();
-        
-        if (Array.isArray(events) && events.length > 0) {
+        if (Array.isArray(events) && events.length >= 0) {
           console.log('Received events from API:', events.length);
           this.state.events.val = events;
         } else {
-          console.log('No events from API, using test events');
-          this.actions.loadTestEvents.call(this);
+          console.log('No events from API, using empty array');
+          this.state.events.val = [];
         }
         
         return this.state.events.val;
       } catch (error) {
-         // Keep original catch block in case needed later, but unreachable with forced test data
         console.error('Error fetching events:', error);
-        console.log('Falling back to test events');
-        this.actions.loadTestEvents.call(this);
+        
+        console.log('API error, setting empty events array');
+        this.state.events.val = [];
+        this.state.error.val = error.message || 'Failed to fetch events';
+        
         return this.state.events.val;
       } finally {
-         // Ensure loading state is reset (also done above in debug block)
         this.state.loadingEvents.val = false;
       }
     },

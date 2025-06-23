@@ -34,7 +34,8 @@ router.get("/users/:id/following", authenticateJWT, userController.getFollowing)
 // Prediction/Events Routes
 router.post("/predict", authenticateJWT, predictionsController.createPrediction);
 router.post("/events", authenticateJWT, predictionsController.createEvent);
-router.get("/events", authenticateJWT, predictionsController.getEvents);
+router.get("/events", predictionsController.getEvents); // Temporarily no auth for testing
+router.get("/categories", predictionsController.getCategories); // Get available categories
 router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
 router.get("/predictions", authenticateJWT, predictionsController.getUserPredictions);
 

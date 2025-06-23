@@ -91,21 +91,30 @@ exports.createEvent = async (req, res) => {
   }
 };
 
-// Get all available events
+// Get all available events with optional search
 exports.getEvents = async (req, res) => {
   console.log('getEvents called');
   try {
-    console.log('User ID:', req.user.userId);
-    const result = await db.query(
-      "SELECT * FROM events WHERE outcome IS NULL AND closing_date > NOW() ORDER BY closing_date ASC"
-    );
-    console.log('Events result:', result.rows);
-    if (result.rows.length === 0) {
-      console.log('No events found');
-      res.status(404).json({ message: "No events found" });
-    } else {
-      res.status(200).json(result.rows);
+    console.log('User ID:', req.user ? req.user.userId : 'No auth required');
+    
+    // Get search parameter if provided
+    const search = req.query.search;
+    let query = "SELECT * FROM events WHERE outcome IS NULL";
+    let params = [];
+    
+    // Add search functionality
+    if (search && search.trim()) {
+      query += " AND (title ILIKE $1 OR details ILIKE $1)";
+      params.push(`%${search.trim()}%`);
     }
+    
+    // Order by closing date, but show events even if closing date has passed (for Metaculus questions)
+    query += " ORDER BY closing_date ASC NULLS LAST";
+    
+    const result = await db.query(query, params);
+    console.log('Events result:', result.rows.length, 'events found');
+    
+    res.status(200).json(result.rows);
   } catch (err) {
     console.error("Error fetching events:", err);
     res.status(500).send("Database error: " + err.message);
@@ -379,6 +388,24 @@ exports.deleteAllPredictions = async (req, res) => {
     res.status(200).json({ message: "All predictions deleted." });
   } catch (err) {
     console.error("Error deleting all predictions:", err);
+    res.status(500).json({ message: "Database error: " + err.message });
+  }
+};
+
+// Get all available categories from events
+exports.getCategories = async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT DISTINCT category 
+      FROM events 
+      WHERE category IS NOT NULL 
+      ORDER BY category ASC
+    `);
+    
+    const categories = result.rows.map(row => row.category);
+    res.status(200).json(categories);
+  } catch (err) {
+    console.error("Error fetching categories:", err);
     res.status(500).json({ message: "Database error: " + err.message });
   }
 };
