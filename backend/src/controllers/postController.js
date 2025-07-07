@@ -102,18 +102,30 @@ exports.getPosts = async (req, res) => {
                                 WHERE post_id = p.id AND user_id = $1) 
                    THEN true 
                    ELSE false 
-              END AS liked_by_user
+              END AS liked_by_user,
+              COALESCE(ur.rep_points, 1.0) as user_rep_points,
+              -- Calculate visibility multiplier: higher reputation = more visibility
+              -- Use GREATEST to ensure we never take LN of a negative number
+              (1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) as visibility_multiplier
        FROM posts p
        JOIN users u ON p.user_id = u.id
+       LEFT JOIN user_reputation ur ON u.id = ur.user_id
        WHERE p.parent_id IS NULL AND p.is_comment = FALSE
-       ORDER BY p.created_at DESC`,
+       ORDER BY 
+         -- Sort by visibility multiplier (reputation-weighted) and recency
+         -- Use GREATEST to ensure we never take LN of a negative number
+         ((1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) * EXTRACT(EPOCH FROM (NOW() - p.created_at)) / -3600) DESC,
+         p.created_at DESC`,
       [userId] // Pass userId for the subquery
     );
 
-    // Log the raw result which should now include liked_by_user from the query
+    // Log the raw result which should now include reputation data
     console.log("Raw query result:", result.rows.map(post => ({
       id: post.id,
       user_id: post.user_id,
+      username: post.username,
+      user_rep_points: post.user_rep_points,
+      visibility_multiplier: post.visibility_multiplier,
       liked_by_user: post.liked_by_user
     })));
 
@@ -227,9 +239,14 @@ exports.getFeed = async (req, res) => {
                                 WHERE post_id = p.id AND user_id = $1) 
                    THEN true 
                    ELSE false 
-              END AS liked_by_user
+              END AS liked_by_user,
+              COALESCE(ur.rep_points, 1.0) as user_rep_points,
+              -- Calculate visibility multiplier: higher reputation = more visibility
+              -- Use GREATEST to ensure we never take LN of a negative number
+              (1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) as visibility_multiplier
        FROM posts p
        JOIN users u ON p.user_id = u.id
+       LEFT JOIN user_reputation ur ON u.id = ur.user_id
        WHERE (p.user_id IN (
          SELECT following_id 
          FROM follows 
@@ -238,17 +255,24 @@ exports.getFeed = async (req, res) => {
        OR p.user_id = $1)
        AND p.parent_id IS NULL
        AND p.is_comment = FALSE
-       ORDER BY p.created_at DESC`,
+       ORDER BY 
+         -- Sort by visibility multiplier (reputation-weighted) and recency
+         -- Use GREATEST to ensure we never take LN of a negative number
+         ((1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) * EXTRACT(EPOCH FROM (NOW() - p.created_at)) / -3600) DESC,
+         p.created_at DESC`,
       [userId]
     );
 
-    // Log the raw result which should include liked_by_user from the query
+    // Log the raw result which should include reputation data
     console.log("Raw feed query result:", result.rows.map(post => ({
       id: post.id,
+      username: post.username,
+      user_rep_points: post.user_rep_points,
+      visibility_multiplier: post.visibility_multiplier,
       liked_by_user: post.liked_by_user
     })));
 
-    // Send the direct query result
+    // Send the direct query result with reputation data
     res.status(200).json(result.rows);
   } catch (err) {
     console.error("Error getting feed:", err);

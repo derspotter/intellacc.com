@@ -1,0 +1,17 @@
+{
+  "name": "intellacc-scripts",
+  "version": "1.0.0",
+  "description": "Database population and utility scripts for Intellacc",
+  "main": "populate_database.js",
+  "scripts": {
+    "populate": "node populate_database.js",
+    "test": "echo \"No tests defined\""
+  },
+  "dependencies": {
+    "pg": "^8.11.3",
+    "bcrypt": "^5.1.1"
+  },
+  "keywords": ["database", "testing", "population"],
+  "author": "Intellacc Team",
+  "license": "MIT"
+}

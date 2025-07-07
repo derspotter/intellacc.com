@@ -2,6 +2,63 @@
 
 const db = require('../db');
 
+// Helper function to generate probability vectors for unified scoring
+function generateProbabilityVector(prediction_type, prediction_value, confidence, numerical_value, lower_bound, upper_bound) {
+  switch (prediction_type) {
+    case 'binary':
+      // Convert confidence to probability vector
+      const prob = confidence / 100.0;
+      if (prediction_value.toLowerCase() === 'yes' || prediction_value.toLowerCase() === 'true') {
+        return [prob, 1 - prob]; // [P(Yes), P(No)]
+      } else {
+        return [1 - prob, prob]; // [P(Yes), P(No)]
+      }
+      
+    case 'multiple_choice':
+      // For now, create uniform distribution with higher weight on selected choice
+      // In practice, this would be handled by the frontend with proper probability inputs
+      const numOptions = 4; // Default assumption, should be extracted from event metadata
+      const selectedProb = confidence / 100.0;
+      const remainingProb = (1 - selectedProb) / (numOptions - 1);
+      const probs = new Array(numOptions).fill(remainingProb);
+      // This is a simplified implementation - in practice we'd need to know which option was selected
+      probs[0] = selectedProb; // Assume first option selected for simplicity
+      return probs;
+      
+    case 'numeric':
+    case 'discrete':
+      // For numerical predictions, we store distribution parameters
+      // This is a simplified representation - full implementation would use proper distributions
+      if (lower_bound !== null && upper_bound !== null) {
+        return {
+          type: 'interval',
+          point_estimate: numerical_value,
+          lower_bound: lower_bound,
+          upper_bound: upper_bound,
+          confidence: confidence / 100.0
+        };
+      } else {
+        return {
+          type: 'point',
+          estimate: numerical_value,
+          confidence: confidence / 100.0
+        };
+      }
+      
+    case 'date':
+      return {
+        type: 'date',
+        predicted_date: prediction_value,
+        confidence: confidence / 100.0
+      };
+      
+    default:
+      // Fallback to binary
+      const fallbackProb = confidence / 100.0;
+      return [fallbackProb, 1 - fallbackProb];
+  }
+}
+
 // Get all predictions for current user
 exports.getUserPredictions = async (req, res) => {
   const userId = req.user.userId;
@@ -30,7 +87,16 @@ exports.getUserPredictions = async (req, res) => {
 
 // Create a new prediction
 exports.createPrediction = async (req, res) => {
-  const { event_id, prediction_value, confidence } = req.body;
+  const { 
+    event_id, 
+    prediction_value, 
+    confidence, 
+    prediction_type = 'binary',
+    numerical_value,
+    lower_bound,
+    upper_bound,
+    prob_vector // New: probability vector for unified scoring
+  } = req.body;
   const userId = req.user.userId;
 
   try {
@@ -44,25 +110,48 @@ exports.createPrediction = async (req, res) => {
       return res.status(409).json({ message: "You have already made a prediction for this event." });
     }
 
-    // Fetch the event title
-    const eventQuery = await db.query("SELECT title FROM events WHERE id = $1", [event_id]);
+    // Fetch the event title and type
+    const eventQuery = await db.query("SELECT title, event_type FROM events WHERE id = $1", [event_id]);
 
     if (eventQuery.rows.length === 0) {
       return res.status(400).json({ message: "Invalid event_id" });
     }
 
     const eventTitle = eventQuery.rows[0].title;
+    const eventType = eventQuery.rows[0].event_type || 'binary';
 
-    // Insert prediction into database
+    // Validate prediction based on type
+    if (eventType === 'numeric' || eventType === 'discrete') {
+      if (!numerical_value) {
+        return res.status(400).json({ message: "Numerical value is required for numerical predictions" });
+      }
+    }
+
+    // Generate probability vector if not provided
+    let finalProbVector = prob_vector;
+    if (!finalProbVector) {
+      finalProbVector = generateProbabilityVector(prediction_type, prediction_value, confidence, numerical_value, lower_bound, upper_bound);
+    }
+
+    // Insert prediction into database with probability vector
     const result = await db.query(
-      "INSERT INTO predictions (user_id, event_id, event, prediction_value, confidence) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [userId, event_id, eventTitle, prediction_value, confidence]
+      `INSERT INTO predictions 
+       (user_id, event_id, event, prediction_value, confidence, prediction_type, numerical_value, lower_bound, upper_bound, prob_vector) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
+       RETURNING *`,
+      [userId, event_id, eventTitle, prediction_value, confidence, eventType, numerical_value, lower_bound, upper_bound, JSON.stringify(finalProbVector)]
     );
 
     // Emit socket event for real-time updates
     if (req.app.get('io')) {
       req.app.get('io').emit('newPrediction', result.rows[0]);
     }
+
+    // Trigger log score calculation in background (non-blocking)
+    const scoringService = require('../services/scoringService');
+    scoringService.triggerScoreUpdate(userId).catch(err => {
+      console.error('Failed to update scoring:', err.message);
+    });
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -150,6 +239,13 @@ exports.resolvePrediction = async (req, res) => {
     if (req.app.get('io')) {
       req.app.get('io').emit('predictionResolved', result.rows[0]);
     }
+
+    // Trigger score recalculation for all affected users (non-blocking)
+    const scoringService = require('../services/scoringService');
+    const prediction = result.rows[0];
+    scoringService.triggerEventResolutionScoring(prediction.event_id).catch(err => {
+      console.error('Failed to update scores after prediction resolution:', err.message);
+    });
 
     res.status(200).json(result.rows[0]);
   } catch (err) {

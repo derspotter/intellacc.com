@@ -193,13 +193,23 @@ const predictionsStore = {
       console.log('Test events loaded:', this.state.events.val);
     },
     
-    async createPrediction(event_id, prediction_value, confidence) {
+    async createPrediction(event_id, prediction_value, confidence, prediction_type = 'binary', numerical_value = null, lower_bound = null, upper_bound = null, prob_vector = null) {
       try {
         if (!isLoggedInState.val) return null;
         
-        console.log('Creating prediction:', { event_id, prediction_value, confidence });
+        console.log('Creating prediction:', { 
+          event_id, 
+          prediction_value, 
+          confidence, 
+          prediction_type, 
+          numerical_value, 
+          lower_bound, 
+          upper_bound,
+          prob_vector
+        });
+        
         const prediction = await api.predictions.create(
-          event_id, prediction_value, confidence
+          event_id, prediction_value, confidence, prediction_type, numerical_value, lower_bound, upper_bound, prob_vector
         );
         console.log('Prediction created successfully:', prediction);
         

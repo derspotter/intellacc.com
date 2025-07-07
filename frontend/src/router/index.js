@@ -15,6 +15,7 @@ import ProfilePredictions from '../components/profile/ProfilePredictions';
 import CreatePredictionForm from '../components/predictions/CreatePredictionForm';
 import CreateEventForm from '../components/predictions/CreateEventForm';
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
+import LeaderboardCard from '../components/predictions/LeaderboardCard';
 import ProfilePage from '../components/profile/ProfilePage';
 import SettingsPage from '../components/settings/SettingsPage';
 
@@ -106,6 +107,8 @@ export default function Router() {
       h1("Predictions & Betting"),
       () => isAdminState.val ? AdminEventManagement() : null,
       div({ class: "cards-container" }, [
+        // Leaderboard Card - shows reputation rankings
+        () => isLoggedInState.val ? LeaderboardCard() : null,
         // Event Creation Form - available to all logged-in users
         () => isLoggedInState.val ? CreateEventForm() : null,
         // Prediction Form - will be styled as a card

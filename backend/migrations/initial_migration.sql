@@ -46,7 +46,11 @@ CREATE TABLE IF NOT EXISTS events (
     closing_date TIMESTAMP NOT NULL,
     outcome VARCHAR(50),
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    updated_at TIMESTAMP DEFAULT NOW(),
+    -- Event type and numerical outcome support
+    category VARCHAR(100), -- e.g., 'politics', 'economics', 'science'
+    event_type VARCHAR(20) DEFAULT 'binary' CHECK (event_type IN ('binary', 'numeric', 'discrete', 'multiple_choice', 'date')),
+    numerical_outcome DECIMAL(15,6) -- For resolved numerical events
 );
 
 CREATE TABLE IF NOT EXISTS user_visibility_score (
@@ -65,6 +69,17 @@ CREATE TABLE IF NOT EXISTS predictions (
     created_at TIMESTAMP DEFAULT NOW(),
     resolved_at TIMESTAMP,
     outcome TEXT CHECK (outcome IN ('correct', 'incorrect', 'pending')),
+    -- Numerical prediction support
+    prediction_type VARCHAR(20) DEFAULT 'binary' CHECK (prediction_type IN ('binary', 'numeric', 'discrete', 'multiple_choice', 'date')),
+    numerical_value DECIMAL(15,6), -- Point estimate for numerical predictions
+    lower_bound DECIMAL(15,6), -- Lower bound of confidence interval
+    upper_bound DECIMAL(15,6), -- Upper bound of confidence interval
+    actual_value DECIMAL(15,6), -- Actual numerical outcome for resolved predictions
+    numerical_score DECIMAL(10,6), -- Interval score or other numerical scoring metric
+    -- Unified log scoring system columns
+    prob_vector JSONB, -- Probability vector for all prediction types
+    raw_log_loss DECIMAL(10,6), -- Raw log loss score (lower is better)
+    outcome_index INTEGER, -- Index of correct outcome for multi-choice questions
     UNIQUE(user_id, event_id) -- Ensure a user can only predict an event once
 );
 
@@ -128,3 +143,36 @@ CREATE TRIGGER after_like_insert_or_delete
 AFTER INSERT OR DELETE ON likes
 FOR EACH ROW
 EXECUTE FUNCTION update_post_like_count();
+
+-- Indexes for numerical predictions and event types
+CREATE INDEX IF NOT EXISTS idx_predictions_type ON predictions(prediction_type);
+CREATE INDEX IF NOT EXISTS idx_events_category ON events(category);
+CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+
+-- Unified log scoring system tables
+CREATE TABLE IF NOT EXISTS score_slices (
+    id SERIAL PRIMARY KEY,
+    prediction_id INTEGER REFERENCES predictions(id) ON DELETE CASCADE,
+    slice_start TIMESTAMP NOT NULL,
+    slice_end TIMESTAMP NOT NULL,
+    raw_loss DECIMAL(10,6), -- Log loss value for this time slice
+    time_weight DECIMAL(8,6), -- Weight for this time slice (Δt / T_open)
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS user_reputation (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    rep_points DECIMAL(8,4) DEFAULT 1.0, -- Reputation points (1-11 scale)
+    global_rank INTEGER DEFAULT NULL, -- Zero-sum relative ranking (1 = best)
+    time_weighted_score DECIMAL(10,6) DEFAULT 0.0, -- Accumulated time-weighted log loss
+    peer_bonus DECIMAL(8,6) DEFAULT 0.0, -- Bonus for beating crowd consensus
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Indexes for unified scoring system
+CREATE INDEX IF NOT EXISTS idx_predictions_log_loss ON predictions(raw_log_loss);
+CREATE INDEX IF NOT EXISTS idx_predictions_prob_vector ON predictions USING GIN(prob_vector);
+CREATE INDEX IF NOT EXISTS idx_score_slices_prediction ON score_slices(prediction_id);
+CREATE INDEX IF NOT EXISTS idx_user_reputation_points ON user_reputation(rep_points DESC);
+CREATE INDEX IF NOT EXISTS idx_user_reputation_rank ON user_reputation(global_rank ASC);

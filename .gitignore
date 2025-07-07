@@ -35,3 +35,6 @@ legacy/*
 # windsurf rules
 .windsurfrules
 AGENT.md
+
+# Rust build artifacts
+/prediction-engine/target/

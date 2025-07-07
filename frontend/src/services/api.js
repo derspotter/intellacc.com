@@ -260,10 +260,19 @@ export const api = {
     getAssigned: () => 
       request('/predictions/assigned'),
       
-    create: (event_id, prediction_value, confidence) => 
+    create: (event_id, prediction_value, confidence, prediction_type = 'binary', numerical_value = null, lower_bound = null, upper_bound = null, prob_vector = null) => 
       request('/predict', { 
         method: 'POST', 
-        body: { event_id, prediction_value, confidence } 
+        body: { 
+          event_id, 
+          prediction_value, 
+          confidence, 
+          prediction_type, 
+          numerical_value, 
+          lower_bound, 
+          upper_bound,
+          prob_vector
+        } 
       }),
       
     resolve: (id, outcome) => 
@@ -277,6 +286,62 @@ export const api = {
       
     getBettingStats: () => 
       request('/bets/stats')
+  },
+  
+  // Scoring endpoints (via backend proxy to prediction engine)
+  scoring: {
+    // Get unified log scoring leaderboard
+    getLeaderboard: (limit = 10) => 
+      request(`/scoring/leaderboard?limit=${limit}`),
+      
+    // Get enhanced leaderboard with Brier scores
+    getEnhancedLeaderboard: () => 
+      request('/scoring/enhanced-leaderboard'),
+      
+    // Get user's reputation stats
+    getUserReputation: (userId) => 
+      request(`/scoring/user/${userId}/reputation`),
+      
+    // Update user's reputation points
+    updateUserReputation: (userId) => 
+      request(`/scoring/user/${userId}/update-reputation`, { method: 'POST' }),
+      
+    // Get user's enhanced accuracy with Brier scores
+    getUserAccuracy: (userId) => 
+      request(`/scoring/user/${userId}/accuracy`),
+      
+    // Get user's calibration data
+    getUserCalibration: (userId) => 
+      request(`/scoring/user/${userId}/calibration`),
+      
+    // Get user's Brier score
+    getUserBrierScore: (userId) => 
+      request(`/scoring/user/${userId}/brier`),
+      
+    // Admin functions to manually trigger score calculations
+    calculateLogScores: () => 
+      request('/scoring/calculate', { method: 'POST' }),
+      
+    calculateTimeWeights: () => 
+      request('/scoring/time-weights', { method: 'POST' })
+  },
+  
+  // Leaderboard endpoints (direct database queries for performance)
+  leaderboard: {
+    getGlobal: (limit = 10) => 
+      request(`/leaderboard/global?limit=${limit}`),
+      
+    getFollowers: (limit = 10) => 
+      request(`/leaderboard/followers?limit=${limit}`),
+      
+    getFollowing: (limit = 10) => 
+      request(`/leaderboard/following?limit=${limit}`),
+      
+    getNetwork: (limit = 10) => 
+      request(`/leaderboard/network?limit=${limit}`),
+      
+    getUserRank: () => 
+      request('/leaderboard/rank')
   }
 };
 

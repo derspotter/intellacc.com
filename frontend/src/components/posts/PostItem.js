@@ -27,6 +27,7 @@ export default function PostItem({ post }) {
     return tokenData && tokenData.userId === post.user_id;
   };
 
+
   // Check if this post is being edited
   const isEditing = () => {
     return postsStore.state.editingPostId.val === post.id;

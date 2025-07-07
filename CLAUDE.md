@@ -52,8 +52,10 @@ docker compose -f docker-compose-dev.yml down  # or docker compose down for full
 - **Docker Optimization**: Separate dev compose file for faster development
 - **Prediction Engine**: Fully functional Rust-based service with professional-grade analytics (port 3001)
 - **Metaculus API Integration**: Successfully importing questions with proper JSON parsing
-- **Brier Score Implementation**: Industry-standard prediction accuracy measurement
-- **Enhanced Leaderboards**: Multi-timeframe performance tracking with caching
+- **Unified Log Scoring System**: Complete implementation of "All-Log + PLL" scoring blueprint
+- **Reputation Points System**: User reputation (1-11 scale) with automatic calculation and display
+- **Backend Integration**: Full scoring API with automatic calculation when predictions are made/resolved
+- **Enhanced Leaderboards**: Multi-timeframe performance tracking with direct database queries
 - **Real-time Updates**: WebSocket infrastructure for live score broadcasting
 - **SOTA Dark Mode**: Complete dark mode implementation with proper theming
 - **Enhanced Predictions List**: Improved styling and layout for predictions display
@@ -61,6 +63,67 @@ docker compose -f docker-compose-dev.yml down  # or docker compose down for full
 - **User Profile Navigation**: Clickable usernames in feed that navigate to user profiles
 - **Follow Functionality**: Users can follow/unfollow other users from their profile pages
 - **Unified Profile System**: Single ProfilePage component handles both current user and public profiles with identical layout
+- **Multi-Selection Leaderboards**: Toggle-based leaderboard filtering (Global, Followers, Following, Network)
+- **Reputation Display**: Profile cards show reputation points, global rank, and prediction count for all users
+- **Feed Visibility Multiplier**: Posts ranked by reputation-weighted visibility for better content discovery
+
+## Database Access Commands
+**IMPORTANT**: Database access commands for development and debugging:
+
+```bash
+# Basic database access
+docker exec intellacc_db psql -U intellacc_user -d intellaccdb
+
+# Run single queries
+docker exec intellacc_db psql -U intellacc_user -d intellaccdb -c "SELECT * FROM users;"
+
+# Show table structure
+docker exec intellacc_db psql -U intellacc_user -d intellaccdb -c "\d table_name;"
+
+# Common queries
+docker exec intellacc_db psql -U intellacc_user -d intellaccdb -c "SELECT COUNT(*) FROM predictions;"
+docker exec intellacc_db psql -U intellacc_user -d intellaccdb -c "SELECT COUNT(*) FROM events;"
+docker exec intellacc_db psql -U intellacc_user -d intellaccdb -c "SELECT id, username, role FROM users;"
+```
+
+**Database Credentials** (from /backend/.env):
+- User: `intellacc_user`
+- Password: `supersecretpassword`
+- Database: `intellaccdb`
+- Host: `db` (within Docker network) or `localhost:5432` (from host)
+
+## Database Population Scripts
+For testing the reputation system and social features with realistic data:
+
+### Main Population Script
+```bash
+# Populate database with 1000 users and realistic social network data
+docker cp scripts/populate_database.js intellacc_backend:/usr/src/app/
+docker exec intellacc_backend node populate_database.js
+```
+
+**Generates:**
+- 1000 realistic users with diverse profiles
+- 35,000+ follow relationships (realistic social network patterns)
+- 15,000+ predictions on existing Metaculus events
+- 500 posts + 800 comments for feed testing
+- 2000+ likes for engagement metrics
+- Reputation scores calculated for all users
+
+### Resolved Predictions Script
+```bash
+# Add historical resolved events for proper reputation testing
+docker cp scripts/add_resolved_predictions.js intellacc_backend:/usr/src/app/
+docker exec intellacc_backend node add_resolved_predictions.js
+```
+
+**Generates:**
+- 30 historical resolved events (2021-2023) based on actual outcomes
+- 800+ additional resolved predictions with realistic accuracy patterns
+- Recalculated reputation scores with sufficient resolved data
+- Proper test coverage for the unified log scoring system
+
+**Combined Result**: Over 4,500 resolved predictions (28% resolution rate) providing robust data for testing leaderboards, reputation rankings, and scoring accuracy.
 
 ## Code Style
 - Indentation: 2 spaces
@@ -129,31 +192,51 @@ body.dark-mode {
 }
 ```
 
-### Enhanced Prediction Engine Integration
-The Rust-based prediction engine provides professional-grade features:
+### Unified Log Scoring System Implementation
+The system implements the complete "All-Log + PLL" scoring blueprint with professional-grade features:
 
-**Core Scoring:**
-- Brier score calculations for proper prediction accuracy
-- Calibration scoring for confidence interval analysis
-- Multi-timeframe accuracy (daily, weekly, monthly, all-time)
-- Time-weighted scoring with decay for recent predictions
+**Core Scoring Rules (One Log Family):**
+- **Binary predictions**: Log loss `L = -ln p_true`
+- **Multi-choice**: Penalized Log-Loss (PLL) `L = -ln p_true + [-ln(1/K)] * 1_{argmax ≠ true}`
+- **Numeric/Continuous**: Negative log-likelihood `L = -ln f_θ(x_true)` with density clipping at ε = 10⁻⁴
 
-**Real-time Features:**
-- WebSocket connections for live leaderboard updates
-- Real-time score recalculation on prediction resolution
-- Live broadcasting of sync events and score changes
+**Reputation System:**
+1. **Time-weighting**: Predictions divided into hourly slices with weight `w_s = Δt/T_open`
+2. **Peer-relative bonus**: `R = k(Acc_user - Acc_others)` where k approaches 0.5 as forecast count grows
+3. **Positive-sum mapping**: `Rep = 10 * tanh(-(Acc + R)) + 1` giving 1-11 scale reputation points
 
-**Metaculus Integration:**
-- Daily automated sync with Metaculus.com API
-- Manual sync endpoints for immediate updates
-- Category-specific synchronization (politics, economics, science, etc.)
-- Automatic event creation from imported questions
+**Database Schema:**
+- `predictions.prob_vector` (JSONB) - Probability distributions for all prediction types
+- `predictions.raw_log_loss` - Calculated unified log loss scores
+- `score_slices` - Time-weighted scoring data per prediction slice
+- `user_reputation` - Final reputation points, time-weighted scores, peer bonuses
 
-**Domain Expertise:**
-- User expertise tracking across different prediction topics
-- Domain-specific leaderboards (politics expert, tech expert, etc.)
-- Cross-domain performance comparison
-- Minimum prediction thresholds for expertise qualification
+**Backend Integration:**
+- Automatic score calculation when predictions are created/resolved
+- Express proxy routes to prediction-engine endpoints (`/api/scoring/*`)
+- Background score updates without blocking user responses
+- Real-time reputation updates via WebSocket broadcasting
+
+**Frontend API Integration:**
+- Complete scoring API service in `api.scoring.*`
+- Leaderboard endpoints for reputation rankings
+- User reputation stats and calibration data
+- Admin functions for manual score recalculation
+
+**Available Scoring Endpoints:**
+- GET `/api/scoring/leaderboard` - Unified log scoring leaderboard
+- GET `/api/scoring/user/:id/reputation` - User reputation stats with level (Beginner/Novice/Skilled/Expert/Oracle)
+- GET `/api/scoring/user/:id/accuracy` - Enhanced accuracy with unified log scoring
+- GET `/api/scoring/user/:id/calibration` - Calibration curve data
+- POST `/api/scoring/calculate` - Manual score recalculation (admin)
+- POST `/api/scoring/time-weights` - Time-weighted score updates (admin)
+
+**Direct Database Leaderboard Endpoints:**
+- GET `/api/leaderboard/global` - Global leaderboard (all users)
+- GET `/api/leaderboard/followers` - User + their followers leaderboard
+- GET `/api/leaderboard/following` - User + people they follow leaderboard
+- GET `/api/leaderboard/network` - User + followers + following (network) leaderboard
+- GET `/api/leaderboard/rank` - Current user's global rank and reputation stats
 
 **Performance Optimization:**
 - In-memory caching with 5-minute TTL for frequently accessed data
@@ -161,21 +244,63 @@ The Rust-based prediction engine provides professional-grade features:
 - Batch processing for bulk score recalculations
 - Async processing for non-blocking operations
 
-**Available Endpoints:**
-- GET /enhanced-leaderboard - Leaderboard with Brier scores
-- GET /user/:id/enhanced-accuracy - Full user analytics
-- GET /user/:id/calibration - Calibration curve data
-- GET /user/:id/expertise - Domain-specific expertise
-- GET /domain/:name/experts - Top experts in domain
-- GET /metaculus/sync - Manual Metaculus sync
-- GET /ws - WebSocket for real-time updates
+**Metaculus Integration:**
+- Daily automated sync with Metaculus.com API
+- Manual sync endpoints for immediate updates
+- Category-specific synchronization (politics, economics, science, etc.)
+- Automatic event creation from imported questions
+
+## Leaderboard & Reputation System
+
+### Multi-Selection Leaderboard Component
+**Location**: `/frontend/src/components/predictions/LeaderboardCard.js`
+
+**Features:**
+- **Toggle-based filtering**: Users can select Global, Followers, Following independently
+- **Network view**: Selecting both Followers + Following creates network leaderboard
+- **Real-time updates**: Automatic refresh and live data fetching
+- **User rank display**: Shows current user's global rank for Global view
+- **Responsive design**: Adapts to mobile with optimized button layout
+
+**API Integration:**
+- Direct database queries for maximum performance (no prediction-engine proxy)
+- Separate endpoints for each leaderboard type with optimized SQL
+- User rank calculation with proper ties handling
+
+### Profile Reputation Display
+**Location**: `/frontend/src/components/profile/ProfileCard.js`
+
+**Features:**
+- **Universal display**: Shows reputation for both current user and public profiles
+- **Comprehensive stats**: Reputation points (1-11 scale), global rank, prediction count
+- **Loading states**: Proper loading indicators and error handling
+- **Responsive design**: Mobile-optimized layout with proper spacing
+
+**Data Sources:**
+- Current user: `/api/leaderboard/rank` (includes rank calculation)
+- Public profiles: `/api/scoring/user/:id/reputation` (prediction-engine data)
+
+### Feed Visibility Multiplier
+**Location**: `/backend/src/controllers/postController.js`
+
+**Implementation:**
+- **Reputation-weighted ranking**: `(1 + 0.15 * LN(1 + Rep)) * time_factor`
+- **Automatic calculation**: Applied to both `getPosts` and `getFeed` endpoints
+- **Performance optimized**: Direct SQL calculation without additional queries
 
 ## Key Directories
 - `/frontend/src/components/` - VanJS components organized by feature
+  - `/predictions/LeaderboardCard.js` - Multi-selection leaderboard with 4 view types
+  - `/profile/ProfileCard.js` - Universal profile card with reputation display
 - `/backend/src/controllers/` - API endpoint handlers
+  - `scoringController.js` - Prediction-engine proxy endpoints
+  - `leaderboardController.js` - Direct database leaderboard queries
+  - `postController.js` - Feed with reputation-based visibility
+- `/backend/src/services/` - Business logic services (scoringService.js for prediction-engine communication)
 - `/backend/src/routes/` - Express route definitions
 - `/backend/migrations/` - Database schema files
-- `/prediction-engine/` - Rust-based prediction processing (optional)
+- `/prediction-engine/` - Rust-based prediction processing with unified log scoring implementation
+- `/scripts/` - Database population scripts for testing
 
 ## Profile System Architecture
 

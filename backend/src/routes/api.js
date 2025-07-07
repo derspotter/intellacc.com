@@ -6,6 +6,8 @@ const userController = require('../controllers/userController');
 const postController = require('../controllers/postController');
 const likeController = require('../controllers/likeController');
 const predictionsController = require('../controllers/predictionsController');
+const scoringController = require('../controllers/scoringController');
+const leaderboardController = require('../controllers/leaderboardController');
 const authenticateJWT = require("../middleware/auth");
 
 // Base test route
@@ -68,5 +70,24 @@ router.post("/posts/:postId/like", authenticateJWT, likeController.likePost);
 router.delete("/posts/:postId/like", authenticateJWT, likeController.unlikePost);
 router.get("/posts/:postId/like/status", authenticateJWT, likeController.checkLikeStatus);
 router.get("/posts/:postId/likes", authenticateJWT, likeController.getLikesCount);
+
+// Scoring Routes (proxy to prediction engine)
+router.get("/scoring/leaderboard", scoringController.getLogScoringLeaderboard);
+router.get("/scoring/enhanced-leaderboard", scoringController.getEnhancedLeaderboard);
+router.get("/scoring/user/:userId/reputation", authenticateJWT, scoringController.getUserReputation);
+router.post("/scoring/user/:userId/update-reputation", authenticateJWT, scoringController.updateUserReputation);
+router.get("/scoring/user/:userId/accuracy", authenticateJWT, scoringController.getUserEnhancedAccuracy);
+
+// Leaderboard Routes (direct database queries for performance)
+router.get("/leaderboard/fast", leaderboardController.getFastLeaderboard); // Fast leaderboard from stored rankings
+router.get("/leaderboard/global", leaderboardController.getGlobalLeaderboard);
+router.get("/leaderboard/followers", authenticateJWT, leaderboardController.getFollowersLeaderboard);
+router.get("/leaderboard/following", authenticateJWT, leaderboardController.getFollowingLeaderboard);
+router.get("/leaderboard/network", authenticateJWT, leaderboardController.getNetworkLeaderboard);
+router.get("/leaderboard/rank", authenticateJWT, leaderboardController.getUserRank);
+router.get("/scoring/user/:userId/calibration", authenticateJWT, scoringController.getUserCalibration);
+router.get("/scoring/user/:userId/brier", authenticateJWT, scoringController.getUserBrierScore);
+router.post("/scoring/calculate", authenticateJWT, scoringController.calculateLogScores);
+router.post("/scoring/time-weights", authenticateJWT, scoringController.calculateTimeWeights);
 
 module.exports = router;

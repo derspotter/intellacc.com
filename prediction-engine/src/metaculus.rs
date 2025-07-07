@@ -151,6 +151,29 @@ impl MetaculusClient {
             .map_err(|_| anyhow::anyhow!("METACULUS_API_TOKEN environment variable not set"))
     }
 
+    // DRY helper: Common API request pattern
+    async fn make_api_request(&self, url: &str) -> Result<MetaculusResponse> {
+        let token = self.get_api_token()?;
+        let response: MetaculusResponse = self.client
+            .get(url)
+            .header("User-Agent", "Intellacc-PredictionEngine/1.0")
+            .header("Authorization", format!("Token {}", token))
+            .send()
+            .await?
+            .json()
+            .await?;
+        Ok(response)
+    }
+
+    // DRY helper: Extract questions from API response
+    fn extract_questions_from_response(&self, response: MetaculusResponse) -> Vec<(MetaculusQuestion, MetaculusPost)> {
+        response.results.into_iter()
+            .filter_map(|post| {
+                post.question.clone().map(|question| (question, post))
+            })
+            .collect()
+    }
+
     // Fetch open questions from Metaculus with proper pagination
     pub async fn fetch_open_questions(&self, limit: Option<u32>) -> Result<Vec<(MetaculusQuestion, MetaculusPost)>> {
         let mut all_questions = Vec::new();
@@ -163,32 +186,18 @@ impl MetaculusClient {
         loop {
             println!("🔍 Fetching from: {}", url);
             
-            let token = self.get_api_token()?;
-            let response: MetaculusResponse = self.client
-                .get(&url)
-                .header("User-Agent", "Intellacc-PredictionEngine/1.0")
-                .header("Authorization", format!("Token {}", token))
-                .send()
-                .await?
-                .json()
-                .await?;
-
-            // Extract questions from posts, keeping both question and post data
-            for post in response.results {
-                if let Some(question) = post.question.clone() {
-                    all_questions.push((question, post));
-                }
-            }
+            let response = self.make_api_request(&url).await?;
+            let next_url = response.next.clone(); // Store next URL before consuming response
+            let questions = self.extract_questions_from_response(response);
+            all_questions.extend(questions);
 
             println!("📊 Collected {} questions so far", all_questions.len());
 
             // Check if we should continue pagination
             let should_continue = if let Some(target_limit) = limit {
-                // If we have a limit, check if we've reached it
-                all_questions.len() < target_limit as usize && response.next.is_some()
+                all_questions.len() < target_limit as usize && next_url.is_some()
             } else {
-                // If no limit, continue until no more pages
-                response.next.is_some()
+                next_url.is_some()
             };
 
             if !should_continue {
@@ -196,7 +205,7 @@ impl MetaculusClient {
             }
 
             // Use the next URL from the response, but ensure it uses HTTPS
-            url = response.next.unwrap().replace("http://", "https://");
+            url = next_url.unwrap().replace("http://", "https://");
 
             // Rate limiting - be respectful to Metaculus API
             tokio::time::sleep(tokio::time::Duration::from_millis(750)).await;
@@ -220,25 +229,8 @@ impl MetaculusClient {
             url = format!("{}&limit={}", url, limit);
         }
 
-        let token = self.get_api_token()?;
-        let response: MetaculusResponse = self.client
-            .get(&url)
-            .header("User-Agent", "Intellacc-PredictionEngine/1.0")
-            .header("Authorization", format!("Token {}", token))
-            .send()
-            .await?
-            .json()
-            .await?;
-
-        // Extract questions from posts, keeping both question and post data
-        let mut questions = Vec::new();
-        for post in response.results {
-            if let Some(question) = post.question.clone() {
-                questions.push((question, post));
-            }
-        }
-
-        Ok(questions)
+        let response = self.make_api_request(&url).await?;
+        Ok(self.extract_questions_from_response(response))
     }
 
     // Convert Metaculus question to our internal event format
@@ -392,24 +384,9 @@ impl MetaculusClient {
         loop {
             println!("📄 Processing batch {} from: {}", page, url);
             
-            // Fetch one batch at a time
-            let token = self.get_api_token()?;
-            let response: MetaculusResponse = self.client
-                .get(&url)
-                .header("User-Agent", "Intellacc-PredictionEngine/1.0")
-                .header("Authorization", format!("Token {}", token))
-                .send()
-                .await?
-                .json()
-                .await?;
-
-            // Extract questions from posts, keeping both question and post data
-            let mut questions = Vec::new();
-            for post in response.results {
-                if let Some(question) = post.question.clone() {
-                    questions.push((question, post));
-                }
-            }
+            let response = self.make_api_request(&url).await?;
+            let next_url = response.next.clone();
+            let questions = self.extract_questions_from_response(response);
 
             if questions.is_empty() {
                 println!("✅ No more questions found. Import complete!");
@@ -434,13 +411,13 @@ impl MetaculusClient {
             }
 
             // Check if there's a next page
-            if response.next.is_none() {
+            if next_url.is_none() {
                 println!("📄 Reached last page. Import complete!");
                 break;
             }
 
             // Use the next URL from the response, but ensure it uses HTTPS
-            url = response.next.unwrap().replace("http://", "https://");
+            url = next_url.unwrap().replace("http://", "https://");
             page += 1;
 
             // Rate limiting - be respectful during bulk import
