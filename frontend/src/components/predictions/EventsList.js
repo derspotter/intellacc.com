@@ -12,6 +12,9 @@ export default function EventsList() {
   const error = van.state(null);
   const filter = van.state('all'); // 'all', 'open', 'closing-soon'
   const searchQuery = van.state('');
+  
+  // Cache EventCard components to prevent recreation and preserve slider state
+  const eventCardCache = new Map();
 
   const loadEvents = async () => {
     try {
@@ -157,10 +160,16 @@ export default function EventsList() {
           }
           
           return div({ class: 'events-grid' }, 
-            filtered.map(event => EventCard({ 
-              event, 
-              onStakeUpdate: handleStakeUpdate 
-            }))
+            filtered.map(event => {
+              // Use cached EventCard if available to preserve state
+              if (!eventCardCache.has(event.id)) {
+                eventCardCache.set(event.id, EventCard({ 
+                  event, 
+                  onStakeUpdate: handleStakeUpdate 
+                }));
+              }
+              return eventCardCache.get(event.id);
+            })
           );
         }
       ]),

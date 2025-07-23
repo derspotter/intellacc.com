@@ -42,7 +42,7 @@ exports.getGlobalLeaderboard = async (req, res) => {
       SELECT 
         u.id as user_id,
         u.username,
-        COALESCE(ur.rep_points, 1.0) as rep_points,
+        COALESCE(u.rp_balance, 1000.0) as rep_points,
         COALESCE(ur.time_weighted_score, 0.0) as time_weighted_score,
         COALESCE(ur.peer_bonus, 0.0) as peer_bonus,
         COUNT(p.id) as total_predictions,
@@ -51,8 +51,8 @@ exports.getGlobalLeaderboard = async (req, res) => {
       FROM users u
       LEFT JOIN user_reputation ur ON u.id = ur.user_id
       LEFT JOIN predictions p ON u.id = p.user_id AND p.raw_log_loss IS NOT NULL
-      GROUP BY u.id, u.username, ur.rep_points, ur.time_weighted_score, ur.peer_bonus, ur.updated_at
-      ORDER BY COALESCE(ur.rep_points, 1.0) DESC, COUNT(p.id) DESC
+      GROUP BY u.id, u.username, u.rp_balance, ur.time_weighted_score, ur.peer_bonus, ur.updated_at
+      ORDER BY COALESCE(u.rp_balance, 1000.0) DESC, COUNT(p.id) DESC
       LIMIT $1
     `, [limit]);
 
@@ -217,13 +217,13 @@ exports.getUserRank = async (req, res) => {
       WITH ranked_users AS (
         SELECT 
           u.id,
-          COALESCE(ur.rep_points, 1.0) as rep_points,
+          COALESCE(u.rp_balance, 1000.0) as rep_points,
           COUNT(p.id) as total_predictions,
-          ROW_NUMBER() OVER (ORDER BY COALESCE(ur.rep_points, 1.0) DESC, COUNT(p.id) DESC) as rank
+          ROW_NUMBER() OVER (ORDER BY COALESCE(u.rp_balance, 1000.0) DESC, COUNT(p.id) DESC) as rank
         FROM users u
         LEFT JOIN user_reputation ur ON u.id = ur.user_id
         LEFT JOIN predictions p ON u.id = p.user_id AND p.raw_log_loss IS NOT NULL
-        GROUP BY u.id, ur.rep_points
+        GROUP BY u.id, u.rp_balance
       )
       SELECT rank, rep_points, total_predictions
       FROM ranked_users
@@ -234,7 +234,7 @@ exports.getUserRank = async (req, res) => {
       return res.json({
         user_id: userId,
         rank: null,
-        rep_points: 1.0,
+        rep_points: 1000.0,
         total_predictions: 0,
         message: 'User has no predictions yet'
       });

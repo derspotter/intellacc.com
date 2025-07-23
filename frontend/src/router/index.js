@@ -18,6 +18,7 @@ import AdminEventManagement from '../components/predictions/AdminEventManagement
 import WeeklyAssignment from '../components/predictions/WeeklyAssignment';
 import EventsList from '../components/predictions/EventsList';
 import RPBalance from '../components/predictions/RPBalance';
+import GlobalLeaderboard from '../components/predictions/GlobalLeaderboard';
 import ProfilePage from '../components/profile/ProfilePage';
 import SettingsPage from '../components/settings/SettingsPage';
 
@@ -119,6 +120,11 @@ export default function Router() {
         
         // Main Markets Trading Interface
         EventsList()
+      ]),
+      
+      // Global Leaderboard Section
+      div({ class: "leaderboard-section" }, [
+        GlobalLeaderboard({ limit: 10 })
       ]),
       
       // Sidebar Content - RP Balance & Legacy Features

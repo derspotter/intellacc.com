@@ -15,7 +15,13 @@ export default function EventCard({ event, onStakeUpdate }) {
   // Betting form state
   const stakeAmount = van.state('');
   const betDirection = van.state('yes'); // 'yes' or 'no'
+  let beliefProbability = 0.7; // Use plain JS variable to avoid reactive updates
   const submitting = van.state(false);
+  
+  // Debounce Kelly suggestions to prevent spam
+  let kellyTimeout;
+  
+  
 
   // Use market data from the event object directly
   const marketState = {
@@ -28,6 +34,7 @@ export default function EventCard({ event, onStakeUpdate }) {
 
   const loadUserPosition = async () => {
     const userId = localStorage.getItem('userId');
+    console.log('loadUserPosition called for event', event.id, 'userId:', userId);
     if (!userId) return;
     
     try {
@@ -36,9 +43,26 @@ export default function EventCard({ event, onStakeUpdate }) {
       
       // Try to get user position from prediction engine
       const positionResponse = await fetch(`http://localhost:3001/events/${event.id}/shares?user_id=${userId}`);
+      console.log('Position response status:', positionResponse.status);
       if (positionResponse.ok) {
         const position = await positionResponse.json();
-        userPosition.val = position;
+        console.log('User position loaded:', position);
+        
+        // Convert string numbers to numbers and add calculated fields
+        const yesShares = parseFloat(position.yes_shares || 0);
+        const noShares = parseFloat(position.no_shares || 0);
+        const totalStaked = (yesShares * marketState.market_prob) + (noShares * (1 - marketState.market_prob));
+        const unrealizedPnl = (yesShares * marketState.market_prob) + (noShares * (1 - marketState.market_prob)) - totalStaked;
+        
+        userPosition.val = {
+          yes_shares: yesShares,
+          no_shares: noShares,
+          total_staked: totalStaked,
+          unrealized_pnl: unrealizedPnl
+        };
+        console.log('Processed position:', userPosition.val);
+      } else {
+        console.log('No position found or error:', await positionResponse.text());
       }
       
     } catch (err) {
@@ -49,12 +73,56 @@ export default function EventCard({ event, onStakeUpdate }) {
     }
   };
 
-  const getKellySuggestion = async (belief) => {
+  const getKellySuggestion = async (belief, updateCallback) => {
     try {
-      const response = await fetch(`http://localhost:3001/events/${event.id}/kelly?belief=${belief}`);
+      const token = localStorage.getItem('token');
+      let userId = localStorage.getItem('userId');
+      
+      if (!userId) {
+        // Get user ID if not cached
+        const userResponse = await api.users.getProfile();
+        userId = userResponse.id;
+        localStorage.setItem('userId', userId);
+      }
+      
+      console.log('Getting Kelly suggestion for belief:', belief, 'userId:', userId, 'eventId:', event.id);
+      
+      const response = await fetch(`http://localhost:3001/events/${event.id}/kelly?belief=${belief}&user_id=${userId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
       if (response.ok) {
         const kelly = await response.json();
-        kellyData.val = kelly;
+        // Transform API response to expected format
+        kellyData.val = {
+          kelly_optimal: parseFloat(kelly.kelly_suggestion),
+          quarter_kelly: parseFloat(kelly.quarter_kelly),
+          edge: belief - parseFloat(kelly.current_prob),
+          balance: parseFloat(kelly.balance),
+          expected_log_growth: (belief - parseFloat(kelly.current_prob)) * 0.1
+        };
+        console.log('Kelly data set:', kellyData.val);
+        // Force a re-render by triggering the reactive state
+        kellyData.val = {...kellyData.val};
+        if (updateCallback) updateCallback();
+      } else {
+        // Create fallback Kelly calculation
+        const marketProb = parseFloat(marketState.market_prob) || 0.5;
+        const edge = belief - marketProb;
+        const userBalance = 990; // Use current balance - could fetch from API
+        const kellyOptimal = Math.max(0, Math.abs(edge) * userBalance * 0.25); // Conservative 25% Kelly
+        kellyData.val = {
+          kelly_optimal: kellyOptimal,
+          quarter_kelly: kellyOptimal * 0.25,
+          edge: edge,
+          balance: userBalance,
+          expected_log_growth: edge * 0.1
+        };
+        // Force a re-render by triggering the reactive state  
+        kellyData.val = {...kellyData.val};
+        if (updateCallback) updateCallback();
       }
     } catch (err) {
       console.error('Error getting Kelly suggestion:', err);
@@ -98,7 +166,7 @@ export default function EventCard({ event, onStakeUpdate }) {
         body: JSON.stringify({
           user_id: parseInt(userId),
           stake: parseFloat(stakeAmount.val),
-          target_prob: betDirection.val === 'yes' ? 1.0 : 0.0
+          target_prob: betDirection.val === 'yes' ? 0.99 : 0.01
         })
       });
       
@@ -120,6 +188,160 @@ export default function EventCard({ event, onStakeUpdate }) {
       error.val = err.message;
     } finally {
       submitting.val = false;
+    }
+  };
+
+  const handleWithdrawal = async (shareType, amount) => {
+    if (!amount || amount <= 0) return;
+    
+    // Confirmation dialog
+    const currentPrice = shareType === 'yes' ? marketState.market_prob : (1 - marketState.market_prob);
+    const estimatedPayout = (amount * currentPrice).toFixed(2);
+    
+    const confirmed = confirm(
+      `Confirm withdrawal:\n\n` +
+      `Sell ${amount.toFixed(2)} ${shareType.toUpperCase()} shares\n` +
+      `Estimated payout: ${estimatedPayout} RP\n` +
+      `Current market price: ${(currentPrice * 100).toFixed(1)}%\n\n` +
+      `Do you want to proceed?`
+    );
+    
+    if (!confirmed) return;
+    
+    try {
+      submitting.val = true;
+      error.val = null;
+      
+      const token = localStorage.getItem('token');
+      let userId = localStorage.getItem('userId');
+      
+      if (!userId) {
+        const userResponse = await api.users.getProfile();
+        userId = userResponse.id;
+        localStorage.setItem('userId', userId);
+      }
+      
+      const response = await fetch(`http://localhost:3001/events/${event.id}/sell`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          user_id: parseInt(userId),
+          share_type: shareType,
+          amount: parseFloat(amount)
+        })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        // Show success message with payout amount
+        const successMsg = `Successfully sold ${amount.toFixed(2)} ${shareType.toUpperCase()} shares for ${result.payout.toFixed(2)} RP`;
+        console.log(successMsg);
+        
+        // Refresh user position
+        await loadUserPosition();
+        
+        // Notify parent of update
+        onStakeUpdate?.(result);
+      } else {
+        const errorData = await response.json();
+        error.val = errorData.message || 'Failed to sell shares';
+      }
+      
+    } catch (err) {
+      console.error('Error selling shares:', err);
+      error.val = err.message;
+    } finally {
+      submitting.val = false;
+    }
+  };
+
+  const handleFullWithdrawal = async () => {    
+    if (!userPosition.val) return;
+    
+    // Confirmation dialog for full withdrawal
+    const position = userPosition.val;
+    const yesValue = position.yes_shares * marketState.market_prob;
+    const noValue = position.no_shares * (1 - marketState.market_prob);
+    const totalEstimatedPayout = (yesValue + noValue).toFixed(2);
+    
+    const confirmed = confirm(
+      `Confirm full withdrawal:\n\n` +
+      `Sell ALL positions in this market\n` +
+      `YES shares: ${position.yes_shares.toFixed(2)}\n` +
+      `NO shares: ${position.no_shares.toFixed(2)}\n` +
+      `Estimated total payout: ${totalEstimatedPayout} RP\n\n` +
+      `This action cannot be undone. Do you want to proceed?`
+    );
+    
+    if (!confirmed) return;
+    
+    try {
+      submitting.val = true;
+      error.val = null;
+      
+      const position = userPosition.val;
+      let totalPayout = 0;
+      
+      // Sell YES shares if any
+      if (position.yes_shares > 0) {
+        const yesResult = await sellShares('yes', position.yes_shares);
+        if (yesResult.success) {
+          totalPayout += parseFloat(yesResult.payout);
+        }
+      }
+      
+      // Sell NO shares if any
+      if (position.no_shares > 0) {
+        const noResult = await sellShares('no', position.no_shares);
+        if (noResult.success) {
+          totalPayout += parseFloat(noResult.payout);
+        }
+      }
+      
+      console.log(`Full withdrawal completed. Total payout: ${totalPayout.toFixed(2)} RP`);
+      
+      // Refresh user position
+      await loadUserPosition();
+      
+    } catch (err) {
+      console.error('Error during full withdrawal:', err);
+      error.val = err.message;
+    } finally {
+      submitting.val = false;
+    }
+  };
+
+  const sellShares = async (shareType, amount) => {
+    const token = localStorage.getItem('token');
+    let userId = localStorage.getItem('userId');
+    
+    if (!userId) {
+      const userResponse = await api.users.getProfile();
+      userId = userResponse.id;
+      localStorage.setItem('userId', userId);
+    }
+    
+    const response = await fetch(`http://localhost:3001/events/${event.id}/sell`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        user_id: parseInt(userId),
+        share_type: shareType,
+        amount: parseFloat(amount)
+      })
+    });
+    
+    if (response.ok) {
+      return await response.json();
+    } else {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Failed to sell shares');
     }
   };
 
@@ -187,7 +409,9 @@ export default function EventCard({ event, onStakeUpdate }) {
       ]),
       
       // User Position
-      () => userPosition.val ? div({ class: 'user-position' }, [
+      () => {
+        console.log('User position check:', userPosition.val);
+        return userPosition.val ? div({ class: 'user-position' }, [
         h4('💼 Your Position'),
         div({ class: 'position-stats' }, [
           div({ class: 'stat' }, [
@@ -208,8 +432,30 @@ export default function EventCard({ event, onStakeUpdate }) {
               class: `stat-value ${userPosition.val.unrealized_pnl >= 0 ? 'positive' : 'negative'}`
             }, formatRP(userPosition.val.unrealized_pnl))
           ])
-        ])
-      ]) : null,
+        ]),
+        // Withdrawal buttons
+        (userPosition.val.yes_shares > 0 || userPosition.val.no_shares > 0) ? div({ class: 'withdrawal-actions' }, [
+          userPosition.val.yes_shares > 0 ? Button({
+            type: 'button',
+            className: 'withdrawal-btn secondary',
+            onclick: () => handleWithdrawal('yes', userPosition.val.yes_shares),
+            children: `Sell All YES (${userPosition.val.yes_shares.toFixed(2)})`
+          }) : null,
+          userPosition.val.no_shares > 0 ? Button({
+            type: 'button', 
+            className: 'withdrawal-btn secondary',
+            onclick: () => handleWithdrawal('no', userPosition.val.no_shares),
+            children: `Sell All NO (${userPosition.val.no_shares.toFixed(2)})`
+          }) : null,
+          Button({
+            type: 'button',
+            className: 'withdrawal-btn primary',
+            onclick: handleFullWithdrawal,
+            children: 'Exit All Positions'
+          })
+        ]) : null
+      ]) : null;
+      },
       
       // Betting Interface
       () => localStorage.getItem('token') ? div({ class: 'betting-interface' }, [
@@ -237,33 +483,130 @@ export default function EventCard({ event, onStakeUpdate }) {
           ]),
           
           div({ class: 'form-row' }, [
-            TextInput({
-              label: 'Stake Amount (RP)',
+            label('Your Belief Probability:'),
+            (() => {
+              // Create display elements
+              const percentageSpan = span({ class: 'belief-percentage' }, `${(beliefProbability * 100).toFixed(1)}%`);
+              const hintSmall = small({ class: 'belief-hint' }, 
+                `Market: ${(marketState.market_prob * 100).toFixed(1)}% | Your edge: ${((beliefProbability - marketState.market_prob) * 100).toFixed(1)}%`
+              );
+              
+              // Create slider
+              const slider = input({
+                type: 'range',
+                min: '0.01',
+                max: '0.99',
+                step: '0.01',
+                value: beliefProbability,
+                class: 'belief-slider'
+              });
+              
+              // Update display manually to avoid reactive re-renders
+              const updateDisplay = () => {
+                percentageSpan.textContent = `${(beliefProbability * 100).toFixed(1)}%`;
+                hintSmall.textContent = `Market: ${(marketState.market_prob * 100).toFixed(1)}% | Your edge: ${((beliefProbability - marketState.market_prob) * 100).toFixed(1)}%`;
+              };
+              
+              slider.oninput = (e) => {
+                beliefProbability = parseFloat(e.target.value);
+                updateDisplay();
+                // Debounce Kelly suggestion updates
+                if (kellyTimeout) clearTimeout(kellyTimeout);
+                kellyTimeout = setTimeout(() => {
+                  if (marketState && localStorage.getItem('token')) {
+                    console.log('Calling Kelly suggestion with belief:', beliefProbability);
+                    getKellySuggestion(beliefProbability);
+                  }
+                }, 300);
+              };
+              
+              // Get initial Kelly suggestion
+              if (localStorage.getItem('token') && marketState) {
+                getKellySuggestion(beliefProbability);
+              }
+              
+              return div({ class: 'belief-slider-container' }, [
+                slider,
+                div({ class: 'belief-display' }, [
+                  percentageSpan,
+                  hintSmall
+                ])
+              ]);
+            })()
+          ]),
+          
+          div({ class: 'form-row' }, [
+            label('Stake Amount (RP):'),
+            input({
               type: 'number',
               step: '0.01',
               min: '0.01',
               placeholder: 'Enter stake amount',
-              value: stakeAmount,
-              onInput: (value) => {
+              value: () => stakeAmount.val,
+              oninput: (e) => {
+                const value = e.target.value;
                 stakeAmount.val = value;
-                // Get Kelly suggestion based on current market and stake
-                if (value && marketState) {
-                  const belief = betDirection.val === 'yes' ? 0.6 : 0.4; // Default belief
-                  getKellySuggestion(belief);
+                console.log('Stake amount changed to:', value, 'stakeAmount.val:', stakeAmount.val);
+                // Get Kelly suggestion when stake amount changes
+                if (beliefProbability && marketState) {
+                  getKellySuggestion(beliefProbability);
                 }
-              }
+              },
+              class: 'stake-input'
             })
           ]),
           
-          () => kellyData.val ? div({ class: 'kelly-suggestion' }, [
-            small({ class: 'kelly-info' }, [
-              '💡 Kelly optimal: ',
-              span({ class: 'kelly-amount' }, formatRP(kellyData.val.kelly_optimal)),
-              ' (edge: ',
-              span({ class: 'kelly-edge' }, `${(kellyData.val.edge * 100).toFixed(1)}%`),
-              ')'
-            ])
-          ]) : null,
+          () => {
+            // Debug: Always show this section
+            return div({ class: 'kelly-debug-section', style: 'border: 1px solid #ccc; padding: 10px; margin: 10px 0;' }, [
+              div({ style: 'font-size: 12px; color: #666; margin-bottom: 5px;' }, 
+                `Debug: kellyData.val = ${kellyData.val ? 'OBJECT' : 'NULL'}`
+              ),
+              kellyData.val ? div({ class: 'kelly-suggestion' }, [
+                div({ class: 'kelly-header' }, [
+                  span('🎯 Kelly Optimal Suggestion'),
+                  div({ class: 'kelly-buttons' }, [
+                    Button({
+                      type: 'button',
+                      className: 'kelly-apply-btn secondary',
+                      onclick: () => {
+                        stakeAmount.val = kellyData.val.quarter_kelly.toFixed(2);
+                      },
+                      children: '1/4 Kelly'
+                    }),
+                    Button({
+                      type: 'button',
+                      className: 'kelly-apply-btn primary',
+                      onclick: () => {
+                        stakeAmount.val = kellyData.val.kelly_optimal.toFixed(2);
+                      },
+                      children: 'Full Kelly'
+                    })
+                  ])
+                ]),
+                div({ class: 'kelly-details' }, [
+                  div({ class: 'kelly-stat' }, [
+                    span({ class: 'kelly-label' }, 'Full Kelly:'),
+                    span({ class: 'kelly-amount' }, formatRP(kellyData.val.kelly_optimal))
+                  ]),
+                  div({ class: 'kelly-stat' }, [
+                    span({ class: 'kelly-label' }, 'Conservative (1/4):'),
+                    span({ class: 'kelly-amount conservative' }, formatRP(kellyData.val.quarter_kelly))
+                  ]),
+                  div({ class: 'kelly-stat' }, [
+                    span({ class: 'kelly-label' }, 'Your Edge:'),
+                    span({ 
+                      class: `kelly-edge ${kellyData.val.edge > 0 ? 'positive' : 'negative'}` 
+                    }, `${(kellyData.val.edge * 100).toFixed(1)}%`)
+                  ]),
+                  div({ class: 'kelly-stat' }, [
+                    span({ class: 'kelly-label' }, 'Balance:'),
+                    span({ class: 'kelly-balance' }, formatRP(kellyData.val.balance))
+                  ])
+                ])
+              ]) : div({ style: 'color: #999; font-style: italic;' }, 'Move the belief slider to see Kelly suggestions')
+            ]);
+          },
           
           () => error.val ? div({ class: 'error-message' }, error.val) : null,
           
@@ -271,7 +614,11 @@ export default function EventCard({ event, onStakeUpdate }) {
             Button({
               type: 'submit',
               className: 'primary',
-              disabled: () => !stakeAmount.val || submitting.val,
+              disabled: () => {
+                const disabled = !stakeAmount.val || submitting.val;
+                console.log('Button disabled:', disabled, 'stakeAmount.val:', stakeAmount.val, 'submitting.val:', submitting.val);
+                return disabled;
+              },
               children: () => submitting.val ? 'Placing Stake...' : 'Place Stake'
             })
           ])

@@ -156,6 +156,85 @@ const details = van.state('');
 title.val = e.target.value;
 ```
 
+### Kelly Criterion Component & Reactive State Issues
+**Problem**: Complex reactive components may not re-render when object state changes, causing components to appear/disappear.
+
+**Critical Solutions**:
+
+1. **Force VanJS Reactivity for Object Updates**:
+```javascript
+// Wrong - VanJS doesn't detect object mutations
+kellyData.val = { optimal: 100, edge: 0.2 };
+
+// Correct - Force reactivity with object spread
+kellyData.val = {...kellyData.val}; // Forces re-render
+```
+
+2. **Direct Input Elements vs Custom Components**:
+```javascript
+// Custom TextInput components may have prop name mismatches
+// Use direct input elements for critical form fields:
+input({
+  type: 'number',
+  value: () => stakeAmount.val, // Reactive binding
+  oninput: (e) => {
+    stakeAmount.val = e.target.value; // Direct state update
+  }
+})
+```
+
+3. **Button Disable Logic with Debugging**:
+```javascript
+// Add logging to debug reactive disable states
+disabled: () => {
+  const disabled = !stakeAmount.val || submitting.val;
+  console.log('Button disabled:', disabled, 'value:', stakeAmount.val);
+  return disabled;
+}
+```
+
+4. **Kelly API Integration Pattern**:
+```javascript
+const getKellySuggestion = async (belief) => {
+  const response = await fetch(`/api/kelly?belief=${belief}&user_id=${userId}`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  
+  if (response.ok) {
+    const kelly = await response.json();
+    kellyData.val = {
+      kelly_optimal: parseFloat(kelly.kelly_suggestion),
+      quarter_kelly: parseFloat(kelly.quarter_kelly),
+      edge: belief - parseFloat(kelly.current_prob),
+      balance: parseFloat(kelly.balance)
+    };
+    // Critical: Force reactivity
+    kellyData.val = {...kellyData.val};
+  }
+};
+```
+
+5. **Slider with Manual DOM Updates (Performance)**:
+```javascript
+// Avoid reactive slider to prevent re-renders during dragging
+let beliefProbability = 0.7; // Plain JS variable
+
+const slider = input({
+  type: 'range',
+  min: '0.01', max: '0.99', step: '0.01',
+  value: beliefProbability
+});
+
+// Manual DOM updates for performance
+slider.oninput = (e) => {
+  beliefProbability = parseFloat(e.target.value);
+  // Update display manually
+  displayElement.textContent = `${(beliefProbability * 100).toFixed(1)}%`;
+  // Debounced API calls
+  setTimeout(() => getKellySuggestion(beliefProbability), 300);
+};
+```
+
 ### Button Component Content
 **Problem**: Button content not displaying when passed incorrectly to custom Button components.
 

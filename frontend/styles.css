@@ -1,3 +1,6 @@
+/* Import leaderboard styles */
+@import url('./src/styles/leaderboard.css');
+
 /* CSS Custom Properties */
 :root {
   --blue-bg: rgb(255, 255, 255);
@@ -1035,6 +1038,64 @@ button:disabled,
 .load-more-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* Withdrawal Actions */
+.withdrawal-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.withdrawal-btn {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--card-bg);
+  color: var(--text-color);
+  cursor: pointer;
+  transition: all var(--transition);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.withdrawal-btn.secondary {
+  background: var(--card-bg);
+  border-color: var(--secondary-text);
+  color: var(--secondary-text);
+}
+
+.withdrawal-btn.secondary:hover {
+  background: var(--secondary-text);
+  color: var(--card-bg);
+}
+
+.withdrawal-btn.primary {
+  background: var(--error-color);
+  border-color: var(--error-color);
+  color: white;
+}
+
+.withdrawal-btn.primary:hover {
+  background: #cc0000;
+  border-color: #cc0000;
+}
+
+.withdrawal-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .withdrawal-actions {
+    flex-direction: column;
+  }
+  
+  .withdrawal-btn {
+    width: 100%;
+    text-align: center;
+  }
 }
 
 /* Responsive Design */
@@ -2294,5 +2355,169 @@ body.dark-mode .balance-note {
   
   .balance-info {
     padding: 0.75rem;
+  }
+}
+
+/* Belief Probability Slider Styles */
+.belief-slider-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.belief-slider {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, #ff4444, #ffaa00, #44ff44);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.belief-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--primary-color, #007bff);
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.belief-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--primary-color, #007bff);
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.belief-display {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+}
+
+.belief-percentage {
+  font-weight: 700;
+  color: var(--primary-color, #007bff);
+  font-size: 1.1rem;
+}
+
+.belief-hint {
+  color: var(--secondary-text);
+  font-size: 0.8rem;
+}
+
+/* Kelly Suggestion Styles */
+.kelly-suggestion {
+  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+  border: 2px solid #28a745;
+  border-radius: 12px;
+  padding: 1rem;
+  margin: 1rem 0;
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.1);
+}
+
+.kelly-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  font-weight: 700;
+  color: #28a745;
+}
+
+.kelly-apply-btn {
+  background: #28a745 !important;
+  color: white !important;
+  border: none !important;
+  padding: 0.4rem 0.8rem !important;
+  border-radius: 6px !important;
+  font-size: 0.8rem !important;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.kelly-apply-btn:hover {
+  background: #218838 !important;
+}
+
+.kelly-details {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+}
+
+.kelly-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.25rem 0;
+}
+
+.kelly-label {
+  font-weight: 500;
+  color: var(--secondary-text);
+}
+
+.kelly-amount {
+  font-weight: 700;
+  color: #28a745;
+  font-size: 1.1rem;
+}
+
+.kelly-edge.positive {
+  color: #28a745;
+  font-weight: 700;
+}
+
+.kelly-edge.negative {
+  color: #dc3545;
+  font-weight: 700;
+}
+
+.kelly-growth {
+  color: #28a745;
+  font-weight: 600;
+}
+
+/* Dark mode adjustments for Kelly suggestions */
+body.dark-mode .kelly-suggestion {
+  background: linear-gradient(135deg, rgba(40, 167, 69, 0.1), rgba(40, 167, 69, 0.05));
+  border-color: #28a745;
+}
+
+body.dark-mode .belief-slider::-webkit-slider-thumb {
+  border-color: var(--card-bg);
+}
+
+body.dark-mode .belief-slider::-moz-range-thumb {
+  border-color: var(--card-bg);
+}
+
+/* Mobile responsiveness for Kelly & Belief components */
+@media (max-width: 768px) {
+  .kelly-header {
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+  
+  .kelly-apply-btn {
+    align-self: stretch;
+  }
+  
+  .belief-display {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
   }
 }
