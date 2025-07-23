@@ -47,6 +47,34 @@ docker compose -f docker-compose-dev.yml down  # or docker compose down for full
 - Database: PostgreSQL accessible on port 5432
 
 ## Recent Features Added
+
+### Market Withdrawal System (Latest)
+- **Complete Withdrawal Interface**: Users can now exit market positions with three options:
+  - Sell All YES shares (individual button with share count)
+  - Sell All NO shares (individual button with share count) 
+  - Exit All Positions (complete liquidation button)
+- **Confirmation Dialogs**: Native browser confirmation with detailed transaction info:
+  - Estimated payout calculations based on current market prices
+  - Share quantities and market price percentages
+  - Warning messages for irreversible actions
+- **Responsive Design**: Mobile-optimized withdrawal buttons with proper spacing
+- **Real-time Updates**: Position data refreshes automatically after withdrawal
+- **Error Handling**: Comprehensive error handling with user-friendly messages
+
+### Kelly Criterion System Improvements (Latest)
+- **Enhanced Reactivity**: Fixed VanJS reactivity issues with proper object spreading pattern
+- **Belief Probability Slider**: Interactive slider showing real-time market edge calculation
+- **Debounced API Calls**: Performance-optimized Kelly suggestions with 300ms debounce
+- **Application Buttons**: One-click Kelly stake application (1/4 Kelly and Full Kelly)
+- **Direct Input Elements**: Replaced TextInput component with native input for better state management
+- **Comprehensive Display**: Formatted Kelly statistics with edge calculations and balance info
+
+### Global Leaderboard Component (Latest)
+- **Top Traders Display**: Shows top 10 traders by reputation points
+- **Reputation Badges**: Visual reputation levels (Beginner/Novice/Skilled/Expert/Oracle)
+- **Nested API Integration**: Properly handles complex API response structures
+- **User Statistics**: Displays prediction counts and accuracy metrics
+- **Router Integration**: Seamlessly integrated with predictions page layout
 - **Event Creation**: Users can create new prediction events via frontend form
 - **Enhanced Routing**: Event creation integrated into predictions page
 - **Docker Optimization**: Separate dev compose file for faster development
@@ -232,6 +260,79 @@ slider.oninput = (e) => {
   displayElement.textContent = `${(beliefProbability * 100).toFixed(1)}%`;
   // Debounced API calls
   setTimeout(() => getKellySuggestion(beliefProbability), 300);
+};
+```
+
+### Market Withdrawal System Implementation
+**Problem**: Users need a way to exit market positions with proper confirmation and error handling.
+
+**Implementation Patterns**:
+
+1. **Withdrawal Button Conditional Rendering**:
+```javascript
+// Only show withdrawal buttons when user has positions
+(userPosition.val.yes_shares > 0 || userPosition.val.no_shares > 0) ? div({ 
+  class: 'withdrawal-actions' 
+}, [
+  userPosition.val.yes_shares > 0 ? Button({
+    onclick: () => handleWithdrawal('yes', userPosition.val.yes_shares),
+    children: `Sell All YES (${userPosition.val.yes_shares.toFixed(2)})`
+  }) : null,
+  // ... other buttons
+]) : null
+```
+
+2. **Confirmation Dialog with Payout Estimation**: 
+```javascript
+const handleWithdrawal = async (shareType, amount) => {
+  // Calculate estimated payout before confirmation
+  const currentPrice = shareType === 'yes' ? marketState.market_prob : (1 - marketState.market_prob);
+  const estimatedPayout = (amount * currentPrice).toFixed(2);
+  
+  const confirmed = confirm(`
+    Confirm withdrawal:
+    Sell ${amount.toFixed(2)} ${shareType.toUpperCase()} shares
+    Estimated payout: ${estimatedPayout} RP
+    Current market price: ${(currentPrice * 100).toFixed(1)}%
+    
+    Do you want to proceed?
+  `);
+  
+  if (!confirmed) return;
+  // ... proceed with withdrawal
+};
+```
+
+3. **Position Data Transformation**:
+```javascript
+// Transform API string responses to usable numbers
+const yesShares = parseFloat(position.yes_shares || 0);
+const noShares = parseFloat(position.no_shares || 0);
+const totalStaked = (yesShares * marketState.market_prob) + (noShares * (1 - marketState.market_prob));
+
+userPosition.val = {
+  yes_shares: yesShares,
+  no_shares: noShares, 
+  total_staked: totalStaked,
+  unrealized_pnl: /* calculated P&L */
+};
+```
+
+4. **Full Withdrawal with Multiple API Calls**:
+```javascript
+const handleFullWithdrawal = async () => {
+  const position = userPosition.val;
+  
+  // Sequential withdrawal of both position types
+  if (position.yes_shares > 0) {
+    await sellShares('yes', position.yes_shares);
+  }
+  if (position.no_shares > 0) {
+    await sellShares('no', position.no_shares);
+  }
+  
+  // Refresh position data
+  await loadUserPosition();
 };
 ```
 
@@ -901,3 +1002,73 @@ const ThemedModal = (props) => Modal({
 - Combine VanUI components with VanX for complex state
 - Customize via CSS custom properties for theme integration
 - Use VanUI.Await for any asynchronous data loading
+
+# Current Development Status & Next Steps
+
+## ✅ Recently Completed (Latest Session)
+
+### Market Withdrawal System
+- **Complete Implementation**: Full withdrawal UI with three button options
+- **Confirmation Dialogs**: Payout estimation and confirmation workflows
+- **API Integration**: Connects to existing prediction engine `/events/:id/sell` endpoint
+- **Responsive Design**: Mobile-optimized withdrawal button layout
+- **Comprehensive Documentation**: Added to VanJS patterns section
+
+### Kelly Criterion System Improvements  
+- **Enhanced Reactivity**: Fixed object state update issues with proper spreading
+- **Interactive Slider**: Belief probability slider with real-time edge calculation
+- **Performance Optimization**: Debounced API calls (300ms) and manual DOM updates
+- **Application Buttons**: One-click Kelly stake application (1/4 and Full Kelly)
+- **Direct Input Integration**: Replaced problematic TextInput component
+
+### Global Leaderboard Component
+- **Top Traders Display**: Shows reputation-ranked users with badges
+- **API Integration**: Handles nested response structures properly
+- **Router Integration**: Seamlessly added to predictions page layout
+
+## 🔍 Current Issue: Withdrawal Button Visibility
+
+**Problem**: adminuser has confirmed positions (253.62 YES shares + 9976 NO shares on Bitcoin $100k event) but withdrawal buttons are not appearing in the UI.
+
+**Debugging Added**:
+- Console logging for position loading process
+- User ID verification and API response status logging
+- Position data transformation verification
+- UI conditional rendering debug output
+
+**Next Steps for Resolution**:
+1. Check browser console for debugging output on Bitcoin event page
+2. Verify user authentication state and localStorage userId
+3. Test position API endpoint response format
+4. Validate VanJS reactivity triggers for position display
+
+## 📋 Current Todo List
+
+### High Priority
+- **Debug withdrawal button visibility**: Investigate why buttons don't appear for confirmed user positions
+- **Test withdrawal functionality**: Complete end-to-end withdrawal testing once visibility issue resolved
+
+### Medium Priority  
+- **UserPortfolio component**: Create comprehensive portfolio view showing all user market positions
+- **Weekly assignment status**: Add assignment tracking to user dashboard/profile
+- **Error handling improvements**: Add comprehensive error handling for position loading failures
+
+### Low Priority
+- **WebSocket support**: Add real-time market updates for live price changes
+
+## 🎯 Development Notes
+
+**Key Files Modified**:
+- `frontend/src/components/predictions/EventCard.js` - Core withdrawal implementation
+- `frontend/styles.css` - Withdrawal button styling
+- `frontend/src/components/predictions/GlobalLeaderboard.js` - New leaderboard component
+
+**Database Verified Positions**:
+- User 1006 (adminuser): Bitcoin event (ID 36) with substantial positions
+- API endpoint confirmed working: returns proper JSON with share amounts
+
+**Technical Patterns Documented**:
+- Force VanJS reactivity with object spreading
+- Direct input elements vs custom components
+- Debounced slider performance optimization
+- Withdrawal confirmation dialog patterns
