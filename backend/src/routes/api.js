@@ -8,6 +8,8 @@ const likeController = require('../controllers/likeController');
 const predictionsController = require('../controllers/predictionsController');
 const scoringController = require('../controllers/scoringController');
 const leaderboardController = require('../controllers/leaderboardController');
+const notificationController = require('../controllers/notificationController');
+const weeklyAssignmentController = require('../controllers/weeklyAssignmentController');
 const authenticateJWT = require("../middleware/auth");
 
 // Base test route
@@ -71,6 +73,13 @@ router.delete("/posts/:postId/like", authenticateJWT, likeController.unlikePost)
 router.get("/posts/:postId/like/status", authenticateJWT, likeController.checkLikeStatus);
 router.get("/posts/:postId/likes", authenticateJWT, likeController.getLikesCount);
 
+// Notification Routes
+router.get("/notifications", authenticateJWT, notificationController.getNotifications);
+router.get("/notifications/count", authenticateJWT, notificationController.getUnreadCount);
+router.put("/notifications/:notificationId/read", authenticateJWT, notificationController.markAsRead);
+router.put("/notifications/mark-all-read", authenticateJWT, notificationController.markAllAsRead);
+router.delete("/notifications/:notificationId", authenticateJWT, notificationController.deleteNotification);
+
 // Scoring Routes (proxy to prediction engine)
 router.get("/scoring/leaderboard", scoringController.getLogScoringLeaderboard);
 router.get("/scoring/enhanced-leaderboard", scoringController.getEnhancedLeaderboard);
@@ -89,5 +98,13 @@ router.get("/scoring/user/:userId/calibration", authenticateJWT, scoringControll
 router.get("/scoring/user/:userId/brier", authenticateJWT, scoringController.getUserBrierScore);
 router.post("/scoring/calculate", authenticateJWT, scoringController.calculateLogScores);
 router.post("/scoring/time-weights", authenticateJWT, scoringController.calculateTimeWeights);
+
+// Weekly Assignment Routes
+router.post("/weekly/assign", weeklyAssignmentController.assignWeeklyPredictions);
+router.post("/weekly/process-completed", weeklyAssignmentController.processCompletedAssignments);
+router.post("/weekly/apply-decay", weeklyAssignmentController.applyWeeklyDecay);
+router.post("/weekly/run-all", weeklyAssignmentController.runWeeklyProcesses);
+router.get("/weekly/stats", weeklyAssignmentController.getWeeklyStats);
+router.get("/weekly/user/:userId/status", authenticateJWT, weeklyAssignmentController.getUserWeeklyStatus);
 
 module.exports = router;

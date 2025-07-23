@@ -188,8 +188,8 @@ async function populateDatabase() {
     await client.query('DELETE FROM user_reputation WHERE user_id > 3');
     await client.query('DELETE FROM users WHERE id > 3');
     
-    // Reset sequence
-    await client.query('SELECT setval(\'users_id_seq\', (SELECT COALESCE(MAX(id), 0) FROM users))');
+    // Reset sequence (ensure minimum value is 1)
+    await client.query('SELECT setval(\'users_id_seq\', GREATEST((SELECT COALESCE(MAX(id), 0) FROM users), 1))');
     
     console.log('Generating 1000 users...');
     const users = [];
@@ -249,12 +249,16 @@ async function populateDatabase() {
     console.log('Generating predictions...');
     let predictionCount = 0;
     
-    for (const user of users) {
-      // Each user makes 5-25 predictions
-      const userPredictionCount = randomInt(5, 25);
-      
-      for (let i = 0; i < userPredictionCount; i++) {
-        const event = random(events);
+    // Skip predictions if no events exist
+    if (events.length === 0) {
+      console.log('No events found, skipping prediction generation');
+    } else {
+      for (const user of users) {
+        // Each user makes 5-25 predictions
+        const userPredictionCount = randomInt(5, 25);
+        
+        for (let i = 0; i < userPredictionCount; i++) {
+          const event = random(events);
         
         // Generate prediction based on event type
         let predictionValue, confidence, numericalValue, outcome;
@@ -321,6 +325,7 @@ async function populateDatabase() {
           // Skip duplicates
         }
       }
+    }
     }
     
     console.log('Generating user reputation scores...');

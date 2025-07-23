@@ -15,12 +15,14 @@ import ProfilePredictions from '../components/profile/ProfilePredictions';
 import CreatePredictionForm from '../components/predictions/CreatePredictionForm';
 import CreateEventForm from '../components/predictions/CreateEventForm';
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
-import LeaderboardCard from '../components/predictions/LeaderboardCard';
+import WeeklyAssignment from '../components/predictions/WeeklyAssignment';
+import EventsList from '../components/predictions/EventsList';
+import RPBalance from '../components/predictions/RPBalance';
 import ProfilePage from '../components/profile/ProfilePage';
 import SettingsPage from '../components/settings/SettingsPage';
 
 // Use shorthand for tag functions
-const { div, h1, h2, p, button } = van.tags;
+const { div, h1, h2, h3, p, button } = van.tags;
 
 // Update page from hash (now async to handle store loading and initial fetch)
 export const updatePageFromHash = async () => {
@@ -103,22 +105,43 @@ export default function Router() {
     signup: () => SignUpForm(),
     settings: () => SettingsPage(),
     
-    predictions: () => div({ class: "predictions-page" }, [
-      h1("Predictions & Betting"),
+    predictions: () => div({ class: "markets-page" }, [
+      h1("🏛️ Prediction Markets"),
+      p({ class: "page-description" }, "Trade on future events with LMSR automated market making. Earn rewards through weekly assignments and optimal staking."),
+      
+      // Admin Event Management
       () => isAdminState.val ? AdminEventManagement() : null,
-      div({ class: "cards-container" }, [
-        // Leaderboard Card - shows reputation rankings
-        () => isLoggedInState.val ? LeaderboardCard() : null,
-        // Event Creation Form - available to all logged-in users
-        () => isLoggedInState.val ? CreateEventForm() : null,
-        // Prediction Form - will be styled as a card
-        CreatePredictionForm(),
-        // Predictions List - will be styled as a card
-        ProfilePredictions({
-          limit: null,
-          showViewAll: false,
-          title: 'Your Predictions'
-        })
+      
+      // Market Overview Section
+      div({ class: "market-overview" }, [
+        // Weekly Assignment - now working
+        () => isLoggedInState.val ? WeeklyAssignment() : null,
+        
+        // Main Markets Trading Interface
+        EventsList()
+      ]),
+      
+      // Sidebar Content - RP Balance & Legacy Features
+      div({ class: "market-sidebar" }, [
+        // RP Balance - now working
+        () => isLoggedInState.val ? RPBalance() : null,
+        
+        // Join Markets Section - for non-logged-in users
+        () => !isLoggedInState.val ? div({ class: "login-section" }, [
+          h2("🔐 Join the Markets"),
+          p("Create an account to:"),
+          div({ class: "feature-list" }, [
+            p("• Trade on prediction markets"),
+            p("• Earn weekly assignment rewards (+50 RP)"),
+            p("• Get Kelly optimal betting suggestions"),
+            p("• Track your market portfolio"),
+            p("• Compete on leaderboards")
+          ]),
+          button({ 
+            onclick: () => { window.location.hash = 'login' },
+            class: "cta-button"
+          }, "Sign Up / Log In")
+        ]) : null
       ])
     ]),
     

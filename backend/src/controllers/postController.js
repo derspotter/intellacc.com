@@ -1,4 +1,5 @@
 const db = require('../db');
+const notificationService = require('../services/notificationService');
 
 // Create a new post or comment
 exports.createPost = async (req, res) => {
@@ -54,12 +55,32 @@ exports.createPost = async (req, res) => {
       newPost.username = 'Unknown User';
     }
 
-    // If this is a comment, increment the parent's comment_count
+    // If this is a comment, increment the parent's comment_count and create notifications
     if (parentId) {
       await db.query(
         'UPDATE posts SET comment_count = comment_count + 1 WHERE id = $1',
         [parentId]
       );
+
+      // Create notification for the parent author
+      try {
+        const parentPost = await db.query('SELECT user_id, is_comment FROM posts WHERE id = $1', [parentId]);
+        if (parentPost.rows.length > 0) {
+          const parentAuthorId = parentPost.rows[0].user_id;
+          const isReplyToComment = parentPost.rows[0].is_comment;
+
+          if (isReplyToComment) {
+            // This is a reply to a comment
+            await notificationService.createReplyNotification(userId, parentId, parentAuthorId, newPost.id);
+          } else {
+            // This is a comment on a post
+            await notificationService.createCommentNotification(userId, parentId, parentAuthorId, newPost.id);
+          }
+        }
+      } catch (notificationError) {
+        console.error('Error creating comment/reply notification:', notificationError);
+        // Don't fail the comment creation if notification fails
+      }
 
       // Handle via socket.io for real-time updates
       if (req.io) {

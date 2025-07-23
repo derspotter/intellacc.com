@@ -188,7 +188,7 @@ exports.getEvents = async (req, res) => {
     
     // Get search parameter if provided
     const search = req.query.search;
-    let query = "SELECT * FROM events WHERE outcome IS NULL";
+    let query = "SELECT * FROM events WHERE 1=1";  // Show all events (resolved and unresolved)
     let params = [];
     
     // Add search functionality

@@ -8,7 +8,7 @@ use axum::{
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
 use std::net::SocketAddr;
 use std::collections::HashMap;
 use axum::extract::ws::{WebSocket, Message};
@@ -22,6 +22,7 @@ use std::time::Duration;
 mod database;
 mod metaculus;
 mod benchmark;
+mod lmsr;
 
 // DRY helper types and functions
 type ApiResult<T> = Result<Json<T>, (axum::http::StatusCode, Json<Value>)>;
@@ -170,6 +171,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/metaculus/bulk-import", get(manual_bulk_import_endpoint))
         .route("/metaculus/limited-import", get(manual_limited_import_endpoint))
         .route("/metaculus/sync-categories", get(manual_category_sync))
+        // LMSR Market API endpoints
+        .route("/events/:id/market", get(get_market_state_endpoint))
+        .route("/events/:id/update", post(update_market_endpoint))
+        .route("/events/:id/kelly", get(kelly_suggestion_endpoint))
+        .route("/events/:id/sell", post(sell_shares_endpoint))
+        .route("/events/:id/market-resolve", post(resolve_market_event_endpoint))
+        .route("/events/:id/shares", get(get_user_shares_endpoint))
         .with_state(app_state); // Share app state with all routes
 
     // Define the address to listen on - bind to all interfaces in Docker
@@ -196,6 +204,12 @@ async fn main() -> anyhow::Result<()> {
     println!("  GET /metaculus/sync - Manual sync with Metaculus API (150 recent questions)");
     println!("  GET /metaculus/bulk-import - Complete import of ALL Metaculus questions");
     println!("  GET /metaculus/sync-categories - Manual category sync");
+    println!("  GET /events/:id/market - Get market state for event");
+    println!("  POST /events/:id/update - Update market with stake");
+    println!("  GET /events/:id/kelly - Get Kelly criterion suggestion");
+    println!("  POST /events/:id/sell - Sell shares back to market");
+    println!("  POST /events/:id/market-resolve - Resolve market event");
+    println!("  GET /events/:id/shares - Get user's shares for event");
 
     // Start the daily Metaculus sync job (disabled for testing)
     // tokio::spawn(async move {
@@ -622,6 +636,187 @@ async fn update_global_rankings_endpoint(
             })))
         },
         Err(e) => Err(internal_error(&format!("Ranking update error: {}", e)))
+    }
+}
+
+// ============================================================================
+// LMSR MARKET API ENDPOINTS
+// ============================================================================
+
+// Get market state for an event
+async fn get_market_state_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+) -> ApiResult<Value> {
+    match lmsr::get_market_state(&app_state.db, event_id).await {
+        Ok(market_state) => Ok(Json(market_state)),
+        Err(e) => Err(internal_error(&format!("Market state error: {}", e)))
+    }
+}
+
+// Update market with new stake
+async fn update_market_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    let user_id = payload.get("user_id")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as i32;
+    
+    let target_prob = payload.get("target_prob")
+        .and_then(|v| v.as_f64())
+        .and_then(|f| Decimal::from_f64(f))
+        .unwrap_or(Decimal::new(5, 1)); // 0.5 default
+
+    let stake = payload.get("stake")
+        .and_then(|v| v.as_f64())
+        .and_then(|f| Decimal::from_f64(f))
+        .unwrap_or(Decimal::new(10, 0)); // 10.0 default
+
+    let update = lmsr::MarketUpdate {
+        event_id,
+        target_prob,
+        stake,
+    };
+
+    match lmsr::update_market(&app_state.db, user_id, update).await {
+        Ok(result) => {
+            invalidate_and_broadcast(&app_state, "market_updated", json!({
+                "event_id": event_id,
+                "user_id": user_id,
+                "new_prob": result.new_prob,
+                "shares_acquired": result.shares_acquired
+            }));
+            Ok(Json(json!(result)))
+        },
+        Err(e) => Err(internal_error(&format!("Market update error: {}", e)))
+    }
+}
+
+// Get Kelly criterion betting suggestion
+async fn kelly_suggestion_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    Query(params): Query<HashMap<String, String>>,
+) -> ApiResult<Value> {
+    let belief = params.get("belief")
+        .and_then(|s| s.parse::<f64>().ok())
+        .and_then(|f| Decimal::from_f64(f))
+        .unwrap_or(Decimal::new(5, 1)); // 0.5 default
+
+    let user_id = params.get("user_id")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(1);
+
+    // Get current market probability
+    let market_prob: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
+        "SELECT market_prob FROM events WHERE id = $1"
+    )
+    .bind(event_id)
+    .fetch_one(&app_state.db)
+    .await;
+
+    let market_prob = match market_prob {
+        Ok(prob) => prob,
+        Err(_) => return Err(not_found_error("Event"))
+    };
+
+    // Get user balance
+    let balance: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
+        "SELECT rp_balance FROM users WHERE id = $1"
+    )
+    .bind(user_id)
+    .fetch_one(&app_state.db)
+    .await;
+
+    let balance = match balance {
+        Ok(bal) => bal,
+        Err(_) => return Err(not_found_error("User"))
+    };
+
+    let suggestion = lmsr::kelly_suggestion(belief, market_prob, balance);
+    Ok(Json(json!(suggestion)))
+}
+
+// Sell shares back to market
+async fn sell_shares_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    let user_id = payload.get("user_id")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as i32;
+
+    let share_type = payload.get("share_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("yes");
+
+    let amount = payload.get("amount")
+        .and_then(|v| v.as_f64())
+        .and_then(|f| Decimal::from_f64(f))
+        .unwrap_or(Decimal::new(1, 0)); // 1.0 default
+
+    match lmsr::sell_shares(&app_state.db, user_id, event_id, share_type, amount).await {
+        Ok(payout) => {
+            invalidate_and_broadcast(&app_state, "shares_sold", json!({
+                "event_id": event_id,
+                "user_id": user_id,
+                "share_type": share_type,
+                "amount": amount,
+                "payout": payout
+            }));
+            Ok(Json(json!({
+                "success": true,
+                "payout": payout,
+                "message": format!("Sold {} {} shares for {} RP", amount, share_type, payout)
+            })))
+        },
+        Err(e) => Err(internal_error(&format!("Share sale error: {}", e)))
+    }
+}
+
+// Resolve event and distribute payouts
+async fn resolve_market_event_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    let outcome = payload.get("outcome")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true); // Default to YES
+
+    match lmsr::resolve_event(&app_state.db, event_id, outcome).await {
+        Ok(()) => {
+            invalidate_and_broadcast(&app_state, "market_event_resolved", json!({
+                "event_id": event_id,
+                "outcome": outcome
+            }));
+            Ok(Json(json!({
+                "success": true,
+                "event_id": event_id,
+                "outcome": outcome,
+                "message": format!("Event {} resolved with outcome: {}", event_id, if outcome { "YES" } else { "NO" })
+            })))
+        },
+        Err(e) => Err(internal_error(&format!("Event resolution error: {}", e)))
+    }
+}
+
+// Get user's shares for an event
+async fn get_user_shares_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    Query(params): Query<HashMap<String, String>>,
+) -> ApiResult<Value> {
+    let user_id = params.get("user_id")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(1);
+
+    match lmsr::get_user_shares(&app_state.db, user_id, event_id).await {
+        Ok(shares) => Ok(Json(shares)),
+        Err(e) => Err(internal_error(&format!("User shares error: {}", e)))
     }
 }
 

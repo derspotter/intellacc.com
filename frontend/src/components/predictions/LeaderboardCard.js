@@ -1,5 +1,5 @@
 import van from 'vanjs-core';
-const { div, span, button, h3, p, a } = van.tags;
+const { div, span, button, h3, p, a, table, thead, tbody, tr, th, td } = van.tags;
 import Card from '../common/Card';
 import api from '../../services/api';
 import { getTokenData } from '../../services/auth';
@@ -135,16 +135,16 @@ export default function LeaderboardCard() {
     };
   };
 
-  // Render leaderboard entry
-  const renderLeaderboardEntry = (entry, index) => {
+  // Render leaderboard table row
+  const renderLeaderboardRow = (entry, index) => {
     const currentUserId = getCurrentUserId();
     const isCurrentUser = entry.user_id === currentUserId;
     
-    return div({ 
-      class: `leaderboard-entry ${isCurrentUser ? 'current-user' : ''}` 
+    return tr({ 
+      class: `leaderboard-row ${isCurrentUser ? 'current-user' : ''}` 
     }, [
-      div({ class: 'entry-rank' }, `#${index + 1}`),
-      div({ class: 'entry-user' }, [
+      td({ class: 'rank-cell' }, `${index + 1}`),
+      td({ class: 'user-cell' }, [
         a({
           href: `#user/${entry.user_id}`,
           class: 'username-link',
@@ -153,18 +153,15 @@ export default function LeaderboardCard() {
             window.location.hash = `user/${entry.user_id}`;
           }
         }, entry.username),
-        isCurrentUser ? span({ class: 'you-indicator' }, '(you)') : null
+        isCurrentUser ? span({ class: 'you-indicator' }, ' (you)') : null
       ]),
-      div({ class: 'entry-stats' }, [
-        div({ class: 'rep-points' }, [
-          span({ class: 'points-value' }, formatRepPoints(entry.rep_points)),
-          span({ class: 'points-label' }, 'pts')
-        ]),
-        div({ class: 'predictions-count' }, [
-          span({ class: 'count-value' }, entry.total_predictions),
-          span({ class: 'count-label' }, 'predictions')
-        ])
-      ])
+      td({ class: 'points-cell' }, formatRepPoints(entry.rep_points)),
+      td({ class: 'predictions-cell' }, entry.total_predictions),
+      td({ class: 'accuracy-cell' }, 
+        entry.avg_log_loss ? 
+          parseFloat(entry.avg_log_loss).toFixed(3) : 
+          '-'
+      )
     ]);
   };
 
@@ -193,9 +190,20 @@ export default function LeaderboardCard() {
         );
       }
 
-      return div({ class: 'leaderboard-list' },
-        leaderboardData.val.map((entry, index) => renderLeaderboardEntry(entry, index))
-      );
+      return table({ class: 'leaderboard-table' }, [
+        thead([
+          tr([
+            th({ class: 'rank-header' }, 'Rank'),
+            th({ class: 'user-header' }, 'User'),
+            th({ class: 'points-header' }, 'Rep Points'),
+            th({ class: 'predictions-header' }, 'Predictions'),
+            th({ class: 'accuracy-header' }, 'Avg Log Loss')
+          ])
+        ]),
+        tbody(
+          leaderboardData.val.map((entry, index) => renderLeaderboardRow(entry, index))
+        )
+      ]);
     };
   };
 

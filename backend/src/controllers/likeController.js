@@ -1,5 +1,6 @@
 // backend/src/controllers/likeController.js
 const db = require('../db');
+const notificationService = require('../services/notificationService');
 
 /**
  * Like a post
@@ -11,7 +12,7 @@ exports.likePost = async (req, res) => {
   const userId = req.user.id;
 
   try {
-    // Check if post exists
+    // Check if post exists and get post author
     const postResult = await db.query(
       'SELECT * FROM posts WHERE id = $1',
       [postId]
@@ -20,6 +21,9 @@ exports.likePost = async (req, res) => {
     if (postResult.rows.length === 0) {
       return res.status(404).json({ message: 'Post not found' });
     }
+
+    const post = postResult.rows[0];
+    const postAuthorId = post.user_id;
 
     // Check if already liked
     const likeCheck = await db.query(
@@ -42,6 +46,14 @@ exports.likePost = async (req, res) => {
       'SELECT like_count FROM posts WHERE id = $1',
       [postId]
     );
+
+    // Create notification for the post author (if not liking own post)
+    try {
+      await notificationService.createLikeNotification(userId, postId, postAuthorId);
+    } catch (notificationError) {
+      console.error('Error creating like notification:', notificationError);
+      // Don't fail the like operation if notification fails
+    }
 
     return res.status(201).json({
       message: 'Post liked successfully',

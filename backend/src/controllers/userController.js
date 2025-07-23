@@ -3,6 +3,7 @@
 const db = require('../db');
 const bcrypt = require('bcrypt');
 const { generateToken } = require('../utils/jwt');
+const notificationService = require('../services/notificationService');
 
 // Create a new user
 exports.createUser = async (req, res) => {
@@ -113,7 +114,7 @@ exports.getUserProfile = async (req, res) => {
     const userId = req.user.id; // Using standardized user object from auth middleware
 
     const result = await db.query(
-      "SELECT id, username, email, role, bio FROM users WHERE id = $1",
+      "SELECT id, username, email, role, bio, rp_balance FROM users WHERE id = $1",
       [userId]
     );
 
@@ -182,6 +183,14 @@ exports.followUser = async (req, res) => {
       'INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) RETURNING *',
       [followerId, followingId]
     );
+    
+    // Create follow notification
+    try {
+      await notificationService.createFollowNotification(followerId, followingId);
+    } catch (notificationError) {
+      console.error('Error creating follow notification:', notificationError);
+      // Don't fail the follow operation if notification fails
+    }
     
     res.status(201).json({ message: "Successfully followed user" });
   } catch (err) {
