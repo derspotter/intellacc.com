@@ -1,11 +1,10 @@
 import van from "vanjs-core";
-import Card from '../common/Card.js';
 import Button from '../common/Button.js';
 import api from '../../services/api.js';
 
 const { div, h3, h4, p, span, small, ul, li } = van.tags;
 
-export default function RPBalance() {
+export default function RPBalance({ horizontal = false }) {
   const balance = van.state(null);
   const loading = van.state(true);
   const error = van.state(null);
@@ -77,10 +76,7 @@ export default function RPBalance() {
     '🏆 Climb leaderboards for reputation bonuses'
   ];
 
-  return Card({
-    className: 'rp-balance-card',
-    children: [
-      () => {
+  return () => {
         if (loading.val) {
           return div({ class: 'rp-balance-loading' }, [
             div({ class: 'loading-spinner' }),
@@ -111,6 +107,34 @@ export default function RPBalance() {
         }
         
         const bal = balance.val;
+        
+        // Horizontal layout for stats bar
+        if (horizontal) {
+          return div({ class: 'user-stats-horizontal' }, [
+            div({ class: 'stat-item' }, [
+              span({ class: 'stat-main' }, formatRP(bal.rp_balance) + ' RP'),
+              span({ class: 'stat-sub' }, 'Balance')
+            ]),
+            div({ class: 'stat-item' }, [
+              span({ class: 'stat-main' }, formatRP(bal.rp_balance)),
+              span({ class: 'stat-sub' }, 'Available for Betting')
+            ]),
+            div({ class: 'stat-item' }, [
+              span({ class: 'stat-main' }, bal.rep_points ? `${bal.rep_points}` : '1.0'),
+              span({ class: 'stat-sub' }, 'Reputation Points')
+            ]),
+            div({ class: 'stat-item' }, [
+              span({ class: 'stat-main' }, bal.rank ? `#${bal.rank}` : 'Unranked'),
+              span({ class: 'stat-sub' }, 'Global Rank')
+            ]),
+            div({ class: 'stat-item' }, [
+              span({ class: 'stat-main' }, bal.total_predictions || 0),
+              span({ class: 'stat-sub' }, 'Total Predictions')
+            ])
+          ]);
+        }
+        
+        // Vertical layout for sidebar/card
         return div({ class: 'rp-balance-content' }, [
           div({ class: 'balance-header' }, [
             h3('💰 Your RP Balance'),
@@ -158,7 +182,5 @@ export default function RPBalance() {
             })
           ])
         ]);
-      }
-    ]
-  });
+      };
 };

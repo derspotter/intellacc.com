@@ -12,15 +12,19 @@ export default function Button({
   variant = '', // Add variant prop
   children
 }) {
-  // Construct class string dynamically, including base, variant, and custom classes
-  const buttonClass = ['button', variant ? `button-${variant}` : '', className]
-    .filter(Boolean) // Remove empty strings
-    .join(' '); // Join with spaces
+  // Handle reactive className functions
+  const computeClass = () => {
+    const resolvedClassName = typeof className === 'function' ? className() : className;
+    const buttonClass = ['button', variant ? `button-${variant}` : '', resolvedClassName]
+      .filter(Boolean) // Remove empty strings
+      .join(' '); // Join with spaces
+    return buttonClass;
+  };
 
   return button({
     type,
     onclick,
     disabled,
-    class: buttonClass // Use the dynamically generated class string
+    class: typeof className === 'function' ? computeClass : computeClass() // Use reactive class if function
   }, children);
 }

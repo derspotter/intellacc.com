@@ -186,6 +186,14 @@ pub async fn update_market(
     })
 }
 
+// Result struct for sell operations
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SellResult {
+    pub payout: Decimal,
+    pub new_prob: Decimal,
+    pub cumulative_stake: Decimal,
+}
+
 // Sell shares back to market (after hold period)
 pub async fn sell_shares(
     pool: &PgPool,
@@ -193,7 +201,7 @@ pub async fn sell_shares(
     event_id: i32,
     share_type: &str,
     amount: Decimal,
-) -> Result<Decimal> {
+) -> Result<SellResult> {
     let mut tx = pool.begin().await?;
     
     // Validate share type
@@ -219,20 +227,71 @@ pub async fn sell_shares(
         return Err(anyhow!("Insufficient NO shares"));
     }
     
-    // Get current market price
-    let market_prob: Decimal = sqlx::query_scalar(
-        "SELECT market_prob FROM events WHERE id = $1"
+    // Get current market state for probability recalculation
+    let event: EventMarketState = sqlx::query_as::<_, (Decimal, Decimal, Decimal)>(
+        "SELECT market_prob, cumulative_stake, liquidity_b FROM events WHERE id = $1"
     )
     .bind(event_id)
     .fetch_one(&mut *tx)
-    .await?;
+    .await
+    .map(|(prob, stake, b)| EventMarketState {
+        market_prob: prob,
+        cumulative_stake: stake,
+        liquidity_b: b,
+    })
+    .map_err(|_| anyhow!("Event not found or market not initialized"))?;
     
-    // Calculate payout
+    let current_prob = event.market_prob;
+    let current_stake = event.cumulative_stake;
+    
+    // Calculate payout at current market price
     let payout = if share_type == "yes" {
-        amount * market_prob
+        amount * current_prob
     } else {
-        amount * (Decimal::ONE - market_prob)
+        amount * (Decimal::ONE - current_prob)
     };
+    
+    // Calculate new market probability after removing shares from circulation
+    // When shares are sold back, it's equivalent to reducing the cumulative stake
+    // by the value of those shares at the time they were purchased
+    let stake_reduction = payout; // The stake value represented by these shares
+    let new_cumulative_stake = (current_stake - stake_reduction).max(Decimal::ZERO);
+    
+    // Recalculate market probability based on remaining stake distribution
+    // This is a simplified approach - in a full LMSR implementation, we would
+    // need to track the original stake weights more precisely
+    let new_prob = if new_cumulative_stake <= Decimal::ZERO {
+        // If no stake remains, reset to neutral probability
+        Decimal::new(5, 1) // 0.5
+    } else {
+        // Adjust probability based on which type of shares were removed
+        if share_type == "yes" {
+            // Selling YES shares should decrease the probability
+            let adjustment = (amount * current_prob) / (new_cumulative_stake + amount * current_prob);
+            (current_prob - adjustment * current_prob / Decimal::from(2))
+                .max(Decimal::new(1, 2)) // Min 0.01
+                .min(Decimal::new(99, 2)) // Max 0.99
+        } else {
+            // Selling NO shares should increase the probability
+            let adjustment = (amount * (Decimal::ONE - current_prob)) / (new_cumulative_stake + amount * (Decimal::ONE - current_prob));
+            (current_prob + adjustment * (Decimal::ONE - current_prob) / Decimal::from(2))
+                .max(Decimal::new(1, 2)) // Min 0.01
+                .min(Decimal::new(99, 2)) // Max 0.99
+        }
+    };
+    
+    // Update market state with new probability and cumulative stake
+    sqlx::query(
+        "UPDATE events SET 
+            market_prob = $1,
+            cumulative_stake = $2
+         WHERE id = $3"
+    )
+    .bind(new_prob)
+    .bind(new_cumulative_stake)
+    .bind(event_id)
+    .execute(&mut *tx)
+    .await?;
     
     // Update user balance and shares
     sqlx::query(
@@ -269,7 +328,11 @@ pub async fn sell_shares(
     }
     
     tx.commit().await?;
-    Ok(payout)
+    Ok(SellResult {
+        payout,
+        new_prob,
+        cumulative_stake: new_cumulative_stake,
+    })
 }
 
 // Kelly criterion suggestion

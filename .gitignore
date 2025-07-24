@@ -13,6 +13,9 @@
 logs/
 *.log
 
+# Screenshots
+screenshots/
+
 # Docker
 docker-compose.override.yml
 

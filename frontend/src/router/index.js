@@ -15,7 +15,6 @@ import ProfilePredictions from '../components/profile/ProfilePredictions';
 import CreatePredictionForm from '../components/predictions/CreatePredictionForm';
 import CreateEventForm from '../components/predictions/CreateEventForm';
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
-import WeeklyAssignment from '../components/predictions/WeeklyAssignment';
 import EventsList from '../components/predictions/EventsList';
 import RPBalance from '../components/predictions/RPBalance';
 import GlobalLeaderboard from '../components/predictions/GlobalLeaderboard';
@@ -107,17 +106,30 @@ export default function Router() {
     settings: () => SettingsPage(),
     
     predictions: () => div({ class: "markets-page" }, [
-      h1("🏛️ Prediction Markets"),
-      p({ class: "page-description" }, "Trade on future events with LMSR automated market making. Earn rewards through weekly assignments and optimal staking."),
+      
+      // User stats bar or description for non-logged users  
+      () => isLoggedInState.val ? 
+        // Show user stats horizontally
+        div({ class: "user-stats-bar" }, [
+          RPBalance({ horizontal: true })
+        ]) :
+        // Show description and login prompt for non-logged users
+        div([
+          p({ class: "page-description" }, "Trade on future events with LMSR automated market making. Earn rewards through weekly assignments and optimal staking."),
+          div({ class: "login-prompt-inline" }, [
+            p("Join the markets to trade on predictions and earn rewards!"),
+            button({ 
+              onclick: () => { window.location.hash = 'login' },
+              class: "cta-button"
+            }, "Sign Up / Log In")
+          ])
+        ]),
       
       // Admin Event Management
       () => isAdminState.val ? AdminEventManagement() : null,
       
-      // Market Overview Section
+      // Market Overview Section - moved above leaderboard
       div({ class: "market-overview" }, [
-        // Weekly Assignment - now working
-        () => isLoggedInState.val ? WeeklyAssignment() : null,
-        
         // Main Markets Trading Interface
         EventsList()
       ]),
@@ -125,29 +137,6 @@ export default function Router() {
       // Global Leaderboard Section
       div({ class: "leaderboard-section" }, [
         GlobalLeaderboard({ limit: 10 })
-      ]),
-      
-      // Sidebar Content - RP Balance & Legacy Features
-      div({ class: "market-sidebar" }, [
-        // RP Balance - now working
-        () => isLoggedInState.val ? RPBalance() : null,
-        
-        // Join Markets Section - for non-logged-in users
-        () => !isLoggedInState.val ? div({ class: "login-section" }, [
-          h2("🔐 Join the Markets"),
-          p("Create an account to:"),
-          div({ class: "feature-list" }, [
-            p("• Trade on prediction markets"),
-            p("• Earn weekly assignment rewards (+50 RP)"),
-            p("• Get Kelly optimal betting suggestions"),
-            p("• Track your market portfolio"),
-            p("• Compete on leaderboards")
-          ]),
-          button({ 
-            onclick: () => { window.location.hash = 'login' },
-            class: "cta-button"
-          }, "Sign Up / Log In")
-        ]) : null
       ])
     ]),
     

@@ -16,6 +16,7 @@ const eventHandlers = {
   newPrediction: [],
   predictionResolved: [],
   newBet: [],
+  marketUpdate: [],
   notification: []
 };
 
@@ -200,6 +201,14 @@ function setupSocketHandlers() {
     
     // Notify registered handlers
     notifyHandlers('newBet', data);
+  });
+  
+  // Market update event - real-time price changes
+  socket.on('marketUpdate', (data) => {
+    console.log('📈 Market update received:', data);
+    
+    // Notify registered handlers for real-time UI updates
+    notifyHandlers('marketUpdate', data);
   });
   
   // User-specific notification event

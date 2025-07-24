@@ -5,6 +5,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use tower_http::cors::CorsLayer;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use rust_decimal::Decimal;
@@ -178,6 +179,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/events/:id/sell", post(sell_shares_endpoint))
         .route("/events/:id/market-resolve", post(resolve_market_event_endpoint))
         .route("/events/:id/shares", get(get_user_shares_endpoint))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(tower_http::cors::Any)
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any)
+        )
         .with_state(app_state); // Share app state with all routes
 
     // Define the address to listen on - bind to all interfaces in Docker
@@ -759,18 +766,22 @@ async fn sell_shares_endpoint(
         .unwrap_or(Decimal::new(1, 0)); // 1.0 default
 
     match lmsr::sell_shares(&app_state.db, user_id, event_id, share_type, amount).await {
-        Ok(payout) => {
+        Ok(result) => {
             invalidate_and_broadcast(&app_state, "shares_sold", json!({
                 "event_id": event_id,
                 "user_id": user_id,
                 "share_type": share_type,
                 "amount": amount,
-                "payout": payout
+                "payout": result.payout,
+                "new_prob": result.new_prob,
+                "cumulative_stake": result.cumulative_stake
             }));
             Ok(Json(json!({
                 "success": true,
-                "payout": payout,
-                "message": format!("Sold {} {} shares for {} RP", amount, share_type, payout)
+                "payout": result.payout,
+                "new_prob": result.new_prob,
+                "cumulative_stake": result.cumulative_stake,
+                "message": format!("Sold {} {} shares for {} RP", amount, share_type, result.payout)
             })))
         },
         Err(e) => Err(internal_error(&format!("Share sale error: {}", e)))

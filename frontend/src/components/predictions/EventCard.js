@@ -1,13 +1,13 @@
 import van from "vanjs-core";
-import Card from '../common/Card.js';
 import Button from '../common/Button.js';
-import TextInput from '../common/TextInput.js';
 import api from '../../services/api.js';
+import { registerSocketEventHandler } from '../../services/socket.js';
 
-const { div, h3, h4, p, span, small, input, label, form } = van.tags;
+const { div, h3, p, span, small, input, label, form, button } = van.tags;
 
-export default function EventCard({ event, onStakeUpdate }) {
+export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
   const userPosition = van.state(null);
+  const withdrawalTrigger = van.state(0); // Counter to force re-renders
   const kellyData = van.state(null);
   const loading = van.state(false);
   const error = van.state(null);
@@ -20,53 +20,157 @@ export default function EventCard({ event, onStakeUpdate }) {
   
   // Debounce Kelly suggestions to prevent spam
   let kellyTimeout;
+  let kellyInitialized = false;
   
   
 
-  // Use market data from the event object directly
-  const marketState = {
+  // Use reactive market data that can be updated via WebSocket
+  const marketState = van.state({
     market_prob: parseFloat(event.market_prob || 0.5),
     cumulative_stake: parseFloat(event.cumulative_stake || 0),
     liquidity_b: parseFloat(event.liquidity_b || 5000),
     unique_traders: 0, // Not available in backend data yet
     total_trades: 0    // Not available in backend data yet
-  };
+  });
+
+  // Register Socket.IO handler for real-time market updates
+  // Note: unregisterSocketHandler could be called for cleanup, but EventCards are cached
+  const unregisterSocketHandler = registerSocketEventHandler('marketUpdate', (data) => {
+    console.log('📈 Market update received for EventCard:', data);
+    
+    // Only update if this is for our event
+    if (data.eventId === event.id) {
+      console.log('📈 Updating market state for event', event.id, 'new prob:', data.market_prob);
+      
+      marketState.val = {
+        ...marketState.val,
+        market_prob: data.market_prob,
+        cumulative_stake: data.cumulative_stake || marketState.val.cumulative_stake
+      };
+      
+      // Recalculate user position values with new market prices
+      if (userPosition.val) {
+        const yesShares = userPosition.val.yes_shares;
+        const noShares = userPosition.val.no_shares;
+        const totalStaked = (yesShares * marketState.val.market_prob) + (noShares * (1 - marketState.val.market_prob));
+        const unrealizedPnl = (yesShares * marketState.val.market_prob) + (noShares * (1 - marketState.val.market_prob)) - totalStaked;
+        
+        userPosition.val = {
+          ...userPosition.val,
+          total_staked: totalStaked,
+          unrealized_pnl: unrealizedPnl
+        };
+        
+        console.log('📈 Updated position values with new market price');
+      }
+    }
+  });
 
   const loadUserPosition = async () => {
+    console.log('🔍 loadUserPosition START for event:', event.id);
+    console.log('🔍 Current userPosition.val:', userPosition.val);
+    
+    // Check if token is expired and clear it
+    const token = localStorage.getItem('token');
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        if (payload.exp * 1000 < Date.now()) {
+          console.log('Token expired, clearing localStorage');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+        }
+      } catch (e) {
+        console.log('Invalid token, clearing localStorage');
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+      }
+    }
+    
+    // Get userId from localStorage
     const userId = localStorage.getItem('userId');
-    console.log('loadUserPosition called for event', event.id, 'userId:', userId);
-    if (!userId) return;
+    if (!userId) {
+      console.log('No userId found, skipping position load');
+      return;
+    }
+    console.log('Loading position for userId:', userId, 'Event ID:', event.id);
     
     try {
       loading.val = true;
       error.val = null;
       
-      // Try to get user position from prediction engine
-      const positionResponse = await fetch(`http://localhost:3001/events/${event.id}/shares?user_id=${userId}`);
-      console.log('Position response status:', positionResponse.status);
-      if (positionResponse.ok) {
-        const position = await positionResponse.json();
-        console.log('User position loaded:', position);
+      // Try to get user position from backend proxy (bypasses CORS)
+      const url = `/api/events/${event.id}/shares?user_id=${userId}`;
+      console.log('📡 About to fetch URL:', url);
+      console.log('📡 Full URL would be:', window.location.origin + url);
+      
+      // Add timeout and better error handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      
+      try {
+        const positionResponse = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json'
+            // Explicitly no Authorization header to avoid expired token issues
+          }
+        });
         
-        // Convert string numbers to numbers and add calculated fields
-        const yesShares = parseFloat(position.yes_shares || 0);
-        const noShares = parseFloat(position.no_shares || 0);
-        const totalStaked = (yesShares * marketState.market_prob) + (noShares * (1 - marketState.market_prob));
-        const unrealizedPnl = (yesShares * marketState.market_prob) + (noShares * (1 - marketState.market_prob)) - totalStaked;
+        clearTimeout(timeoutId);
+        console.log('✅ Fetch completed! Status:', positionResponse.status);
         
-        userPosition.val = {
-          yes_shares: yesShares,
-          no_shares: noShares,
-          total_staked: totalStaked,
-          unrealized_pnl: unrealizedPnl
-        };
-        console.log('Processed position:', userPosition.val);
-      } else {
-        console.log('No position found or error:', await positionResponse.text());
+        if (positionResponse.ok) {
+          const position = await positionResponse.json();
+          console.log('📊 Raw position data:', JSON.stringify(position));
+          
+          // Convert string numbers to numbers and add calculated fields
+          const yesShares = parseFloat(position.yes_shares || 0);
+          const noShares = parseFloat(position.no_shares || 0);
+          console.log('📊 Parsed shares - YES:', yesShares, 'NO:', noShares);
+          
+          // Only set position if user actually has shares
+          if (yesShares > 0 || noShares > 0) {
+            const totalStaked = (yesShares * marketState.val.market_prob) + (noShares * (1 - marketState.val.market_prob));
+            const unrealizedPnl = (yesShares * marketState.val.market_prob) + (noShares * (1 - marketState.val.market_prob)) - totalStaked;
+            
+            const newPosition = {
+              yes_shares: yesShares,
+              no_shares: noShares,
+              total_staked: totalStaked,
+              unrealized_pnl: unrealizedPnl
+            };
+            
+            console.log('🔄 SETTING NEW POSITION:', newPosition);
+            userPosition.val = newPosition;
+            withdrawalTrigger.val++; // Force withdrawal buttons to re-render
+            console.log('✅ POSITION SET! userPosition.val:', userPosition.val);
+            console.log('✅ This should trigger withdrawal button render!');
+            console.log('🔄 WITHDRAWAL TRIGGER incremented to:', withdrawalTrigger.val);
+          } else {
+            console.log('❌ User has no shares in this event');
+            userPosition.val = null;
+            withdrawalTrigger.val++; // Force withdrawal buttons to re-render when position becomes null
+            console.log('🔄 WITHDRAWAL TRIGGER incremented to:', withdrawalTrigger.val);
+          }
+        } else {
+          const errorText = await positionResponse.text();
+          console.log('❌ Position API error:', positionResponse.status, errorText);
+          userPosition.val = null;
+        }
+        
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          console.error('Fetch timeout for URL:', url);
+        } else {
+          console.error('Fetch error for URL:', url, fetchError);
+        }
       }
       
     } catch (err) {
-      console.error('Error loading user position:', err);
+      console.error('ERROR in loadUserPosition for event', event.id, ':', err);
+      console.error('Error details:', err.message, err.stack);
       // Don't show error for missing position data
     } finally {
       loading.val = false;
@@ -79,51 +183,56 @@ export default function EventCard({ event, onStakeUpdate }) {
       let userId = localStorage.getItem('userId');
       
       if (!userId) {
-        // Get user ID if not cached
-        const userResponse = await api.users.getProfile();
-        userId = userResponse.id;
-        localStorage.setItem('userId', userId);
+        console.log('No userId for Kelly suggestion, skipping');
+        return;
       }
       
-      console.log('Getting Kelly suggestion for belief:', belief, 'userId:', userId, 'eventId:', event.id);
+      console.log('Getting Kelly suggestion for belief:', belief, 'userId:', userId, 'eventId:', event.id, 'hasToken:', !!token);
       
-      const response = await fetch(`http://localhost:3001/events/${event.id}/kelly?belief=${belief}&user_id=${userId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
+      if (token) {
+        const response = await fetch(`/api/events/${event.id}/kelly?belief=${belief}&user_id=${userId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (response.ok) {
+          const kelly = await response.json();
+          // Transform API response to expected format
+          kellyData.val = {
+            kelly_optimal: parseFloat(kelly.kelly_suggestion),
+            quarter_kelly: parseFloat(kelly.quarter_kelly),
+            edge: belief - parseFloat(kelly.current_prob),
+            balance: parseFloat(kelly.balance),
+            expected_log_growth: (belief - parseFloat(kelly.current_prob)) * 0.1
+          };
+          console.log('Kelly data set from API:', kellyData.val);
+          // Force a re-render by triggering the reactive state
+          kellyData.val = {...kellyData.val};
+          if (updateCallback) updateCallback();
+          return;
+        } else {
+          console.log('Kelly API failed with status:', response.status);
         }
-      });
-      
-      if (response.ok) {
-        const kelly = await response.json();
-        // Transform API response to expected format
-        kellyData.val = {
-          kelly_optimal: parseFloat(kelly.kelly_suggestion),
-          quarter_kelly: parseFloat(kelly.quarter_kelly),
-          edge: belief - parseFloat(kelly.current_prob),
-          balance: parseFloat(kelly.balance),
-          expected_log_growth: (belief - parseFloat(kelly.current_prob)) * 0.1
-        };
-        console.log('Kelly data set:', kellyData.val);
-        // Force a re-render by triggering the reactive state
-        kellyData.val = {...kellyData.val};
-        if (updateCallback) updateCallback();
-      } else {
-        // Create fallback Kelly calculation
-        const marketProb = parseFloat(marketState.market_prob) || 0.5;
-        const edge = belief - marketProb;
-        const userBalance = 990; // Use current balance - could fetch from API
-        const kellyOptimal = Math.max(0, Math.abs(edge) * userBalance * 0.25); // Conservative 25% Kelly
-        kellyData.val = {
-          kelly_optimal: kellyOptimal,
-          quarter_kelly: kellyOptimal * 0.25,
-          edge: edge,
-          balance: userBalance,
-          expected_log_growth: edge * 0.1
-        };
-        // Force a re-render by triggering the reactive state  
-        kellyData.val = {...kellyData.val};
-        if (updateCallback) updateCallback();
       }
+      
+      // Create fallback Kelly calculation when no token or API fails
+      console.log('Using fallback Kelly calculation');
+      const marketProb = parseFloat(marketState.val.market_prob) || 0.5;
+      const edge = belief - marketProb;
+      const userBalance = 1000; // Default balance for calculation
+      const kellyOptimal = Math.max(0, Math.abs(edge) * userBalance * 0.25); // Conservative 25% Kelly
+      kellyData.val = {
+        kelly_optimal: kellyOptimal,
+        quarter_kelly: kellyOptimal * 0.25,
+        edge: edge,
+        balance: userBalance,
+        expected_log_growth: edge * 0.1
+      };
+      console.log('Kelly data set from fallback:', kellyData.val);
+      // Force a re-render by triggering the reactive state  
+      kellyData.val = {...kellyData.val};
+      if (updateCallback) updateCallback();
     } catch (err) {
       console.error('Error getting Kelly suggestion:', err);
     }
@@ -157,7 +266,7 @@ export default function EventCard({ event, onStakeUpdate }) {
         return;
       }
       
-      const response = await fetch(`http://localhost:3001/events/${event.id}/update`, {
+      const response = await fetch(`/api/events/${event.id}/update`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -172,8 +281,13 @@ export default function EventCard({ event, onStakeUpdate }) {
       
       if (response.ok) {
         const result = await response.json();
+        console.log('✅ Stake placed successfully! Result:', result);
+        
         // Refresh user position
+        console.log('🔄 About to reload user position after stake...');
         await loadUserPosition();
+        console.log('🔄 User position reloaded after stake');
+        
         // Clear form
         stakeAmount.val = '';
         // Notify parent of update
@@ -192,10 +306,14 @@ export default function EventCard({ event, onStakeUpdate }) {
   };
 
   const handleWithdrawal = async (shareType, amount) => {
-    if (!amount || amount <= 0) return;
+    console.log('🔥 WITHDRAWAL BUTTON CLICKED!', shareType, amount);
+    if (!amount || amount <= 0) {
+      console.log('❌ Invalid amount, returning:', amount);
+      return;
+    }
     
     // Confirmation dialog
-    const currentPrice = shareType === 'yes' ? marketState.market_prob : (1 - marketState.market_prob);
+    const currentPrice = shareType === 'yes' ? marketState.val.market_prob : (1 - marketState.val.market_prob);
     const estimatedPayout = (amount * currentPrice).toFixed(2);
     
     const confirmed = confirm(
@@ -221,7 +339,8 @@ export default function EventCard({ event, onStakeUpdate }) {
         localStorage.setItem('userId', userId);
       }
       
-      const response = await fetch(`http://localhost:3001/events/${event.id}/sell`, {
+
+      const response = await fetch(`/api/events/${event.id}/sell`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -236,18 +355,29 @@ export default function EventCard({ event, onStakeUpdate }) {
       
       if (response.ok) {
         const result = await response.json();
-        // Show success message with payout amount
-        const successMsg = `Successfully sold ${amount.toFixed(2)} ${shareType.toUpperCase()} shares for ${result.payout.toFixed(2)} RP`;
+        console.log('🔄 Sell response:', result);
+        
+        // Handle different response formats
+        const payout = parseFloat(result.payout || result.new_balance || 0);
+        const successMsg = `Successfully sold ${amount.toFixed(2)} ${shareType.toUpperCase()} shares for ${payout.toFixed(2)} RP`;
         console.log(successMsg);
         
         // Refresh user position
+        console.log('🔄 Refreshing position after withdrawal...');
         await loadUserPosition();
+        console.log('🔄 Position refresh completed. New position:', userPosition.val);
         
         // Notify parent of update
         onStakeUpdate?.(result);
       } else {
-        const errorData = await response.json();
-        error.val = errorData.message || 'Failed to sell shares';
+        const errorText = await response.text();
+        console.log('❌ Sell API error:', response.status, errorText);
+        try {
+          const errorData = JSON.parse(errorText);
+          error.val = errorData.message || 'Failed to sell shares';
+        } catch (e) {
+          error.val = `Failed to sell shares: ${response.status} ${errorText}`;
+        }
       }
       
     } catch (err) {
@@ -263,8 +393,8 @@ export default function EventCard({ event, onStakeUpdate }) {
     
     // Confirmation dialog for full withdrawal
     const position = userPosition.val;
-    const yesValue = position.yes_shares * marketState.market_prob;
-    const noValue = position.no_shares * (1 - marketState.market_prob);
+    const yesValue = position.yes_shares * marketState.val.market_prob;
+    const noValue = position.no_shares * (1 - marketState.val.market_prob);
     const totalEstimatedPayout = (yesValue + noValue).toFixed(2);
     
     const confirmed = confirm(
@@ -324,7 +454,7 @@ export default function EventCard({ event, onStakeUpdate }) {
       localStorage.setItem('userId', userId);
     }
     
-    const response = await fetch(`http://localhost:3001/events/${event.id}/sell`, {
+    const response = await fetch(`/api/events/${event.id}/sell`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -340,13 +470,28 @@ export default function EventCard({ event, onStakeUpdate }) {
     if (response.ok) {
       return await response.json();
     } else {
-      const errorData = await response.json();
-      throw new Error(errorData.message || 'Failed to sell shares');
+      const errorText = await response.text();
+      console.log('❌ sellShares API error:', response.status, errorText);
+      try {
+        const errorData = JSON.parse(errorText);
+        throw new Error(errorData.message || 'Failed to sell shares');
+      } catch (e) {
+        throw new Error(`Failed to sell shares: ${response.status} ${errorText}`);
+      }
     }
   };
 
-  // Load user position on component mount if logged in
-  loadUserPosition();
+  // Debug: Always log when EventCard is created
+  console.log('=== EventCard CREATED for event:', event.id, event.title);
+  console.log('DEBUG EventCard - userId:', localStorage.getItem('userId'), 'token exists:', !!localStorage.getItem('token'));
+  
+  // Load user position once on mount
+  console.log('🚀 Loading user position on mount');
+  loadUserPosition().then(() => {
+    console.log('🚀 loadUserPosition completed successfully');
+  }).catch(err => {
+    console.error('🚀 loadUserPosition failed:', err);
+  });
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -368,11 +513,9 @@ export default function EventCard({ event, onStakeUpdate }) {
     return `${numValue.toFixed(2)} RP`;
   };
 
-  return () => Card({
-    className: 'event-card',
-    children: [
-      // Event Header
-      div({ class: 'event-header' }, [
+  return () => div({ class: 'event-card' }, [
+      // Event Header - conditional based on hideTitle prop
+      hideTitle ? null : div({ class: 'event-header' }, [
         h3({ class: 'event-title' }, event.title),
         div({ class: 'event-meta' }, [
           span({ class: 'event-category' }, event.category || 'General'),
@@ -385,21 +528,27 @@ export default function EventCard({ event, onStakeUpdate }) {
       
       // Market State
       div({ class: 'market-state' }, [
-        h4('📊 Market State'),
         div({ class: 'market-stats' }, [
           div({ class: 'stat' }, [
             span({ class: 'stat-label' }, 'Current Probability:'),
             span({ 
-              class: 'stat-value probability' 
-            }, formatPercentage(marketState.market_prob))
+              class: 'stat-value probability',
+              style: () => {
+                // Interpolate between blue and red based on probability
+                const prob = marketState.val.market_prob;
+                const red = Math.round(prob * 255);
+                const blue = Math.round((1 - prob) * 255);
+                return `color: rgb(${red}, 0, ${blue})`;
+              }
+            }, () => formatPercentage(marketState.val.market_prob))
           ]),
           div({ class: 'stat' }, [
             span({ class: 'stat-label' }, 'Total Staked:'),
-            span({ class: 'stat-value' }, formatRP(marketState.cumulative_stake))
+            span({ class: 'stat-value' }, () => formatRP(marketState.val.cumulative_stake))
           ]),
           div({ class: 'stat' }, [
             span({ class: 'stat-label' }, 'Liquidity Parameter:'),
-            span({ class: 'stat-value' }, formatRP(marketState.liquidity_b))
+            span({ class: 'stat-value' }, () => marketState.val.liquidity_b.toString())
           ]),
           div({ class: 'stat' }, [
             span({ class: 'stat-label' }, 'Event Type:'),
@@ -408,76 +557,129 @@ export default function EventCard({ event, onStakeUpdate }) {
         ])
       ]),
       
-      // User Position
-      () => {
-        console.log('User position check:', userPosition.val);
-        return userPosition.val ? div({ class: 'user-position' }, [
-        h4('💼 Your Position'),
+      // User Position Stats - Always present, visibility controlled by CSS
+      div({ 
+        class: 'user-position',
+        style: () => {
+          withdrawalTrigger.val; // Force dependency on trigger
+          const visible = userPosition.val !== null;
+          console.log('🎲 Position visibility:', visible, 'position:', userPosition.val, 'trigger:', withdrawalTrigger.val);
+          return visible ? 'display: block;' : 'display: none;';
+        }
+      }, [
         div({ class: 'position-stats' }, [
           div({ class: 'stat' }, [
             span({ class: 'stat-label' }, 'YES Shares:'),
-            span({ class: 'stat-value' }, userPosition.val.yes_shares.toFixed(4))
+            span({ class: 'stat-value' }, () => userPosition.val ? userPosition.val.yes_shares.toFixed(2) : '0.00')
           ]),
           div({ class: 'stat' }, [
             span({ class: 'stat-label' }, 'NO Shares:'),
-            span({ class: 'stat-value' }, userPosition.val.no_shares.toFixed(4))
+            span({ class: 'stat-value' }, () => userPosition.val ? userPosition.val.no_shares.toFixed(2) : '0.00')
           ]),
           div({ class: 'stat' }, [
-            span({ class: 'stat-label' }, 'Total Staked:'),
-            span({ class: 'stat-value' }, formatRP(userPosition.val.total_staked))
+            span({ class: 'stat-label' }, 'Your Stake:'),
+            span({ class: 'stat-value' }, () => userPosition.val ? formatRP(userPosition.val.total_staked) : '0.00 RP')
           ]),
           div({ class: 'stat' }, [
             span({ class: 'stat-label' }, 'Unrealized P&L:'),
             span({ 
-              class: `stat-value ${userPosition.val.unrealized_pnl >= 0 ? 'positive' : 'negative'}`
-            }, formatRP(userPosition.val.unrealized_pnl))
+              class: () => `stat-value ${userPosition.val && userPosition.val.unrealized_pnl >= 0 ? 'positive' : 'negative'}`
+            }, () => userPosition.val ? formatRP(userPosition.val.unrealized_pnl) : '0.00 RP')
           ])
-        ]),
-        // Withdrawal buttons
-        (userPosition.val.yes_shares > 0 || userPosition.val.no_shares > 0) ? div({ class: 'withdrawal-actions' }, [
-          userPosition.val.yes_shares > 0 ? Button({
-            type: 'button',
-            className: 'withdrawal-btn secondary',
-            onclick: () => handleWithdrawal('yes', userPosition.val.yes_shares),
-            children: `Sell All YES (${userPosition.val.yes_shares.toFixed(2)})`
-          }) : null,
-          userPosition.val.no_shares > 0 ? Button({
-            type: 'button', 
-            className: 'withdrawal-btn secondary',
-            onclick: () => handleWithdrawal('no', userPosition.val.no_shares),
-            children: `Sell All NO (${userPosition.val.no_shares.toFixed(2)})`
-          }) : null,
-          Button({
-            type: 'button',
-            className: 'withdrawal-btn primary',
-            onclick: handleFullWithdrawal,
-            children: 'Exit All Positions'
-          })
-        ]) : null
-      ]) : null;
-      },
+        ])
+      ]),
+      
+      // Withdrawal buttons - Always present in DOM, outside position conditional
+      div({ class: 'withdrawal-actions' }, [
+        // YES button - always present, visibility controlled by CSS
+        button({
+          type: 'button',
+          class: 'button withdrawal-btn secondary',
+          style: () => {
+            withdrawalTrigger.val; // Force dependency on trigger
+            const visible = userPosition.val && userPosition.val.yes_shares > 0;
+            console.log('🔄 YES button visibility:', visible, 'shares:', userPosition.val?.yes_shares || 0, 'trigger:', withdrawalTrigger.val);
+            return visible ? 'display: inline-block;' : 'display: none;';
+          },
+          onclick: () => {
+            console.log('🔥 YES withdrawal button clicked!');
+            handleWithdrawal('yes', userPosition.val.yes_shares);
+          }
+        }, () => {
+          if (!userPosition.val || userPosition.val.yes_shares <= 0) return 'Sell All YES (0.00)';
+          return `Sell All YES (${userPosition.val.yes_shares.toFixed(2)})`;
+        }),
+        
+        // NO button - always present, visibility controlled by CSS
+        button({
+          type: 'button', 
+          class: 'button withdrawal-btn secondary',
+          style: () => {
+            withdrawalTrigger.val; // Force dependency on trigger  
+            const visible = userPosition.val && userPosition.val.no_shares > 0;
+            console.log('🔄 NO button visibility:', visible, 'shares:', userPosition.val?.no_shares || 0, 'trigger:', withdrawalTrigger.val);
+            return visible ? 'display: inline-block;' : 'display: none;';
+          },
+          onclick: () => {
+            console.log('🔥 NO withdrawal button clicked!');
+            handleWithdrawal('no', userPosition.val.no_shares);
+          }
+        }, () => {
+          if (!userPosition.val || userPosition.val.no_shares <= 0) return 'Sell All NO (0.00)';
+          return `Sell All NO (${userPosition.val.no_shares.toFixed(2)})`;
+        }),
+        
+        // Full withdrawal button - always present, visibility controlled by CSS
+        button({
+          type: 'button',
+          class: 'button withdrawal-btn primary',
+          style: () => {
+            withdrawalTrigger.val; // Force dependency on trigger
+            const visible = userPosition.val && (userPosition.val.yes_shares > 0 || userPosition.val.no_shares > 0);
+            console.log('🔄 FULL button visibility:', visible, 'position:', userPosition.val, 'trigger:', withdrawalTrigger.val);
+            return visible ? 'display: inline-block;' : 'display: none;';
+          },
+          onclick: () => {
+            console.log('🔥 FULL withdrawal button clicked!');
+            handleFullWithdrawal();
+          }
+        }, 'Exit All Positions')
+      ]),
       
       // Betting Interface
       () => localStorage.getItem('token') ? div({ class: 'betting-interface' }, [
-        h4('🎲 Place Stake'),
         form({ 
           class: 'betting-form',
           onsubmit: handleStake
         }, [
-          div({ class: 'form-row' }, [
-            label('Bet Direction:'),
-            div({ class: 'direction-buttons' }, [
-              Button({
-                type: 'button',
-                className: () => `direction-btn ${betDirection.val === 'yes' ? 'active' : ''}`,
-                onclick: () => betDirection.val = 'yes',
-                children: 'YES'
-              }),
-              Button({
-                type: 'button', 
-                className: () => `direction-btn ${betDirection.val === 'no' ? 'active' : ''}`,
-                onclick: () => betDirection.val = 'no',
-                children: 'NO'
+          div({ class: 'form-row horizontal-row' }, [
+            div({ class: 'form-field' }, [
+              label('Bet Direction:'),
+              div({ class: 'direction-buttons' }, [
+                button({
+                  type: 'button', 
+                  class: () => `direction-btn no-btn ${betDirection.val === 'no' ? 'active' : ''}`,
+                  onclick: () => betDirection.val = 'no'
+                }, 'NO'),
+                button({
+                  type: 'button',
+                  class: () => `direction-btn yes-btn ${betDirection.val === 'yes' ? 'active' : ''}`,
+                  onclick: () => betDirection.val = 'yes'
+                }, 'YES')
+              ])
+            ]),
+            div({ class: 'form-field' }, [
+              label('Stake Amount (RP):'),
+              input({
+                type: 'number',
+                step: '0.01',
+                min: '0.01',
+                placeholder: 'Enter stake amount',
+                value: () => stakeAmount.val, // Reactive binding
+                class: 'stake-input',
+                oninput: (e) => {
+                  stakeAmount.val = e.target.value; // Direct state update
+                }
               })
             ])
           ]),
@@ -488,7 +690,7 @@ export default function EventCard({ event, onStakeUpdate }) {
               // Create display elements
               const percentageSpan = span({ class: 'belief-percentage' }, `${(beliefProbability * 100).toFixed(1)}%`);
               const hintSmall = small({ class: 'belief-hint' }, 
-                `Market: ${(marketState.market_prob * 100).toFixed(1)}% | Your edge: ${((beliefProbability - marketState.market_prob) * 100).toFixed(1)}%`
+                `Market: ${(marketState.val.market_prob * 100).toFixed(1)}% | Your edge: ${((beliefProbability - marketState.val.market_prob) * 100).toFixed(1)}%`
               );
               
               // Create slider
@@ -504,7 +706,7 @@ export default function EventCard({ event, onStakeUpdate }) {
               // Update display manually to avoid reactive re-renders
               const updateDisplay = () => {
                 percentageSpan.textContent = `${(beliefProbability * 100).toFixed(1)}%`;
-                hintSmall.textContent = `Market: ${(marketState.market_prob * 100).toFixed(1)}% | Your edge: ${((beliefProbability - marketState.market_prob) * 100).toFixed(1)}%`;
+                hintSmall.textContent = `Market: ${(marketState.val.market_prob * 100).toFixed(1)}% | Your edge: ${((beliefProbability - marketState.val.market_prob) * 100).toFixed(1)}%`;
               };
               
               slider.oninput = (e) => {
@@ -520,8 +722,9 @@ export default function EventCard({ event, onStakeUpdate }) {
                 }, 300);
               };
               
-              // Get initial Kelly suggestion
-              if (localStorage.getItem('token') && marketState) {
+              // Get initial Kelly suggestion (only once)
+              if (!kellyInitialized && localStorage.getItem('token') && marketState) {
+                kellyInitialized = true;
                 getKellySuggestion(beliefProbability);
               }
               
@@ -535,78 +738,35 @@ export default function EventCard({ event, onStakeUpdate }) {
             })()
           ]),
           
-          div({ class: 'form-row' }, [
-            label('Stake Amount (RP):'),
-            input({
-              type: 'number',
-              step: '0.01',
-              min: '0.01',
-              placeholder: 'Enter stake amount',
-              value: () => stakeAmount.val,
-              oninput: (e) => {
-                const value = e.target.value;
-                stakeAmount.val = value;
-                console.log('Stake amount changed to:', value, 'stakeAmount.val:', stakeAmount.val);
-                // Get Kelly suggestion when stake amount changes
-                if (beliefProbability && marketState) {
-                  getKellySuggestion(beliefProbability);
-                }
-              },
-              class: 'stake-input'
-            })
+          div({ class: 'kelly-suggestion' }, [
+            div({ class: 'kelly-header' }, [
+              span('Kelly Optimal Suggestion'),
+              div({ class: 'kelly-buttons' }, [
+                Button({
+                  type: 'button',
+                  className: 'kelly-apply-btn primary',
+                  onclick: () => {
+                    if (kellyData.val) {
+                      stakeAmount.val = kellyData.val.kelly_optimal.toFixed(2);
+                    }
+                  },
+                  children: 'Apply Kelly'
+                })
+              ])
+            ]),
+            div({ class: 'kelly-details' }, [
+              div({ class: 'kelly-stat' }, [
+                span({ class: 'kelly-label' }, 'Optimal Kelly:'),
+                span({ class: 'kelly-amount' }, kellyData.val ? formatRP(kellyData.val.kelly_optimal) : '--')
+              ]),
+              div({ class: 'kelly-stat' }, [
+                span({ class: 'kelly-label' }, 'Your Edge:'),
+                span({ 
+                  class: `kelly-edge positive` 
+                }, kellyData.val ? `${Math.abs(kellyData.val.edge * 100).toFixed(1)}%` : '--')
+              ])
+            ])
           ]),
-          
-          () => {
-            // Debug: Always show this section
-            return div({ class: 'kelly-debug-section', style: 'border: 1px solid #ccc; padding: 10px; margin: 10px 0;' }, [
-              div({ style: 'font-size: 12px; color: #666; margin-bottom: 5px;' }, 
-                `Debug: kellyData.val = ${kellyData.val ? 'OBJECT' : 'NULL'}`
-              ),
-              kellyData.val ? div({ class: 'kelly-suggestion' }, [
-                div({ class: 'kelly-header' }, [
-                  span('🎯 Kelly Optimal Suggestion'),
-                  div({ class: 'kelly-buttons' }, [
-                    Button({
-                      type: 'button',
-                      className: 'kelly-apply-btn secondary',
-                      onclick: () => {
-                        stakeAmount.val = kellyData.val.quarter_kelly.toFixed(2);
-                      },
-                      children: '1/4 Kelly'
-                    }),
-                    Button({
-                      type: 'button',
-                      className: 'kelly-apply-btn primary',
-                      onclick: () => {
-                        stakeAmount.val = kellyData.val.kelly_optimal.toFixed(2);
-                      },
-                      children: 'Full Kelly'
-                    })
-                  ])
-                ]),
-                div({ class: 'kelly-details' }, [
-                  div({ class: 'kelly-stat' }, [
-                    span({ class: 'kelly-label' }, 'Full Kelly:'),
-                    span({ class: 'kelly-amount' }, formatRP(kellyData.val.kelly_optimal))
-                  ]),
-                  div({ class: 'kelly-stat' }, [
-                    span({ class: 'kelly-label' }, 'Conservative (1/4):'),
-                    span({ class: 'kelly-amount conservative' }, formatRP(kellyData.val.quarter_kelly))
-                  ]),
-                  div({ class: 'kelly-stat' }, [
-                    span({ class: 'kelly-label' }, 'Your Edge:'),
-                    span({ 
-                      class: `kelly-edge ${kellyData.val.edge > 0 ? 'positive' : 'negative'}` 
-                    }, `${(kellyData.val.edge * 100).toFixed(1)}%`)
-                  ]),
-                  div({ class: 'kelly-stat' }, [
-                    span({ class: 'kelly-label' }, 'Balance:'),
-                    span({ class: 'kelly-balance' }, formatRP(kellyData.val.balance))
-                  ])
-                ])
-              ]) : div({ style: 'color: #999; font-style: italic;' }, 'Move the belief slider to see Kelly suggestions')
-            ]);
-          },
           
           () => error.val ? div({ class: 'error-message' }, error.val) : null,
           
@@ -630,6 +790,5 @@ export default function EventCard({ event, onStakeUpdate }) {
           children: 'Log In'
         })
       ])
-    ]
-  });
+    ]);
 };
