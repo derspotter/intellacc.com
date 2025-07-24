@@ -24,10 +24,7 @@ Intellacc is a prediction and social platform where users can:
 # Create network (run once)
 docker network create intellacc-network
 
-# Start development environment (without prediction engine for faster builds)
-docker compose -f docker-compose-dev.yml up -d
-
-# OR start full stack including prediction engine
+# Start full stack including prediction engine
 docker compose up -d
 
 # Access the application
@@ -37,7 +34,7 @@ docker compose up -d
 # Health check: http://localhost:3000/api/health-check
 
 # Stop services
-docker compose -f docker-compose-dev.yml down  # or docker compose down for full stack
+docker compose down
 ```
 
 ## Recent Features Added
