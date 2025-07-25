@@ -50,3 +50,6 @@ dotenv = "0.15"
 # Parallel processing for benchmarks
 rayon = "1.8"
 rand = "0.8"
+
+# Property-based testing for LMSR
+proptest = "1.0"

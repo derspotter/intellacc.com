@@ -23,7 +23,10 @@ use std::time::Duration;
 mod database;
 mod metaculus;
 mod benchmark;
-mod lmsr;
+mod lmsr_api;  // Clean LMSR API using lmsr_core directly
+mod lmsr_core;
+mod db_adapter;
+mod tests;
 
 // DRY helper types and functions
 type ApiResult<T> = Result<Json<T>, (axum::http::StatusCode, Json<Value>)>;
@@ -179,6 +182,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/events/:id/sell", post(sell_shares_endpoint))
         .route("/events/:id/market-resolve", post(resolve_market_event_endpoint))
         .route("/events/:id/shares", get(get_user_shares_endpoint))
+        .route("/lmsr/test-invariants", get(test_lmsr_invariants_endpoint))
         .layer(
             CorsLayer::new()
                 .allow_origin(tower_http::cors::Any)
@@ -217,6 +221,7 @@ async fn main() -> anyhow::Result<()> {
     println!("  POST /events/:id/sell - Sell shares back to market");
     println!("  POST /events/:id/market-resolve - Resolve market event");
     println!("  GET /events/:id/shares - Get user's shares for event");
+    println!("  POST /events/:id/market-resolve - Resolve market event (LMSR)");
 
     // Start the daily Metaculus sync job (disabled for testing)
     // tokio::spawn(async move {
@@ -655,7 +660,7 @@ async fn get_market_state_endpoint(
     State(app_state): State<AppState>,
     Path(event_id): Path<i32>,
 ) -> ApiResult<Value> {
-    match lmsr::get_market_state(&app_state.db, event_id).await {
+    match lmsr_api::get_market_state(&app_state.db, event_id).await {
         Ok(market_state) => Ok(Json(market_state)),
         Err(e) => Err(internal_error(&format!("Market state error: {}", e)))
     }
@@ -673,21 +678,19 @@ async fn update_market_endpoint(
     
     let target_prob = payload.get("target_prob")
         .and_then(|v| v.as_f64())
-        .and_then(|f| Decimal::from_f64(f))
-        .unwrap_or(Decimal::new(5, 1)); // 0.5 default
+        .unwrap_or(0.5); // 0.5 default
 
     let stake = payload.get("stake")
         .and_then(|v| v.as_f64())
-        .and_then(|f| Decimal::from_f64(f))
-        .unwrap_or(Decimal::new(10, 0)); // 10.0 default
+        .unwrap_or(10.0); // 10.0 default
 
-    let update = lmsr::MarketUpdate {
+    let update = lmsr_api::MarketUpdate {
         event_id,
         target_prob,
         stake,
     };
 
-    match lmsr::update_market(&app_state.db, user_id, update).await {
+    match lmsr_api::update_market(&app_state.db, user_id, update).await {
         Ok(result) => {
             invalidate_and_broadcast(&app_state, "market_updated", json!({
                 "event_id": event_id,
@@ -709,40 +712,39 @@ async fn kelly_suggestion_endpoint(
 ) -> ApiResult<Value> {
     let belief = params.get("belief")
         .and_then(|s| s.parse::<f64>().ok())
-        .and_then(|f| Decimal::from_f64(f))
-        .unwrap_or(Decimal::new(5, 1)); // 0.5 default
+        .unwrap_or(0.5); // 0.5 default
 
     let user_id = params.get("user_id")
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(1);
 
     // Get current market probability
-    let market_prob: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
+    let market_prob_decimal: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
         "SELECT market_prob FROM events WHERE id = $1"
     )
     .bind(event_id)
     .fetch_one(&app_state.db)
     .await;
 
-    let market_prob = match market_prob {
-        Ok(prob) => prob,
+    let market_prob = match market_prob_decimal {
+        Ok(prob) => prob.to_f64().unwrap_or(0.5),
         Err(_) => return Err(not_found_error("Event"))
     };
 
     // Get user balance
-    let balance: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
+    let balance_decimal: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
         "SELECT rp_balance FROM users WHERE id = $1"
     )
     .bind(user_id)
     .fetch_one(&app_state.db)
     .await;
 
-    let balance = match balance {
-        Ok(bal) => bal,
+    let balance = match balance_decimal {
+        Ok(bal) => bal.to_f64().unwrap_or(0.0),
         Err(_) => return Err(not_found_error("User"))
     };
 
-    let suggestion = lmsr::kelly_suggestion(belief, market_prob, balance);
+    let suggestion = lmsr_api::kelly_suggestion(belief, market_prob, balance);
     Ok(Json(json!(suggestion)))
 }
 
@@ -762,10 +764,9 @@ async fn sell_shares_endpoint(
 
     let amount = payload.get("amount")
         .and_then(|v| v.as_f64())
-        .and_then(|f| Decimal::from_f64(f))
-        .unwrap_or(Decimal::new(1, 0)); // 1.0 default
+        .unwrap_or(1.0); // 1.0 default
 
-    match lmsr::sell_shares(&app_state.db, user_id, event_id, share_type, amount).await {
+    match lmsr_api::sell_shares(&app_state.db, user_id, event_id, share_type, amount).await {
         Ok(result) => {
             invalidate_and_broadcast(&app_state, "shares_sold", json!({
                 "event_id": event_id,
@@ -774,13 +775,13 @@ async fn sell_shares_endpoint(
                 "amount": amount,
                 "payout": result.payout,
                 "new_prob": result.new_prob,
-                "cumulative_stake": result.cumulative_stake
+                "cumulative_stake": result.current_cost_c
             }));
             Ok(Json(json!({
                 "success": true,
                 "payout": result.payout,
                 "new_prob": result.new_prob,
-                "cumulative_stake": result.cumulative_stake,
+                "cumulative_stake": result.current_cost_c,
                 "message": format!("Sold {} {} shares for {} RP", amount, share_type, result.payout)
             })))
         },
@@ -788,32 +789,6 @@ async fn sell_shares_endpoint(
     }
 }
 
-// Resolve event and distribute payouts
-async fn resolve_market_event_endpoint(
-    State(app_state): State<AppState>,
-    Path(event_id): Path<i32>,
-    ExtractJson(payload): ExtractJson<serde_json::Value>,
-) -> ApiResult<Value> {
-    let outcome = payload.get("outcome")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true); // Default to YES
-
-    match lmsr::resolve_event(&app_state.db, event_id, outcome).await {
-        Ok(()) => {
-            invalidate_and_broadcast(&app_state, "market_event_resolved", json!({
-                "event_id": event_id,
-                "outcome": outcome
-            }));
-            Ok(Json(json!({
-                "success": true,
-                "event_id": event_id,
-                "outcome": outcome,
-                "message": format!("Event {} resolved with outcome: {}", event_id, if outcome { "YES" } else { "NO" })
-            })))
-        },
-        Err(e) => Err(internal_error(&format!("Event resolution error: {}", e)))
-    }
-}
 
 // Get user's shares for an event
 async fn get_user_shares_endpoint(
@@ -825,9 +800,147 @@ async fn get_user_shares_endpoint(
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(1);
 
-    match lmsr::get_user_shares(&app_state.db, user_id, event_id).await {
+    match lmsr_api::get_user_shares(&app_state.db, user_id, event_id).await {
         Ok(shares) => Ok(Json(shares)),
         Err(e) => Err(internal_error(&format!("User shares error: {}", e)))
     }
 }
+
+// Resolve market event (LMSR)
+async fn resolve_market_event_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Extract outcome: true = YES, false = NO
+    let outcome = payload.get("outcome")
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| {
+            (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": "Missing or invalid outcome (must be boolean)"})))
+        })?;
+    
+    println!("🎯 Market resolution triggered: event_id={}, outcome={}", event_id, outcome);
+    
+    match lmsr_api::resolve_event(&app_state.db, event_id, outcome).await {
+        Ok(()) => {
+            // Broadcast market resolution
+            invalidate_and_broadcast(&app_state, "marketResolved", json!({
+                "eventId": event_id,
+                "outcome": outcome,
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }));
+            
+            Ok(Json(json!({
+                "success": true,
+                "event_id": event_id,
+                "outcome": outcome,
+                "message": format!("Market event {} resolved as {}", event_id, if outcome { "YES" } else { "NO" })
+            })))
+        },
+        Err(e) => Err(internal_error(&format!("Market resolution error: {}", e)))
+    }
+}
+
+// Test LMSR invariants using property-based tests
+async fn test_lmsr_invariants_endpoint(
+    State(_app_state): State<AppState>,
+) -> ApiResult<Value> {
+    println!("🧪 Running LMSR invariant tests...");
+    
+    // Run a simplified version of the property tests
+    let mut success_count = 0;
+    let mut total_tests = 0;
+    let mut failed_tests = Vec::new();
+    
+    // Test round-trip invariant with a few fixed cases
+    let test_cases = vec![
+        (5000.0, vec![10_000_000i128, 50_000_000i128], vec![0u8, 1u8]),
+        (1000.0, vec![5_000_000i128, 25_000_000i128, 10_000_000i128], vec![0u8, 1u8, 0u8]),
+        (10000.0, vec![100_000_000i128], vec![1u8]),
+    ];
+    
+    for (i, (b, stakes, sides)) in test_cases.iter().enumerate() {
+        total_tests += 1;
+        
+        let mut mkt = crate::lmsr_core::Market::new(*b);
+        let mut cash_ledger: i128 = 0;
+        let mut yes_shares: f64 = 0.0;
+        let mut no_shares: f64 = 0.0;
+        
+        // Execute trades
+        for j in 0..stakes.len().min(sides.len()) {
+            let stake_ledger = stakes[j];
+            
+            if sides[j] == 0 {
+                let (dq, cash_debit) = mkt.buy_yes(stake_ledger);
+                yes_shares += dq;
+                cash_ledger -= cash_debit;
+            } else {
+                let (dq, cash_debit) = mkt.buy_no(stake_ledger);
+                no_shares += dq;
+                cash_ledger -= cash_debit;
+            }
+        }
+        
+        // Unwind positions
+        let cash_credit_yes = if yes_shares > 0.0 {
+            mkt.sell_yes(yes_shares)
+        } else { 0 };
+        let cash_credit_no = if no_shares > 0.0 {
+            mkt.sell_no(no_shares)
+        } else { 0 };
+        
+        cash_ledger += cash_credit_yes + cash_credit_no;
+        
+        // Check invariants
+        if cash_ledger.abs() <= 1 && mkt.q_yes.abs() < 1e-9 && mkt.q_no.abs() < 1e-9 {
+            success_count += 1;
+        } else {
+            failed_tests.push(format!("Test case {}: cash_ledger={}, q_yes={:.2e}, q_no={:.2e}", 
+                i, cash_ledger, mkt.q_yes, mkt.q_no));
+        }
+    }
+    
+    // Test probability bounds
+    let mut prob_tests = 0;
+    let mut prob_success = 0;
+    
+    for b in vec![1000.0, 5000.0, 10000.0] {
+        let mut m = crate::lmsr_core::Market::new(b);
+        for stake in vec![1_000_000i128, 10_000_000i128, 50_000_000i128] {
+            prob_tests += 1;
+            let (_dq, _cash) = m.buy_yes(stake);
+            let p = m.prob_yes();
+            if p > 0.0 && p < 1.0 {
+                prob_success += 1;
+            } else {
+                failed_tests.push(format!("Probability out of bounds: p={}", p));
+            }
+        }
+    }
+    
+    println!("✅ LMSR tests completed: {}/{} round-trip tests passed, {}/{} probability tests passed", 
+             success_count, total_tests, prob_success, prob_tests);
+    
+    let all_passed = success_count == total_tests && prob_success == prob_tests;
+    
+    Ok(Json(json!({
+        "success": all_passed,
+        "round_trip_tests": {
+            "passed": success_count,
+            "total": total_tests
+        },
+        "probability_tests": {
+            "passed": prob_success,
+            "total": prob_tests
+        },
+        "failed_tests": failed_tests,
+        "message": if all_passed {
+            "All LMSR invariant tests passed!"
+        } else {
+            "Some LMSR invariant tests failed - see failed_tests for details"
+        }
+    })))
+}
+
 
