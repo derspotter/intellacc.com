@@ -39,7 +39,19 @@ docker compose down
 
 ## Recent Features Added
 
-### LMSR Market System with Real-Time Updates (Latest - July 2025)
+### LMSR Security & Reliability Hardening (Latest - July 2025)
+- **Production-Grade Security**: Comprehensive security audit and hardening completed
+- **DoS Protection**: Replaced all panic!() calls with Result returns to prevent denial of service attacks
+- **Input Validation**: API-level validation prevents invalid data from reaching core functions
+- **Concurrency Safety**: SERIALIZABLE transaction isolation with exponential backoff retry logic
+- **PostgreSQL SQLSTATE Integration**: Reliable error detection using proper error codes instead of fragile string matching
+- **Numerical Stability**: Overflow protection and validated calculations for all market operations
+- **Performance Optimization**: Exponential calculations verified as production-ready (sub-microsecond performance)
+- **f64+i128 Precision System**: High-precision monetary calculations with 6-decimal RP precision
+- **Side Enum Pattern**: Unified YES/NO trade logic with type-safe operations
+- **Clean Database Adapter**: Eliminates scattered conversion code throughout the system
+
+### LMSR Market System with Real-Time Updates (Previous - July 2025)
 - **Complete Market Probability Updates**: Both buying AND selling shares now correctly update market probability
 - **Fixed Prediction Engine**: Rust `sell_shares` function now recalculates market probability using proper LMSR economics
 - **Real-Time WebSocket Broadcasts**: All market operations (buy/sell) trigger instant probability updates across all connected users
@@ -130,26 +142,35 @@ docker exec intellacc_db psql -U intellacc_user -d intellaccdb -c "SELECT id, us
 ## LMSR Market System Implementation
 
 ### Core Components
-- **Prediction Engine** (`/prediction-engine/src/lmsr.rs`): Rust-based LMSR implementation
+- **Prediction Engine** (`/prediction-engine/src/lmsr_core.rs`): Production-grade LMSR implementation with security hardening
+- **API Layer** (`/prediction-engine/src/lmsr_api.rs`): SERIALIZABLE transactions with PostgreSQL SQLSTATE error handling
+- **Database Adapter** (`/prediction-engine/src/db_adapter.rs`): Clean f64/Decimal conversion layer
 - **Backend Proxy** (`/backend/src/routes/api.js`): WebSocket broadcasting and API proxying
 - **Frontend Components** (`/frontend/src/components/predictions/EventCard.js`): Real-time market interface
 
 ### Key Functions
-- **`update_market()`**: Stakes and probability updates using stake-weighted averaging
-- **`sell_shares()`**: **FIXED** - Now properly recalculates market probability after selling
-- **`kelly_suggestion()`**: Conservative Kelly criterion betting suggestions
-- **`resolve_event()`**: Event resolution and payout distribution
+- **`update_market()`**: Secure market updates with input validation and SERIALIZABLE transactions
+- **`sell_shares()`**: Secure share selling with hold period checks and numerical stability
+- **`kelly_suggestion()`**: Conservative Kelly criterion betting suggestions (25% Kelly factor)
+- **`resolve_event()`**: Event resolution with proper payout distribution and stake unwinding
 
-### Market Economics
+### Market Economics & Security
 - **LMSR Formula**: Logarithmic Market Scoring Rule with liquidity parameter b=5000
-- **Stake-Weighted Average**: `r_{t+1} = (s_t * target_prob + S_t * r_t) / (s_t + S_t)`
-- **Share Calculation**: YES shares = stake/prob, NO shares = stake/(1-prob)
-- **Payout Logic**: Market probability determines share value at sale
+- **f64+i128 Precision**: Core mathematics in f64 with 6-decimal fixed-point ledger (1,000,000 micro-RP units)
+- **Overflow Protection**: `MAX_STAKE_TO_LIQUIDITY_RATIO = 700.0` prevents dangerous exponential calculations
+- **Share Calculation**: YES shares = stake/prob, NO shares = stake/(1-prob) with Result error handling
+- **Side Enum Safety**: Type-safe YES/NO operations replace brittle string matching
+- **Payout Logic**: Market probability determines share value with numerical stability checks
 
-### WebSocket Integration
-- **Real-Time Broadcasts**: All market operations trigger `marketUpdate` events
+### WebSocket Integration & Testing
+- **Real-Time Broadcasts**: All market operations trigger `marketUpdate` events with security validation
 - **Event Structure**: `{eventId, market_prob, cumulative_stake, action, user_id, timestamp}`
 - **Frontend Reactivity**: VanJS reactive state updates position values automatically
+- **Security Testing**: Comprehensive test scripts verify input validation and error handling:
+  - `/test/test-api-validation.sh` - Tests invalid input rejection
+  - `/test/test-concurrency-behavior.sh` - Tests SERIALIZABLE transaction behavior
+  - `/test/load-test-exponentials.sh` - Performance testing under concurrent load
+  - `/test/bench-exponentials.py` - Mathematical performance benchmarking
 
 ## VanJS Idiomatic Patterns & Best Practices
 

@@ -26,7 +26,7 @@ mod benchmark;
 mod lmsr_api;  // Clean LMSR API using lmsr_core directly
 mod lmsr_core;
 mod db_adapter;
-mod tests;
+// Removed outdated tests.rs - lmsr_core.rs has comprehensive property-based tests
 
 // DRY helper types and functions
 type ApiResult<T> = Result<Json<T>, (axum::http::StatusCode, Json<Value>)>;
@@ -45,6 +45,15 @@ fn not_found_error(entity: &str) -> (axum::http::StatusCode, Json<Value>) {
     (
         axum::http::StatusCode::NOT_FOUND,
         Json(json!({"error": format!("{} not found", entity)}))
+    )
+}
+
+// Bad request error for validation failures
+fn bad_request_error(message: &str) -> (axum::http::StatusCode, Json<Value>) {
+    eprintln!("❌ Bad request: {}", message);
+    (
+        axum::http::StatusCode::BAD_REQUEST,
+        Json(json!({"error": message}))
     )
 }
 
@@ -672,18 +681,47 @@ async fn update_market_endpoint(
     Path(event_id): Path<i32>,
     ExtractJson(payload): ExtractJson<serde_json::Value>,
 ) -> ApiResult<Value> {
+    // Validate event_id
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+    
+    // Validate user_id - require explicit value, no defaults
     let user_id = payload.get("user_id")
         .and_then(|v| v.as_i64())
-        .unwrap_or(0) as i32;
+        .ok_or_else(|| bad_request_error("Missing or invalid user_id: must be a positive integer"))? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
     
+    // Validate target_prob - require explicit value, no defaults
     let target_prob = payload.get("target_prob")
         .and_then(|v| v.as_f64())
-        .unwrap_or(0.5); // 0.5 default
-
+        .ok_or_else(|| bad_request_error("Missing or invalid target_prob: must be a finite number"))?;
+    if !target_prob.is_finite() {
+        return Err(bad_request_error("Invalid target_prob: must be finite"));
+    }
+    if target_prob <= 0.0 || target_prob >= 1.0 {
+        return Err(bad_request_error("Invalid target_prob: must be between 0 and 1 (exclusive)"));
+    }
+    
+    // Validate stake - require explicit value, no defaults
     let stake = payload.get("stake")
         .and_then(|v| v.as_f64())
-        .unwrap_or(10.0); // 10.0 default
-
+        .ok_or_else(|| bad_request_error("Missing or invalid stake: must be a finite number"))?;
+    if !stake.is_finite() {
+        return Err(bad_request_error("Invalid stake: must be finite"));
+    }
+    if stake <= 0.0 {
+        return Err(bad_request_error("Invalid stake: must be positive"));
+    }
+    if stake > 1_000_000.0 {  // 1M RP max per trade
+        return Err(bad_request_error("Invalid stake: exceeds maximum allowed (1,000,000 RP)"));
+    }
+    if stake < 0.01 {  // Minimum 0.01 RP
+        return Err(bad_request_error("Invalid stake: below minimum allowed (0.01 RP)"));
+    }
+    
     let update = lmsr_api::MarketUpdate {
         event_id,
         target_prob,
@@ -710,13 +748,29 @@ async fn kelly_suggestion_endpoint(
     Path(event_id): Path<i32>,
     Query(params): Query<HashMap<String, String>>,
 ) -> ApiResult<Value> {
+    // Validate event_id
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+    
+    // Validate belief probability - require explicit value, no defaults
     let belief = params.get("belief")
         .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.5); // 0.5 default
+        .ok_or_else(|| bad_request_error("Missing or invalid belief: must be a finite number"))?;
+    if !belief.is_finite() {
+        return Err(bad_request_error("Invalid belief: must be finite"));
+    }
+    if belief <= 0.0 || belief >= 1.0 {
+        return Err(bad_request_error("Invalid belief: must be between 0 and 1 (exclusive)"));
+    }
 
+    // Validate user_id - require explicit value, no defaults
     let user_id = params.get("user_id")
         .and_then(|s| s.parse::<i32>().ok())
-        .unwrap_or(1);
+        .ok_or_else(|| bad_request_error("Missing or invalid user_id: must be a positive integer"))?;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
 
     // Get current market probability
     let market_prob_decimal: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
@@ -754,17 +808,43 @@ async fn sell_shares_endpoint(
     Path(event_id): Path<i32>,
     ExtractJson(payload): ExtractJson<serde_json::Value>,
 ) -> ApiResult<Value> {
+    // Validate event_id
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+    
+    // Validate user_id - require explicit value, no defaults
     let user_id = payload.get("user_id")
         .and_then(|v| v.as_i64())
-        .unwrap_or(0) as i32;
+        .ok_or_else(|| bad_request_error("Missing or invalid user_id: must be a positive integer"))? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
 
+    // Validate share_type - require explicit value, no defaults
     let share_type = payload.get("share_type")
         .and_then(|v| v.as_str())
-        .unwrap_or("yes");
+        .ok_or_else(|| bad_request_error("Missing or invalid share_type: must be 'yes' or 'no'"))?;
+    if share_type != "yes" && share_type != "no" {
+        return Err(bad_request_error("Invalid share_type: must be 'yes' or 'no'"));
+    }
 
+    // Validate amount - require explicit value, no defaults
     let amount = payload.get("amount")
         .and_then(|v| v.as_f64())
-        .unwrap_or(1.0); // 1.0 default
+        .ok_or_else(|| bad_request_error("Missing or invalid amount: must be a finite number"))?;
+    if !amount.is_finite() {
+        return Err(bad_request_error("Invalid amount: must be finite"));
+    }
+    if amount <= 0.0 {
+        return Err(bad_request_error("Invalid amount: must be positive"));
+    }
+    if amount > 10_000_000.0 {  // 10M shares max per sale
+        return Err(bad_request_error("Invalid amount: exceeds maximum allowed (10,000,000 shares)"));
+    }
+    if amount < 0.000001 {  // Minimum 0.000001 shares (1 micro-share)
+        return Err(bad_request_error("Invalid amount: below minimum allowed (0.000001 shares)"));
+    }
 
     match lmsr_api::sell_shares(&app_state.db, user_id, event_id, share_type, amount).await {
         Ok(result) => {
@@ -812,12 +892,15 @@ async fn resolve_market_event_endpoint(
     Path(event_id): Path<i32>,
     ExtractJson(payload): ExtractJson<serde_json::Value>,
 ) -> ApiResult<Value> {
-    // Extract outcome: true = YES, false = NO
+    // Validate event_id
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+    
+    // Extract and validate outcome: true = YES, false = NO
     let outcome = payload.get("outcome")
         .and_then(|v| v.as_bool())
-        .ok_or_else(|| {
-            (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": "Missing or invalid outcome (must be boolean)"})))
-        })?;
+        .ok_or_else(|| bad_request_error("Missing or invalid outcome (must be boolean)"))?;
     
     println!("🎯 Market resolution triggered: event_id={}, outcome={}", event_id, outcome);
     
@@ -872,11 +955,11 @@ async fn test_lmsr_invariants_endpoint(
             let stake_ledger = stakes[j];
             
             if sides[j] == 0 {
-                let (dq, cash_debit) = mkt.buy_yes(stake_ledger);
+                let (dq, cash_debit) = mkt.buy_yes(stake_ledger).unwrap();
                 yes_shares += dq;
                 cash_ledger -= cash_debit;
             } else {
-                let (dq, cash_debit) = mkt.buy_no(stake_ledger);
+                let (dq, cash_debit) = mkt.buy_no(stake_ledger).unwrap();
                 no_shares += dq;
                 cash_ledger -= cash_debit;
             }
@@ -884,10 +967,10 @@ async fn test_lmsr_invariants_endpoint(
         
         // Unwind positions
         let cash_credit_yes = if yes_shares > 0.0 {
-            mkt.sell_yes(yes_shares)
+            mkt.sell_yes(yes_shares).unwrap()
         } else { 0 };
         let cash_credit_no = if no_shares > 0.0 {
-            mkt.sell_no(no_shares)
+            mkt.sell_no(no_shares).unwrap()
         } else { 0 };
         
         cash_ledger += cash_credit_yes + cash_credit_no;
@@ -909,7 +992,7 @@ async fn test_lmsr_invariants_endpoint(
         let mut m = crate::lmsr_core::Market::new(b);
         for stake in vec![1_000_000i128, 10_000_000i128, 50_000_000i128] {
             prob_tests += 1;
-            let (_dq, _cash) = m.buy_yes(stake);
+            let (_dq, _cash) = m.buy_yes(stake).unwrap();
             let p = m.prob_yes();
             if p > 0.0 && p < 1.0 {
                 prob_success += 1;

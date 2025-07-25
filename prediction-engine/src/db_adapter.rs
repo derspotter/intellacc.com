@@ -181,7 +181,8 @@ impl DbAdapter {
         shares_delta: f64,
         cost: f64,
     ) -> Result<()> {
-        let cost_ledger = crate::lmsr_core::to_ledger_units(cost) as i64;
+        let cost_ledger = crate::lmsr_core::to_ledger_units(cost)
+            .map_err(|e| anyhow!("Invalid cost value: {}", e))? as i64;
         
         match side {
             Side::Yes => {

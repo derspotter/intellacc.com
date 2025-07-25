@@ -8,17 +8,18 @@ use std::fmt;
 pub const LEDGER_SCALE: i128 = 1_000_000; // 1 micro-RP units
 
 #[inline]
-pub fn to_ledger_units(x: f64) -> i128 {
+pub fn to_ledger_units(x: f64) -> Result<i128, String> {
     // round half-away-from-zero
     if x.is_nan() || !x.is_finite() {
-        panic!("non-finite value passed to to_ledger_units: {x}");
+        return Err(format!("non-finite value passed to to_ledger_units: {x}"));
     }
     let scaled = x * (LEDGER_SCALE as f64);
-    if scaled >= 0.0 {
+    let result = if scaled >= 0.0 {
         (scaled + 0.5).floor() as i128
     } else {
         (scaled - 0.5).ceil() as i128
-    }
+    };
+    Ok(result)
 }
 
 #[inline]
@@ -61,13 +62,15 @@ impl Market {
     }
 
     /// Unified trade executor for buying shares with stake (in ledger units).
-    /// Returns (shares_bought, cash_debited_ledger).
-    pub fn apply_trade(&mut self, side: Side, stake_ledger: i128) -> (f64, i128) {
+    /// Returns Result<(shares_bought, cash_debited_ledger), String>.
+    pub fn apply_trade(&mut self, side: Side, stake_ledger: i128) -> Result<(f64, i128), String> {
         let stake = from_ledger_units(stake_ledger);
-        assert!(stake > 0.0, "stake must be > 0");
+        if stake <= 0.0 {
+            return Err("stake must be > 0".to_string());
+        }
         
         let pre_cost = self.cost();
-        let shares_delta = delta_q_for_stake(side, self.q_yes, self.q_no, self.b, stake);
+        let shares_delta = delta_q_for_stake(side, self.q_yes, self.q_no, self.b, stake)?;
         
         // Apply the share delta to the appropriate side
         match side {
@@ -77,24 +80,26 @@ impl Market {
         
         let post_cost = self.cost();
         let cash_delta = post_cost - pre_cost; // what trader pays (positive)
-        let cash_debit = to_ledger_units(cash_delta);
+        let cash_debit = to_ledger_units(cash_delta)?;
         
-        (shares_delta, cash_debit)
+        Ok((shares_delta, cash_debit))
     }
 
-    /// Buy YES with a *stake* (in ledger units). Returns (shares_bought, cash_debited_ledger).
-    pub fn buy_yes(&mut self, stake_ledger: i128) -> (f64, i128) {
+    /// Buy YES with a *stake* (in ledger units). Returns Result<(shares_bought, cash_debited_ledger), String>.
+    pub fn buy_yes(&mut self, stake_ledger: i128) -> Result<(f64, i128), String> {
         self.apply_trade(Side::Yes, stake_ledger)
     }
 
-    /// Buy NO with a *stake* (in ledger units). Returns (shares_bought, cash_debited_ledger).
-    pub fn buy_no(&mut self, stake_ledger: i128) -> (f64, i128) {
+    /// Buy NO with a *stake* (in ledger units). Returns Result<(shares_bought, cash_debited_ledger), String>.
+    pub fn buy_no(&mut self, stake_ledger: i128) -> Result<(f64, i128), String> {
         self.apply_trade(Side::No, stake_ledger)
     }
 
-    /// Unified sell executor for selling shares. Returns (cash_credited_ledger).
-    pub fn apply_sell(&mut self, side: Side, shares: f64) -> i128 {
-        assert!(shares > 0.0, "shares must be > 0");
+    /// Unified sell executor for selling shares. Returns Result<cash_credited_ledger, String>.
+    pub fn apply_sell(&mut self, side: Side, shares: f64) -> Result<i128, String> {
+        if shares <= 0.0 {
+            return Err("shares must be > 0".to_string());
+        }
         
         let pre_cost = self.cost();
         
@@ -109,13 +114,13 @@ impl Market {
         to_ledger_units(cash_delta)
     }
 
-    /// Sell YES `shares`. Returns (cash_credited_ledger).
-    pub fn sell_yes(&mut self, shares: f64) -> i128 {
+    /// Sell YES `shares`. Returns Result<cash_credited_ledger, String>.
+    pub fn sell_yes(&mut self, shares: f64) -> Result<i128, String> {
         self.apply_sell(Side::Yes, shares)
     }
 
-    /// Sell NO `shares`. Returns (cash_credited_ledger).
-    pub fn sell_no(&mut self, shares: f64) -> i128 {
+    /// Sell NO `shares`. Returns Result<cash_credited_ledger, String>.
+    pub fn sell_no(&mut self, shares: f64) -> Result<i128, String> {
         self.apply_sell(Side::No, shares)
     }
 }
@@ -188,14 +193,27 @@ impl Side {
 /// For YES: dq_yes = b * ln((exp(S/b) * (A + B) - B) / A)
 /// For NO:  dq_no  = b * ln((exp(S/b) * (A + B) - A) / B)
 /// where A = exp(q_yes / b), B = exp(q_no / b)
-#[inline]
-pub fn delta_q_for_stake(side: Side, q_yes: f64, q_no: f64, b: f64, s: f64) -> f64 {
-    assert!(s > 0.0, "stake must be positive");
-    assert!(b > 0.0 && b.is_finite(), "b must be positive and finite");
+// Maximum allowed stake-to-liquidity ratio for numerical stability
+pub const MAX_STAKE_TO_LIQUIDITY_RATIO: f64 = 700.0;
+
+pub fn delta_q_for_stake(side: Side, q_yes: f64, q_no: f64, b: f64, s: f64) -> Result<f64, String> {
+    // Input validation
+    if s <= 0.0 {
+        return Err("stake must be positive".to_string());
+    }
+    if b <= 0.0 || !b.is_finite() {
+        return Err("liquidity parameter b must be positive and finite".to_string());
+    }
+    if !q_yes.is_finite() || !q_no.is_finite() {
+        return Err("market quantities must be finite".to_string());
+    }
     
-    // Centralized overflow protection
-    if s / b > 700.0 {
-        panic!("stake too large relative to liquidity parameter: s/b = {}", s / b);
+    // Centralized overflow protection with descriptive error
+    if s / b > MAX_STAKE_TO_LIQUIDITY_RATIO {
+        return Err(format!(
+            "stake too large relative to liquidity parameter: {:.2} / {:.2} = {:.2} > {}",
+            s, b, s / b, MAX_STAKE_TO_LIQUIDITY_RATIO
+        ));
     }
     
     let a = (q_yes / b).exp();
@@ -216,11 +234,20 @@ pub fn delta_q_for_stake(side: Side, q_yes: f64, q_no: f64, b: f64, s: f64) -> f
         }
     };
     
-    assert!(numerator > 0.0 && denominator > 0.0, 
+    // Validate numerical stability
+    if numerator <= 0.0 || denominator <= 0.0 || !numerator.is_finite() || !denominator.is_finite() {
+        return Err(format!(
             "invalid delta calculation for {}: numerator={}, denominator={}", 
-            side_name, numerator, denominator);
+            side_name, numerator, denominator
+        ));
+    }
     
-    b * (numerator / denominator).ln()
+    let result = b * (numerator / denominator).ln();
+    if !result.is_finite() {
+        return Err(format!("delta calculation resulted in non-finite value: {}", result));
+    }
+    
+    Ok(result)
 }
 
 // Note: Removed duplicate delta_q_yes_for_stake and delta_q_no_for_stake functions
@@ -257,18 +284,18 @@ mod tests {
             for i in 0..n {
                 let stake_ledger = stakes[i];
                 let stake = from_ledger_units(stake_ledger as i128).abs(); // ensure positive
-                let stake_ledger = to_ledger_units(stake);
+                let stake_ledger = to_ledger_units(stake).unwrap();
                 let pre = mkt.cost();
 
                 if sides[i] == 0 {
-                    let (dq, cash_debit) = mkt.buy_yes(stake_ledger);
+                    let (dq, cash_debit) = mkt.buy_yes(stake_ledger)?;
                     yes_shares += dq;
                     let post = mkt.cost();
                     let delta_c = post - pre;
                     cash_float += delta_c;
                     cash_ledger -= cash_debit; // user pays (cash leaves user)
                 } else {
-                    let (dq, cash_debit) = mkt.buy_no(stake_ledger);
+                    let (dq, cash_debit) = mkt.buy_no(stake_ledger)?;
                     no_shares += dq;
                     let post = mkt.cost();
                     let delta_c = post - pre;
@@ -283,10 +310,10 @@ mod tests {
             // unwind positions
             let pre = mkt.cost();
             let cash_credit_yes = if yes_shares > 0.0 {
-                mkt.sell_yes(yes_shares)
+                mkt.sell_yes(yes_shares)?
             } else { 0 };
             let cash_credit_no = if no_shares > 0.0 {
-                mkt.sell_no(no_shares)
+                mkt.sell_no(no_shares)?
             } else { 0 };
             let post = mkt.cost();
             let delta_c_back = pre - post;
@@ -310,7 +337,7 @@ mod tests {
     fn prob_is_between_zero_and_one() {
         let mut m = Market::new(5000.0);
         for _ in 0..100 {
-            let (_dq, _cash) = m.buy_yes(to_ledger_units(10.0));
+            let (_dq, _cash) = m.buy_yes(to_ledger_units(10.0).unwrap()).unwrap();
             let p = m.prob_yes();
             assert!(p > 0.0 && p < 1.0, "p={}", p);
         }
@@ -319,8 +346,8 @@ mod tests {
     #[test]
     fn simple_round_trip_exact_zero_ledger() {
         let mut m = Market::new(5000.0);
-        let (dq, debit) = m.buy_yes(to_ledger_units(100.0));
-        let credit = m.sell_yes(dq);
+        let (dq, debit) = m.buy_yes(to_ledger_units(100.0).unwrap()).unwrap();
+        let credit = m.sell_yes(dq).unwrap();
         assert_eq!(debit, credit, "round trip should net to zero in ledger units");
     }
 }

@@ -3,7 +3,7 @@
 
 use crate::lmsr_core::{Market, to_ledger_units, from_ledger_units, Side};
 use crate::db_adapter::DbAdapter;
-use sqlx::{PgPool, Row, Executor};
+use sqlx::{PgPool, Row, Executor, Error as SqlxError};
 use chrono::{DateTime, Utc, Duration};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,65 @@ use rand::Rng;
 // Configuration constants for concurrency control
 const MAX_RETRY_ATTEMPTS: u32 = 5;
 const BASE_RETRY_DELAY_MS: u64 = 10;
+
+/// PostgreSQL SQLSTATE codes for retryable errors
+/// Reference: https://www.postgresql.org/docs/current/errcodes-appendix.html
+mod pg_error_codes {
+    // Class 40 — Transaction Rollback
+    pub const SERIALIZATION_FAILURE: &str = "40001";
+    pub const DEADLOCK_DETECTED: &str = "40P01";
+    
+    // Class 25 — Invalid Transaction State  
+    pub const ACTIVE_SQL_TRANSACTION: &str = "25001";
+    
+    // Class 23 — Integrity Constraint Violation (may indicate concurrent updates)
+    pub const UNIQUE_VIOLATION: &str = "23505";
+}
+
+/// Determines if a database error is retryable based on PostgreSQL SQLSTATE codes
+/// This replaces fragile string-based error detection with reliable error code matching
+fn is_retryable_error(error: &anyhow::Error) -> bool {
+    // Try to extract the root cause SqlxError
+    let mut current_error: &dyn std::error::Error = error.as_ref();
+    
+    loop {
+        // Check if this level is a SqlxError
+        if let Some(sqlx_error) = current_error.downcast_ref::<SqlxError>() {
+            return match sqlx_error {
+                SqlxError::Database(db_error) => {
+                    // SQLx provides SQLSTATE through the code() method
+                    if let Some(sqlstate) = db_error.code() {
+                        let sqlstate_str = sqlstate.as_ref();
+                        let is_retryable = matches!(sqlstate_str, 
+                            pg_error_codes::SERIALIZATION_FAILURE |
+                            pg_error_codes::DEADLOCK_DETECTED |
+                            pg_error_codes::ACTIVE_SQL_TRANSACTION |
+                            pg_error_codes::UNIQUE_VIOLATION
+                        );
+                        
+                        if is_retryable {
+                            eprintln!("🔄 Detected retryable database error: SQLSTATE {} ({})", 
+                                sqlstate_str, db_error.message());
+                        }
+                        
+                        is_retryable
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+        }
+        
+        // Move to the next error in the chain
+        match current_error.source() {
+            Some(source) => current_error = source,
+            None => break,
+        }
+    }
+    
+    false
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MarketUpdate {
@@ -69,13 +128,8 @@ macro_rules! with_serializable_tx {
                 Err(e) => {
                     $tx_var.rollback().await.ok();
                     
-                    // Check if this is a serialization conflict that we should retry
-                    let error_str = e.to_string().to_lowercase();
-                    let is_retry_able = error_str.contains("serialization failure") ||
-                                       error_str.contains("deadlock") ||
-                                       error_str.contains("could not serialize");
-                    
-                    if is_retry_able && attempt < MAX_RETRY_ATTEMPTS {
+                    // Check if this is a retryable error using PostgreSQL SQLSTATE codes
+                    if is_retryable_error(&e) && attempt < MAX_RETRY_ATTEMPTS {
                         // Exponential backoff with jitter
                         let jitter = rand::thread_rng().gen_range(0..10);
                         let delay_ms = BASE_RETRY_DELAY_MS * (1 << (attempt - 1)) + jitter;
@@ -112,13 +166,8 @@ macro_rules! with_optimistic_tx {
                 Err(e) => {
                     $tx_var.rollback().await.ok();
                     
-                    // Check for version conflicts or concurrent updates
-                    let error_str = e.to_string().to_lowercase();
-                    let is_version_conflict = error_str.contains("version") ||
-                                             error_str.contains("concurrent") ||
-                                             error_str.contains("updated_at");
-                    
-                    if is_version_conflict && attempt < MAX_RETRY_ATTEMPTS {
+                    // Check if this is a retryable error using PostgreSQL SQLSTATE codes
+                    if is_retryable_error(&e) && attempt < MAX_RETRY_ATTEMPTS {
                         let jitter = rand::thread_rng().gen_range(0..5);
                         let delay_ms = BASE_RETRY_DELAY_MS * attempt as u64 + jitter;
                         sleep(StdDuration::from_millis(delay_ms)).await;
@@ -179,16 +228,19 @@ async fn update_market_transaction(
     let mut market = Market { q_yes, q_no, b: liquidity_b };
     
     // Convert stake to ledger units for exact computation
-    let stake_ledger = to_ledger_units(update.stake);
+    let stake_ledger = to_ledger_units(update.stake)
+        .map_err(|e| anyhow!("Invalid stake value: {}", e))?;
     
     // Execute trade based on target probability
     let (shares_acquired, side, actual_cost_ledger) = if update.target_prob > prev_prob {
         // Buy YES shares to increase probability
-        let (shares, cost) = market.buy_yes(stake_ledger);
+        let (shares, cost) = market.buy_yes(stake_ledger)
+            .map_err(|e| anyhow!("Trade execution failed: {}", e))?;
         (shares, Side::Yes, cost)
     } else {
         // Buy NO shares to decrease probability  
-        let (shares, cost) = market.buy_no(stake_ledger);
+        let (shares, cost) = market.buy_no(stake_ledger)
+            .map_err(|e| anyhow!("Trade execution failed: {}", e))?;
         (shares, Side::No, cost)
     };
     
@@ -340,8 +392,10 @@ async fn sell_shares_transaction(
     let mut market = Market { q_yes, q_no, b: liquidity_b };
     
     let payout_ledger = match side {
-        Side::Yes => market.sell_yes(amount),
-        Side::No => market.sell_no(amount),
+        Side::Yes => market.sell_yes(amount)
+            .map_err(|e| anyhow!("Sell execution failed: {}", e))?,
+        Side::No => market.sell_no(amount)
+            .map_err(|e| anyhow!("Sell execution failed: {}", e))?,
     };
     
     let payout = from_ledger_units(payout_ledger);
