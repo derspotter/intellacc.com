@@ -3,8 +3,6 @@ const { div, h1, button } = van.tags;
 import { Await } from 'vanjs-ui';
 import ProfileCard from './ProfileCard';
 import ProfileEditor from './ProfileEditor';
-import ProfilePredictions from './ProfilePredictions';
-import NetworkTabs from './NetworkTabs';
 import FollowButton from './FollowButton';
 import api from '../../services/api';
 import auth from '../../services/auth';
@@ -41,27 +39,7 @@ export default function ProfilePage({ userId } = {}) {
                 followButton: isCurrentUser ? null : FollowButton({ user })
               }),
           
-          // Show ProfilePredictions for current user, placeholder for others
-          isCurrentUser ? 
-            ProfilePredictions({
-              compact: true,
-              limit: 5,
-              showViewAll: true,
-              title: 'Your Predictions',
-              className: 'profile-predictions'
-            }) :
-            // TODO: Implement ProfilePredictions for other users
-            ProfilePredictions({
-              compact: true,
-              limit: 5,
-              showViewAll: true,
-              title: 'Predictions',
-              className: 'profile-predictions'
-            })
         ]),
-        div({ class: "profile-column sidebar" }, [
-          NetworkTabs({ userId: isCurrentUser ? null : user.id })
-        ])
       ])
     ]);
   };

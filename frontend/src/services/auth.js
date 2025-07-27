@@ -200,6 +200,45 @@ export function isTokenExpired() {
   return payload.exp * 1000 < Date.now();
 }
 
+/**
+ * Efficiently get user ID with localStorage caching and JWT validation
+ * Uses localStorage for performance but validates against JWT token for reliability
+ * @returns {string|null} User ID or null if not authenticated
+ */
+export function getUserId() {
+  const token = getToken();
+  if (!token) {
+    // No token, clean up any orphaned cache
+    localStorage.removeItem('userId');
+    return null;
+  }
+  
+  // Check cached value first for performance
+  const cachedUserId = localStorage.getItem('userId');
+  
+  try {
+    // Validate cache against current token
+    const tokenData = JSON.parse(atob(token.split('.')[1]));
+    const tokenUserId = String(tokenData.userId);
+    
+    // If cache doesn't match token, update cache
+    if (cachedUserId !== tokenUserId) {
+      localStorage.setItem('userId', tokenUserId);
+      return tokenUserId;
+    }
+    
+    // Cache is valid, return fast cached value
+    return cachedUserId;
+  } catch (e) {
+    // Invalid token, clean up
+    console.error('Invalid token, clearing auth data:', e);
+    localStorage.removeItem('userId');
+    localStorage.removeItem('token');
+    clearToken(); // Also update reactive state
+    return null;
+  }
+}
+
 export default {
   isLoggedInState,
   tokenState,
@@ -214,5 +253,6 @@ export default {
   logout,
   // fetchUserProfile is now provided by userStore.actions.fetchUserProfile
   getTokenData,
-  isTokenExpired
+  isTokenExpired,
+  getUserId
 };

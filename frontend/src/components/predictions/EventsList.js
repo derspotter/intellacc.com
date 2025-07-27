@@ -3,7 +3,7 @@ import Card from '../common/Card.js';
 import Button from '../common/Button.js';
 import EventCard from './EventCard.js';
 import api from '../../services/api.js';
-import { isLoggedInState } from '../../services/auth.js';
+import { isLoggedInState, getUserId } from '../../services/auth.js';
 import { registerSocketEventHandler } from '../../services/socket.js';
 
 const { div, h2, h3, p, input, label, select, option, span, ul, li } = van.tags;
@@ -27,6 +27,9 @@ export default function EventsList() {
   
   // Cache EventCard components to prevent recreation and preserve slider state
   const eventCardCache = new Map();
+  
+  // Search debounce timeout
+  let searchTimeout;
 
   // Register Socket.IO handler for real-time market updates in event list
   const unregisterEventListSocketHandler = registerSocketEventHandler('marketUpdate', (data) => {
@@ -53,12 +56,12 @@ export default function EventsList() {
     }
   });
 
-  const loadEvents = async () => {
+  const loadEvents = async (search = '') => {
     try {
       loading.val = true;
       error.val = null;
       
-      const response = await api.events.getAll();
+      const response = await api.events.getAll(search);
       events.val = response || [];
     } catch (err) {
       console.error('Error loading events:', err);
@@ -79,12 +82,12 @@ export default function EventsList() {
 
     try {
       positionsLoading.val = true;
-      const userId = localStorage.getItem('userId');
+      const userId = getUserId();
       const token = localStorage.getItem('token');
       console.log('🔍 userId:', userId, 'hasToken:', !!token);
       
       if (!userId) {
-        console.log('🔍 No userId found in localStorage');
+        console.log('🔍 No userId found');
         return;
       }
 
@@ -124,7 +127,7 @@ export default function EventsList() {
       weeklyLoading.val = true;
       weeklyError.val = null;
       
-      const userId = localStorage.getItem('userId');
+      const userId = getUserId();
       if (!userId) {
         weeklyAssignment.val = null;
         weeklyLoading.val = false;
@@ -160,14 +163,7 @@ export default function EventsList() {
   const filteredEvents = () => {
     let filtered = events.val;
     
-    // Apply search filter
-    if (searchQuery.val.trim()) {
-      const query = searchQuery.val.toLowerCase().trim();
-      filtered = filtered.filter(event => 
-        event.title.toLowerCase().includes(query) ||
-        (event.category && event.category.toLowerCase().includes(query))
-      );
-    }
+    // Search is now handled server-side, no need for client-side search filter
     
     // Apply status filter
     if (filter.val === 'open') {
@@ -216,7 +212,7 @@ export default function EventsList() {
 
   const handleStakeUpdate = (result) => {
     // Refresh events list and user positions after a stake is placed
-    loadEvents();
+    loadEvents(searchQuery.val.trim());
     if (isLoggedInState.val) {
       loadUserPositions();
     }
@@ -236,7 +232,7 @@ export default function EventsList() {
 
   // Load events and weekly assignment on component mount
   const initializeData = async () => {
-    await loadEvents();
+    await loadEvents(''); // Start with no search filter
     if (isLoggedInState.val) {
       await loadWeeklyAssignment();
       await loadUserPositions();
@@ -275,7 +271,14 @@ export default function EventsList() {
               type: 'text',
               placeholder: 'Search by title or category...',
               value: searchQuery,
-              oninput: (e) => searchQuery.val = e.target.value
+              oninput: (e) => {
+                searchQuery.val = e.target.value;
+                // Debounce search to avoid too many API calls
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                  loadEvents(searchQuery.val.trim());
+                }, 500);
+              }
             }),
             
             select({

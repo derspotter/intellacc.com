@@ -2,6 +2,7 @@ import van from "vanjs-core";
 import Button from '../common/Button.js';
 import api from '../../services/api.js';
 import { registerSocketEventHandler } from '../../services/socket.js';
+import { getUserId } from '../../services/auth.js';
 
 const { div, h3, p, span, small, input, label, form, button } = van.tags;
 
@@ -87,8 +88,8 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
       }
     }
     
-    // Get userId from localStorage
-    const userId = localStorage.getItem('userId');
+    // Get userId efficiently with caching
+    const userId = getUserId();
     if (!userId) {
       console.log('No userId found, skipping position load');
       return;
@@ -179,13 +180,14 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
 
   const getKellySuggestion = async (belief, updateCallback) => {
     try {
-      const token = localStorage.getItem('token');
-      let userId = localStorage.getItem('userId');
-      
+      // Get userId efficiently with caching
+      const userId = getUserId();
       if (!userId) {
         console.log('No userId for Kelly suggestion, skipping');
         return;
       }
+      
+      const token = localStorage.getItem('token');
       
       console.log('Getting Kelly suggestion for belief:', belief, 'userId:', userId, 'eventId:', event.id, 'hasToken:', !!token);
       
@@ -198,13 +200,19 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
         
         if (response.ok) {
           const kelly = await response.json();
-          // Transform API response to expected format
+          // Transform API response to expected format, handling null values
+          const kellyOptimal = kelly.kelly_suggestion ? parseFloat(kelly.kelly_suggestion) : 0;
+          const quarterKelly = kelly.quarter_kelly ? parseFloat(kelly.quarter_kelly) : 0;
+          const currentProb = kelly.current_prob ? parseFloat(kelly.current_prob) : 0.5;
+          const balance = kelly.balance ? parseFloat(kelly.balance) : 1000;
+          const edge = belief - currentProb;
+          
           kellyData.val = {
-            kelly_optimal: parseFloat(kelly.kelly_suggestion),
-            quarter_kelly: parseFloat(kelly.quarter_kelly),
-            edge: belief - parseFloat(kelly.current_prob),
-            balance: parseFloat(kelly.balance),
-            expected_log_growth: (belief - parseFloat(kelly.current_prob)) * 0.1
+            kelly_optimal: kellyOptimal,
+            quarter_kelly: quarterKelly,
+            edge: edge,
+            balance: balance,
+            expected_log_growth: edge * 0.1
           };
           console.log('Kelly data set from API:', kellyData.val);
           // Force a re-render by triggering the reactive state
@@ -248,21 +256,10 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
       
       const token = localStorage.getItem('token');
       
-      // Get user ID from token or API call
-      let userId;
-      try {
-        // Try to get from localStorage first
-        userId = localStorage.getItem('userId');
-        
-        // If not available, get from current user endpoint
-        if (!userId) {
-          const userResponse = await api.users.getProfile();
-          userId = userResponse.id;
-          // Cache it for future use
-          localStorage.setItem('userId', userId);
-        }
-      } catch (err) {
-        error.val = 'Unable to get user information';
+      // Get userId efficiently with caching
+      const userId = getUserId();
+      if (!userId) {
+        error.val = 'User not authenticated';
         return;
       }
       
@@ -330,13 +327,15 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
       submitting.val = true;
       error.val = null;
       
-      const token = localStorage.getItem('token');
-      let userId = localStorage.getItem('userId');
-      
+      // Get userId efficiently with caching
+      const userId = getUserId();
       if (!userId) {
-        const userResponse = await api.users.getProfile();
-        userId = userResponse.id;
-        localStorage.setItem('userId', userId);
+        throw new Error('User not authenticated');
+      }
+      
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token');
       }
       
 
@@ -448,13 +447,15 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
   };
 
   const sellShares = async (shareType, amount) => {
-    const token = localStorage.getItem('token');
-    let userId = localStorage.getItem('userId');
-    
+    // Get userId efficiently with caching
+    const userId = getUserId();
     if (!userId) {
-      const userResponse = await api.users.getProfile();
-      userId = userResponse.id;
-      localStorage.setItem('userId', userId);
+      throw new Error('User not authenticated');
+    }
+    
+    const token = localStorage.getItem('token');
+    if (!token) {
+      throw new Error('No authentication token');
     }
     
     const response = await fetch(`/api/events/${event.id}/sell`, {
@@ -498,7 +499,8 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
 
   // Debug: Always log when EventCard is created
   console.log('=== EventCard CREATED for event:', event.id, event.title);
-  console.log('DEBUG EventCard - userId:', localStorage.getItem('userId'), 'token exists:', !!localStorage.getItem('token'));
+  const debugUserId = getUserId();
+  console.log('DEBUG EventCard - userId (cached):', debugUserId, 'token exists:', !!localStorage.getItem('token'));
   
   // Load user position once on mount
   console.log('🚀 Loading user position on mount');
@@ -525,6 +527,9 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
 
   const formatRP = (value) => {
     const numValue = typeof value === 'string' ? parseFloat(value) : value;
+    if (isNaN(numValue) || numValue === null || numValue === undefined) {
+      return '0.00 RP';
+    }
     return `${numValue.toFixed(2)} RP`;
   };
 
@@ -761,8 +766,8 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
                   type: 'button',
                   className: 'kelly-apply-btn primary',
                   onclick: () => {
-                    if (kellyData.val) {
-                      stakeAmount.val = kellyData.val.kelly_optimal.toFixed(2);
+                    if (kellyData.val && !isNaN(kellyData.val.kelly_optimal)) {
+                      stakeAmount.val = Math.max(0, kellyData.val.kelly_optimal).toFixed(2);
                     }
                   },
                   children: 'Apply Kelly'

@@ -193,7 +193,7 @@ exports.getEvents = async (req, res) => {
     
     // Add search functionality
     if (search && search.trim()) {
-      query += " AND (title ILIKE $1 OR details ILIKE $1)";
+      query += " AND title ILIKE $1";
       params.push(`%${search.trim()}%`);
     }
     

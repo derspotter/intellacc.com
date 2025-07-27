@@ -23,23 +23,28 @@ export default function ProfileCard({ onEdit, user, followButton }) {
     setTimeout(() => userStore.actions.fetchUserProfile.call(userStore), 0);
   }
   
-  // Fetch reputation data (for current user or public profiles)
-  if (auth.isLoggedInState.val && !reputationData.val && !loadingReputation.val && userData) {
-    loadingReputation.val = true;
-    const reputationPromise = isCurrentUser 
-      ? api.leaderboard.getUserRank()
-      : api.scoring.getUserReputation(userData.id);
-      
-    reputationPromise
-      .then(data => {
-        reputationData.val = data;
-        loadingReputation.val = false;
-      })
-      .catch(error => {
-        console.error('Failed to fetch reputation data:', error);
-        loadingReputation.val = false;
-      });
-  }
+  // Fetch reputation data (for current user or public profiles) - run once
+  const fetchReputation = () => {
+    if (auth.isLoggedInState.val && !reputationData.val && !loadingReputation.val && userData) {
+      loadingReputation.val = true;
+      const reputationPromise = isCurrentUser 
+        ? api.leaderboard.getUserRank()
+        : api.scoring.getUserReputation(userData.id);
+        
+      reputationPromise
+        .then(data => {
+          reputationData.val = data;
+          loadingReputation.val = false;
+        })
+        .catch(error => {
+          console.error('Failed to fetch reputation data:', error);
+          loadingReputation.val = false;
+        });
+    }
+  };
+  
+  // Run fetch only once when component is created
+  setTimeout(fetchReputation, 0);
   
   return Card({
     title: "Profile",
@@ -60,7 +65,7 @@ export default function ProfileCard({ onEdit, user, followButton }) {
               reputationData.val ? div({ class: "reputation-stats" }, [
                 div({ class: "reputation-item" }, [
                   span({ class: "reputation-label" }, "Points: "),
-                  span({ class: "reputation-value points-value" }, reputationData.val.rep_points.toFixed(1))
+                  span({ class: "reputation-value points-value" }, parseFloat(reputationData.val.rep_points || 1000.0).toFixed(1))
                 ]),
                 div({ class: "reputation-item" }, [
                   span({ class: "reputation-label" }, "Global Rank: "),
