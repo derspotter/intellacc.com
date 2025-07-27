@@ -1,0 +1,17 @@
+# Development override for docker-compose.yml
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+version: "3.8"
+
+services:
+  prediction_engine:
+    build:
+      context: ./prediction-engine
+      dockerfile: Dockerfile.dev
+    # Development features
+    volumes:
+      - ./prediction-engine/src:/app/src:ro  # Mount source for development
+    environment:
+      - RUST_LOG=debug
+    # Override command for development if needed
+    # command: ["cargo", "run", "--release"]
