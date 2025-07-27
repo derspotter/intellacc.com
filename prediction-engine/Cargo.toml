@@ -1,7 +1,7 @@
 [package]
 name = "prediction_engine"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 # Async runtime - The foundation for async Rust (like Node.js event loop)
@@ -23,6 +23,10 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Error handling - Better error types than standard library
 anyhow = "1.0"
+
+# Logging - Structured logging framework
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # HTTP types and utilities
 tower = "0.5"
@@ -53,3 +57,11 @@ rand = "0.8"
 
 # Property-based testing for LMSR
 proptest = "1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.8"
+
+[[bin]]
+name = "stress_test"
+path = "src/bin/stress_test.rs"

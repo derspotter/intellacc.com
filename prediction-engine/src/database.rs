@@ -924,14 +924,12 @@ pub async fn get_user_market_position(pool: &PgPool, user_id: i32, event_id: i32
             us.event_id,
             COALESCE(us.yes_shares, 0) as yes_shares,
             COALESCE(us.no_shares, 0) as no_shares,
-            COALESCE(SUM(mu.stake_amount), 0) as total_staked,
+            COALESCE(ledger_to_decimal(us.total_staked_ledger), 0) as total_staked,
             us.last_updated,
             e.market_prob
         FROM user_shares us
-        LEFT JOIN market_updates mu ON us.user_id = mu.user_id AND us.event_id = mu.event_id
         LEFT JOIN events e ON us.event_id = e.id
         WHERE us.user_id = $1 AND us.event_id = $2
-        GROUP BY us.user_id, us.event_id, us.yes_shares, us.no_shares, us.last_updated, e.market_prob
         "#
     )
     .bind(user_id)
@@ -1017,20 +1015,12 @@ pub async fn get_user_portfolio(pool: &PgPool, user_id: i32) -> Result<Vec<UserM
             us.event_id,
             COALESCE(us.yes_shares, 0) as yes_shares,
             COALESCE(us.no_shares, 0) as no_shares,
-            COALESCE(portfolio_stakes.total_staked, 0) as total_staked,
+            COALESCE(ledger_to_decimal(us.total_staked_ledger), 0) as total_staked,
             us.last_updated,
             e.market_prob,
             e.title
         FROM user_shares us
         JOIN events e ON us.event_id = e.id
-        LEFT JOIN (
-            SELECT 
-                user_id, 
-                event_id, 
-                SUM(stake_amount) as total_staked
-            FROM market_updates
-            GROUP BY user_id, event_id
-        ) portfolio_stakes ON us.user_id = portfolio_stakes.user_id AND us.event_id = portfolio_stakes.event_id
         WHERE us.user_id = $1
         AND (us.yes_shares > 0 OR us.no_shares > 0)
         AND e.outcome IS NULL

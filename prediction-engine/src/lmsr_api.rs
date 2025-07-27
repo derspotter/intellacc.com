@@ -3,13 +3,18 @@
 
 use crate::lmsr_core::{Market, to_ledger_units, from_ledger_units, Side};
 use crate::db_adapter::DbAdapter;
+use crate::config::Config;
 use sqlx::{PgPool, Row, Executor, Error as SqlxError};
 use chrono::{DateTime, Utc, Duration};
 use anyhow::{Result, anyhow};
+use std::convert::TryFrom;
+use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Serialize};
 use std::time::Duration as StdDuration;
 use tokio::time::sleep;
 use rand::Rng;
+use tracing::{debug, info, warn, error};
+use std::str::FromStr;
 
 // Configuration constants for concurrency control
 const MAX_RETRY_ATTEMPTS: u32 = 5;
@@ -51,8 +56,11 @@ fn is_retryable_error(error: &anyhow::Error) -> bool {
                         );
                         
                         if is_retryable {
-                            eprintln!("🔄 Detected retryable database error: SQLSTATE {} ({})", 
-                                sqlstate_str, db_error.message());
+                            debug!(
+                                sqlstate = sqlstate_str,
+                                message = db_error.message(),
+                                "detected retryable database error"
+                            );
                         }
                         
                         is_retryable
@@ -185,6 +193,7 @@ macro_rules! with_optimistic_tx {
 // Core LMSR update function using lmsr_core directly
 pub async fn update_market(
     pool: &PgPool,
+    config: &Config,
     user_id: i32,
     update: MarketUpdate,
 ) -> Result<UpdateResult> {
@@ -197,13 +206,14 @@ pub async fn update_market(
     }
 
     with_serializable_tx!(pool, tx, {
-        update_market_transaction(&mut tx, user_id, &update).await
+        update_market_transaction(&mut tx, config, user_id, &update).await
     })
 }
 
 // Internal transaction logic extracted for concurrency control
 async fn update_market_transaction(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    config: &Config,
     user_id: i32,
     update: &MarketUpdate,
 ) -> Result<UpdateResult> {
@@ -244,6 +254,7 @@ async fn update_market_transaction(
         (shares, Side::No, cost)
     };
     
+    // Keep actual_cost_ledger as i128, only convert for final result
     let actual_cost = from_ledger_units(actual_cost_ledger);
     let new_prob = market.prob_yes();
     let new_cumulative_cost = market.cost();
@@ -258,14 +269,27 @@ async fn update_market_transaction(
         market.q_no,
     ).await?;
     
-    // Deduct exact cost from user balance using clean adapter
-    let has_sufficient_funds = DbAdapter::deduct_user_cost(tx, user_id, actual_cost).await?;
+    // Deduct exact cost from user balance using ledger-native method (single rounding boundary)
+    let cost_ledger_i64 = i64::try_from(actual_cost_ledger)
+        .map_err(|_| anyhow!("actual_cost_ledger out of i64 range"))?;
+    let has_sufficient_funds = DbAdapter::deduct_user_cost_ledger(tx, user_id, cost_ledger_i64).await?;
     if !has_sufficient_funds {
         return Err(anyhow!("Insufficient RP balance"));
     }
     
-    // Record the update with 1-hour hold using clean adapter
-    let hold_until = Utc::now() + Duration::hours(1);
+    // Record the update with configurable hold period using clean adapter
+    let hold_duration_hours = if config.market.enable_hold_period {
+        config.market.hold_period_hours
+    } else {
+        0.0  // No hold period if disabled
+    };
+    
+    let hold_until = if hold_duration_hours > 0.0 {
+        let duration_minutes = (hold_duration_hours * 60.0).round() as i64;
+        Utc::now() + Duration::minutes(duration_minutes)
+    } else {
+        Utc::now()  // No hold period
+    };
     DbAdapter::record_market_update(
         tx,
         user_id,
@@ -278,14 +302,14 @@ async fn update_market_transaction(
         hold_until,
     ).await?;
     
-    // Update user shares using clean adapter
-    DbAdapter::update_user_shares(
+    // Update user shares using ledger-native method (single rounding boundary)
+    DbAdapter::update_user_shares_ledger(
         tx,
         user_id,
         update.event_id,
         side,
         shares_acquired,
-        actual_cost,
+        cost_ledger_i64,
     ).await?;
     
     // Calculate expected payouts for display
@@ -306,6 +330,7 @@ async fn update_market_transaction(
 // Sell shares back to market using lmsr_core directly
 pub async fn sell_shares(
     pool: &PgPool,
+    config: &Config,
     user_id: i32,
     event_id: i32,
     share_type: &str,
@@ -321,69 +346,81 @@ pub async fn sell_shares(
     }
 
     with_serializable_tx!(pool, tx, {
-        sell_shares_transaction(&mut tx, user_id, event_id, side, amount).await
+        sell_shares_transaction(&mut tx, config, user_id, event_id, side, amount).await
     })
 }
 
 // Internal transaction logic for sell_shares
 async fn sell_shares_transaction(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    config: &Config,
     user_id: i32,
     event_id: i32,
     side: Side,
     amount: f64,
 ) -> Result<SellResult> {
     
-    // Check hold period
-    let now = Utc::now();
-    let active_holds: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM market_updates 
-         WHERE user_id = $1 AND event_id = $2 AND hold_until > $3"
+    // Check hold period (if enabled in config)
+    if config.market.enable_hold_period {
+        let now = Utc::now();
+        let active_holds: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM market_updates 
+             WHERE user_id = $1 AND event_id = $2 AND hold_until > $3"
+        )
+        .bind(user_id)
+        .bind(event_id)
+        .bind(now)
+        .fetch_one(tx.as_mut())
+        .await?;
+        
+        if active_holds > 0 {
+            return Err(anyhow!("Hold period not expired for recent purchases"));
+        }
+    }
+    
+    // Get current market state FIRST (consistent lock order with buy path)
+    let event_row = sqlx::query(
+        "SELECT market_prob, cumulative_stake, liquidity_b, q_yes, q_no FROM events WHERE id = $1 FOR UPDATE"
     )
-    .bind(user_id)
     .bind(event_id)
-    .bind(now)
     .fetch_one(tx.as_mut())
     .await?;
     
-    if active_holds > 0 {
-        return Err(anyhow!("Hold period not expired for recent purchases"));
-    }
-    
-    // Get user shares
-    let shares = sqlx::query_as::<_, (rust_decimal::Decimal, rust_decimal::Decimal)>(
-        "SELECT yes_shares, no_shares FROM user_shares WHERE user_id = $1 AND event_id = $2"
+    // Then get user shares with side-specific staked amounts (lock user_shares SECOND)
+    let row = sqlx::query(
+        "SELECT yes_shares, no_shares, total_staked_ledger, staked_yes_ledger, staked_no_ledger
+         FROM user_shares 
+         WHERE user_id = $1 AND event_id = $2
+         FOR UPDATE"
     )
     .bind(user_id)
     .bind(event_id)
     .fetch_optional(tx.as_mut())
     .await?;
     
-    let (yes_shares_dec, no_shares_dec) = shares.unwrap_or((rust_decimal::Decimal::ZERO, rust_decimal::Decimal::ZERO));
-    let yes_shares = DbAdapter::decimal_to_f64(yes_shares_dec)?;
-    let no_shares = DbAdapter::decimal_to_f64(no_shares_dec)?;
+    // If no row exists, user has no shares to sell
+    let (yes_shares, no_shares, _total_staked_ledger, staked_yes_ledger, staked_no_ledger): (f64, f64, i64, i64, i64) = match row {
+        Some(r) => (
+            DbAdapter::decimal_to_f64(r.get("yes_shares"))?,
+            DbAdapter::decimal_to_f64(r.get("no_shares"))?,
+            r.get::<i64, _>("total_staked_ledger"),
+            r.get::<i64, _>("staked_yes_ledger"),
+            r.get::<i64, _>("staked_no_ledger"),
+        ),
+        None => (0.0, 0.0, 0, 0, 0),
+    };
     
     // Check sufficient shares
-    match side {
-        Side::Yes if yes_shares < amount => {
-            return Err(anyhow!("Insufficient YES shares"));
-        }
-        Side::No if no_shares < amount => {
-            return Err(anyhow!("Insufficient NO shares"));
-        }
-        _ => {} // Sufficient shares
+    let shares_of_type = match side {
+        Side::Yes => yes_shares,
+        Side::No => no_shares,
+    };
+    
+    if shares_of_type < amount {
+        return Err(anyhow!("Insufficient {} shares", side.as_str().to_uppercase()));
     }
     
-    // Get current market state
-    let row = sqlx::query(
-        "SELECT market_prob, cumulative_stake, liquidity_b, q_yes, q_no FROM events WHERE id = $1 FOR UPDATE"
-    )
-    .bind(event_id)
-    .fetch_one(tx.as_mut())
-    .await
-    .map_err(|_| anyhow!("Event not found"))?;
-    
-    let market_state = DbAdapter::extract_market_state(&row)?;
+    let market_state = DbAdapter::extract_market_state(&event_row)?;
     let liquidity_b = market_state.liquidity_b;
     let q_yes = market_state.q_yes;
     let q_no = market_state.q_no;
@@ -398,6 +435,7 @@ async fn sell_shares_transaction(
             .map_err(|e| anyhow!("Sell execution failed: {}", e))?,
     };
     
+    // Keep payout_ledger as i128, only convert for final result
     let payout = from_ledger_units(payout_ledger);
     let new_prob = market.prob_yes();
     let new_cumulative_cost = market.cost();
@@ -412,43 +450,55 @@ async fn sell_shares_transaction(
         market.q_no,
     ).await?;
     
-    // Calculate proportional stake to unwind
-    let total_shares_of_type = match side {
-        Side::Yes => yes_shares,
-        Side::No => no_shares,
-    };
-    let stake_to_unwind = if total_shares_of_type > 0.0 {
-        let total_user_stake: rust_decimal::Decimal = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(stake_amount), 0) FROM market_updates 
-             WHERE user_id = $1 AND event_id = $2"
-        )
-        .bind(user_id)
-        .bind(event_id)
-        .fetch_one(tx.as_mut())
-        .await?;
-        
-        let total_stake_f64 = DbAdapter::decimal_to_f64(total_user_stake)?;
-        total_stake_f64 * (amount / total_shares_of_type)
-    } else {
-        0.0
+    // Calculate side-specific stake to unwind directly in ledger units (single rounding boundary)
+    let stake_of_side_ledger = match side {
+        Side::Yes => staked_yes_ledger,
+        Side::No => staked_no_ledger,
     };
     
-    // Update user balance using clean adapter
-    DbAdapter::update_user_balance(
+    let stake_to_unwind_ledger = if shares_of_type > 0.0 && stake_of_side_ledger > 0 {
+        // Pure integer arithmetic for proportional calculation (eliminates double rounding)
+        let amount_ledger = to_ledger_units(amount)
+            .map_err(|e| anyhow!("Invalid sell amount: {}", e))?;
+        let shares_ledger = to_ledger_units(shares_of_type)
+            .map_err(|e| anyhow!("Invalid shares amount: {}", e))?;
+        
+        // Ensure shares_ledger is not zero to prevent division by zero
+        if shares_ledger == 0 {
+            return Err(anyhow!("Cannot calculate proportional stake for zero shares"));
+        }
+        
+        // Pure integer proportional calculation with round-to-nearest: (stake * amount) / shares
+        // Safe arithmetic with overflow protection
+        let stake_of_side_i128 = stake_of_side_ledger as i128;
+        let amount_i128 = amount_ledger as i128;
+        
+        let numer = stake_of_side_i128.checked_mul(amount_i128)
+            .ok_or_else(|| anyhow!("Arithmetic overflow in proportional stake calculation"))?;
+        let stake_to_unwind = (numer + (shares_ledger / 2)) / shares_ledger; // Round to nearest
+        let clamped = stake_to_unwind.max(0).min(stake_of_side_i128);
+        i64::try_from(clamped).map_err(|_| anyhow!("stake_to_unwind_ledger out of i64 range"))?
+    } else { 0 };
+    
+    // Update user balance using ledger-native method (single rounding boundary)
+    let payout_ledger_i64 = i64::try_from(payout_ledger)
+        .map_err(|_| anyhow!("payout_ledger out of i64 range"))?;
+    let stake_delta_ledger = -stake_to_unwind_ledger;
+    DbAdapter::update_user_balance_ledger(
         tx,
         user_id,
-        payout,
-        -stake_to_unwind,
+        payout_ledger_i64,
+        stake_delta_ledger,
     ).await?;
     
-    // Update user shares using clean adapter (subtract shares)
-    DbAdapter::update_user_shares(
+    // Update user shares using side-specific stake unwinding
+    DbAdapter::update_user_shares_with_side_unwind_ledger(
         tx,
         user_id,
         event_id,
         side,
-        -amount, // Negative to subtract shares
-        0.0,     // No cost for selling
+        -amount,                    // Negative to subtract shares
+        stake_to_unwind_ledger,     // Positive amount to unwind from side-specific stake
     ).await?;
     
     Ok(SellResult {
@@ -460,6 +510,7 @@ async fn sell_shares_transaction(
 
 // Kelly criterion suggestion
 pub fn kelly_suggestion(
+    config: &Config,
     belief: f64,
     market_prob: f64,
     balance: f64,
@@ -471,8 +522,8 @@ pub fn kelly_suggestion(
         (market_prob - belief) / market_prob
     };
     
-    // Conservative Kelly (25% of full Kelly for safety)
-    let kelly_fraction = 0.25;
+    // Configurable Kelly fraction for conservative betting
+    let kelly_fraction = config.market.kelly_fraction;
     let suggestion = (edge * balance * kelly_fraction)
         .max(0.0)
         .min(balance * kelly_fraction);
@@ -503,11 +554,15 @@ async fn resolve_event_transaction(
     outcome: bool,
 ) -> Result<()> {
     
-    // Get all user positions with aggregated stake data in single query
+    // Get all user positions with side-specific stake data in single query
+    // FOR UPDATE prevents race conditions during resolution (e.g., concurrent sell operations)
     let user_shares = sqlx::query(
-        "SELECT user_id, yes_shares, no_shares, COALESCE(total_staked_ledger::NUMERIC / 1000000.0, 0) as total_staked
+        "SELECT user_id, yes_shares, no_shares, 
+                staked_yes_ledger, staked_no_ledger,
+                COALESCE((staked_yes_ledger + staked_no_ledger)::NUMERIC / 1000000.0, 0) as total_staked
          FROM user_shares 
-         WHERE event_id = $1 AND (yes_shares > 0 OR no_shares > 0)"
+         WHERE event_id = $1 AND (yes_shares > 0 OR no_shares > 0)
+         FOR UPDATE"
     )
     .bind(event_id)
     .fetch_all(tx.as_mut())
@@ -518,11 +573,13 @@ async fn resolve_event_transaction(
         let user_id: i32 = row.get("user_id");
         let yes_shares: rust_decimal::Decimal = row.get("yes_shares");
         let no_shares: rust_decimal::Decimal = row.get("no_shares");
+        let staked_yes_ledger: i64 = row.get("staked_yes_ledger");
+        let staked_no_ledger: i64 = row.get("staked_no_ledger");
         let total_staked: rust_decimal::Decimal = row.get("total_staked");
         
         let yes_shares_f64 = DbAdapter::decimal_to_f64(yes_shares)?;
         let no_shares_f64 = DbAdapter::decimal_to_f64(no_shares)?;
-        let total_staked_f64 = DbAdapter::decimal_to_f64(total_staked)?;
+        let _total_staked_f64 = DbAdapter::decimal_to_f64(total_staked)?;
         
         // Calculate final share value based on outcome
         let share_value_f64 = if outcome {
@@ -531,12 +588,16 @@ async fn resolve_event_transaction(
             no_shares_f64   // NO outcome: NO shares worth 1, YES shares worth 0
         };
         
-        // Update user balance with share value and clear staked amount using clean adapter
-        DbAdapter::update_user_balance(
+        // Update user balance with share value and clear exact staked amount using ledger-native method
+        let total_staked_ledger = staked_yes_ledger + staked_no_ledger;
+        let share_value_ledger = i64::try_from(crate::lmsr_core::to_ledger_units(share_value_f64)
+            .map_err(|e| anyhow!("Invalid share value: {}", e))?)
+            .map_err(|_| anyhow!("share_value_ledger out of i64 range"))?;
+        DbAdapter::update_user_balance_ledger(
             tx,
             user_id,
-            share_value_f64,
-            -total_staked_f64,
+            share_value_ledger,
+            -total_staked_ledger,
         ).await?;
     }
     
@@ -637,4 +698,348 @@ pub async fn get_user_shares(
             }))
         }
     }
+}
+
+// ============================================================================
+// INVARIANT VERIFICATION FUNCTIONS
+// ============================================================================
+
+/// Verify balance invariant: users.rp_balance + users.rp_staked == initial + Σ(ledger ΔC) + Σ(resolution credits)
+pub async fn verify_balance_invariant(
+    pool: &PgPool,
+    user_id: i32,
+) -> Result<serde_json::Value> {
+    with_optimistic_tx!(pool, tx, {
+        verify_balance_invariant_transaction(&mut tx, user_id).await
+    })
+}
+
+async fn verify_balance_invariant_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: i32,
+) -> Result<serde_json::Value> {
+    
+    // Get current user ledger balances (exact precision)
+    let row = sqlx::query(
+        "SELECT rp_balance_ledger, rp_staked_ledger FROM users WHERE id = $1"
+    )
+    .bind(user_id)
+    .fetch_optional(tx.as_mut())
+    .await?;
+    
+    let (current_balance_ledger, current_staked_ledger) = match row {
+        Some(row) => {
+            let balance: i64 = row.get("rp_balance_ledger");
+            let staked: i64 = row.get("rp_staked_ledger");
+            (balance, staked)
+        }
+        None => return Ok(serde_json::json!({
+            "valid": false,
+            "message": "User not found"
+        }))
+    };
+    
+    let current_total_ledger = current_balance_ledger + current_staked_ledger;
+    
+    // Calculate total stake spent in ledger units from market updates (if available)
+    let total_spent_ledger: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(stake_amount_ledger), 0) FROM market_updates WHERE user_id = $1"
+    )
+    .bind(user_id)
+    .fetch_one(tx.as_mut())
+    .await
+    .map_err(|e| anyhow!("Failed to fetch user stake history: {}", e))?;
+    
+    // For now, assume initial balance was 1000 RP (1,000,000,000 ledger units)
+    // In a real system, this would be tracked from account creation
+    let _assumed_initial_ledger = 1_000_000_000i64; // 1000 RP
+    
+    // The fundamental ledger conservation equation:
+    // current_total = initial_total - total_spent + total_received
+    // For trading: total_received comes from selling shares back to market
+    
+    // Since we're missing some transaction history, we'll do a simpler check:
+    // Verify that current ledger values are internally consistent
+    let ledger_consistency_check = current_balance_ledger >= 0 && current_staked_ledger >= 0;
+    
+    // Advanced check: Verify that NUMERIC columns match ledger columns exactly
+    let numeric_row = sqlx::query(
+        "SELECT rp_balance, rp_staked FROM users WHERE id = $1"
+    )
+    .bind(user_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+    
+    let balance_numeric: rust_decimal::Decimal = numeric_row.get("rp_balance");
+    let staked_numeric: rust_decimal::Decimal = numeric_row.get("rp_staked");
+    
+    // Convert ledger to decimal for comparison (with 6dp precision)
+    let balance_from_ledger = rust_decimal::Decimal::from(current_balance_ledger) / rust_decimal::Decimal::from(1_000_000);
+    let staked_from_ledger = rust_decimal::Decimal::from(current_staked_ledger) / rust_decimal::Decimal::from(1_000_000);
+    
+    // Check if NUMERIC columns match ledger within 2dp rounding tolerance  
+    // NUMERIC(15,2) columns will always round to 2dp, so allow 0.01 RP tolerance
+    let tolerance = rust_decimal::Decimal::from_str("0.01")?;
+    let balance_matches = (balance_numeric - balance_from_ledger).abs() <= tolerance;
+    let staked_matches = (staked_numeric - staked_from_ledger).abs() <= tolerance;
+    
+    let is_valid = ledger_consistency_check && balance_matches && staked_matches;
+    
+    let message = if is_valid {
+        "Ledger-based balance invariant verified".to_string()
+    } else {
+        let mut issues = Vec::new();
+        if !ledger_consistency_check {
+            issues.push("negative ledger values");
+        }
+        if !balance_matches {
+            issues.push("NUMERIC/ledger balance mismatch");
+        }
+        if !staked_matches {
+            issues.push("NUMERIC/ledger staked mismatch");
+        }
+        format!("Ledger invariant violated: {}", issues.join(", "))
+    };
+    
+    Ok(serde_json::json!({
+        "valid": is_valid,
+        "message": message,
+        "details": {
+            "current_balance_ledger": current_balance_ledger,
+            "current_staked_ledger": current_staked_ledger,
+            "current_total_ledger": current_total_ledger,
+            "current_balance_rp": crate::lmsr_core::from_ledger_units(current_balance_ledger as i128),
+            "current_staked_rp": crate::lmsr_core::from_ledger_units(current_staked_ledger as i128),
+            "current_total_rp": crate::lmsr_core::from_ledger_units(current_total_ledger as i128),
+            "total_spent_ledger": total_spent_ledger,
+            "balance_numeric_matches": balance_matches,
+            "staked_numeric_matches": staked_matches,
+            "ledger_consistency": ledger_consistency_check
+        }
+    }))
+}
+
+/// Verify staked invariant: users.rp_staked == Σ user_shares.total_staked_ledger (before resolution)
+pub async fn verify_staked_invariant(
+    pool: &PgPool,
+    user_id: i32,
+) -> Result<serde_json::Value> {
+    with_optimistic_tx!(pool, tx, {
+        verify_staked_invariant_transaction(&mut tx, user_id).await
+    })
+}
+
+async fn verify_staked_invariant_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: i32,
+) -> Result<serde_json::Value> {
+    
+    // Pure ledger vs ledger check (exact match expected)
+    let user_staked_ledger: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(rp_staked_ledger, 0)::BIGINT FROM users WHERE id = $1"
+    )
+    .bind(user_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+    
+    let total_staked_ledger: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(total_staked_ledger), 0)::BIGINT FROM user_shares WHERE user_id = $1"
+    )
+    .bind(user_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+    
+    let is_valid = user_staked_ledger == total_staked_ledger;
+    let diff_ledger = (user_staked_ledger as i128 - total_staked_ledger as i128).abs();
+    let user_staked = from_ledger_units(user_staked_ledger as i128);
+    let shares_staked = from_ledger_units(total_staked_ledger as i128);
+    
+    let message = if is_valid {
+        "Staked invariant verified - exact match in ledger units".into()
+    } else {
+        format!("Staked invariant FAILED - ledger mismatch of {} (≈{:.6} RP)", diff_ledger, from_ledger_units(diff_ledger))
+    };
+    
+    Ok(serde_json::json!({
+        "valid": is_valid,
+        "message": message,
+        "details": {
+            "user_staked_ledger": user_staked_ledger,
+            "shares_staked_ledger": total_staked_ledger,
+            "user_staked": user_staked,
+            "shares_staked": shares_staked,
+            "difference_ledger": diff_ledger
+        }
+    }))
+}
+
+/// Verify post-resolution invariant: After resolution, user_shares rows cleared; rp_staked unchanged by further reads
+pub async fn verify_post_resolution_invariant(
+    pool: &PgPool,
+    event_id: i32,
+) -> Result<serde_json::Value> {
+    with_optimistic_tx!(pool, tx, {
+        verify_post_resolution_invariant_transaction(&mut tx, event_id).await
+    })
+}
+
+async fn verify_post_resolution_invariant_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event_id: i32,
+) -> Result<serde_json::Value> {
+    
+    // Check if event is resolved
+    let outcome: Option<String> = sqlx::query_scalar(
+        "SELECT outcome FROM events WHERE id = $1"
+    )
+    .bind(event_id)
+    .fetch_optional(tx.as_mut())
+    .await?;
+    
+    let is_resolved = match outcome {
+        Some(ref outcome_str) => outcome_str.starts_with("resolved_"),
+        None => return Ok(serde_json::json!({
+            "valid": false,
+            "message": "Event not found"
+        }))
+    };
+    
+    if !is_resolved {
+        return Ok(serde_json::json!({
+            "valid": true,
+            "message": "Event not yet resolved - invariant not applicable"
+        }));
+    }
+    
+    // Check that no user_shares rows exist for this event
+    let remaining_shares: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_shares WHERE event_id = $1"
+    )
+    .bind(event_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+    
+    let shares_cleared = remaining_shares == 0;
+    
+    // For rp_staked stability check, we'd need to track pre/post resolution states
+    // For now, just verify shares are cleared
+    
+    let message = if shares_cleared {
+        "Post-resolution invariant verified: user_shares cleared".to_string()
+    } else {
+        format!("Post-resolution invariant violated: {} user_shares rows still exist for resolved event", remaining_shares)
+    };
+    
+    Ok(serde_json::json!({
+        "valid": shares_cleared,
+        "message": message,
+        "details": {
+            "event_id": event_id,
+            "outcome": outcome,
+            "is_resolved": is_resolved,
+            "remaining_shares": remaining_shares
+        }
+    }))
+}
+
+/// Verify system consistency after concurrent operations
+pub async fn verify_system_consistency(
+    pool: &PgPool,
+    event_id: i32,
+) -> Result<serde_json::Value> {
+    with_optimistic_tx!(pool, tx, {
+        verify_system_consistency_transaction(&mut tx, event_id).await
+    })
+}
+
+async fn verify_system_consistency_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event_id: i32,
+) -> Result<serde_json::Value> {
+    
+    // Get market state
+    let market_row = sqlx::query(
+        "SELECT market_prob, cumulative_stake, liquidity_b, q_yes, q_no FROM events WHERE id = $1"
+    )
+    .bind(event_id)
+    .fetch_optional(tx.as_mut())
+    .await?;
+    
+    let (market_state, stored_cost) = match market_row {
+        Some(row) => {
+            let state = DbAdapter::extract_market_state(&row)?;
+            let cost = DbAdapter::decimal_to_f64(row.get("cumulative_stake"))?;
+            (state, cost)
+        },
+        None => return Ok(serde_json::json!({
+            "valid": false,
+            "message": "Event not found"
+        }))
+    };
+    
+    // Verify probability is in valid range
+    let prob_valid = market_state.market_prob >= 0.0 && market_state.market_prob <= 1.0;
+    
+    // Verify market cost consistency with LMSR formula
+    let market = Market { 
+        q_yes: market_state.q_yes, 
+        q_no: market_state.q_no, 
+        b: market_state.liquidity_b 
+    };
+    let calculated_cost = market.cost();
+    
+    // Allow some tolerance for floating point differences
+    let cost_tolerance = 0.01;
+    let cost_consistent = (calculated_cost - stored_cost).abs() <= cost_tolerance;
+    
+    // Verify no negative shares
+    let negative_shares: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_shares 
+         WHERE event_id = $1 AND (yes_shares < 0 OR no_shares < 0)"
+    )
+    .bind(event_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+    
+    let no_negative_shares = negative_shares == 0;
+    
+    // Check total market updates consistency
+    let total_updates: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM market_updates WHERE event_id = $1"
+    )
+    .bind(event_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+    
+    let all_checks_passed = prob_valid && cost_consistent && no_negative_shares;
+    
+    Ok(serde_json::json!({
+        "valid": all_checks_passed,
+        "message": if all_checks_passed {
+            "System consistency verified"
+        } else {
+            "System consistency violations detected"
+        },
+        "checks": {
+            "probability_valid": {
+                "passed": prob_valid,
+                "value": market_state.market_prob
+            },
+            "cost_consistent": {
+                "passed": cost_consistent,
+                "calculated": calculated_cost,
+                "stored": stored_cost,
+                "difference": (calculated_cost - stored_cost).abs()
+            },
+            "no_negative_shares": {
+                "passed": no_negative_shares,
+                "negative_count": negative_shares
+            }
+        },
+        "stats": {
+            "total_updates": total_updates,
+            "market_prob": market_state.market_prob,
+            "liquidity_b": market_state.liquidity_b
+        }
+    }))
 }

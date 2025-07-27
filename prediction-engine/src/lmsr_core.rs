@@ -188,66 +188,71 @@ impl Side {
     }
 }
 
+/// Log-domain numerically stable ln(exp(t) - 1) for t > 0
+#[inline]
+fn ln_expm1_pos(t: f64) -> f64 {
+    // t > 0; returns ln(exp(t) - 1) stably for all magnitudes of t
+    // Uses: ln(expm1(t)) = t + ln(1 - exp(-t))
+    debug_assert!(t.is_finite() && t > 0.0);
+    let e_neg_t = (-t).exp();               // safe even for large t (underflows to 0)
+    t + (1.0 - e_neg_t).ln()
+}
+
 /// Unified closed-form delta calculation for buying shares with stake S.
 /// 
-/// For YES: dq_yes = b * ln((exp(S/b) * (A + B) - B) / A)
-/// For NO:  dq_no  = b * ln((exp(S/b) * (A + B) - A) / B)
-/// where A = exp(q_yes / b), B = exp(q_no / b)
+/// Log-domain implementation avoids exp(q/b) overflow for large market quantities.
+/// For YES: dq_yes = b * ((q_no - q_yes)/b + ln(expm1(s/b + ln(exp(q_yes/b) + exp(q_no/b)) - q_no/b)))
+/// For NO:  dq_no  = b * ((q_yes - q_no)/b + ln(expm1(s/b + ln(exp(q_yes/b) + exp(q_no/b)) - q_yes/b)))
 // Maximum allowed stake-to-liquidity ratio for numerical stability
 pub const MAX_STAKE_TO_LIQUIDITY_RATIO: f64 = 700.0;
 
 pub fn delta_q_for_stake(side: Side, q_yes: f64, q_no: f64, b: f64, s: f64) -> Result<f64, String> {
-    // Input validation
-    if s <= 0.0 {
-        return Err("stake must be positive".to_string());
+    if s <= 0.0 { 
+        return Err("stake must be positive".to_string()); 
     }
-    if b <= 0.0 || !b.is_finite() {
-        return Err("liquidity parameter b must be positive and finite".to_string());
+    if b <= 0.0 || !b.is_finite() { 
+        return Err("liquidity parameter b must be positive and finite".to_string()); 
     }
-    if !q_yes.is_finite() || !q_no.is_finite() {
-        return Err("market quantities must be finite".to_string());
+    if !q_yes.is_finite() || !q_no.is_finite() { 
+        return Err("market quantities must be finite".to_string()); 
     }
-    
-    // Centralized overflow protection with descriptive error
     if s / b > MAX_STAKE_TO_LIQUIDITY_RATIO {
         return Err(format!(
             "stake too large relative to liquidity parameter: {:.2} / {:.2} = {:.2} > {}",
             s, b, s / b, MAX_STAKE_TO_LIQUIDITY_RATIO
         ));
     }
-    
-    let a = (q_yes / b).exp();
-    let n = (q_no / b).exp();
-    let exp_sb = (s / b).exp();
-    
-    // Map (q_buy, q_other) and (exp_buy, exp_other) based on side
-    let (numerator, denominator, side_name) = match side {
+
+    let ay = q_yes / b;
+    let an = q_no  / b;
+    let lse = log_sum_exp(ay, an);          // = ln(exp(ay)+exp(an))
+    let sb  = s / b;
+    let t_yes = sb + lse - an;              // for YES: ln(exp(sb)*(exp(ay)+exp(an)) / exp(an))
+    let t_no  = sb + lse - ay;              // for  NO: ln(exp(sb)*(exp(ay)+exp(an)) / exp(ay))
+
+    // ln((exp(sb)*(exp(ay)+exp(an)) - exp(an)) / exp(ay))
+    //   = (an - ay) + ln(expm1(t_yes))
+    // ln((exp(sb)*(exp(ay)+exp(an)) - exp(ay)) / exp(an))
+    //   = (ay - an) + ln(expm1(t_no))
+    let delta = match side {
         Side::Yes => {
-            // YES: subtract the other side (NO) from total
-            let num = exp_sb * (a + n) - n;
-            (num, a, "YES")
+            if !(t_yes > 0.0) { 
+                return Err("numerically unstable: stake too small".to_string()); 
+            }
+            b * ((an - ay) + ln_expm1_pos(t_yes))
         }
         Side::No => {
-            // NO: subtract the other side (YES) from total  
-            let num = exp_sb * (a + n) - a;
-            (num, n, "NO")
+            if !(t_no > 0.0) { 
+                return Err("numerically unstable: stake too small".to_string()); 
+            }
+            b * ((ay - an) + ln_expm1_pos(t_no))
         }
     };
-    
-    // Validate numerical stability
-    if numerator <= 0.0 || denominator <= 0.0 || !numerator.is_finite() || !denominator.is_finite() {
-        return Err(format!(
-            "invalid delta calculation for {}: numerator={}, denominator={}", 
-            side_name, numerator, denominator
-        ));
+
+    if !delta.is_finite() {
+        return Err(format!("delta calculation resulted in non-finite value: {}", delta));
     }
-    
-    let result = b * (numerator / denominator).ln();
-    if !result.is_finite() {
-        return Err(format!("delta calculation resulted in non-finite value: {}", result));
-    }
-    
-    Ok(result)
+    Ok(delta)
 }
 
 // Note: Removed duplicate delta_q_yes_for_stake and delta_q_no_for_stake functions

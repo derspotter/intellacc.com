@@ -357,8 +357,13 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
         const result = await response.json();
         console.log('🔄 Sell response:', result);
         
-        // Handle different response formats
-        const payout = parseFloat(result.payout || result.new_balance || 0);
+        // Validate new LMSR response format
+        if (!result.success) {
+          error.val = result.message || 'Failed to sell shares';
+          return;
+        }
+        
+        const payout = parseFloat(result.payout);
         const successMsg = `Successfully sold ${amount.toFixed(2)} ${shareType.toUpperCase()} shares for ${payout.toFixed(2)} RP`;
         console.log(successMsg);
         
@@ -418,17 +423,15 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
       // Sell YES shares if any
       if (position.yes_shares > 0) {
         const yesResult = await sellShares('yes', position.yes_shares);
-        if (yesResult.success) {
-          totalPayout += parseFloat(yesResult.payout);
-        }
+        // sellShares now returns validated result or throws error
+        totalPayout += yesResult.payout;
       }
       
       // Sell NO shares if any
       if (position.no_shares > 0) {
         const noResult = await sellShares('no', position.no_shares);
-        if (noResult.success) {
-          totalPayout += parseFloat(noResult.payout);
-        }
+        // sellShares now returns validated result or throws error
+        totalPayout += noResult.payout;
       }
       
       console.log(`Full withdrawal completed. Total payout: ${totalPayout.toFixed(2)} RP`);
@@ -468,7 +471,19 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
     });
     
     if (response.ok) {
-      return await response.json();
+      const result = await response.json();
+      
+      // Validate new LMSR response format
+      if (!result.success) {
+        throw new Error(result.message || 'Failed to sell shares');
+      }
+      
+      return {
+        success: true,
+        payout: parseFloat(result.payout),
+        new_prob: parseFloat(result.new_prob),
+        cumulative_stake: parseFloat(result.cumulative_stake)
+      };
     } else {
       const errorText = await response.text();
       console.log('❌ sellShares API error:', response.status, errorText);

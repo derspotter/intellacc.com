@@ -26,6 +26,11 @@ mod benchmark;
 mod lmsr_api;  // Clean LMSR API using lmsr_core directly
 mod lmsr_core;
 mod db_adapter;
+mod config;  // Configuration management
+mod stress;  // Comprehensive stress tests
+
+#[cfg(test)]
+mod integration_tests;
 // Removed outdated tests.rs - lmsr_core.rs has comprehensive property-based tests
 
 // DRY helper types and functions
@@ -119,6 +124,7 @@ struct AppState {
     db: PgPool,
     tx: broadcast::Sender<String>,
     cache: Cache<String, String>,
+    config: config::Config,
 }
 
 // This is our main function - but notice the #[tokio::main] attribute!
@@ -128,6 +134,10 @@ async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
     
     println!("🦀 Starting Prediction Engine...");
+
+    // Load configuration from environment
+    let config = config::Config::from_env();
+    config.print_config();
 
     // Get database URL from environment variable
     let database_url = std::env::var("DATABASE_URL")
@@ -153,6 +163,7 @@ async fn main() -> anyhow::Result<()> {
         db: pool,
         tx: tx.clone(),
         cache,
+        config,
     };
 
     // Clone pool for background task before moving app_state
@@ -192,6 +203,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/events/:id/market-resolve", post(resolve_market_event_endpoint))
         .route("/events/:id/shares", get(get_user_shares_endpoint))
         .route("/lmsr/test-invariants", get(test_lmsr_invariants_endpoint))
+        // Invariant verification endpoints
+        .route("/lmsr/verify-balance-invariant", post(verify_balance_invariant_endpoint))
+        .route("/lmsr/verify-staked-invariant", post(verify_staked_invariant_endpoint))
+        .route("/lmsr/verify-post-resolution", post(verify_post_resolution_endpoint))
+        .route("/lmsr/verify-consistency", post(verify_consistency_endpoint))
         .layer(
             CorsLayer::new()
                 .allow_origin(tower_http::cors::Any)
@@ -230,7 +246,10 @@ async fn main() -> anyhow::Result<()> {
     println!("  POST /events/:id/sell - Sell shares back to market");
     println!("  POST /events/:id/market-resolve - Resolve market event");
     println!("  GET /events/:id/shares - Get user's shares for event");
-    println!("  POST /events/:id/market-resolve - Resolve market event (LMSR)");
+    println!("  POST /lmsr/verify-balance-invariant - Verify balance invariant");
+    println!("  POST /lmsr/verify-staked-invariant - Verify staked invariant");
+    println!("  POST /lmsr/verify-post-resolution - Verify post-resolution invariant");
+    println!("  POST /lmsr/verify-consistency - Verify system consistency");
 
     // Start the daily Metaculus sync job (disabled for testing)
     // tokio::spawn(async move {
@@ -728,7 +747,7 @@ async fn update_market_endpoint(
         stake,
     };
 
-    match lmsr_api::update_market(&app_state.db, user_id, update).await {
+    match lmsr_api::update_market(&app_state.db, &app_state.config, user_id, update).await {
         Ok(result) => {
             invalidate_and_broadcast(&app_state, "market_updated", json!({
                 "event_id": event_id,
@@ -798,7 +817,7 @@ async fn kelly_suggestion_endpoint(
         Err(_) => return Err(not_found_error("User"))
     };
 
-    let suggestion = lmsr_api::kelly_suggestion(belief, market_prob, balance);
+    let suggestion = lmsr_api::kelly_suggestion(&app_state.config, belief, market_prob, balance);
     Ok(Json(json!(suggestion)))
 }
 
@@ -846,7 +865,7 @@ async fn sell_shares_endpoint(
         return Err(bad_request_error("Invalid amount: below minimum allowed (0.000001 shares)"));
     }
 
-    match lmsr_api::sell_shares(&app_state.db, user_id, event_id, share_type, amount).await {
+    match lmsr_api::sell_shares(&app_state.db, &app_state.config, user_id, event_id, share_type, amount).await {
         Ok(result) => {
             invalidate_and_broadcast(&app_state, "shares_sold", json!({
                 "event_id": event_id,
@@ -1024,6 +1043,86 @@ async fn test_lmsr_invariants_endpoint(
             "Some LMSR invariant tests failed - see failed_tests for details"
         }
     })))
+}
+
+// ============================================================================
+// INVARIANT VERIFICATION ENDPOINTS
+// ============================================================================
+
+// Verify balance invariant
+async fn verify_balance_invariant_endpoint(
+    State(app_state): State<AppState>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Validate user_id - require explicit value, no defaults
+    let user_id = payload.get("user_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid user_id: must be a positive integer"))? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
+
+    match lmsr_api::verify_balance_invariant(&app_state.db, user_id).await {
+        Ok(result) => Ok(Json(result)),
+        Err(e) => Err(internal_error(&format!("Balance invariant verification error: {}", e)))
+    }
+}
+
+// Verify staked invariant
+async fn verify_staked_invariant_endpoint(
+    State(app_state): State<AppState>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Validate user_id - require explicit value, no defaults
+    let user_id = payload.get("user_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid user_id: must be a positive integer"))? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
+
+    match lmsr_api::verify_staked_invariant(&app_state.db, user_id).await {
+        Ok(result) => Ok(Json(result)),
+        Err(e) => Err(internal_error(&format!("Staked invariant verification error: {}", e)))
+    }
+}
+
+// Verify post-resolution invariant
+async fn verify_post_resolution_endpoint(
+    State(app_state): State<AppState>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Validate event_id - require explicit value, no defaults
+    let event_id = payload.get("event_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid event_id: must be a positive integer"))? as i32;
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+
+    match lmsr_api::verify_post_resolution_invariant(&app_state.db, event_id).await {
+        Ok(result) => Ok(Json(result)),
+        Err(e) => Err(internal_error(&format!("Post-resolution invariant verification error: {}", e)))
+    }
+}
+
+// Verify system consistency
+async fn verify_consistency_endpoint(
+    State(app_state): State<AppState>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Validate event_id - require explicit value, no defaults
+    let event_id = payload.get("event_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid event_id: must be a positive integer"))? as i32;
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+
+    match lmsr_api::verify_system_consistency(&app_state.db, event_id).await {
+        Ok(result) => Ok(Json(result)),
+        Err(e) => Err(internal_error(&format!("System consistency verification error: {}", e)))
+    }
 }
 
 
