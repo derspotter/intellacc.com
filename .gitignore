@@ -13,6 +13,9 @@
 logs/
 *.log
 
+# Screenshots
+screenshots/
+
 # Docker
 docker-compose.override.yml
 
@@ -38,3 +41,4 @@ AGENT.md
 
 # Rust build artifacts
 /prediction-engine/target/
+recherche/2504.01781v2.pdf

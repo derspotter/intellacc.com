@@ -5,10 +5,11 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use tower_http::cors::CorsLayer;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
 use std::net::SocketAddr;
 use std::collections::HashMap;
 use axum::extract::ws::{WebSocket, Message};
@@ -22,6 +23,15 @@ use std::time::Duration;
 mod database;
 mod metaculus;
 mod benchmark;
+mod lmsr_api;  // Clean LMSR API using lmsr_core directly
+mod lmsr_core;
+mod db_adapter;
+mod config;  // Configuration management
+mod stress;  // Comprehensive stress tests
+
+#[cfg(test)]
+mod integration_tests;
+// Removed outdated tests.rs - lmsr_core.rs has comprehensive property-based tests
 
 // DRY helper types and functions
 type ApiResult<T> = Result<Json<T>, (axum::http::StatusCode, Json<Value>)>;
@@ -40,6 +50,15 @@ fn not_found_error(entity: &str) -> (axum::http::StatusCode, Json<Value>) {
     (
         axum::http::StatusCode::NOT_FOUND,
         Json(json!({"error": format!("{} not found", entity)}))
+    )
+}
+
+// Bad request error for validation failures
+fn bad_request_error(message: &str) -> (axum::http::StatusCode, Json<Value>) {
+    eprintln!("❌ Bad request: {}", message);
+    (
+        axum::http::StatusCode::BAD_REQUEST,
+        Json(json!({"error": message}))
     )
 }
 
@@ -105,6 +124,7 @@ struct AppState {
     db: PgPool,
     tx: broadcast::Sender<String>,
     cache: Cache<String, String>,
+    config: config::Config,
 }
 
 // This is our main function - but notice the #[tokio::main] attribute!
@@ -114,6 +134,10 @@ async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
     
     println!("🦀 Starting Prediction Engine...");
+
+    // Load configuration from environment
+    let config = config::Config::from_env();
+    config.print_config();
 
     // Get database URL from environment variable
     let database_url = std::env::var("DATABASE_URL")
@@ -139,6 +163,7 @@ async fn main() -> anyhow::Result<()> {
         db: pool,
         tx: tx.clone(),
         cache,
+        config,
     };
 
     // Clone pool for background task before moving app_state
@@ -170,6 +195,25 @@ async fn main() -> anyhow::Result<()> {
         .route("/metaculus/bulk-import", get(manual_bulk_import_endpoint))
         .route("/metaculus/limited-import", get(manual_limited_import_endpoint))
         .route("/metaculus/sync-categories", get(manual_category_sync))
+        // LMSR Market API endpoints
+        .route("/events/:id/market", get(get_market_state_endpoint))
+        .route("/events/:id/update", post(update_market_endpoint))
+        .route("/events/:id/kelly", get(kelly_suggestion_endpoint))
+        .route("/events/:id/sell", post(sell_shares_endpoint))
+        .route("/events/:id/market-resolve", post(resolve_market_event_endpoint))
+        .route("/events/:id/shares", get(get_user_shares_endpoint))
+        .route("/lmsr/test-invariants", get(test_lmsr_invariants_endpoint))
+        // Invariant verification endpoints
+        .route("/lmsr/verify-balance-invariant", post(verify_balance_invariant_endpoint))
+        .route("/lmsr/verify-staked-invariant", post(verify_staked_invariant_endpoint))
+        .route("/lmsr/verify-post-resolution", post(verify_post_resolution_endpoint))
+        .route("/lmsr/verify-consistency", post(verify_consistency_endpoint))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(tower_http::cors::Any)
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any)
+        )
         .with_state(app_state); // Share app state with all routes
 
     // Define the address to listen on - bind to all interfaces in Docker
@@ -196,6 +240,16 @@ async fn main() -> anyhow::Result<()> {
     println!("  GET /metaculus/sync - Manual sync with Metaculus API (150 recent questions)");
     println!("  GET /metaculus/bulk-import - Complete import of ALL Metaculus questions");
     println!("  GET /metaculus/sync-categories - Manual category sync");
+    println!("  GET /events/:id/market - Get market state for event");
+    println!("  POST /events/:id/update - Update market with stake");
+    println!("  GET /events/:id/kelly - Get Kelly criterion suggestion");
+    println!("  POST /events/:id/sell - Sell shares back to market");
+    println!("  POST /events/:id/market-resolve - Resolve market event");
+    println!("  GET /events/:id/shares - Get user's shares for event");
+    println!("  POST /lmsr/verify-balance-invariant - Verify balance invariant");
+    println!("  POST /lmsr/verify-staked-invariant - Verify staked invariant");
+    println!("  POST /lmsr/verify-post-resolution - Verify post-resolution invariant");
+    println!("  POST /lmsr/verify-consistency - Verify system consistency");
 
     // Start the daily Metaculus sync job (disabled for testing)
     // tokio::spawn(async move {
@@ -624,4 +678,451 @@ async fn update_global_rankings_endpoint(
         Err(e) => Err(internal_error(&format!("Ranking update error: {}", e)))
     }
 }
+
+// ============================================================================
+// LMSR MARKET API ENDPOINTS
+// ============================================================================
+
+// Get market state for an event
+async fn get_market_state_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+) -> ApiResult<Value> {
+    match lmsr_api::get_market_state(&app_state.db, event_id).await {
+        Ok(market_state) => Ok(Json(market_state)),
+        Err(e) => Err(internal_error(&format!("Market state error: {}", e)))
+    }
+}
+
+// Update market with new stake
+async fn update_market_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Validate event_id
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+    
+    // Validate user_id - require explicit value, no defaults
+    let user_id = payload.get("user_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid user_id: must be a positive integer"))? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
+    
+    // Validate target_prob - require explicit value, no defaults
+    let target_prob = payload.get("target_prob")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| bad_request_error("Missing or invalid target_prob: must be a finite number"))?;
+    if !target_prob.is_finite() {
+        return Err(bad_request_error("Invalid target_prob: must be finite"));
+    }
+    if target_prob <= 0.0 || target_prob >= 1.0 {
+        return Err(bad_request_error("Invalid target_prob: must be between 0 and 1 (exclusive)"));
+    }
+    
+    // Validate stake - require explicit value, no defaults
+    let stake = payload.get("stake")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| bad_request_error("Missing or invalid stake: must be a finite number"))?;
+    if !stake.is_finite() {
+        return Err(bad_request_error("Invalid stake: must be finite"));
+    }
+    if stake <= 0.0 {
+        return Err(bad_request_error("Invalid stake: must be positive"));
+    }
+    if stake > 1_000_000.0 {  // 1M RP max per trade
+        return Err(bad_request_error("Invalid stake: exceeds maximum allowed (1,000,000 RP)"));
+    }
+    if stake < 0.01 {  // Minimum 0.01 RP
+        return Err(bad_request_error("Invalid stake: below minimum allowed (0.01 RP)"));
+    }
+    
+    let update = lmsr_api::MarketUpdate {
+        event_id,
+        target_prob,
+        stake,
+    };
+
+    match lmsr_api::update_market(&app_state.db, &app_state.config, user_id, update).await {
+        Ok(result) => {
+            invalidate_and_broadcast(&app_state, "market_updated", json!({
+                "event_id": event_id,
+                "user_id": user_id,
+                "new_prob": result.new_prob,
+                "shares_acquired": result.shares_acquired
+            }));
+            Ok(Json(json!(result)))
+        },
+        Err(e) => Err(internal_error(&format!("Market update error: {}", e)))
+    }
+}
+
+// Get Kelly criterion betting suggestion
+async fn kelly_suggestion_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    Query(params): Query<HashMap<String, String>>,
+) -> ApiResult<Value> {
+    // Validate event_id
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+    
+    // Validate belief probability - require explicit value, no defaults
+    let belief = params.get("belief")
+        .and_then(|s| s.parse::<f64>().ok())
+        .ok_or_else(|| bad_request_error("Missing or invalid belief: must be a finite number"))?;
+    if !belief.is_finite() {
+        return Err(bad_request_error("Invalid belief: must be finite"));
+    }
+    if belief <= 0.0 || belief >= 1.0 {
+        return Err(bad_request_error("Invalid belief: must be between 0 and 1 (exclusive)"));
+    }
+
+    // Validate user_id - require explicit value, no defaults
+    let user_id = params.get("user_id")
+        .and_then(|s| s.parse::<i32>().ok())
+        .ok_or_else(|| bad_request_error("Missing or invalid user_id: must be a positive integer"))?;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
+
+    // Get current market probability
+    let market_prob_decimal: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
+        "SELECT market_prob FROM events WHERE id = $1"
+    )
+    .bind(event_id)
+    .fetch_one(&app_state.db)
+    .await;
+
+    let market_prob = match market_prob_decimal {
+        Ok(prob) => prob.to_f64().unwrap_or(0.5),
+        Err(_) => return Err(not_found_error("Event"))
+    };
+
+    // Get user balance
+    let balance_decimal: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
+        "SELECT rp_balance FROM users WHERE id = $1"
+    )
+    .bind(user_id)
+    .fetch_one(&app_state.db)
+    .await;
+
+    let balance = match balance_decimal {
+        Ok(bal) => bal.to_f64().unwrap_or(0.0),
+        Err(_) => return Err(not_found_error("User"))
+    };
+
+    let suggestion = lmsr_api::kelly_suggestion(&app_state.config, belief, market_prob, balance);
+    Ok(Json(json!(suggestion)))
+}
+
+// Sell shares back to market
+async fn sell_shares_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Validate event_id
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+    
+    // Validate user_id - require explicit value, no defaults
+    let user_id = payload.get("user_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid user_id: must be a positive integer"))? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
+
+    // Validate share_type - require explicit value, no defaults
+    let share_type = payload.get("share_type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| bad_request_error("Missing or invalid share_type: must be 'yes' or 'no'"))?;
+    if share_type != "yes" && share_type != "no" {
+        return Err(bad_request_error("Invalid share_type: must be 'yes' or 'no'"));
+    }
+
+    // Validate amount - require explicit value, no defaults
+    let amount = payload.get("amount")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| bad_request_error("Missing or invalid amount: must be a finite number"))?;
+    if !amount.is_finite() {
+        return Err(bad_request_error("Invalid amount: must be finite"));
+    }
+    if amount <= 0.0 {
+        return Err(bad_request_error("Invalid amount: must be positive"));
+    }
+    if amount > 10_000_000.0 {  // 10M shares max per sale
+        return Err(bad_request_error("Invalid amount: exceeds maximum allowed (10,000,000 shares)"));
+    }
+    if amount < 0.000001 {  // Minimum 0.000001 shares (1 micro-share)
+        return Err(bad_request_error("Invalid amount: below minimum allowed (0.000001 shares)"));
+    }
+
+    match lmsr_api::sell_shares(&app_state.db, &app_state.config, user_id, event_id, share_type, amount).await {
+        Ok(result) => {
+            invalidate_and_broadcast(&app_state, "shares_sold", json!({
+                "event_id": event_id,
+                "user_id": user_id,
+                "share_type": share_type,
+                "amount": amount,
+                "payout": result.payout,
+                "new_prob": result.new_prob,
+                "cumulative_stake": result.current_cost_c
+            }));
+            Ok(Json(json!({
+                "success": true,
+                "payout": result.payout,
+                "new_prob": result.new_prob,
+                "cumulative_stake": result.current_cost_c,
+                "message": format!("Sold {} {} shares for {} RP", amount, share_type, result.payout)
+            })))
+        },
+        Err(e) => Err(internal_error(&format!("Share sale error: {}", e)))
+    }
+}
+
+
+// Get user's shares for an event
+async fn get_user_shares_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    Query(params): Query<HashMap<String, String>>,
+) -> ApiResult<Value> {
+    let user_id = params.get("user_id")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(1);
+
+    match lmsr_api::get_user_shares(&app_state.db, user_id, event_id).await {
+        Ok(shares) => Ok(Json(shares)),
+        Err(e) => Err(internal_error(&format!("User shares error: {}", e)))
+    }
+}
+
+// Resolve market event (LMSR)
+async fn resolve_market_event_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Validate event_id
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+    
+    // Extract and validate outcome: true = YES, false = NO
+    let outcome = payload.get("outcome")
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| bad_request_error("Missing or invalid outcome (must be boolean)"))?;
+    
+    println!("🎯 Market resolution triggered: event_id={}, outcome={}", event_id, outcome);
+    
+    match lmsr_api::resolve_event(&app_state.db, event_id, outcome).await {
+        Ok(()) => {
+            // Broadcast market resolution
+            invalidate_and_broadcast(&app_state, "marketResolved", json!({
+                "eventId": event_id,
+                "outcome": outcome,
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }));
+            
+            Ok(Json(json!({
+                "success": true,
+                "event_id": event_id,
+                "outcome": outcome,
+                "message": format!("Market event {} resolved as {}", event_id, if outcome { "YES" } else { "NO" })
+            })))
+        },
+        Err(e) => Err(internal_error(&format!("Market resolution error: {}", e)))
+    }
+}
+
+// Test LMSR invariants using property-based tests
+async fn test_lmsr_invariants_endpoint(
+    State(_app_state): State<AppState>,
+) -> ApiResult<Value> {
+    println!("🧪 Running LMSR invariant tests...");
+    
+    // Run a simplified version of the property tests
+    let mut success_count = 0;
+    let mut total_tests = 0;
+    let mut failed_tests = Vec::new();
+    
+    // Test round-trip invariant with a few fixed cases
+    let test_cases = vec![
+        (5000.0, vec![10_000_000i128, 50_000_000i128], vec![0u8, 1u8]),
+        (1000.0, vec![5_000_000i128, 25_000_000i128, 10_000_000i128], vec![0u8, 1u8, 0u8]),
+        (10000.0, vec![100_000_000i128], vec![1u8]),
+    ];
+    
+    for (i, (b, stakes, sides)) in test_cases.iter().enumerate() {
+        total_tests += 1;
+        
+        let mut mkt = crate::lmsr_core::Market::new(*b);
+        let mut cash_ledger: i128 = 0;
+        let mut yes_shares: f64 = 0.0;
+        let mut no_shares: f64 = 0.0;
+        
+        // Execute trades
+        for j in 0..stakes.len().min(sides.len()) {
+            let stake_ledger = stakes[j];
+            
+            if sides[j] == 0 {
+                let (dq, cash_debit) = mkt.buy_yes(stake_ledger).unwrap();
+                yes_shares += dq;
+                cash_ledger -= cash_debit;
+            } else {
+                let (dq, cash_debit) = mkt.buy_no(stake_ledger).unwrap();
+                no_shares += dq;
+                cash_ledger -= cash_debit;
+            }
+        }
+        
+        // Unwind positions
+        let cash_credit_yes = if yes_shares > 0.0 {
+            mkt.sell_yes(yes_shares).unwrap()
+        } else { 0 };
+        let cash_credit_no = if no_shares > 0.0 {
+            mkt.sell_no(no_shares).unwrap()
+        } else { 0 };
+        
+        cash_ledger += cash_credit_yes + cash_credit_no;
+        
+        // Check invariants
+        if cash_ledger.abs() <= 1 && mkt.q_yes.abs() < 1e-9 && mkt.q_no.abs() < 1e-9 {
+            success_count += 1;
+        } else {
+            failed_tests.push(format!("Test case {}: cash_ledger={}, q_yes={:.2e}, q_no={:.2e}", 
+                i, cash_ledger, mkt.q_yes, mkt.q_no));
+        }
+    }
+    
+    // Test probability bounds
+    let mut prob_tests = 0;
+    let mut prob_success = 0;
+    
+    for b in vec![1000.0, 5000.0, 10000.0] {
+        let mut m = crate::lmsr_core::Market::new(b);
+        for stake in vec![1_000_000i128, 10_000_000i128, 50_000_000i128] {
+            prob_tests += 1;
+            let (_dq, _cash) = m.buy_yes(stake).unwrap();
+            let p = m.prob_yes();
+            if p > 0.0 && p < 1.0 {
+                prob_success += 1;
+            } else {
+                failed_tests.push(format!("Probability out of bounds: p={}", p));
+            }
+        }
+    }
+    
+    println!("✅ LMSR tests completed: {}/{} round-trip tests passed, {}/{} probability tests passed", 
+             success_count, total_tests, prob_success, prob_tests);
+    
+    let all_passed = success_count == total_tests && prob_success == prob_tests;
+    
+    Ok(Json(json!({
+        "success": all_passed,
+        "round_trip_tests": {
+            "passed": success_count,
+            "total": total_tests
+        },
+        "probability_tests": {
+            "passed": prob_success,
+            "total": prob_tests
+        },
+        "failed_tests": failed_tests,
+        "message": if all_passed {
+            "All LMSR invariant tests passed!"
+        } else {
+            "Some LMSR invariant tests failed - see failed_tests for details"
+        }
+    })))
+}
+
+// ============================================================================
+// INVARIANT VERIFICATION ENDPOINTS
+// ============================================================================
+
+// Verify balance invariant
+async fn verify_balance_invariant_endpoint(
+    State(app_state): State<AppState>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Validate user_id - require explicit value, no defaults
+    let user_id = payload.get("user_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid user_id: must be a positive integer"))? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
+
+    match lmsr_api::verify_balance_invariant(&app_state.db, user_id).await {
+        Ok(result) => Ok(Json(result)),
+        Err(e) => Err(internal_error(&format!("Balance invariant verification error: {}", e)))
+    }
+}
+
+// Verify staked invariant
+async fn verify_staked_invariant_endpoint(
+    State(app_state): State<AppState>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Validate user_id - require explicit value, no defaults
+    let user_id = payload.get("user_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid user_id: must be a positive integer"))? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
+
+    match lmsr_api::verify_staked_invariant(&app_state.db, user_id).await {
+        Ok(result) => Ok(Json(result)),
+        Err(e) => Err(internal_error(&format!("Staked invariant verification error: {}", e)))
+    }
+}
+
+// Verify post-resolution invariant
+async fn verify_post_resolution_endpoint(
+    State(app_state): State<AppState>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Validate event_id - require explicit value, no defaults
+    let event_id = payload.get("event_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid event_id: must be a positive integer"))? as i32;
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+
+    match lmsr_api::verify_post_resolution_invariant(&app_state.db, event_id).await {
+        Ok(result) => Ok(Json(result)),
+        Err(e) => Err(internal_error(&format!("Post-resolution invariant verification error: {}", e)))
+    }
+}
+
+// Verify system consistency
+async fn verify_consistency_endpoint(
+    State(app_state): State<AppState>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    // Validate event_id - require explicit value, no defaults
+    let event_id = payload.get("event_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid event_id: must be a positive integer"))? as i32;
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+
+    match lmsr_api::verify_system_consistency(&app_state.db, event_id).await {
+        Ok(result) => Ok(Json(result)),
+        Err(e) => Err(internal_error(&format!("System consistency verification error: {}", e)))
+    }
+}
+
 

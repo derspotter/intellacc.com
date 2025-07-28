@@ -836,3 +836,225 @@ pub async fn get_enhanced_leaderboard(pool: &PgPool, limit: i32) -> Result<Vec<U
 
     Ok(leaderboard)
 }
+// ============================================================================
+// LMSR MARKET STATE QUERY FUNCTIONS
+// ============================================================================
+
+// Struct for market state information
+#[derive(Debug)]
+pub struct MarketState {
+    pub event_id: i32,
+    pub title: String,
+    pub market_prob: Decimal,
+    pub cumulative_stake: Decimal,
+    pub liquidity_b: Decimal,
+    pub unique_traders: i64,
+    pub total_trades: i64,
+}
+
+// Struct for user market positions
+#[derive(Debug)]
+pub struct UserMarketPosition {
+    pub user_id: i32,
+    pub event_id: i32,
+    pub yes_shares: Decimal,
+    pub no_shares: Decimal,
+    pub total_staked: Decimal,
+    pub unrealized_pnl: Decimal,
+    pub last_updated: DateTime<Utc>,
+}
+
+// Struct for recent market updates
+#[derive(Debug)]
+pub struct MarketUpdate {
+    pub id: i32,
+    pub user_id: i32,
+    pub username: String,
+    pub event_id: i32,
+    pub prev_prob: Decimal,
+    pub new_prob: Decimal,
+    pub stake_amount: Decimal,
+    pub shares_acquired: Decimal,
+    pub share_type: String,
+    pub created_at: DateTime<Utc>,
+}
+
+// Get comprehensive market state for an event
+pub async fn get_event_market_state(pool: &PgPool, event_id: i32) -> Result<Option<MarketState>> {
+    let row = sqlx::query(
+        r#"
+        SELECT 
+            e.id as event_id,
+            e.title,
+            e.market_prob,
+            e.cumulative_stake,
+            e.liquidity_b,
+            COUNT(DISTINCT mu.user_id) as unique_traders,
+            COUNT(mu.id) as total_trades
+        FROM events e
+        LEFT JOIN market_updates mu ON e.id = mu.event_id
+        WHERE e.id = $1
+        GROUP BY e.id, e.title, e.market_prob, e.cumulative_stake, e.liquidity_b
+        "#
+    )
+    .bind(event_id)
+    .fetch_optional(pool)
+    .await?;
+
+    match row {
+        Some(row) => Ok(Some(MarketState {
+            event_id: row.get("event_id"),
+            title: row.get("title"),
+            market_prob: row.get("market_prob"),
+            cumulative_stake: row.get("cumulative_stake"),
+            liquidity_b: row.get("liquidity_b"),
+            unique_traders: row.get("unique_traders"),
+            total_trades: row.get("total_trades"),
+        })),
+        None => Ok(None),
+    }
+}
+
+// Get user's position in a specific market
+pub async fn get_user_market_position(pool: &PgPool, user_id: i32, event_id: i32) -> Result<Option<UserMarketPosition>> {
+    let row = sqlx::query(
+        r#"
+        SELECT 
+            us.user_id,
+            us.event_id,
+            COALESCE(us.yes_shares, 0) as yes_shares,
+            COALESCE(us.no_shares, 0) as no_shares,
+            COALESCE(ledger_to_decimal(us.total_staked_ledger), 0) as total_staked,
+            us.last_updated,
+            e.market_prob
+        FROM user_shares us
+        LEFT JOIN events e ON us.event_id = e.id
+        WHERE us.user_id = $1 AND us.event_id = $2
+        "#
+    )
+    .bind(user_id)
+    .bind(event_id)
+    .fetch_optional(pool)
+    .await?;
+
+    match row {
+        Some(row) => {
+            let yes_shares: Decimal = row.get("yes_shares");
+            let no_shares: Decimal = row.get("no_shares");
+            let market_prob: Decimal = row.get("market_prob");
+            let total_staked: Decimal = row.get("total_staked");
+            
+            // Calculate unrealized P&L
+            let yes_value = yes_shares * market_prob;
+            let no_value = no_shares * (Decimal::ONE - market_prob);
+            let current_value = yes_value + no_value;
+            let unrealized_pnl = current_value - total_staked;
+            
+            Ok(Some(UserMarketPosition {
+                user_id: row.get("user_id"),
+                event_id: row.get("event_id"),
+                yes_shares,
+                no_shares,
+                total_staked,
+                unrealized_pnl,
+                last_updated: row.get("last_updated"),
+            }))
+        },
+        None => Ok(None),
+    }
+}
+
+// Get all active markets (events with market_prob set)
+pub async fn get_active_markets(pool: &PgPool, limit: i32) -> Result<Vec<MarketState>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT 
+            e.id as event_id,
+            e.title,
+            e.market_prob,
+            e.cumulative_stake,
+            e.liquidity_b,
+            COUNT(DISTINCT mu.user_id) as unique_traders,
+            COUNT(mu.id) as total_trades
+        FROM events e
+        LEFT JOIN market_updates mu ON e.id = mu.event_id
+        WHERE e.market_prob IS NOT NULL 
+        AND e.outcome IS NULL
+        AND e.closing_date > NOW()
+        GROUP BY e.id, e.title, e.market_prob, e.cumulative_stake, e.liquidity_b
+        ORDER BY e.cumulative_stake DESC, COUNT(mu.id) DESC
+        LIMIT $1
+        "#
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    let mut markets = Vec::new();
+    for row in rows {
+        markets.push(MarketState {
+            event_id: row.get("event_id"),
+            title: row.get("title"),
+            market_prob: row.get("market_prob"),
+            cumulative_stake: row.get("cumulative_stake"),
+            liquidity_b: row.get("liquidity_b"),
+            unique_traders: row.get("unique_traders"),
+            total_trades: row.get("total_trades"),
+        });
+    }
+
+    Ok(markets)
+}
+
+// Get user portfolio across all markets  
+pub async fn get_user_portfolio(pool: &PgPool, user_id: i32) -> Result<Vec<UserMarketPosition>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT 
+            us.user_id,
+            us.event_id,
+            COALESCE(us.yes_shares, 0) as yes_shares,
+            COALESCE(us.no_shares, 0) as no_shares,
+            COALESCE(ledger_to_decimal(us.total_staked_ledger), 0) as total_staked,
+            us.last_updated,
+            e.market_prob,
+            e.title
+        FROM user_shares us
+        JOIN events e ON us.event_id = e.id
+        WHERE us.user_id = $1
+        AND (us.yes_shares > 0 OR us.no_shares > 0)
+        AND e.outcome IS NULL
+        ORDER BY us.last_updated DESC
+        "#
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut positions = Vec::new();
+    for row in rows {
+        let yes_shares: Decimal = row.get("yes_shares");
+        let no_shares: Decimal = row.get("no_shares");
+        let market_prob: Decimal = row.get("market_prob");
+        let total_staked: Decimal = row.get("total_staked");
+        
+        // Calculate unrealized P&L
+        let yes_value = yes_shares * market_prob;
+        let no_value = no_shares * (Decimal::ONE - market_prob);
+        let current_value = yes_value + no_value;
+        let unrealized_pnl = current_value - total_staked;
+        
+        positions.push(UserMarketPosition {
+            user_id: row.get("user_id"),
+            event_id: row.get("event_id"),
+            yes_shares,
+            no_shares,
+            total_staked,
+            unrealized_pnl,
+            last_updated: row.get("last_updated"),
+        });
+    }
+
+    Ok(positions)
+}
+

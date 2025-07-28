@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  weekly-cron:
+    build:
+      context: .
+      dockerfile: docker/weekly-cron/Dockerfile
+    container_name: intellacc_weekly_cron
+    environment:
+      - API_BASE=http://backend:3000/api
+      - WEEKLY_WEBHOOK_URL=${WEEKLY_WEBHOOK_URL:-}
+    networks:
+      - intellacc-network
+    volumes:
+      - ./scripts:/usr/src/app/scripts:ro
+      - cron-logs:/var/log
+    depends_on:
+      - backend
+      - db
+    restart: unless-stopped
+
+volumes:
+  cron-logs:
+
+networks:
+  intellacc-network:
+    external: true

@@ -15,12 +15,14 @@ import ProfilePredictions from '../components/profile/ProfilePredictions';
 import CreatePredictionForm from '../components/predictions/CreatePredictionForm';
 import CreateEventForm from '../components/predictions/CreateEventForm';
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
-import LeaderboardCard from '../components/predictions/LeaderboardCard';
+import EventsList from '../components/predictions/EventsList';
+import RPBalance from '../components/predictions/RPBalance';
+import GlobalLeaderboard from '../components/predictions/GlobalLeaderboard';
 import ProfilePage from '../components/profile/ProfilePage';
 import SettingsPage from '../components/settings/SettingsPage';
 
 // Use shorthand for tag functions
-const { div, h1, h2, p, button } = van.tags;
+const { div, h1, h2, h3, p, button } = van.tags;
 
 // Update page from hash (now async to handle store loading and initial fetch)
 export const updatePageFromHash = async () => {
@@ -103,22 +105,38 @@ export default function Router() {
     signup: () => SignUpForm(),
     settings: () => SettingsPage(),
     
-    predictions: () => div({ class: "predictions-page" }, [
-      h1("Predictions & Betting"),
+    predictions: () => div({ class: "markets-page" }, [
+      
+      // User stats bar or description for non-logged users  
+      () => isLoggedInState.val ? 
+        // Show user stats horizontally
+        div({ class: "user-stats-bar" }, [
+          RPBalance({ horizontal: true })
+        ]) :
+        // Show description and login prompt for non-logged users
+        div([
+          p({ class: "page-description" }, "Trade on future events with LMSR automated market making. Earn rewards through weekly assignments and optimal staking."),
+          div({ class: "login-prompt-inline" }, [
+            p("Join the markets to trade on predictions and earn rewards!"),
+            button({ 
+              onclick: () => { window.location.hash = 'login' },
+              class: "cta-button"
+            }, "Sign Up / Log In")
+          ])
+        ]),
+      
+      // Admin Event Management
       () => isAdminState.val ? AdminEventManagement() : null,
-      div({ class: "cards-container" }, [
-        // Leaderboard Card - shows reputation rankings
-        () => isLoggedInState.val ? LeaderboardCard() : null,
-        // Event Creation Form - available to all logged-in users
-        () => isLoggedInState.val ? CreateEventForm() : null,
-        // Prediction Form - will be styled as a card
-        CreatePredictionForm(),
-        // Predictions List - will be styled as a card
-        ProfilePredictions({
-          limit: null,
-          showViewAll: false,
-          title: 'Your Predictions'
-        })
+      
+      // Market Overview Section - moved above leaderboard
+      div({ class: "market-overview" }, [
+        // Main Markets Trading Interface
+        EventsList()
+      ]),
+      
+      // Global Leaderboard Section
+      div({ class: "leaderboard-section" }, [
+        GlobalLeaderboard({ limit: 10 })
       ])
     ]),
     

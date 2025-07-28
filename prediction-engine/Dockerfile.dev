@@ -1,0 +1,40 @@
+# Development Dockerfile with cargo for testing
+# This version includes Rust toolchain for running property tests
+
+FROM rust:latest
+
+WORKDIR /app
+
+# Install runtime dependencies  
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    bc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user
+RUN useradd -m -u 1001 appuser
+
+# Copy source code
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+# Build the application in release mode
+RUN cargo build --release
+
+# Copy the property test script
+COPY test_lmsr_properties.sh ./
+
+# Change ownership to app user
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Expose port 3001
+EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3001/health || exit 1
+
+# Run the application
+CMD ["./target/release/prediction_engine"]

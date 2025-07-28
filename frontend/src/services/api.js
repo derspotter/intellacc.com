@@ -342,6 +342,31 @@ export const api = {
       
     getUserRank: () => 
       request('/leaderboard/rank')
+  },
+
+  // Notification endpoints
+  notifications: {
+    getAll: (options = {}) => {
+      const { limit = 20, offset = 0, unreadOnly = false } = options;
+      const params = new URLSearchParams({
+        limit: limit.toString(),
+        offset: offset.toString(),
+        unreadOnly: unreadOnly.toString()
+      });
+      return request(`/notifications?${params}`);
+    },
+
+    getUnreadCount: () => 
+      request('/notifications/count'),
+
+    markAsRead: (notificationId) => 
+      request(`/notifications/${notificationId}/read`, { method: 'PUT' }),
+
+    markAllAsRead: () => 
+      request('/notifications/mark-all-read', { method: 'PUT' }),
+
+    delete: (notificationId) => 
+      request(`/notifications/${notificationId}`, { method: 'DELETE' })
   }
 };
 

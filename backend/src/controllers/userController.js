@@ -3,6 +3,7 @@
 const db = require('../db');
 const bcrypt = require('bcrypt');
 const { generateToken } = require('../utils/jwt');
+const notificationService = require('../services/notificationService');
 
 // Create a new user
 exports.createUser = async (req, res) => {
@@ -113,7 +114,7 @@ exports.getUserProfile = async (req, res) => {
     const userId = req.user.id; // Using standardized user object from auth middleware
 
     const result = await db.query(
-      "SELECT id, username, email, role, bio FROM users WHERE id = $1",
+      "SELECT id, username, email, role, bio, rp_balance FROM users WHERE id = $1",
       [userId]
     );
 
@@ -182,6 +183,14 @@ exports.followUser = async (req, res) => {
       'INSERT INTO follows (follower_id, following_id) VALUES ($1, $2) RETURNING *',
       [followerId, followingId]
     );
+    
+    // Create follow notification
+    try {
+      await notificationService.createFollowNotification(followerId, followingId);
+    } catch (notificationError) {
+      console.error('Error creating follow notification:', notificationError);
+      // Don't fail the follow operation if notification fails
+    }
     
     res.status(201).json({ message: "Successfully followed user" });
   } catch (err) {
@@ -254,6 +263,38 @@ exports.getFollowing = async (req, res) => {
   } catch (err) {
     console.error("Error getting following:", err);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Get user's portfolio positions
+exports.getUserPositions = async (req, res) => {
+  try {
+    const userId = req.params.id;
+    console.log('🔍 getUserPositions for userId:', userId);
+    
+    const result = await db.query(`
+      SELECT 
+        us.event_id,
+        us.yes_shares,
+        us.no_shares,
+        e.title as event_title,
+        e.category,
+        e.closing_date,
+        e.market_prob,
+        e.cumulative_stake
+      FROM user_shares us
+      JOIN events e ON us.event_id = e.id
+      WHERE us.user_id = $1 
+        AND (us.yes_shares > 0 OR us.no_shares > 0)
+      ORDER BY us.last_updated DESC
+    `, [userId]);
+    
+    console.log('🔍 Found', result.rows.length, 'positions for user', userId);
+    res.status(200).json(result.rows);
+    
+  } catch (err) {
+    console.error('Error fetching user positions:', err);
+    res.status(500).json({ message: 'Error fetching user positions' });
   }
 };
 

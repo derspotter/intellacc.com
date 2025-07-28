@@ -1,0 +1,19 @@
+# Stress test image with full Rust toolchain
+FROM rust:latest
+
+WORKDIR /app
+
+# Install additional dependencies
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy everything
+COPY . .
+
+# Build the stress test binary
+RUN cargo build --bin stress_test
+
+# Run the stress test
+CMD ["cargo", "run", "--bin", "stress_test"]
