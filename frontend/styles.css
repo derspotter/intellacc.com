@@ -1058,6 +1058,7 @@ button:disabled,
   gap: 0.5rem;
   margin-top: 1rem;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .withdrawal-btn.hidden {
@@ -1074,6 +1075,11 @@ button:disabled,
   transition: all var(--transition);
   font-size: 0.9rem;
   white-space: nowrap;
+  min-width: 140px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .withdrawal-btn.secondary {
@@ -1096,6 +1102,10 @@ button:disabled,
 .withdrawal-btn.primary:hover {
   background: #cc0000;
   border-color: #cc0000;
+}
+
+.withdrawal-btn.primary {
+  margin-left: auto;
 }
 
 .withdrawal-btn:disabled {
@@ -1554,6 +1564,9 @@ body.dark-mode .weekly-assignment-badge.pending {
   padding: 0;
   border: none;
   background: transparent;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 .event-header {
@@ -1799,7 +1812,7 @@ body.dark-mode .weekly-assignment-badge.pending {
   box-shadow: var(--box-shadow);
   padding: 1rem;
   overflow: hidden;
-  height: 800px;
+  height: 780px;
 }
 
 .events-list-header {
@@ -1898,6 +1911,14 @@ body.dark-mode .weekly-assignment-badge.pending {
   text-align: center;
   padding-top: 1rem;
   flex-shrink: 0;
+}
+
+.events-actions .button {
+  min-width: 140px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Dark mode adjustments */
@@ -2680,8 +2701,10 @@ body.dark-mode .belief-slider::-moz-range-thumb {
 }
 
 .event-list-item.selected {
-  background-color: var(--primary-color);
+  background-color: #007bff;
   color: white;
+  border: 2px solid #0056b3;
+  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.3);
 }
 
 .event-list-item.resolved {
@@ -2731,24 +2754,38 @@ body.dark-mode .belief-slider::-moz-range-thumb {
 
 .event-category {
   padding: 0.2rem 0.5rem;
-  background-color: var(--bg-color);
+  background-color: rgba(0, 123, 255, 0.1);
+  color: #0056b3;
+  border: 1px solid rgba(0, 123, 255, 0.2);
   border-radius: 3px;
   font-size: 0.8rem;
+  font-weight: 600;
 }
 
 .event-list-item.selected .event-category {
   background-color: rgba(255, 255, 255, 0.2);
+  color: white;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.event-date {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.2;
 }
 
 .event-resolved {
+  display: inline-flex;
+  align-items: center;
   color: var(--success-color);
   font-weight: 600;
+  line-height: 1.2;
 }
 
 /* Selected Event Container */
 .selected-event-container {
   display: flex;
-  height: 800px;
+  height: 780px;
   flex-direction: column;
   background: transparent;
   border: none;
@@ -2770,6 +2807,7 @@ body.dark-mode .belief-slider::-moz-range-thumb {
   background: transparent;
   border: none;
   padding: 0;
+  flex: 1;
 }
 
 .event-card-header {

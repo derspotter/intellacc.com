@@ -23,6 +23,29 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
   let kellyTimeout;
   let kellyInitialized = false;
   
+  // Create slider elements once at component initialization
+  const sliderElements = (() => {
+    const container = div({ class: 'belief-slider-container' });
+    const slider = input({
+      type: 'range',
+      min: '0.01',
+      max: '0.99',
+      step: '0.01',
+      value: beliefProbability,
+      class: 'belief-slider'
+    });
+    const percentageSpan = span({ class: 'belief-percentage' }, `${(beliefProbability * 100).toFixed(1)}%`);
+    const hintSmall = small({ class: 'belief-hint' }, '');
+    
+    container.appendChild(slider);
+    container.appendChild(div({ class: 'belief-display' }, [
+      percentageSpan,
+      hintSmall
+    ]));
+    
+    return { container, slider, percentageSpan, hintSmall };
+  })();
+  
   
 
   // Use reactive market data that can be updated via WebSocket
@@ -532,22 +555,54 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
     }
     return `${numValue.toFixed(2)} RP`;
   };
+  
+  // Setup slider event handlers after all functions are defined
+  const updateSliderDisplay = () => {
+    sliderElements.percentageSpan.textContent = `${(beliefProbability * 100).toFixed(1)}%`;
+    sliderElements.hintSmall.textContent = `Market: ${(marketState.val.market_prob * 100).toFixed(1)}% | Your edge: ${((beliefProbability - marketState.val.market_prob) * 100).toFixed(1)}%`;
+  };
+  
+  sliderElements.slider.oninput = (e) => {
+    beliefProbability = parseFloat(e.target.value);
+    updateSliderDisplay();
+    
+    // Debounce Kelly suggestion updates
+    if (kellyTimeout) clearTimeout(kellyTimeout);
+    kellyTimeout = setTimeout(() => {
+      if (localStorage.getItem('token')) {
+        console.log('Calling Kelly suggestion with belief:', beliefProbability);
+        getKellySuggestion(beliefProbability);
+      }
+    }, 300);
+  };
+  
+  // Initialize display
+  updateSliderDisplay();
+  
+  // Get initial Kelly suggestion after component setup
+  if (localStorage.getItem('token')) {
+    setTimeout(() => {
+      getKellySuggestion(beliefProbability);
+    }, 100);
+  }
 
   return () => div({ class: 'event-card' }, [
-      // Event Header - conditional based on hideTitle prop
-      hideTitle ? null : div({ class: 'event-header' }, [
-        h3({ class: 'event-title' }, event.title),
-        div({ class: 'event-meta' }, [
-          span({ class: 'event-category' }, event.category || 'General'),
-          span({ class: 'event-closing' }, [
-            '📅 Closes: ',
-            formatDate(event.closing_date)
+      // Main content wrapper that grows to push position info to bottom
+      div({ style: 'flex: 1 1 auto;' }, [
+        // Event Header - conditional based on hideTitle prop
+        hideTitle ? null : div({ class: 'event-header' }, [
+          h3({ class: 'event-title' }, event.title),
+          div({ class: 'event-meta' }, [
+            span({ class: 'event-category' }, event.category || 'General'),
+            span({ class: 'event-closing' }, [
+              '📅 Closes: ',
+              formatDate(event.closing_date)
+            ])
           ])
-        ])
-      ]),
-      
-      // Market State
-      div({ class: 'market-state' }, [
+        ]),
+        
+        // Market State
+        div({ class: 'market-state' }, [
         div({ class: 'market-stats' }, [
           div({ class: 'stat' }, [
             span({ class: 'stat-label' }, 'Current Probability:'),
@@ -575,95 +630,6 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
             span({ class: 'stat-value' }, event.event_type || 'binary')
           ])
         ])
-      ]),
-      
-      // User Position Stats - Always present, visibility controlled by CSS
-      div({ 
-        class: 'user-position',
-        style: () => {
-          withdrawalTrigger.val; // Force dependency on trigger
-          const visible = userPosition.val !== null;
-          console.log('🎲 Position visibility:', visible, 'position:', userPosition.val, 'trigger:', withdrawalTrigger.val);
-          return visible ? 'display: block;' : 'display: none;';
-        }
-      }, [
-        div({ class: 'position-stats' }, [
-          div({ class: 'stat' }, [
-            span({ class: 'stat-label' }, 'YES Shares:'),
-            span({ class: 'stat-value' }, () => userPosition.val ? userPosition.val.yes_shares.toFixed(2) : '0.00')
-          ]),
-          div({ class: 'stat' }, [
-            span({ class: 'stat-label' }, 'NO Shares:'),
-            span({ class: 'stat-value' }, () => userPosition.val ? userPosition.val.no_shares.toFixed(2) : '0.00')
-          ]),
-          div({ class: 'stat' }, [
-            span({ class: 'stat-label' }, 'Your Stake:'),
-            span({ class: 'stat-value' }, () => userPosition.val ? formatRP(userPosition.val.total_staked) : '0.00 RP')
-          ]),
-          div({ class: 'stat' }, [
-            span({ class: 'stat-label' }, 'Unrealized P&L:'),
-            span({ 
-              class: () => `stat-value ${userPosition.val && userPosition.val.unrealized_pnl >= 0 ? 'positive' : 'negative'}`
-            }, () => userPosition.val ? formatRP(userPosition.val.unrealized_pnl) : '0.00 RP')
-          ])
-        ])
-      ]),
-      
-      // Withdrawal buttons - Always present in DOM, outside position conditional
-      div({ class: 'withdrawal-actions' }, [
-        // YES button - always present, visibility controlled by CSS
-        button({
-          type: 'button',
-          class: 'button withdrawal-btn secondary',
-          style: () => {
-            withdrawalTrigger.val; // Force dependency on trigger
-            const visible = userPosition.val && userPosition.val.yes_shares > 0;
-            console.log('🔄 YES button visibility:', visible, 'shares:', userPosition.val?.yes_shares || 0, 'trigger:', withdrawalTrigger.val);
-            return visible ? 'display: inline-block;' : 'display: none;';
-          },
-          onclick: () => {
-            console.log('🔥 YES withdrawal button clicked!');
-            handleWithdrawal('yes', userPosition.val.yes_shares);
-          }
-        }, () => {
-          if (!userPosition.val || userPosition.val.yes_shares <= 0) return 'Sell All YES (0.00)';
-          return `Sell All YES (${userPosition.val.yes_shares.toFixed(2)})`;
-        }),
-        
-        // NO button - always present, visibility controlled by CSS
-        button({
-          type: 'button', 
-          class: 'button withdrawal-btn secondary',
-          style: () => {
-            withdrawalTrigger.val; // Force dependency on trigger  
-            const visible = userPosition.val && userPosition.val.no_shares > 0;
-            console.log('🔄 NO button visibility:', visible, 'shares:', userPosition.val?.no_shares || 0, 'trigger:', withdrawalTrigger.val);
-            return visible ? 'display: inline-block;' : 'display: none;';
-          },
-          onclick: () => {
-            console.log('🔥 NO withdrawal button clicked!');
-            handleWithdrawal('no', userPosition.val.no_shares);
-          }
-        }, () => {
-          if (!userPosition.val || userPosition.val.no_shares <= 0) return 'Sell All NO (0.00)';
-          return `Sell All NO (${userPosition.val.no_shares.toFixed(2)})`;
-        }),
-        
-        // Full withdrawal button - always present, visibility controlled by CSS
-        button({
-          type: 'button',
-          class: 'button withdrawal-btn primary',
-          style: () => {
-            withdrawalTrigger.val; // Force dependency on trigger
-            const visible = userPosition.val && (userPosition.val.yes_shares > 0 || userPosition.val.no_shares > 0);
-            console.log('🔄 FULL button visibility:', visible, 'position:', userPosition.val, 'trigger:', withdrawalTrigger.val);
-            return visible ? 'display: inline-block;' : 'display: none;';
-          },
-          onclick: () => {
-            console.log('🔥 FULL withdrawal button clicked!');
-            handleFullWithdrawal();
-          }
-        }, 'Exit All Positions')
       ]),
       
       // Betting Interface
@@ -706,56 +672,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
           
           div({ class: 'form-row' }, [
             label('Your Belief Probability:'),
-            (() => {
-              // Create display elements
-              const percentageSpan = span({ class: 'belief-percentage' }, `${(beliefProbability * 100).toFixed(1)}%`);
-              const hintSmall = small({ class: 'belief-hint' }, 
-                `Market: ${(marketState.val.market_prob * 100).toFixed(1)}% | Your edge: ${((beliefProbability - marketState.val.market_prob) * 100).toFixed(1)}%`
-              );
-              
-              // Create slider
-              const slider = input({
-                type: 'range',
-                min: '0.01',
-                max: '0.99',
-                step: '0.01',
-                value: beliefProbability,
-                class: 'belief-slider'
-              });
-              
-              // Update display manually to avoid reactive re-renders
-              const updateDisplay = () => {
-                percentageSpan.textContent = `${(beliefProbability * 100).toFixed(1)}%`;
-                hintSmall.textContent = `Market: ${(marketState.val.market_prob * 100).toFixed(1)}% | Your edge: ${((beliefProbability - marketState.val.market_prob) * 100).toFixed(1)}%`;
-              };
-              
-              slider.oninput = (e) => {
-                beliefProbability = parseFloat(e.target.value);
-                updateDisplay();
-                // Debounce Kelly suggestion updates
-                if (kellyTimeout) clearTimeout(kellyTimeout);
-                kellyTimeout = setTimeout(() => {
-                  if (marketState && localStorage.getItem('token')) {
-                    console.log('Calling Kelly suggestion with belief:', beliefProbability);
-                    getKellySuggestion(beliefProbability);
-                  }
-                }, 300);
-              };
-              
-              // Get initial Kelly suggestion (only once)
-              if (!kellyInitialized && localStorage.getItem('token') && marketState) {
-                kellyInitialized = true;
-                getKellySuggestion(beliefProbability);
-              }
-              
-              return div({ class: 'belief-slider-container' }, [
-                slider,
-                div({ class: 'belief-display' }, [
-                  percentageSpan,
-                  hintSmall
-                ])
-              ]);
-            })()
+            sliderElements.container
           ]),
           
           div({ class: 'kelly-suggestion' }, [
@@ -810,5 +727,100 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
           children: 'Log In'
         })
       ])
+      ]), // Close main content wrapper
+      
+      // Bottom-aligned position container
+      div({ 
+        style: 'flex: 0 0 auto; margin-top: auto;' 
+      }, [
+        // User Position Stats - Always present, visibility controlled by CSS
+        div({ 
+          class: 'user-position',
+          style: () => {
+            withdrawalTrigger.val; // Force dependency on trigger
+            const visible = userPosition.val !== null;
+            console.log('🎲 Position visibility:', visible, 'position:', userPosition.val, 'trigger:', withdrawalTrigger.val);
+            return visible ? 'display: block;' : 'display: none;';
+          }
+      }, [
+        div({ class: 'position-stats' }, [
+          div({ class: 'stat' }, [
+            span({ class: 'stat-label' }, 'YES Shares:'),
+            span({ class: 'stat-value' }, () => userPosition.val ? userPosition.val.yes_shares.toFixed(2) : '0.00')
+          ]),
+          div({ class: 'stat' }, [
+            span({ class: 'stat-label' }, 'NO Shares:'),
+            span({ class: 'stat-value' }, () => userPosition.val ? userPosition.val.no_shares.toFixed(2) : '0.00')
+          ]),
+          div({ class: 'stat' }, [
+            span({ class: 'stat-label' }, 'Your Stake:'),
+            span({ class: 'stat-value' }, () => userPosition.val ? formatRP(userPosition.val.total_staked) : '0.00 RP')
+          ]),
+          div({ class: 'stat' }, [
+            span({ class: 'stat-label' }, 'Unrealized P&L:'),
+            span({ 
+              class: () => `stat-value ${userPosition.val && userPosition.val.unrealized_pnl >= 0 ? 'positive' : 'negative'}`
+            }, () => userPosition.val ? formatRP(userPosition.val.unrealized_pnl) : '0.00 RP')
+          ])
+        ])
+      ]),
+      
+      // Withdrawal buttons - Always present in DOM, outside position conditional (moved to bottom)
+      div({ class: 'withdrawal-actions' }, [
+        // YES button - always present, visibility controlled by CSS
+        button({
+          type: 'button',
+          class: 'button withdrawal-btn secondary',
+          style: () => {
+            withdrawalTrigger.val; // Force dependency on trigger
+            const visible = userPosition.val && userPosition.val.yes_shares > 0;
+            console.log('🔄 YES button visibility:', visible, 'shares:', userPosition.val?.yes_shares || 0, 'trigger:', withdrawalTrigger.val);
+            return visible ? 'display: inline-block;' : 'display: none;';
+          },
+          onclick: () => {
+            console.log('🔥 YES withdrawal button clicked!');
+            handleWithdrawal('yes', userPosition.val.yes_shares);
+          }
+        }, () => {
+          if (!userPosition.val || userPosition.val.yes_shares <= 0) return 'Sell All YES (0.00)';
+          return `Sell All YES (${userPosition.val.yes_shares.toFixed(2)})`;
+        }),
+        
+        // NO button - always present, visibility controlled by CSS
+        button({
+          type: 'button', 
+          class: 'button withdrawal-btn secondary',
+          style: () => {
+            withdrawalTrigger.val; // Force dependency on trigger  
+            const visible = userPosition.val && userPosition.val.no_shares > 0;
+            console.log('🔄 NO button visibility:', visible, 'shares:', userPosition.val?.no_shares || 0, 'trigger:', withdrawalTrigger.val);
+            return visible ? 'display: inline-block;' : 'display: none;';
+          },
+          onclick: () => {
+            console.log('🔥 NO withdrawal button clicked!');
+            handleWithdrawal('no', userPosition.val.no_shares);
+          }
+        }, () => {
+          if (!userPosition.val || userPosition.val.no_shares <= 0) return 'Sell All NO (0.00)';
+          return `Sell All NO (${userPosition.val.no_shares.toFixed(2)})`;
+        }),
+        
+        // Full withdrawal button - always present, visibility controlled by CSS
+        button({
+          type: 'button',
+          class: 'button withdrawal-btn primary',
+          style: () => {
+            withdrawalTrigger.val; // Force dependency on trigger
+            const visible = userPosition.val && (userPosition.val.yes_shares > 0 || userPosition.val.no_shares > 0);
+            console.log('🔄 FULL button visibility:', visible, 'position:', userPosition.val, 'trigger:', withdrawalTrigger.val);
+            return visible ? 'display: inline-block;' : 'display: none;';
+          },
+          onclick: () => {
+            console.log('🔥 FULL withdrawal button clicked!');
+            handleFullWithdrawal();
+          }
+        }, 'Exit All Positions')
+      ])
+      ]) // Close bottom-aligned position container
     ]);
 };
