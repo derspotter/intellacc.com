@@ -40,4 +40,5 @@ docker compose up -d
 docker compose down
 ```
 
-[... rest of the existing content remains unchanged ...]
+## Development Reminders
+- When you make a screenshot with browsertools mcp server, always remember to look at it!

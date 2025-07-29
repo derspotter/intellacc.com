@@ -118,7 +118,7 @@ export default function NotificationItem({ notification, onMarkAsRead, onDelete 
     // Action buttons
     div({ class: "notification-actions" }, [
       // Mark as read button (only show if unread)
-      () => !notification.read 
+      !notification.read 
         ? button({
             class: "mark-read-btn",
             onclick: (e) => {

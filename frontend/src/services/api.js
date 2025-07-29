@@ -367,6 +367,71 @@ export const api = {
 
     delete: (notificationId) => 
       request(`/notifications/${notificationId}`, { method: 'DELETE' })
+  },
+
+  // Key management endpoints (for end-to-end encryption)
+  keys: {
+    storePublicKey: (publicKey) =>
+      request('/keys', { method: 'POST', body: { publicKey } }),
+
+    getMyPublicKey: () =>
+      request('/keys/me'),
+
+    getUserPublicKey: (userId) =>
+      request(`/keys/user/${userId}`),
+
+    getMultiplePublicKeys: (userIds) =>
+      request('/keys/batch', { method: 'POST', body: { userIds } }),
+
+    getUsersWithKeys: (limit = 50, offset = 0) =>
+      request(`/keys/users?limit=${limit}&offset=${offset}`),
+
+    verifyFingerprint: (userId, fingerprint) =>
+      request('/keys/verify', { method: 'POST', body: { userId, fingerprint } }),
+
+    deleteMyPublicKey: () =>
+      request('/keys/me', { method: 'DELETE' }),
+
+    getStats: () =>
+      request('/keys/stats')
+  },
+
+  // Messaging endpoints (end-to-end encrypted)
+  messages: {
+    getConversations: (limit = 20, offset = 0) =>
+      request(`/messages/conversations?limit=${limit}&offset=${offset}`),
+
+    createConversation: (otherUserId) =>
+      request('/messages/conversations', { method: 'POST', body: { otherUserId } }),
+
+    searchConversations: (query, limit = 10) =>
+      request(`/messages/conversations/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+
+    getConversation: (conversationId) =>
+      request(`/messages/conversations/${conversationId}`),
+
+    getMessages: (conversationId, limit = 50, offset = 0, before = null) => {
+      let url = `/messages/conversations/${conversationId}/messages?limit=${limit}&offset=${offset}`;
+      if (before) {
+        url += `&before=${encodeURIComponent(before)}`;
+      }
+      return request(url);
+    },
+
+    sendMessage: (conversationId, messageData) =>
+      request(`/messages/conversations/${conversationId}/messages`, { 
+        method: 'POST', 
+        body: messageData 
+      }),
+
+    markAsRead: (messageIds) =>
+      request('/messages/read', { method: 'POST', body: { messageIds } }),
+
+    getUnreadCount: () =>
+      request('/messages/unread-count'),
+
+    deleteMessage: (messageId) =>
+      request(`/messages/${messageId}`, { method: 'DELETE' })
   }
 };
 

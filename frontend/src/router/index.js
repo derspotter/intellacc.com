@@ -20,6 +20,8 @@ import RPBalance from '../components/predictions/RPBalance';
 import GlobalLeaderboard from '../components/predictions/GlobalLeaderboard';
 import ProfilePage from '../components/profile/ProfilePage';
 import SettingsPage from '../components/settings/SettingsPage';
+import NotificationsPage from '../pages/Notifications';
+import MessagesPage from '../pages/Messages';
 
 // Use shorthand for tag functions
 const { div, h1, h2, h3, p, button } = van.tags;
@@ -104,6 +106,8 @@ export default function Router() {
     login: () => LoginForm(),
     signup: () => SignUpForm(),
     settings: () => SettingsPage(),
+    notifications: () => NotificationsPage(),
+    messages: () => MessagesPage(),
     
     predictions: () => div({ class: "markets-page" }, [
       

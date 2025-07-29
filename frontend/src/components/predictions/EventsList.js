@@ -6,7 +6,7 @@ import api from '../../services/api.js';
 import { isLoggedInState, getUserId } from '../../services/auth.js';
 import { registerSocketEventHandler } from '../../services/socket.js';
 
-const { div, h2, h3, p, input, label, select, option, span, ul, li } = van.tags;
+const { div, h2, h3, p, input, label, select, option, span, ul, li, br } = van.tags;
 
 export default function EventsList() {
   const events = van.state([]);

@@ -17,7 +17,13 @@ const eventHandlers = {
   predictionResolved: [],
   newBet: [],
   marketUpdate: [],
-  notification: []
+  notification: [],
+  // Messaging events
+  newMessage: [],
+  messageSent: [],
+  messagesRead: [],
+  messageDeleted: [],
+  'user-typing': []
 };
 
 /**
@@ -218,6 +224,32 @@ function setupSocketHandlers() {
     // Notify registered handlers
     notifyHandlers('notification', data);
   });
+
+  // Messaging events
+  socket.on('newMessage', (data) => {
+    console.log('[Socket] Received newMessage event:', data);
+    notifyHandlers('newMessage', data);
+  });
+
+  socket.on('messageSent', (data) => {
+    console.log('[Socket] Received messageSent event:', data);
+    notifyHandlers('messageSent', data);
+  });
+
+  socket.on('messagesRead', (data) => {
+    console.log('[Socket] Received messagesRead event:', data);
+    notifyHandlers('messagesRead', data);
+  });
+
+  socket.on('messageDeleted', (data) => {
+    console.log('[Socket] Received messageDeleted event:', data);
+    notifyHandlers('messageDeleted', data);
+  });
+
+  socket.on('user-typing', (data) => {
+    console.log('[Socket] Received user-typing event:', data);
+    notifyHandlers('user-typing', data);
+  });
 }
 
 /**
@@ -248,6 +280,10 @@ function joinUserRooms() {
   if (tokenData && tokenData.userId) {
     socket.emit('join-profile', tokenData.userId);
     console.log(`Joined user-${tokenData.userId} room`);
+    
+    // Authenticate for notifications
+    socket.emit('authenticate', tokenData.userId);
+    console.log(`Authenticated for notifications as user ${tokenData.userId}`);
   }
 }
 

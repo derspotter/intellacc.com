@@ -1,6 +1,17 @@
 // backend/src/services/notificationService.js
 const db = require('../db');
 
+// Socket.io instance will be injected
+let io = null;
+
+/**
+ * Set the Socket.io instance for real-time notifications
+ * @param {Object} socketIo - Socket.io instance
+ */
+function setSocketIo(socketIo) {
+  io = socketIo;
+}
+
 /**
  * Create a new notification
  * @param {Object} notificationData - The notification data
@@ -40,7 +51,35 @@ async function createNotification({ userId, type, actorId, targetId, targetType,
       [userId, type, actorId, targetId, targetType, content]
     );
 
-    return result.rows[0];
+    const notification = result.rows[0];
+
+    // Emit real-time notification if socket.io is available
+    if (io && notification) {
+      try {
+        // Get the full notification with actor details
+        const fullNotification = await getUserNotifications(userId, { limit: 1, offset: 0 });
+        
+        if (fullNotification.length > 0) {
+          // Emit to the user's room
+          io.to(`user:${userId}`).emit('notification', {
+            type: 'new',
+            notification: fullNotification[0]
+          });
+
+          // Also emit unread count update
+          const unreadCount = await getUnreadNotificationCount(userId);
+          io.to(`user:${userId}`).emit('notification', {
+            type: 'unreadCountUpdate',
+            count: unreadCount
+          });
+        }
+      } catch (socketError) {
+        console.error('Error emitting real-time notification:', socketError);
+        // Don't fail the notification creation if socket emission fails
+      }
+    }
+
+    return notification;
   } catch (error) {
     console.error('Error creating notification:', error);
     throw error;
@@ -58,10 +97,11 @@ async function createNotification({ userId, type, actorId, targetId, targetType,
  */
 async function getUserNotifications(userId, { limit = 20, offset = 0, unreadOnly = false } = {}) {
   try {
+    console.log(`Fetching notifications for user ${userId}, limit: ${limit}, offset: ${offset}, unreadOnly: ${unreadOnly}`);
+    
     let query = `
       SELECT n.*, 
              u.username as actor_username,
-             u.bio as actor_bio,
              CASE 
                WHEN n.target_type = 'post' THEN p.content
                WHEN n.target_type = 'comment' THEN c.content
@@ -84,6 +124,7 @@ async function getUserNotifications(userId, { limit = 20, offset = 0, unreadOnly
     params.push(limit, offset);
 
     const result = await db.query(query, params);
+    console.log(`Found ${result.rows.length} notifications for user ${userId}`);
     return result.rows;
   } catch (error) {
     console.error('Error fetching notifications:', error);
@@ -259,6 +300,7 @@ async function createReplyNotification(replierUserId, parentCommentId, parentCom
 }
 
 module.exports = {
+  setSocketIo,
   createNotification,
   getUserNotifications,
   markNotificationAsRead,

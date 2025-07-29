@@ -10,6 +10,8 @@ const scoringController = require('../controllers/scoringController');
 const leaderboardController = require('../controllers/leaderboardController');
 const notificationController = require('../controllers/notificationController');
 const weeklyAssignmentController = require('../controllers/weeklyAssignmentController');
+const keyManagementController = require('../controllers/keyManagementController');
+const messagingController = require('../controllers/messagingController');
 const authenticateJWT = require("../middleware/auth");
 
 // Base test route
@@ -112,6 +114,27 @@ router.post("/weekly/apply-decay", weeklyAssignmentController.applyWeeklyDecay);
 router.post("/weekly/run-all", weeklyAssignmentController.runWeeklyProcesses);
 router.get("/weekly/stats", weeklyAssignmentController.getWeeklyStats);
 router.get("/weekly/user/:userId/status", authenticateJWT, weeklyAssignmentController.getUserWeeklyStatus);
+
+// Key Management Routes (for end-to-end encryption)
+router.post("/keys", authenticateJWT, keyManagementController.storePublicKey);
+router.get("/keys/me", authenticateJWT, keyManagementController.getMyPublicKey);
+router.get("/keys/user/:userId", authenticateJWT, keyManagementController.getUserPublicKey);
+router.post("/keys/batch", authenticateJWT, keyManagementController.getMultiplePublicKeys);
+router.get("/keys/users", authenticateJWT, keyManagementController.getUsersWithKeys);
+router.post("/keys/verify", authenticateJWT, keyManagementController.verifyKeyFingerprint);
+router.delete("/keys/me", authenticateJWT, keyManagementController.deleteMyPublicKey);
+router.get("/keys/stats", authenticateJWT, keyManagementController.getKeyStats);
+
+// Messaging Routes (end-to-end encrypted direct messages)
+router.get("/messages/conversations", authenticateJWT, messagingController.getConversations);
+router.post("/messages/conversations", authenticateJWT, messagingController.createConversation);
+router.get("/messages/conversations/search", authenticateJWT, messagingController.searchConversations);
+router.get("/messages/conversations/:conversationId", authenticateJWT, messagingController.getConversation);
+router.get("/messages/conversations/:conversationId/messages", authenticateJWT, messagingController.getMessages);
+router.post("/messages/conversations/:conversationId/messages", authenticateJWT, messagingController.sendMessage);
+router.post("/messages/read", authenticateJWT, messagingController.markAsRead);
+router.get("/messages/unread-count", authenticateJWT, messagingController.getUnreadCount);
+router.delete("/messages/:messageId", authenticateJWT, messagingController.deleteMessage);
 
 // LMSR Market API proxy routes (bypass CORS issues)
 router.get("/events/:eventId/shares", async (req, res) => {

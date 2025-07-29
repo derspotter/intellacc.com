@@ -1,6 +1,7 @@
 import van from 'vanjs-core';
 const { div, button, span } = van.tags;
 import api from '../../services/api';
+import socketService from '../../services/socket';
 
 /**
  * Notification bell component for the sidebar
@@ -30,9 +31,26 @@ export default function NotificationBell({ onClick }) {
   loadUnreadCount();
 
   // Auto-refresh every 30 seconds
-  setInterval(loadUnreadCount, 30000);
+  const intervalId = setInterval(loadUnreadCount, 30000);
 
-  return div({ class: "notification-bell-container" }, [
+  // Listen for socket notification events
+  const handleNotification = (data) => {
+    console.log('Notification received:', data);
+    
+    if (data.type === 'new') {
+      // New notification received, increment count
+      unreadCount.val = unreadCount.val + 1;
+    } else if (data.type === 'unreadCountUpdate') {
+      // Direct count update from server
+      unreadCount.val = data.count;
+    }
+  };
+
+  // Register socket handler
+  const unregister = socketService.on('notification', handleNotification);
+
+  // Store cleanup function on the component
+  const bellElement = div({ class: "notification-bell-container" }, [
     button({
       class: () => `notification-bell ${unreadCount.val > 0 ? 'has-unread' : ''}`,
       onclick: () => onClick?.(),
@@ -50,6 +68,17 @@ export default function NotificationBell({ onClick }) {
         : null
     ])
   ]);
+
+  // Store cleanup functions
+  bellElement._cleanup = () => {
+    clearInterval(intervalId);
+    unregister?.();
+  };
+
+  // Store loadUnreadCount function for external access
+  bellElement.loadUnreadCount = loadUnreadCount;
+
+  return bellElement;
 }
 
 /**

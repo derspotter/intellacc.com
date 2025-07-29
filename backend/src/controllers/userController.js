@@ -114,7 +114,7 @@ exports.getUserProfile = async (req, res) => {
     const userId = req.user.id; // Using standardized user object from auth middleware
 
     const result = await db.query(
-      "SELECT id, username, email, role, bio, rp_balance FROM users WHERE id = $1",
+      "SELECT id, username, email, role, rp_balance FROM users WHERE id = $1",
       [userId]
     );
 
@@ -132,12 +132,12 @@ exports.getUserProfile = async (req, res) => {
 // Edit user profile
 exports.editUserProfile = async (req, res) => {
   const userId = req.user.id; // Using standardized user object
-  const { bio } = req.body;
+  const { username } = req.body; // Changed from bio to username
   
   try {
     const result = await db.query(
-      'UPDATE users SET bio = $1, updated_at = NOW() WHERE id = $2 RETURNING id, username, email, role, bio',
-      [bio, userId]
+      'UPDATE users SET username = $1 WHERE id = $2 RETURNING id, username, email, role',
+      [username, userId]
     );
     
     if (result.rows.length === 0) {
@@ -232,7 +232,7 @@ exports.getFollowers = async (req, res) => {
   
   try {
     const result = await db.query(
-      `SELECT u.id, u.username, u.bio 
+      `SELECT u.id, u.username 
       FROM follows f 
       JOIN users u ON f.follower_id = u.id 
       WHERE f.following_id = $1`,
@@ -252,7 +252,7 @@ exports.getFollowing = async (req, res) => {
   
   try {
     const result = await db.query(
-      `SELECT u.id, u.username, u.bio 
+      `SELECT u.id, u.username 
       FROM follows f 
       JOIN users u ON f.following_id = u.id 
       WHERE f.follower_id = $1`,

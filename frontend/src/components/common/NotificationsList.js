@@ -2,6 +2,7 @@ import van from 'vanjs-core';
 const { div, button, h3, p } = van.tags;
 import api from '../../services/api';
 import NotificationItem from './NotificationItem';
+import socketService from '../../services/socket';
 
 /**
  * Notifications list component - displays notifications in a dropdown or modal
@@ -92,6 +93,25 @@ export default function NotificationsList({ isOpen, onClose, onUnreadCountChange
     const unreadCount = notifications.val.filter(n => !n.read).length;
     onUnreadCountChange?.(unreadCount);
   };
+
+  // Socket notification handler
+  const handleSocketNotification = (data) => {
+    console.log('Notification received in list:', data);
+    
+    if (data.type === 'new' && data.notification) {
+      // Add new notification to the top of the list if dropdown is open
+      if (isOpen.val) {
+        notifications.val = [data.notification, ...notifications.val];
+        
+        // Update unread count
+        const unreadCount = notifications.val.filter(n => !n.read).length;
+        onUnreadCountChange?.(unreadCount);
+      }
+    }
+  };
+
+  // Register socket handler when component is created
+  const unregister = socketService.on('notification', handleSocketNotification);
 
   // Load notifications when component opens
   van.derive(() => {
