@@ -3304,3 +3304,332 @@ body.dark-mode .market-link:hover {
     max-height: 300px;
   }
 }
+
+/* =============================================
+   MOBILE NAVIGATION STYLES
+   ============================================= */
+
+/* Mobile Header */
+.mobile-header {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  background: var(--blue-bg);
+  border-bottom: 1px solid var(--border-color);
+  z-index: 998;
+  padding: 0 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hamburger-button {
+  background: transparent;
+  border: none;
+  padding: 8px;
+  font-size: 24px;
+  cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-logo {
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+.mobile-logo a {
+  text-decoration: none;
+  color: var(--text-color);
+}
+
+.mobile-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Bottom Navigation */
+.bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  background: var(--blue-bg);
+  border-top: 1px solid var(--border-color);
+  z-index: 998;
+  justify-content: space-around;
+  align-items: center;
+  padding: 0 0.5rem;
+}
+
+.bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  color: var(--secondary-text);
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px;
+  position: relative;
+  transition: color 0.2s ease;
+}
+
+.bottom-nav-item.active {
+  color: var(--text-color);
+}
+
+.bottom-nav-item.special {
+  background: var(--text-color);
+  color: white;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+}
+
+.nav-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.nav-label {
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.nav-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: var(--error-color);
+  color: white;
+  border-radius: 10px;
+  padding: 2px 4px;
+  font-size: 10px;
+  min-width: 16px;
+  text-align: center;
+}
+
+/* Sidebar Mobile Overlay */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar-overlay.active {
+  display: block;
+  opacity: 1;
+}
+
+/* Touch Target Improvements */
+button, 
+.button, 
+input[type="button"],
+input[type="submit"],
+select {
+  min-height: 44px;
+  touch-action: manipulation;
+}
+
+/* =============================================
+   MOBILE MEDIA QUERIES
+   ============================================= */
+
+/* Tablet View (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .sidebar {
+    width: 250px;
+    position: fixed;
+    left: -250px;
+    height: 100vh;
+    transition: left 0.3s ease;
+    z-index: 1000;
+  }
+  
+  .sidebar.open {
+    left: 0;
+  }
+  
+  .main-content {
+    width: 100%;
+    margin-left: 0;
+  }
+  
+  .content-container {
+    padding-left: 0;
+  }
+}
+
+/* Mobile View (< 768px) */
+@media (max-width: 768px) {
+  /* Show mobile navigation */
+  .mobile-header {
+    display: flex;
+  }
+  
+  .bottom-nav {
+    display: flex;
+  }
+  
+  /* Adjust wrapper for mobile header */
+  .wrapper {
+    padding-top: 56px; /* Account for fixed mobile header */
+  }
+  
+  /* Mobile sidebar styles */
+  .sidebar {
+    position: fixed;
+    left: -250px;
+    width: 250px;
+    height: 100vh;
+    top: 0;
+    transition: left 0.3s ease;
+    z-index: 1000;
+  }
+  
+  .sidebar.open {
+    left: 0;
+  }
+  
+  /* Main content adjustments */
+  .main-content {
+    width: 100%;
+    padding: 1rem;
+    margin-bottom: 60px; /* Space for bottom nav */
+    box-shadow: none;
+  }
+  
+  .content-container {
+    flex-direction: column;
+    padding-top: 0;
+  }
+  
+  /* Form improvements for mobile */
+  input[type="text"],
+  input[type="password"],
+  input[type="email"],
+  input[type="search"],
+  input[type="number"],
+  input[type="tel"],
+  input[type="url"],
+  select,
+  textarea {
+    font-size: 16px; /* Prevent iOS zoom */
+    padding: 12px;
+    min-height: 44px;
+  }
+  
+  /* Button improvements */
+  button, .button {
+    padding: 12px 16px;
+    font-size: 16px;
+    min-height: 44px;
+  }
+  
+  /* Increase spacing between interactive elements */
+  .sidebar-item {
+    padding: 14px 16px;
+  }
+  
+  .sidebar-item a {
+    padding: 4px 0;
+  }
+  
+  /* Hide desktop-specific elements */
+  .wrapper > .header-box {
+    display: none;
+  }
+  
+  /* Adjust page containers */
+  .login-page,
+  .signup-page,
+  .settings-page {
+    max-width: 100%;
+    padding: 1rem;
+  }
+  
+  /* Posts and cards */
+  .post-card,
+  .prediction-card,
+  .event-card {
+    margin: 0.5rem 0;
+  }
+  
+  /* Tables responsive */
+  .leaderboard-table {
+    font-size: 0.85rem;
+  }
+  
+  /* Modal adjustments */
+  .modal-content {
+    width: 95%;
+    max-width: none;
+    margin: 1rem;
+  }
+}
+
+/* Small Mobile (< 480px) */
+@media (max-width: 480px) {
+  .main-content {
+    padding: 0.5rem;
+  }
+  
+  .bottom-nav-item.special {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .nav-label {
+    display: none; /* Hide labels on very small screens */
+  }
+  
+  /* Further reduce font sizes */
+  body {
+    font-size: 14px;
+  }
+  
+  h1 {
+    font-size: 1.5rem;
+  }
+  
+  h2 {
+    font-size: 1.2rem;
+  }
+  
+  h3 {
+    font-size: 1rem;
+  }
+}
+
+/* Landscape orientation adjustments */
+@media (max-width: 768px) and (orientation: landscape) {
+  .mobile-header {
+    height: 48px;
+  }
+  
+  .bottom-nav {
+    height: 48px;
+  }
+  
+  .wrapper {
+    padding-top: 48px;
+  }
+  
+  .main-content {
+    margin-bottom: 52px;
+  }
+}

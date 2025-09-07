@@ -1,7 +1,7 @@
 // src/services/socket.js
 import van from 'vanjs-core';
 import io from 'socket.io-client';
-import { getTokenData } from './auth';
+import { getToken, getTokenData } from './auth';
 import store from '../store';
 
 // Create reactive state for socket
@@ -12,6 +12,11 @@ export const socketState = {
 
 // Custom event handlers registry
 const eventHandlers = {
+  // Core connection events
+  connect: [],
+  disconnect: [],
+
+  // Domain events
   newPost: [],
   newPrediction: [],
   predictionResolved: [],
@@ -96,20 +101,29 @@ function createSocketConnection() {
        * Backend: 3000 (Socket.IO server)
        */
       // Use origin-based connection to work in both dev and production
-      const socketUrl = window.location.hostname === 'localhost' 
-        ? 'http://localhost:3000'  // Development
-        : window.location.origin;   // Production (same origin)
+      // In development, use same origin to leverage Vite proxy
+      const socketUrl = window.location.origin;
       
       console.log('Creating Socket.IO connection to:', socketUrl);
       
+      const token = getToken();
       socket = io(socketUrl, {
         path: '/socket.io',
         transports: ['websocket'],
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
-        timeout: 5000 // Add a timeout to fail faster
+        timeout: 5000, // Add a timeout to fail faster
+        auth: token ? { token } : undefined
       });
+
+      // Ensure latest token is used on reconnect attempts
+      if (socket && socket.io) {
+        socket.io.on('reconnect_attempt', () => {
+          const freshToken = getToken();
+          socket.auth = freshToken ? { token: freshToken } : undefined;
+        });
+      }
       
       // Set up event listeners
       setupSocketHandlers();
@@ -127,6 +141,9 @@ function setupSocketHandlers() {
   socket.on('connect', () => {
     console.log('Connected to Socket.IO server!');
     socketState.connected.val = true;
+
+    // Notify custom handlers
+    notifyHandlers('connect');
     
     // Send test message
     socket.emit('test-message', {
@@ -142,6 +159,9 @@ function setupSocketHandlers() {
   socket.on('disconnect', () => {
     console.log('Disconnected from Socket.IO server');
     socketState.connected.val = false;
+
+    // Notify custom handlers
+    notifyHandlers('disconnect');
     
     // Add disconnect message
     addMessage('Disconnected from server');
@@ -272,17 +292,18 @@ function joinUserRooms() {
   if (!socketState.connected.val) return;
   
   // Join predictions room
-  socket.emit('join-predictions');
+    socket.emit('join-predictions');
   console.log('Joined predictions room');
   
   // Join user-specific room if authenticated
   const tokenData = getTokenData();
   if (tokenData && tokenData.userId) {
-    socket.emit('join-profile', tokenData.userId);
-    console.log(`Joined user-${tokenData.userId} room`);
+    // Server derives user id from JWT; do not pass userId from client
+    socket.emit('join-profile');
+    console.log(`Requested join to user-${tokenData.userId} room`);
     
-    // Authenticate for notifications
-    socket.emit('authenticate', tokenData.userId);
+    // Authenticate for notifications (no userId param)
+    socket.emit('authenticate');
     console.log(`Authenticated for notifications as user ${tokenData.userId}`);
   }
 }
@@ -348,6 +369,21 @@ export function emit(event, data) {
 }
 
 /**
+ * Disconnect the socket connection and clear state
+ */
+export function disconnect() {
+  try {
+    if (socket) {
+      socket.disconnect();
+    }
+  } catch (e) {
+    console.error('Error disconnecting socket:', e);
+  } finally {
+    socketState.connected.val = false;
+  }
+}
+
+/**
  * Join a specific room
  * @param {string} room - Room name
  * @param {any} data - Room data
@@ -377,5 +413,6 @@ export default {
   on,
   off,
   emit,
-  joinRoom
+  joinRoom,
+  disconnect
 };

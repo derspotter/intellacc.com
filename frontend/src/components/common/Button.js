@@ -10,7 +10,8 @@ export default function Button({
   type = 'button',
   className = '',
   variant = '', // Add variant prop
-  children
+  children,
+  ariaLabel = null // Add aria-label for accessibility
 }) {
   // Handle reactive className functions
   const computeClass = () => {
@@ -21,10 +22,18 @@ export default function Button({
     return buttonClass;
   };
 
-  return button({
+  const buttonProps = {
     type,
     onclick,
     disabled,
-    class: typeof className === 'function' ? computeClass : computeClass() // Use reactive class if function
-  }, children);
+    class: typeof className === 'function' ? computeClass : computeClass(), // Use reactive class if function
+    style: 'touch-action: manipulation;' // Improve touch response
+  };
+  
+  // Add aria-label if provided
+  if (ariaLabel) {
+    buttonProps['aria-label'] = ariaLabel;
+  }
+
+  return button(buttonProps, children);
 }

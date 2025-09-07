@@ -181,21 +181,10 @@ export default function EventsList() {
       );
     } else if (filter.val === 'my-positions') {
       // Filter to show only events where user has positions
-      console.log('🔍 MY-POSITIONS filter selected');
-      console.log('🔍 userPositions.val:', userPositions.val);
-      console.log('🔍 userPositions.val.length:', userPositions.val.length);
-      
-      const positionEventIds = userPositions.val.map(pos => pos.event_id);
-      console.log('🔍 positionEventIds:', positionEventIds);
-      console.log('🔍 events.val.length before filter:', filtered.length);
-      
-      filtered = filtered.filter(event => {
-        const hasPosition = positionEventIds.includes(event.id);
-        console.log(`🔍 Event ${event.id} (${event.title}): hasPosition=${hasPosition}`);
-        return hasPosition;
-      });
-      
-      console.log('🔍 events.val.length after filter:', filtered.length);
+      const positionEventIds = new Set(
+        (userPositions.val || []).map(pos => Number(pos.event_id))
+      );
+      filtered = filtered.filter(event => positionEventIds.has(Number(event.id)));
     }
     
     // Sort by closing date (soonest first for open events)

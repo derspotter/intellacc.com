@@ -1,7 +1,7 @@
 // backend/src/controllers/userController.js
 
 const db = require('../db');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const { generateToken } = require('../utils/jwt');
 const notificationService = require('../services/notificationService');
 
@@ -269,8 +269,18 @@ exports.getFollowing = async (req, res) => {
 // Get user's portfolio positions
 exports.getUserPositions = async (req, res) => {
   try {
-    const userId = req.params.id;
-    console.log('🔍 getUserPositions for userId:', userId);
+    const requestedId = parseInt(req.params.id, 10);
+    const authedUserId = req.user?.id ?? req.user?.userId;
+
+    // Require auth and only allow fetching own positions
+    if (!authedUserId) {
+      return res.status(401).json({ message: 'Unauthorized: No authenticated user' });
+    }
+    if (authedUserId !== requestedId) {
+      return res.status(403).json({ message: 'Forbidden: Cannot access other users\' positions' });
+    }
+
+    console.log('🔍 getUserPositions for userId:', authedUserId);
     
     const result = await db.query(`
       SELECT 
@@ -278,7 +288,7 @@ exports.getUserPositions = async (req, res) => {
         us.yes_shares,
         us.no_shares,
         e.title as event_title,
-        e.category,
+        'General'::text AS category,
         e.closing_date,
         e.market_prob,
         e.cumulative_stake
@@ -287,9 +297,9 @@ exports.getUserPositions = async (req, res) => {
       WHERE us.user_id = $1 
         AND (us.yes_shares > 0 OR us.no_shares > 0)
       ORDER BY us.last_updated DESC
-    `, [userId]);
+    `, [authedUserId]);
     
-    console.log('🔍 Found', result.rows.length, 'positions for user', userId);
+    console.log('🔍 Found', result.rows.length, 'positions for user', authedUserId);
     res.status(200).json(result.rows);
     
   } catch (err) {

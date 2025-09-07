@@ -5,18 +5,20 @@
     "main": "src/index.js",
     "scripts": {
       "start": "node src/index.js",
-      "dev": "nodemon src/index.js",
+      "dev": "nodemon --watch src --legacy-watch src/index.js",
       "test": "jest"
     },
     "dependencies": {
       "express": "^4.21.2",
       "pg": "^8.13.1",
-      "bcrypt": "^5.1.1",
+      "bcryptjs": "^2.4.3",
       "jsonwebtoken": "^9.0.2",
+      "express-rate-limit": "^7.4.0",
       "socket.io": "^4.7.5",
       "cors": "^2.8.5",
       "morgan": "^1.10.0",
-      "axios": "^1.7.0"
+      "axios": "^1.7.0",
+      "@simplewebauthn/server": "13.1.2"
     },
     "devDependencies": {
       "nodemon": "^3.1.9",

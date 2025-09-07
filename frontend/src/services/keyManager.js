@@ -79,8 +79,9 @@ class KeyManager {
       // Store public key on server
       await api.keys.storePublicKey(publicKeyBase64);
       
-      // Cache the keys
-      this.privateKey = keyPair.privateKey;
+      // Re-import a non-extractable working key and discard the exportable instance
+      const nonExtractable = await cryptoService.importPrivateKey(privateKeyBase64, false);
+      this.privateKey = nonExtractable;
       
       return {
         publicKey: publicKeyBase64,
@@ -96,19 +97,39 @@ class KeyManager {
    * Store private key in IndexedDB
    */
   async storePrivateKey(privateKeyBase64) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['keys'], 'readwrite');
-      const store = transaction.objectStore('keys');
-      
-      const request = store.put({
-        id: KEY_STORAGE_KEY,
-        privateKey: privateKeyBase64,
-        timestamp: Date.now()
+    try {
+      // If we have a passphrase, encrypt before storing
+      const pass = this._passphrase || null;
+      let record;
+      if (pass) {
+        const salt = window.crypto.getRandomValues(new Uint8Array(16));
+        const aesKey = await cryptoService.deriveKey(pass, salt);
+        const enc = await cryptoService.encryptData(aesKey, privateKeyBase64);
+        record = {
+          id: KEY_STORAGE_KEY,
+          encryptedPrivateKey: enc.ciphertext,
+          salt: cryptoService.bytesToBase64(salt),
+          iv: enc.iv,
+          timestamp: Date.now()
+        };
+      } else {
+        // Fallback to legacy plaintext storage if no passphrase yet
+        record = {
+          id: KEY_STORAGE_KEY,
+          privateKey: privateKeyBase64,
+          timestamp: Date.now()
+        };
+      }
+      return new Promise((resolve, reject) => {
+        const transaction = this.db.transaction(['keys'], 'readwrite');
+        const store = transaction.objectStore('keys');
+        const request = store.put(record);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve();
       });
-      
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
-    });
+    } catch (e) {
+      throw e;
+    }
   }
 
   /**
@@ -122,6 +143,25 @@ class KeyManager {
         this.privateKey = await cryptoService.importPrivateKey(keyData.privateKey);
         console.log('Private key loaded from secure storage');
         return true;
+      }
+
+      // New encrypted storage format
+      if (keyData && keyData.encryptedPrivateKey && keyData.salt && keyData.iv) {
+        if (!this._passphrase) {
+          console.warn('Encrypted private key present but no passphrase provided. Call keyManager.unlock(passphrase).');
+          return false;
+        }
+        try {
+          const salt = cryptoService.base64ToBytes(keyData.salt);
+          const aesKey = await cryptoService.deriveKey(this._passphrase, salt);
+          const plain = await cryptoService.decryptData(aesKey, keyData.iv, keyData.encryptedPrivateKey);
+          this.privateKey = await cryptoService.importPrivateKey(plain);
+          console.log('Private key decrypted and loaded');
+          return true;
+        } catch (e) {
+          console.error('Failed to decrypt private key with provided passphrase');
+          return false;
+        }
       }
       
       console.log('No private key found in storage');
@@ -168,10 +208,11 @@ class KeyManager {
   /**
    * Get user's public key from server or cache
    */
-  async getUserPublicKey(userId) {
+  async getUserPublicKey(userId, options = {}) {
     try {
+      const forceRefresh = !!options.forceRefresh;
       // Check cache first
-      if (this.publicKeyCache.has(userId)) {
+      if (!forceRefresh && this.publicKeyCache.has(userId)) {
         const cached = this.publicKeyCache.get(userId);
         // Check if cache is still fresh (1 hour)
         if (Date.now() - cached.timestamp < 3600000) {
@@ -306,7 +347,8 @@ class KeyManager {
    */
   async encryptMessage(message, recipientUserId) {
     try {
-      const recipientPublicKey = await this.getUserPublicKey(recipientUserId);
+      // Always refresh recipient public key to avoid using stale keys after rotations
+      const recipientPublicKey = await this.getUserPublicKey(recipientUserId, { forceRefresh: true });
       const myPublicKey = await this.getMyPublicKey();
       
       if (!myPublicKey || !myPublicKey.publicKey) {
@@ -368,8 +410,100 @@ class KeyManager {
   }
 
   /**
-   * Clear IndexedDB
+   * Lock keys in memory
    */
+  lockKeys() {
+    this.privateKey = null;
+    try { document.dispatchEvent(new CustomEvent('keys-locked')); } catch {}
+  }
+
+  /**
+   * Encrypt current in-memory private key at rest with passphrase
+   */
+  async encryptAtRest(passphrase) {
+    this._passphrase = passphrase;
+    // Read existing record; if plaintext is present, encrypt and replace
+    const existing = await this.getFromDB('keys', KEY_STORAGE_KEY);
+    if (existing && existing.encryptedPrivateKey && existing.salt && existing.iv) {
+      // Already encrypted-at-rest; nothing to do
+      return true;
+    }
+    let privateKeyBase64 = null;
+    if (existing && existing.privateKey) {
+      privateKeyBase64 = existing.privateKey;
+    } else if (this.privateKey) {
+      // As a fallback, try to export the in-memory key (may fail if non-extractable)
+      try {
+        privateKeyBase64 = await cryptoService.exportPrivateKey(this.privateKey);
+      } catch (e) {
+        throw new Error('No plaintext key available to encrypt at rest');
+      }
+    } else {
+      throw new Error('No key available to encrypt at rest');
+    }
+
+    // Delegate encryption to a dedicated worker to reduce exposure
+    const record = await this.wrapInWorker(privateKeyBase64, passphrase);
+    await this.saveEncryptedRecord(record);
+    return true;
+  }
+
+  /**
+  * Wrap/encrypt base64 private key in a Worker
+  */
+  wrapInWorker(privateKeyBase64, passphrase) {
+   return new Promise((resolve, reject) => {
+   try {
+     const worker = new Worker(new URL('../workers/keyWrapWorker.js', import.meta.url), { type: 'module' });
+     const handleMessage = (e) => {
+       const { ok, record, error } = e.data || {};
+     worker.removeEventListener('message', handleMessage);
+       worker.terminate();
+       if (error) return reject(new Error(error));
+         if (!ok || !record) return reject(new Error('Worker failed to wrap key'));
+           resolve(record);
+       };
+      worker.addEventListener('message', handleMessage);
+      worker.postMessage({ action: 'encryptAtRest', privateKeyBase64, passphrase });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  async saveEncryptedRecord(record) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['keys'], 'readwrite');
+      const store = transaction.objectStore('keys');
+      const request = store.put({
+        id: KEY_STORAGE_KEY,
+        encryptedPrivateKey: record.encryptedPrivateKey,
+        salt: record.salt,
+        iv: record.iv,
+        timestamp: Date.now()
+      });
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+  }
+
+  /**
+    * Unlock by providing passphrase to decrypt key at rest
+    * @param {string} passphrase
+    */
+  async unlock(passphrase) {
+    this._passphrase = passphrase;
+    // Try load/decrypt
+    const ok = await this.loadPrivateKey();
+    if (ok) {
+      try { document.dispatchEvent(new CustomEvent('keys-unlocked')); } catch {}
+    }
+    return ok;
+  }
+
+  /**
+    * Clear IndexedDB
+    */
   async clearDB() {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(['keys', 'publicKeys'], 'readwrite');
@@ -404,6 +538,13 @@ class KeyManager {
       }
       throw error;
     }
+  }
+
+  /**
+   * Check if a repair has been requested/needed
+   */
+  needsRepairFlag() {
+    try { return localStorage.getItem('intellacc_keys_needs_repair') === 'true'; } catch { return false; }
   }
 
   /**
@@ -456,8 +597,35 @@ class KeyManager {
       const hasServerPublicKey = serverKey !== null;
       
       if (hasLocalPrivateKey && hasServerPublicKey) {
-        console.log('User already has complete key set up');
-        return true;
+        // Both sides present; validate they actually match by doing a quick
+        // encrypt/decrypt round-trip against our own server-stored public key.
+        let valid = false;
+        try {
+          const test = await cryptoService.encryptMessageForRecipient(
+            'ping',
+            serverKey.publicKey
+          );
+          const msg = await cryptoService.decryptMessageFromSender(
+            test.encryptedContent,
+            test.encryptedSessionKey,
+            this.privateKey
+          );
+          valid = msg === 'ping';
+        } catch (e) {
+          valid = false;
+        }
+
+        if (valid) {
+          console.log('User already has complete key set up');
+          return true;
+        }
+
+        // If not valid, auto-repair by generating a fresh keypair and
+        // uploading the new public key so messaging works seamlessly.
+        console.warn('Key mismatch detected between local private key and server public key. Auto-repairing...');
+        const result = await this.repairKeys();
+        console.log('Auto-repair complete');
+        return result;
       }
       
       if (hasLocalPrivateKey && !hasServerPublicKey) {
@@ -469,11 +637,11 @@ class KeyManager {
       }
       
       if (!hasLocalPrivateKey && hasServerPublicKey) {
-        // We have server key but no local private key - generate fresh keys
-        console.warn('Public key exists on server but no private key locally - generating fresh keys');
-        const result = await this.generateUserKeys();
-        console.log('Fresh keys generated to replace missing private key');
-        return result;
+        // We have server key but no local private key. Do NOT overwrite the server key automatically,
+        // to avoid breaking other devices that can still decrypt with the existing key.
+        console.warn('Public key exists on server but no local private key. Skipping auto-repair to avoid key mismatch.');
+        try { localStorage.setItem('intellacc_keys_needs_repair', 'true'); } catch {}
+        return { needsRepair: true };
       }
       
       // No keys found anywhere - generate new ones
@@ -508,20 +676,27 @@ class KeyManager {
    * Clear all public key cache
    */
   clearAllPublicKeyCache() {
-    this.publicKeyCache.clear();
-    
-    // Clear IndexedDB cache
-    if (this.db) {
-      const transaction = this.db.transaction(['publicKeys'], 'readwrite');
-      const store = transaction.objectStore('publicKeys');
-      store.clear();
-    }
-    
-    console.log('Cleared all public key cache');
+  this.publicKeyCache.clear();
+  
+  // Clear IndexedDB cache
+  if (this.db) {
+  const transaction = this.db.transaction(['publicKeys'], 'readwrite');
+  const store = transaction.objectStore('publicKeys');
+  store.clear();
+  }
+  
+  console.log('Cleared all public key cache');
+  }
+
+   /**
+   * Whether the private key is currently unlocked in memory
+   */
+   isUnlocked() {
+    return !!this.privateKey;
   }
 }
-
+ 
 // Create singleton instance
 const keyManager = new KeyManager();
-
+ 
 export default keyManager;

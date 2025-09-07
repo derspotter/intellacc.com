@@ -1,17 +1,30 @@
-# Development override for docker-compose.yml
-# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-
-version: "3.8"
-
 services:
-  prediction_engine:
-    build:
-      context: ./prediction-engine
-      dockerfile: Dockerfile.dev
-    # Development features
+  prediction-engine-dev:
+    image: rust:alpine
+    container_name: intellacc_prediction_engine_dev
+    working_dir: /app
+    command: sh -lc "apk add --no-cache rust cargo musl-dev clang llvm build-base pkgconfig && cargo install cargo-watch && RUST_LOG=info cargo watch -x 'run --bin prediction_engine'"
+    ports:
+      - "3001:3001"
     volumes:
-      - ./prediction-engine/src:/app/src:ro  # Mount source for development
-    environment:
-      - RUST_LOG=debug
-    # Override command for development if needed
-    # command: ["cargo", "run", "--release"]
+      - ./prediction-engine:/app
+      - cargo-reg:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - target:/app/target
+    env_file:
+      - ./backend/.env
+    networks:
+      intellacc-network:
+        aliases:
+          - prediction-engine
+    depends_on:
+      - db
+
+networks:
+  intellacc-network:
+    external: true
+
+volumes:
+  cargo-reg:
+  cargo-git:
+  target:

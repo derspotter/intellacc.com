@@ -57,6 +57,12 @@ export default defineConfig({
             }
           });
         }
+      },
+      '/socket.io': {
+        target: 'http://intellacc_backend:3000',
+        changeOrigin: true,
+        ws: true,
+        secure: false
       }
     }
   }

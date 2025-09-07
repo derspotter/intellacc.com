@@ -1,0 +1,17 @@
+{
+  "name": "Partei der Moderne",
+  "version": "1.0",
+  "meta": {
+    "created": "2025-08-11",
+    "brandColor": "#006D6F"
+  },
+  "data": {
+    "party": "Die Moderne",
+    "promises": [
+      {"Steuern": "runter"},
+      {"Bahn": "pünktlich"},
+      {"Internet": "überall"}
+    ],
+    "tagline": "klar • modern • zukunftsfähig"
+  }
+}

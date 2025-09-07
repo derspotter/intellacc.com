@@ -4,12 +4,15 @@ import { isLoggedInState, isAdminState } from '../../services/auth';
 import { logout } from '../../services/auth';
 import api from '../../services/api';
 import socketService from '../../services/socket';
+import { isMobile } from '../../utils/deviceDetection';
 
 /**
  * Sidebar navigation component
+ * @param {Object} props - Component props
+ * @param {van.State} props.isOpen - Mobile menu open state
  * @returns {HTMLElement} Sidebar element
  */
-export default function Sidebar() {
+export default function Sidebar({ isOpen = van.state(false) } = {}) {
   const unreadCount = van.state(0);
   const unreadMessages = van.state(0);
 
@@ -65,7 +68,22 @@ export default function Sidebar() {
     }, 30000);
   }
 
-  return div({ class: "sidebar" }, [
+  // Create overlay for mobile
+  const overlay = () => isMobile.val ? div({ 
+    class: () => `sidebar-overlay ${isOpen.val ? 'active' : ''}`,
+    onclick: () => isOpen.val = false 
+  }) : null;
+
+  return [
+    overlay(),
+    div({ 
+      class: () => {
+        const classes = ['sidebar'];
+        if (isMobile.val && isOpen.val) classes.push('open');
+        if (isMobile.val) classes.push('mobile');
+        return classes.join(' ');
+      }
+    }, [
     div({ class: "sidebar-logo" }, "INTELLACC"),
     div({ class: "sidebar-content" }, [
       div({ class: "sidebar-item" }, a({ href: "#home" }, "Home")),
@@ -114,5 +132,6 @@ export default function Sidebar() {
           ])
         : div({ class: "sidebar-item" }, a({ href: "#login" }, "Login"))
     ])
-  ]);
+  ])
+  ];
 }

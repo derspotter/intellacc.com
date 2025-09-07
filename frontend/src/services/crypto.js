@@ -103,7 +103,7 @@ async function exportPrivateKey(privateKey) {
  * @param {string} base64Key - Base64 encoded private key
  * @returns {Promise<CryptoKey>} Imported private key
  */
-async function importPrivateKey(base64Key) {
+async function importPrivateKey(base64Key, extractable = false) {
   try {
     const binaryString = atob(base64Key);
     const bytes = new Uint8Array(binaryString.length);
@@ -115,7 +115,7 @@ async function importPrivateKey(base64Key) {
       'pkcs8',
       bytes.buffer,
       CRYPTO_CONFIG.rsa,
-      false, // not extractable
+      extractable,
       ['decrypt']
     );
     
@@ -134,7 +134,7 @@ async function generateSessionKey() {
   try {
     const key = await window.crypto.subtle.generateKey(
       CRYPTO_CONFIG.aes,
-      true, // extractable
+      true, // extractable so we can wrap/export per-message session key
       ['encrypt', 'decrypt']
     );
     
@@ -450,6 +450,52 @@ async function decryptMessageFromSender(encryptedContentBase64, encryptedSession
   }
 }
 
+/***********************
+ * Key encryption at rest
+ ***********************/
+
+async function deriveKey(passphrase, salt, iterations = 100000) {
+  const enc = new TextEncoder();
+  const passKey = await window.crypto.subtle.importKey(
+    'raw',
+    enc.encode(passphrase),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveKey']
+  );
+  return await window.crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations,
+      hash: 'SHA-256'
+    },
+    passKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+async function encryptData(aesKey, plaintext) {
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const enc = new TextEncoder();
+  const data = enc.encode(plaintext);
+  const ct = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, data);
+  return {
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(new Uint8Array(ct))
+  };
+}
+
+async function decryptData(aesKey, ivBase64, ciphertextBase64) {
+  const iv = base64ToBytes(ivBase64);
+  const ct = base64ToBytes(ciphertextBase64);
+  const pt = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ct);
+  const dec = new TextDecoder();
+  return dec.decode(pt);
+}
+
 export default {
   generateKeyPair,
   exportPublicKey,
@@ -465,5 +511,8 @@ export default {
   decryptMessageFromSender,
   bytesToBase64,
   base64ToBytes,
-  encryptMessageForBothUsers
+  encryptMessageForBothUsers,
+  deriveKey,
+  encryptData,
+  decryptData
 };

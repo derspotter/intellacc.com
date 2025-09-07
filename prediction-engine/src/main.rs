@@ -884,7 +884,13 @@ async fn sell_shares_endpoint(
                 "message": format!("Sold {} {} shares for {} RP", amount, share_type, result.payout)
             })))
         },
-        Err(e) => Err(internal_error(&format!("Share sale error: {}", e)))
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.to_lowercase().contains("hold period not expired") {
+                return Err(bad_request_error("Hold period not expired for recent purchases"));
+            }
+            Err(internal_error(&format!("Share sale error: {}", msg)))
+        }
     }
 }
 
@@ -1124,5 +1130,4 @@ async fn verify_consistency_endpoint(
         Err(e) => Err(internal_error(&format!("System consistency verification error: {}", e)))
     }
 }
-
 

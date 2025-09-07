@@ -432,7 +432,17 @@ export const api = {
 
     deleteMessage: (messageId) =>
       request(`/messages/${messageId}`, { method: 'DELETE' })
+  },
+
+   // WebAuthn endpoints
+  webauthn: {
+    registerStart: () => request('/webauthn/register/start', { method: 'POST' }),
+    registerFinish: (attestationResponse) => request('/webauthn/register/finish', { method: 'POST', body: attestationResponse }),
+    authStart: () => request('/webauthn/auth/start', { method: 'POST' }),
+    authFinish: (assertionResponse) => request('/webauthn/auth/finish', { method: 'POST', body: assertionResponse }),
+    health: () => request('/webauthn/health'),
+    credentials: () => request('/webauthn/credentials'),
   }
 };
-
+ 
 export default api;

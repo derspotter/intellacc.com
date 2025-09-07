@@ -13,6 +13,8 @@ const weeklyAssignmentController = require('../controllers/weeklyAssignmentContr
 const keyManagementController = require('../controllers/keyManagementController');
 const messagingController = require('../controllers/messagingController');
 const authenticateJWT = require("../middleware/auth");
+const rateLimit = require('express-rate-limit');
+const attachmentsController = require('../controllers/attachmentsController');
 
 // Base test route
 router.get("/", (req, res) => {
@@ -22,6 +24,9 @@ router.get("/", (req, res) => {
 router.get("/health-check", (req, res) => {
     res.status(200).json({ status: 'ok', message: 'Server is healthy' });
 });
+
+// WebAuthn routes (authenticated)
+router.use('/webauthn', authenticateJWT, require('./webauthn'));
 
 // User Routes
 router.post("/users", userController.createUser);
@@ -126,15 +131,25 @@ router.delete("/keys/me", authenticateJWT, keyManagementController.deleteMyPubli
 router.get("/keys/stats", authenticateJWT, keyManagementController.getKeyStats);
 
 // Messaging Routes (end-to-end encrypted direct messages)
+// Rate limiters for messaging
+const sendMessageLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false });
+const createConversationLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+const searchConversationsLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+const markReadLimiter = rateLimit({ windowMs: 60 * 1000, max: 240, standardHeaders: true, legacyHeaders: false });
+
 router.get("/messages/conversations", authenticateJWT, messagingController.getConversations);
-router.post("/messages/conversations", authenticateJWT, messagingController.createConversation);
-router.get("/messages/conversations/search", authenticateJWT, messagingController.searchConversations);
+router.post("/messages/conversations", authenticateJWT, createConversationLimiter, messagingController.createConversation);
+router.get("/messages/conversations/search", authenticateJWT, searchConversationsLimiter, messagingController.searchConversations);
 router.get("/messages/conversations/:conversationId", authenticateJWT, messagingController.getConversation);
 router.get("/messages/conversations/:conversationId/messages", authenticateJWT, messagingController.getMessages);
-router.post("/messages/conversations/:conversationId/messages", authenticateJWT, messagingController.sendMessage);
-router.post("/messages/read", authenticateJWT, messagingController.markAsRead);
+router.post("/messages/conversations/:conversationId/messages", authenticateJWT, sendMessageLimiter, messagingController.sendMessage);
+router.post("/messages/read", authenticateJWT, markReadLimiter, messagingController.markAsRead);
 router.get("/messages/unread-count", authenticateJWT, messagingController.getUnreadCount);
 router.delete("/messages/:messageId", authenticateJWT, messagingController.deleteMessage);
+
+// Attachments (pre-signed URL scaffold)
+router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);
+router.get('/attachments/presign-download', authenticateJWT, attachmentsController.presignDownload);
 
 // LMSR Market API proxy routes (bypass CORS issues)
 router.get("/events/:eventId/shares", async (req, res) => {

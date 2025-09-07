@@ -183,7 +183,7 @@ export default function MessagesPage() {
       if (!token) return null;
       
       const payload = JSON.parse(atob(token.split('.')[1]));
-      return payload.userId;
+      return Number(payload.userId);
     } catch (error) {
       return null;
     }
@@ -238,7 +238,7 @@ export default function MessagesPage() {
 
   // Get other user name
   const getOtherUserName = (conversation) => {
-    const userId = getUserId();
+    const userId = Number(getUserId());
     return conversation.participant_1 === userId 
       ? conversation.participant_2_username 
       : conversation.participant_1_username;

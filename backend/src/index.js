@@ -2,6 +2,7 @@ const express = require('express');
 const { Pool } = require('pg');
 const http = require('http'); // Import the http module
 const socketIo = require('socket.io'); // Import Socket.IO
+const { verifyToken } = require('./utils/jwt');
 const notificationService = require('./services/notificationService');
 
 const app = express();
@@ -15,11 +16,26 @@ const pool = new Pool({
 // Create HTTP server
 const server = http.createServer(app);
 
-// Initialize Socket.IO
+// Initialize Socket.IO with restricted CORS
+const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['http://localhost:5173'];
 const io = socketIo(server, {
   cors: {
-    origin: "*", // Allow all origins for testing
+    origin: allowedOrigins,
     methods: ["GET", "POST"]
+  }
+});
+
+// Authenticate socket connections with JWT
+io.use((socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+    if (!token) return next(new Error('Authentication required'));
+    const payload = verifyToken(token);
+    if (payload?.error) return next(new Error('Invalid token'));
+    socket.userId = payload.userId;
+    next();
+  } catch (err) {
+    next(new Error('Invalid token'));
   }
 });
 
@@ -50,59 +66,72 @@ io.on('connection', (socket) => {
     console.log('User joined predictions room');
   });
   
-  // Join profile room (for personalized updates)
-  socket.on('join-profile', (userId) => {
-    if (userId) {
-      socket.join(`user-${userId}`);
-      console.log(`User ${userId} joined their profile room`);
+  // Join profile room (for personalized updates) - derive from authenticated socket
+  socket.on('join-profile', () => {
+    if (socket.userId) {
+      socket.join(`user-${socket.userId}`);
+      console.log(`User ${socket.userId} joined their profile room`);
     }
   });
 
-  // Join user notification room
-  socket.on('authenticate', (userId) => {
-    if (userId) {
-      socket.join(`user:${userId}`);
-      console.log(`User ${userId} authenticated for notifications`);
+  // Join user notification room (no client-provided id)
+  socket.on('authenticate', () => {
+    if (socket.userId) {
+      socket.join(`user:${socket.userId}`);
+      console.log(`User ${socket.userId} authenticated for notifications`);
     }
   });
 
-  // Join messaging room for real-time message delivery
-  socket.on('join-messaging', (userId) => {
-    if (userId) {
-      socket.join(`messaging:${userId}`);
-      console.log(`User ${userId} joined messaging room`);
+  // Join messaging room for real-time message delivery (no client-provided id)
+  socket.on('join-messaging', () => {
+    if (socket.userId) {
+      socket.join(`messaging:${socket.userId}`);
+      console.log(`User ${socket.userId} joined messaging room`);
     }
   });
 
-  // Handle typing indicators for messaging
-  socket.on('typing-start', (data) => {
-    const { conversationId, userId } = data;
-    if (conversationId && userId) {
+  // Handle typing indicators for messaging (use authenticated userId)
+  socket.on('typing-start', async (data) => {
+    try {
+      const { conversationId } = data || {};
+      if (!conversationId || !socket.userId) return;
+      const messagingService = require('./services/messagingService');
+      const isParticipant = await messagingService.checkConversationMembership(conversationId, socket.userId);
+      if (!isParticipant) return;
       socket.to(`conversation:${conversationId}`).emit('user-typing', {
         conversationId,
-        userId,
+        userId: socket.userId,
         isTyping: true
       });
-    }
+    } catch {}
   });
 
-  socket.on('typing-stop', (data) => {
-    const { conversationId, userId } = data;
-    if (conversationId && userId) {
+  socket.on('typing-stop', async (data) => {
+    try {
+      const { conversationId } = data || {};
+      if (!conversationId || !socket.userId) return;
+      const messagingService = require('./services/messagingService');
+      const isParticipant = await messagingService.checkConversationMembership(conversationId, socket.userId);
+      if (!isParticipant) return;
       socket.to(`conversation:${conversationId}`).emit('user-typing', {
         conversationId,
-        userId,
+        userId: socket.userId,
         isTyping: false
       });
-    }
+    } catch {}
   });
 
-  // Join specific conversation room for typing indicators
-  socket.on('join-conversation', (conversationId) => {
-    if (conversationId) {
-      socket.join(`conversation:${conversationId}`);
-      console.log(`Socket joined conversation room: ${conversationId}`);
-    }
+  // Join specific conversation room for typing indicators (validate membership)
+  socket.on('join-conversation', async (conversationId) => {
+    try {
+      if (!conversationId || !socket.userId) return;
+      const messagingService = require('./services/messagingService');
+      const isParticipant = await messagingService.checkConversationMembership(conversationId, socket.userId);
+      if (isParticipant) {
+        socket.join(`conversation:${conversationId}`);
+        console.log(`User ${socket.userId} joined conversation room: ${conversationId}`);
+      }
+    } catch {}
   });
 
   // Leave conversation room
@@ -120,6 +149,25 @@ io.on('connection', (socket) => {
 
 // Middleware
 app.use(express.json());
+
+// Security headers (baseline hardening)
+app.use((req, res, next) => {
+  try {
+    const csp = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      `connect-src 'self' ${process.env.FRONTEND_URL || ''}`.trim(),
+      "img-src 'self' data:",
+      "style-src 'self' 'unsafe-inline'",
+      "frame-ancestors 'none'"
+    ].filter(Boolean).join('; ');
+    res.setHeader('Content-Security-Policy', csp);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  } catch {}
+  next();
+});
 
 // Example Route
 app.get('/', async (req, res) => {

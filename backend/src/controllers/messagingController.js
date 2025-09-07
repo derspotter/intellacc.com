@@ -1,6 +1,7 @@
 // backend/src/controllers/messagingController.js
 const messagingService = require('../services/messagingService');
 const keyManagementService = require('../services/keyManagementService');
+const db = require('../db');
 
 /**
  * Get user's conversations
@@ -36,16 +37,22 @@ async function getConversations(req, res) {
  */
 async function createConversation(req, res) {
   try {
-    const { otherUserId } = req.body;
+    const { otherUserId, otherUsername } = req.body;
     const userId = req.user.id;
-
-    if (!otherUserId || isNaN(parseInt(otherUserId))) {
-      return res.status(400).json({ 
-        error: 'Valid otherUserId is required' 
-      });
+    let otherUserIdInt = undefined;
+    if (otherUsername && typeof otherUsername === 'string') {
+      // Resolve username to user ID
+      const u = await db.query('SELECT id FROM users WHERE username = $1', [otherUsername]);
+      if (u.rowCount === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      otherUserIdInt = u.rows[0].id;
+    } else {
+      if (!otherUserId || isNaN(parseInt(otherUserId))) {
+        return res.status(400).json({ error: 'Valid otherUserId or otherUsername is required' });
+      }
+      otherUserIdInt = parseInt(otherUserId);
     }
-
-    const otherUserIdInt = parseInt(otherUserId);
 
     // Prevent conversation with self
     if (otherUserIdInt === userId) {
@@ -133,17 +140,32 @@ async function getMessages(req, res) {
  * POST /api/messages/conversations/:conversationId/messages
  */
 async function sendMessage(req, res) {
-  try {
-    const { conversationId } = req.params;
-    const userId = req.user.id;
-    const {
-      encryptedContent,
-      receiverId,
-      contentHash,
-      senderSessionKey,
-      receiverSessionKey,
-      messageType = 'text'
-    } = req.body;
+try {
+const { conversationId } = req.params;
+const userId = req.user.id;
+const {
+encryptedContent,
+receiverId: receiverIdRaw,
+receiverUsername,
+contentHash,
+senderSessionKey,
+receiverSessionKey,
+messageType = 'text'
+} = req.body;
+
+    // Enforce maximum payload size (~16KB base64 ≈ 12KB raw)
+    try {
+      const maxBase64Bytes = 16 * 1024; // 16KB
+      const size = typeof encryptedContent === 'string' ? Buffer.byteLength(encryptedContent, 'utf8') : 0;
+      if (!encryptedContent || size === 0) {
+        return res.status(400).json({ error: 'encryptedContent is required' });
+      }
+      if (size > maxBase64Bytes) {
+        return res.status(400).json({ error: 'Message too large' });
+      }
+    } catch (_) {
+      return res.status(400).json({ error: 'Invalid encryptedContent' });
+    }
 
     if (!conversationId || isNaN(parseInt(conversationId))) {
       return res.status(400).json({ 
@@ -151,16 +173,31 @@ async function sendMessage(req, res) {
       });
     }
 
-    if (!encryptedContent || !receiverId || !contentHash) {
-      return res.status(400).json({ 
-        error: 'encryptedContent, receiverId, and contentHash are required' 
-      });
+    if (!encryptedContent || !contentHash) {
+      return res.status(400).json({ error: 'encryptedContent and contentHash are required' });
     }
 
-    if (isNaN(parseInt(receiverId))) {
-      return res.status(400).json({ 
-        error: 'Valid receiverId is required' 
-      });
+    // Determine receiverId: prefer explicit receiverId, else receiverUsername, else derive from conversation
+    let receiverId = undefined;
+    if (receiverIdRaw != null) {
+      if (isNaN(parseInt(receiverIdRaw))) {
+        return res.status(400).json({ error: 'Valid receiverId is required' });
+      }
+      receiverId = parseInt(receiverIdRaw);
+    } else if (receiverUsername && typeof receiverUsername === 'string') {
+      const ru = await db.query('SELECT id FROM users WHERE username = $1', [receiverUsername]);
+      if (ru.rowCount === 0) {
+        return res.status(404).json({ error: 'Receiver not found' });
+      }
+      receiverId = ru.rows[0].id;
+    } else {
+      // Derive from conversation participants
+      const convo = await db.query('SELECT participant_1, participant_2 FROM conversations WHERE id = $1', [parseInt(conversationId)]);
+      if (convo.rowCount === 0) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
+      const { participant_1, participant_2 } = convo.rows[0];
+      receiverId = (userId === participant_1) ? participant_2 : participant_1;
     }
 
     // Validate message type

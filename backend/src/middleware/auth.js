@@ -12,7 +12,7 @@ const authenticateJWT = (req, res, next) => {
   }
 
   const token = authHeader.split(" ")[1];
-  console.log('Token:', token);
+  // Do not log tokens
   
   const decoded = verifyToken(token);
   

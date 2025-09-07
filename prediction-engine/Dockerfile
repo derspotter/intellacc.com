@@ -7,17 +7,11 @@ WORKDIR /app
 # Copy manifest files first for better caching
 COPY Cargo.toml Cargo.lock ./
 
-# Create a dummy main.rs to build dependencies
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-
-# Build dependencies (this layer will be cached)
-RUN cargo build --release && rm -rf src
+# Pre-fetch dependencies without compiling local bins (avoids missing bin errors)
+RUN cargo fetch
 
 # Copy real source code
 COPY src ./src
-
-# Touch main.rs to ensure it's rebuilt
-RUN touch src/main.rs
 
 # Build the application in release mode
 RUN cargo build --release

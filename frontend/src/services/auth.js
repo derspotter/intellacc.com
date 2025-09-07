@@ -4,6 +4,7 @@ import { api } from './api';
 import userStore from '../store/user';
 import { updatePageFromHash } from '../router'; // Import updatePageFromHash
 import { getStore } from '../store';
+import socketService from './socket';
 
 // Create reactive state for auth
 export const isLoggedInState = van.state(!!localStorage.getItem('token'));
@@ -37,6 +38,8 @@ export function clearToken() {
   tokenState.val = '';
   isLoggedInState.val = false;
   isAdminState.val = false;
+  // Disconnect any active socket session to drop room membership
+  try { socketService.disconnect(); } catch {}
 }
 
 /**
@@ -163,6 +166,9 @@ export async function register(username, email, password) {
 export function logout() {
   clearToken();
   userProfileState.val = null;
+  
+  // Also lock keys in memory for safety
+  try { require('./keyManager').default.lockKeys(); } catch {}
   
   // Navigate to login page
   window.location.hash = 'login';

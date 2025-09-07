@@ -45,6 +45,18 @@ const messagingStore = vanX.reactive({
       conv.id === conversationId ? { ...conv, ...updates } : conv
     );
   },
+
+  incrementUnread(conversationId, delta = 1) {
+    messagingStore.conversations = messagingStore.conversations.map(conv => {
+      if (conv.id === conversationId) {
+        const myId = Number(JSON.parse(atob(localStorage.getItem('token')?.split('.')[1] || 'e30='))?.userId);
+        const field = (conv.participant_1 === myId) ? 'unread_count_participant_1' : 'unread_count_participant_2';
+        const current = conv[field] || 0;
+        return { ...conv, [field]: current + delta };
+      }
+      return conv;
+    });
+  },
   
   setMessages(conversationId, messages) {
     // Create new object to trigger reactivity
@@ -207,7 +219,7 @@ function getOtherUserName(conversation) {
     if (!token) return 'Unknown User';
     
     const payload = JSON.parse(atob(token.split('.')[1]));
-    const userId = payload.userId;
+    const userId = Number(payload.userId);
     
     return conversation.participant_1 === userId 
       ? conversation.participant_2_username 

@@ -40,5 +40,19 @@ docker compose up -d
 docker compose down
 ```
 
+## Mobile Implementation (Phase 1 Complete)
+- **Mobile Navigation**: Hamburger menu + slide-out sidebar + bottom nav
+- **Responsive Breakpoints**: <768px (mobile), 768-1024px (tablet), >1024px (desktop)
+- **Touch Targets**: All buttons/inputs minimum 44px height
+- **Key Files Modified**:
+  - `frontend/src/utils/deviceDetection.js` - Mobile detection utility
+  - `frontend/src/components/layout/Sidebar.js` - Mobile-responsive sidebar
+  - `frontend/src/components/mobile/MobileHeader.js` - Mobile header with hamburger
+  - `frontend/src/components/mobile/BottomNav.js` - Bottom navigation bar
+  - `frontend/src/components/layout/MainLayout.js` - Responsive layout wrapper
+  - `frontend/styles.css` - Mobile styles and media queries
+
 ## Development Reminders
 - When you make a screenshot with browsertools mcp server, always remember to look at it!
+- please remember to always look at screenshots when you made them. they are being saved in /home/justus/Nextcloud/intellacc.com//screenshots
+- Always look at screenshots after making them in /home/justus/Nextcloud/intellacc.com//screenshots

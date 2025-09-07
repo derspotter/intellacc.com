@@ -14,6 +14,25 @@ function setSocketIo(socketIo) {
 }
 
 /**
+ * Check if a user is a participant in a conversation
+ * @param {number} conversationId
+ * @param {number} userId
+ * @returns {Promise<boolean>}
+ */
+async function checkConversationMembership(conversationId, userId) {
+  try {
+    const result = await db.query(
+      `SELECT 1 FROM conversations WHERE id = $1 AND (participant_1 = $2 OR participant_2 = $2)`,
+      [conversationId, userId]
+    );
+    return result.rowCount > 0;
+  } catch (error) {
+    console.error('Error checking conversation membership:', error);
+    return false;
+  }
+}
+
+/**
  * Get or create a conversation between two users
  * @param {number} user1Id - First user ID
  * @param {number} user2Id - Second user ID
@@ -108,15 +127,23 @@ async function sendMessage({
   messageType = 'text'
 }) {
   try {
-    // Verify the sender is part of the conversation
-    const conversationCheck = await db.query(
-      `SELECT id FROM conversations 
-       WHERE id = $1 AND (participant_1 = $2 OR participant_2 = $2)`,
-      [conversationId, senderId]
+    // Verify the sender is part of the conversation and receiver matches the other participant
+    const convo = await db.query(
+      `SELECT participant_1, participant_2 FROM conversations WHERE id = $1`,
+      [conversationId]
     );
 
-    if (conversationCheck.rows.length === 0) {
+    if (convo.rowCount === 0) {
+      throw new Error('Conversation not found');
+    }
+
+    const { participant_1, participant_2 } = convo.rows[0];
+    if (senderId !== participant_1 && senderId !== participant_2) {
       throw new Error('Sender is not part of this conversation');
+    }
+    const expectedReceiver = senderId === participant_1 ? participant_2 : participant_1;
+    if (receiverId !== expectedReceiver) {
+      throw new Error('Receiver does not match conversation participants');
     }
 
     // Insert the message
@@ -141,25 +168,18 @@ async function sendMessage({
       [message.id]
     );
 
-    // Emit real-time message if socket.io is available
+    // Emit real-time message if socket.io is available (emit minimal tailored payloads)
     if (io) {
       try {
-        // Get sender username for the real-time event
-        const senderResult = await db.query(
-          'SELECT username FROM users WHERE id = $1',
-          [senderId]
-        );
-        
-        const messageWithSender = {
-          ...message,
-          sender_username: senderResult.rows[0]?.username
-        };
-
-        // Emit to receiver's messaging room
-        io.to(`messaging:${receiverId}`).emit('newMessage', messageWithSender);
-        
-        // Also emit to sender's messaging room for other devices
-        io.to(`messaging:${senderId}`).emit('messageSent', messageWithSender);
+        // Emit IDs only; clients fetch via authenticated HTTP API
+        io.to(`messaging:${receiverId}`).emit('newMessage', {
+          messageId: message.id,
+          conversationId
+        });
+        io.to(`messaging:${senderId}`).emit('messageSent', {
+          messageId: message.id,
+          conversationId
+        });
 
         // Update delivery status
         await db.query(
@@ -444,6 +464,7 @@ async function searchConversations(userId, searchTerm, limit = 10) {
 
 module.exports = {
   setSocketIo,
+  checkConversationMembership,
   getOrCreateConversation,
   getUserConversations,
   sendMessage,

@@ -512,8 +512,9 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
       const errorText = await response.text();
       console.log('❌ sellShares API error:', response.status, errorText);
       try {
-        const errorData = JSON.parse(errorText);
-        throw new Error(errorData.message || 'Failed to sell shares');
+        const err = JSON.parse(errorText);
+        const msg = err.message || err.error || `Failed to sell shares (${response.status})`;
+        throw new Error(msg);
       } catch (e) {
         throw new Error(`Failed to sell shares: ${response.status} ${errorText}`);
       }
