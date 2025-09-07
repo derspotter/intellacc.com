@@ -18,12 +18,13 @@ page errors, and failed network requests to stdout.
 */
 
 const { chromium } = require('@playwright/test');
+const fs = require('fs');
 
 (async () => {
   const url = process.argv[2] || 'http://localhost:5173';
   const duration = parseInt(process.argv[3] || '3000', 10);
 
-  const executablePath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
+  const configuredPath = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
   const headless = (process.env.HEADLESS || 'true') === 'true';
   const noSandbox = (process.env.NO_SANDBOX || 'true') === 'true';
   const disableDevShm = (process.env.DISABLE_DEV_SHM || 'true') === 'true';
@@ -33,9 +34,10 @@ const { chromium } = require('@playwright/test');
   if (noSandbox) args.push('--no-sandbox');
   if (disableDevShm) args.push('--disable-dev-shm-usage');
 
-  console.error(`[collect_console] Launching Chromium at ${executablePath} headless=${headless} args=${args.join(' ')}`);
+  const useExecutablePath = (configuredPath && fs.existsSync(configuredPath)) ? configuredPath : undefined;
+  console.error(`[collect_console] Launching Chromium at ${useExecutablePath || '(playwright default)'} headless=${headless} args=${args.join(' ')}`);
 
-  const browser = await chromium.launch({ executablePath, headless, args });
+  const browser = await chromium.launch({ executablePath: useExecutablePath, headless, args });
   const context = await browser.newContext();
   const page = await context.newPage();
 
@@ -92,6 +94,35 @@ const { chromium } = require('@playwright/test');
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
   } catch (e) {
     console.log(`[goto-error] ${e.message}`);
+  }
+
+  // Optional: auto navigate to hash and click conversations
+  const autoHash = process.env.HASH || '';
+  const autoClick = (process.env.AUTO_CLICK || 'false') === 'true';
+  const clickDelay = parseInt(process.env.CLICK_DELAY || '600', 10);
+  if (autoHash) {
+    try {
+      await page.evaluate((h) => { window.location.hash = h; }, autoHash);
+      await page.waitForTimeout(500);
+    } catch (e) {
+      console.log(`[hash-error] ${e.message}`);
+    }
+  }
+  if (autoClick) {
+    try {
+      await page.waitForSelector('[data-conversation-id]', { timeout: 10000 });
+      const items = await page.$$('[data-conversation-id]');
+      console.log(`[auto-click] found ${items.length} conversation rows`);
+      for (let i = 0; i < Math.min(items.length, 3); i++) {
+        const el = items[i];
+        const id = await el.getAttribute('data-conversation-id');
+        console.log(`[auto-click] clicking index=${i} id=${id}`);
+        await el.click();
+        await page.waitForTimeout(clickDelay);
+      }
+    } catch (e) {
+      console.log(`[auto-click-error] ${e.message}`);
+    }
   }
 
   // Optional: trigger a like as another user to verify room delivery
@@ -153,7 +184,7 @@ const { chromium } = require('@playwright/test');
           console.log(`[typing-trigger] connected as sender, emitting typing-start for conversation ${conversationId}`);
           s.emit('join-conversation', conversationId);
           s.emit('typing-start', { conversationId });
-          setTimeout(()n=> {
+          setTimeout(() => {
             s.emit('typing-stop', { conversationId });
             s.close();
           }, 1500);

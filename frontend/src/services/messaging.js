@@ -5,6 +5,7 @@ import api from './api.js';
 import keyManager from './keyManager.js';
 import socketService from './socket.js';
 import messagingStore from '../stores/messagingStore.js';
+// No pairKey work in service; store normalizes
 
 /**
  * Messaging service for handling encrypted conversations and messages
@@ -18,38 +19,41 @@ class MessagingService {
      * Setup Socket.io handlers for real-time messaging
      */
     setupSocketHandlers() {
-        // Listen for new messages (IDs-only strategy: fetch recent window)
-        socketService.on('newMessage', async (data) => {
+        const applyMessageEvent = async (conversationId, { createdAt = null, isSelected = false } = {}) => {
             try {
-                const { conversationId } = data || {};
-                if (!conversationId) return;
-
-                // If user is viewing this conversation, refresh recent window
-                if (messagingStore.selectedConversationId === conversationId) {
+                if (isSelected) {
                     const response = await api.messages.getMessages(conversationId, 50, 0);
                     const decryptedMessages = await this.decryptMessages(response.messages);
                     messagingStore.setMessages(conversationId, decryptedMessages);
                 } else {
-                    // Otherwise, increment unread count in the conversation list
                     messagingStore.incrementUnread(conversationId, 1);
+                    const ts = createdAt || new Date().toISOString();
+                    messagingStore.updateConversation(conversationId, { last_message_created_at: ts });
                 }
             } catch (error) {
-                console.error('Error handling newMessage event:', error);
+                // swallow socket event errors; list will reconcile on next fetch
             }
+        };
+        // Listen for new messages (IDs-only strategy: fetch recent window)
+        socketService.on('newMessage', async (data) => {
+            const { conversationId, created_at } = data || {};
+            if (!conversationId) return;
+            const isSelected = (messagingStore.selectedConversationId === String(conversationId));
+            await applyMessageEvent(conversationId, { createdAt: created_at, isSelected });
         });
 
         // Listen for message sent confirmations: refresh recent window if open
         socketService.on('messageSent', async (data) => {
-            try {
-                const { conversationId } = data || {};
-                if (!conversationId) return;
-                if (messagingStore.selectedConversationId === conversationId) {
-                    const response = await api.messages.getMessages(conversationId, 50, 0);
-                    const decryptedMessages = await this.decryptMessages(response.messages);
-                    messagingStore.setMessages(conversationId, decryptedMessages);
-                }
-            } catch (error) {
-                console.error('Error handling messageSent event:', error);
+            const { conversationId, created_at } = data || {};
+            if (!conversationId) return;
+            const isSelected = (messagingStore.selectedConversationId === String(conversationId));
+            if (isSelected) {
+                const response = await api.messages.getMessages(conversationId, 50, 0);
+                const decryptedMessages = await this.decryptMessages(response.messages);
+                messagingStore.setMessages(conversationId, decryptedMessages);
+            } else {
+                const ts = created_at || new Date().toISOString();
+                messagingStore.updateConversation(conversationId, { last_message_created_at: ts });
             }
         });
 
@@ -118,6 +122,25 @@ class MessagingService {
     }
 
     /**
+     * Ensure a conversation exists in the store; fetch from API if missing
+     */
+    async ensureConversation(conversationId) {
+        const idStr = String(conversationId);
+        const existing = (messagingStore.conversations || []).find(c => String(c.id) === idStr);
+        if (existing) return existing;
+        try {
+            const resp = await api.messages.getConversation(conversationId);
+            const conv = resp?.conversation;
+            if (!conv) return null;
+            messagingStore.upsertConversation(conv);
+            return messagingStore.conversationsById?.[String(conv.conversation_id ?? conv.id)] || conv;
+        } catch (e) {
+            console.error('ensureConversation error:', e);
+            return null;
+        }
+    }
+
+    /**
      * Get conversations for current user
      */
     async getConversations(limit = 20, offset = 0) {
@@ -125,15 +148,14 @@ class MessagingService {
             const response = await api.messages.getConversations(limit, offset);
 
             // Normalize conversation field names (conversation_id -> id)
-            const normalizedConversations = response.conversations.map(conv => ({
-                ...conv,
-                id: conv.conversation_id
-            }));
+            const rawList = response.conversations || [];
 
-            // Update store with conversations
-            messagingStore.setConversations(normalizedConversations);
+            // store handles normalization
 
-            return normalizedConversations;
+            // Update store with conversations (store normalizes/dedupes)
+            messagingStore.upsertConversations(rawList);
+
+            return messagingStore.conversations;
         } catch (error) {
             console.error('Error getting conversations:', error);
             throw error;
@@ -176,7 +198,6 @@ class MessagingService {
                     messagingStore.addMessage(conversationId, message);
                 }
             }
-
             return decryptedMessages;
         } catch (error) {
             console.error('Error getting messages:', error);

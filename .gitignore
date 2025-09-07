@@ -9,6 +9,9 @@
 /backend/node_modules/
 /frontend/node_modules/
 
+# Root node modules
+/node_modules/
+
 # Logs
 logs/
 *.log

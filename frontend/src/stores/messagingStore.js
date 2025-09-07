@@ -2,6 +2,10 @@
 // Central reactive store for messaging state management
 
 import * as vanX from 'vanjs-ext';
+import { normalizeConversation } from '../utils/messagingUtils.js';
+
+// Helper: sort ids by their conversation's lastTs (desc)
+const sortIdsByTs = (byId, ids) => ids.sort((a, b) => ((byId[b]?.lastTs || 0) - (byId[a]?.lastTs || 0)));
 
 /**
  * Central messaging store using VanX reactive patterns
@@ -10,9 +14,14 @@ import * as vanX from 'vanjs-ext';
 const messagingStore = vanX.reactive({
   // Core state
   conversations: [],
+  conversationsById: {},
+  conversationIds: [],
+  currentUserId: null,
+  messagesMeta: {},
   messagesByConversation: {}, // Use plain object instead of Map for VanX compatibility
   selectedConversationId: null,
-  loading: false,
+  conversationsLoading: false,
+  messagesLoading: false,
   error: '',
   
   // Typing indicators - use array instead of Set for VanX compatibility
@@ -29,21 +38,82 @@ const messagingStore = vanX.reactive({
   // Calculated fields will be added after store creation
   
   // Store methods for managing state
+  setCurrentUserId(userId) {
+    messagingStore.currentUserId = userId != null ? Number(userId) : null;
+  },
+  upsertConversations(rawList) {
+    const currentUserId = (messagingStore.currentUserId != null)
+      ? messagingStore.currentUserId
+      : (() => { try { const t = localStorage.getItem('token'); return t ? JSON.parse(atob(t.split('.')[1])).userId : null; } catch { return null; } })();
+    const byId = { ...(messagingStore.conversationsById || {}) };
+    for (const raw of rawList || []) {
+      const norm = normalizeConversation(raw, currentUserId);
+      if (!norm) continue;
+      const prev = byId[norm.id];
+      byId[norm.id] = prev ? { ...prev, ...norm } : norm;
+    }
+    // Rebuild ids sorted by time desc
+    const ids = Object.values(byId).map(c => String(c.id));
+    sortIdsByTs(byId, ids);
+    messagingStore.conversationsById = byId;
+    messagingStore.conversationIds = ids;
+    messagingStore.conversations = ids.map(id => byId[id]);
+  },
+
+  upsertConversation(raw) {
+    const currentUserId = (messagingStore.currentUserId != null)
+      ? messagingStore.currentUserId
+      : (() => { try { const t = localStorage.getItem('token'); return t ? JSON.parse(atob(t.split('.')[1])).userId : null; } catch { return null; } })();
+    const norm = normalizeConversation(raw, currentUserId);
+    if (!norm) return;
+    const byId = { ...(messagingStore.conversationsById || {}) };
+    byId[norm.id] = byId[norm.id] ? { ...byId[norm.id], ...norm } : norm;
+    // Rebuild ids keeping existing order, then ensure id exists and sort by time desc
+    const set = new Set(messagingStore.conversationIds || []);
+    set.add(norm.id);
+    let ids = Array.from(set);
+    sortIdsByTs(byId, ids);
+    messagingStore.conversationsById = byId;
+    messagingStore.conversationIds = ids;
+    messagingStore.conversations = ids.map(id => byId[id]);
+  },
   setConversations(conversations) {
-    messagingStore.conversations = [...conversations];
+    try { /* dev-only logging removed */ } catch {}
+    // Delegate to upsert for normalization + indexing
+    messagingStore.upsertConversations(conversations);
+    try { /* dev-only logging removed */ } catch {}
   },
   
   addConversation(conversation) {
-    const exists = messagingStore.conversations.some(c => c.id === conversation.id);
-    if (!exists) {
-      messagingStore.conversations = [conversation, ...messagingStore.conversations];
-    }
+    const token = localStorage.getItem('token');
+    const currentUserId = (() => {
+      try { return token ? JSON.parse(atob(token.split('.')[1])).userId : null; } catch { return null; }
+    })();
+    const id = String(conversation?.id ?? conversation?.conversation_id ?? '');
+    if (!id) return;
+    // Delegate to normalized single upsert
+    messagingStore.upsertConversation({ ...conversation, id });
   },
   
   updateConversation(conversationId, updates) {
-    messagingStore.conversations = messagingStore.conversations.map(conv =>
-      conv.id === conversationId ? { ...conv, ...updates } : conv
-    );
+    messagingStore.conversations = messagingStore.conversations.map(conv => {
+      if (conv.id !== conversationId) return conv;
+      const next = { ...conv, ...updates };
+      // Keep derived lastTime/lastTs in sync when backend time fields change
+      const lt = updates?.last_message_created_at || updates?.last_message_at || updates?.updated_at || updates?.created_at;
+      if (lt) {
+        next.lastTime = lt;
+        next.lastTs = Date.parse(lt) || next.lastTs || 0;
+      }
+      // If displayName not set, preserve existing
+      if (!next.displayName && conv.displayName) next.displayName = conv.displayName;
+      return next;
+    });
+    // also update byId entry
+    const current = messagingStore.conversations.find(c => c.id === conversationId);
+    if (current) {
+      messagingStore.conversationsById = { ...messagingStore.conversationsById, [conversationId]: current };
+    }
   },
 
   incrementUnread(conversationId, delta = 1) {
@@ -52,10 +122,15 @@ const messagingStore = vanX.reactive({
         const myId = Number(JSON.parse(atob(localStorage.getItem('token')?.split('.')[1] || 'e30='))?.userId);
         const field = (conv.participant_1 === myId) ? 'unread_count_participant_1' : 'unread_count_participant_2';
         const current = conv[field] || 0;
-        return { ...conv, [field]: current + delta };
+        const myUnread = (conv.my_unread_count || 0) + delta;
+        return { ...conv, [field]: current + delta, my_unread_count: myUnread };
       }
       return conv;
     });
+    const current = messagingStore.conversations.find(c => c.id === conversationId);
+    if (current) {
+      messagingStore.conversationsById = { ...messagingStore.conversationsById, [conversationId]: current };
+    }
   },
   
   setMessages(conversationId, messages) {
@@ -64,6 +139,12 @@ const messagingStore = vanX.reactive({
       ...messagingStore.messagesByConversation,
       [conversationId]: [...messages]
     };
+    // update meta
+    // Track last fetched time
+    const now = Date.now();
+    const meta = { ...(messagingStore.messagesMeta || {}) };
+    meta[String(conversationId)] = { lastFetchedTs: now };
+    messagingStore.messagesMeta = meta;
   },
   
   addMessage(conversationId, message) {
@@ -71,10 +152,7 @@ const messagingStore = vanX.reactive({
     
     // Check for duplicates by ID
     const messageExists = existingMessages.some(m => m.id === message.id);
-    if (messageExists) {
-      console.log(`Message ${message.id} already exists, skipping`);
-      return false;
-    }
+      if (messageExists) return false;
     
     // Add message in chronological order
     const newMessages = [...existingMessages];
@@ -92,7 +170,6 @@ const messagingStore = vanX.reactive({
       [conversationId]: newMessages
     };
     
-    console.log(`Added message ${message.id} to conversation ${conversationId}`);
     return true;
   },
   
@@ -151,7 +228,8 @@ const messagingStore = vanX.reactive({
   },
   
   selectConversation(conversationId) {
-    messagingStore.selectedConversationId = conversationId;
+    const id = String(conversationId ?? '');
+    messagingStore.selectedConversationId = id;
     // Clear typing indicators when switching conversations
     messagingStore.typingUsers = [];
   },
@@ -175,8 +253,13 @@ const messagingStore = vanX.reactive({
     messagingStore.typingUsers = messagingStore.typingUsers.filter(id => id !== userId);
   },
   
-  setLoading(loading) {
-    messagingStore.loading = loading;
+
+  setConversationsLoading(loading) {
+    messagingStore.conversationsLoading = loading;
+  },
+
+  setMessagesLoading(loading) {
+    messagingStore.messagesLoading = loading;
   },
   
   setError(error) {
@@ -200,11 +283,14 @@ const messagingStore = vanX.reactive({
   },
   
   setSearchQuery(query) {
+    console.log('[Store.setSearchQuery] ->', query);
     messagingStore.searchQuery = query;
   },
   
   clearCache() {
     messagingStore.conversations = [];
+    messagingStore.conversationsById = {};
+    messagingStore.conversationIds = [];
     messagingStore.messagesByConversation = {};
     messagingStore.selectedConversationId = null;
     messagingStore.typingUsers = [];
@@ -212,23 +298,7 @@ const messagingStore = vanX.reactive({
   }
 });
 
-// Helper function for getting other user name
-function getOtherUserName(conversation) {
-  try {
-    const token = localStorage.getItem('token');
-    if (!token) return 'Unknown User';
-    
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    const userId = Number(payload.userId);
-    
-    return conversation.participant_1 === userId 
-      ? conversation.participant_2_username 
-      : conversation.participant_1_username;
-  } catch (error) {
-    console.error('Error getting other user name:', error);
-    return 'Unknown User';
-  }
-}
+// (Removed local getOtherUserName; using shared util)
 
 // Add calculated fields after store creation to avoid circular reference
 messagingStore.selectedConversation = vanX.calc(() => {
@@ -241,12 +311,42 @@ messagingStore.currentMessages = vanX.calc(() => {
   return messagingStore.messagesByConversation[messagingStore.selectedConversationId] || [];
 });
 
-messagingStore.filteredConversations = vanX.calc(() => {
-  if (!messagingStore.searchQuery) return messagingStore.conversations;
-  return messagingStore.conversations.filter(conv => {
-    const otherUserName = getOtherUserName(conv);
-    return otherUserName.toLowerCase().includes(messagingStore.searchQuery.toLowerCase());
-  });
+messagingStore.selectedConversationName = vanX.calc(() => {
+  const id = messagingStore.selectedConversationId;
+  if (!id) return '';
+  const conv = messagingStore.conversationsById?.[id];
+  return conv?.displayName || '';
 });
 
+  // Plain reactive projection for the sidebar, avoids Proxy aliasing
+  messagingStore.sidebarItems = vanX.calc(() => {
+    const q = (messagingStore.searchQuery || '').toLowerCase();
+    const ids = messagingStore.conversationIds || [];
+    const byId = messagingStore.conversationsById || {};
+    const items = ids.map(id => {
+      const conv = byId[id];
+      const item = conv ? {
+        id: String(conv.id),
+        name: conv.displayName || '',
+        time: conv.lastTime || conv.last_message_created_at || conv.updated_at || conv.created_at || null,
+        ts: conv.lastTs || 0,
+        unread: typeof conv.my_unread_count === 'number' ? conv.my_unread_count : 0
+      } : null;
+      return item;
+    }).filter(Boolean);
+    const filtered = q ? items.filter(it => (it.name || '').toLowerCase().includes(q)) : items;
+    filtered.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    return filtered;
+  });
+
+// filteredConversations deprecated; use sidebarItems for filter/sort/projection
+
 export default messagingStore;
+
+// Expose for debugging in browser (dev tools)
+try {
+  if (typeof window !== 'undefined') {
+    window.__messagingStore = messagingStore;
+    window.messagingStore = messagingStore;
+  }
+} catch {}
