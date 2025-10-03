@@ -1,17 +1,27 @@
 -- Add LMSR market functionality to the prediction platform
 
 -- Add market fields to events table
-ALTER TABLE events ADD COLUMN IF NOT EXISTS
-    market_prob DECIMAL(10,6) DEFAULT 0.5,
-    liquidity_b DECIMAL(10,2) DEFAULT 5000.0,
-    cumulative_stake DECIMAL(15,2) DEFAULT 0.0,
-    q_yes DECIMAL(15,6) DEFAULT 0.0,  -- For AMM tracking (future use)
-    q_no DECIMAL(15,6) DEFAULT 0.0;    -- For AMM tracking (future use)
+ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS market_prob DECIMAL(10,6) DEFAULT 0.5;
+
+ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS liquidity_b DECIMAL(10,2) DEFAULT 5000.0;
+
+ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS cumulative_stake DECIMAL(15,2) DEFAULT 0.0;
+
+ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS q_yes DECIMAL(15,6) DEFAULT 0.0;  -- For AMM tracking (future use)
+
+ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS q_no DECIMAL(15,6) DEFAULT 0.0;    -- For AMM tracking (future use)
 
 -- Add RP (Reputation Points) fields to users table
-ALTER TABLE users ADD COLUMN IF NOT EXISTS
-    rp_balance DECIMAL(15,2) DEFAULT 1000.0,
-    rp_staked DECIMAL(15,2) DEFAULT 0.0;
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS rp_balance DECIMAL(15,2) DEFAULT 1000.0;
+
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS rp_staked DECIMAL(15,2) DEFAULT 0.0;
 
 -- Track market updates/trades
 CREATE TABLE IF NOT EXISTS market_updates (
