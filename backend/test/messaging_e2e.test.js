@@ -112,6 +112,8 @@ describe('E2E Encrypted Messaging', () => {
     expect(messageId).toBeDefined();
   }, 20000);
 
+  // Note: contentHash remains required by DB; client should provide it.
+
   test('receiver fetches, unread count increments, then mark as read', async () => {
     // Unread count before read
     const unread1 = await request(API)
@@ -148,4 +150,3 @@ describe('E2E Encrypted Messaging', () => {
     expect(typeof unread2.body.count).toBe('number');
   }, 20000);
 });
-

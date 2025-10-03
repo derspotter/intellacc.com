@@ -1,7 +1,7 @@
 // frontend/src/services/webauthnClient.js
 import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 import api from './api';
-import keyManager from './keyManager';
+import keyManager from './keyManager.js';
 import cryptoService from './crypto';
 
 // Storage keys for wrapped private key

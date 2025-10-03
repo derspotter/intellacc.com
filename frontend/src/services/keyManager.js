@@ -370,6 +370,12 @@ class KeyManager {
   async decryptMessage(encryptedContent, encryptedSessionKey) {
     try {
       if (!this.privateKey) {
+        // Attempt lazy load in case initialization hasn't completed yet
+        try {
+          await this.loadPrivateKey();
+        } catch {}
+      }
+      if (!this.privateKey) {
         throw new Error('No private key available for decryption');
       }
       

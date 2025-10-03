@@ -55,6 +55,8 @@ export function registerSocketEventHandler(eventName, handler) {
 
 // Socket.IO instance
 let socket = null;
+// Queue for emits attempted while disconnected
+const _emitQueue = [];
 
 /**
  * Initialize Socket.IO connection
@@ -104,7 +106,7 @@ function createSocketConnection() {
       // In development, use same origin to leverage Vite proxy
       const socketUrl = window.location.origin;
       
-      console.log('Creating Socket.IO connection to:', socketUrl);
+      if (import.meta?.env?.DEV) console.log('Creating Socket.IO connection to:', socketUrl);
       
       const token = getToken();
       socket = io(socketUrl, {
@@ -139,7 +141,7 @@ function createSocketConnection() {
 function setupSocketHandlers() {
   // Connection event
   socket.on('connect', () => {
-    console.log('Connected to Socket.IO server!');
+    if (import.meta?.env?.DEV) console.log('Connected to Socket.IO server!');
     socketState.connected.val = true;
 
     // Notify custom handlers
@@ -153,11 +155,29 @@ function setupSocketHandlers() {
     
     // Join rooms based on authenticated user
     joinUserRooms();
+
+    // Proactively ensure E2EE identity/prekeys are published on every connect
+    (async () => {
+      try {
+        const { bootstrapSignalIfNeeded } = await import('./signalBootstrap.js');
+        await bootstrapSignalIfNeeded();
+      } catch {}
+    })();
+
+    // Flush any queued emits from offline period
+    try {
+      while (_emitQueue.length > 0) {
+        const { event, data } = _emitQueue.shift();
+        socket.emit(event, data);
+      }
+    } catch (e) {
+      // leave remaining items for next connect
+    }
   });
   
   // Disconnection event
   socket.on('disconnect', () => {
-    console.log('Disconnected from Socket.IO server');
+    if (import.meta?.env?.DEV) console.log('Disconnected from Socket.IO server');
     socketState.connected.val = false;
 
     // Notify custom handlers
@@ -169,7 +189,7 @@ function setupSocketHandlers() {
   
   // Connection error event
   socket.on('connect_error', (error) => {
-    console.log('Connection error:', error.message);
+    if (import.meta?.env?.DEV) console.log('Connection error:', error.message);
     socketState.connected.val = false;
     
     // Add error message
@@ -178,7 +198,7 @@ function setupSocketHandlers() {
   
   // Broadcast message event
   socket.on('broadcast', (data) => {
-    addMessage(`Broadcast: ${JSON.stringify(data)}`);
+    if (import.meta?.env?.DEV) addMessage(`Broadcast: ${JSON.stringify(data)}`);
   });
   
   // We are no longer using socket for post updates
@@ -186,7 +206,7 @@ function setupSocketHandlers() {
   
   // New prediction event
   socket.on('newPrediction', (data) => {
-    addMessage(`New prediction: ${data.event || JSON.stringify(data)}`);
+    if (import.meta?.env?.DEV) addMessage(`New prediction: ${data.event || JSON.stringify(data)}`);
     
     // Update predictions in store if available
     if (store.predictions) {
@@ -200,7 +220,7 @@ function setupSocketHandlers() {
   
   // Prediction resolved event
   socket.on('predictionResolved', (data) => {
-    addMessage(`Prediction resolved: ${data.event || JSON.stringify(data)}`);
+    if (import.meta?.env?.DEV) addMessage(`Prediction resolved: ${data.event || JSON.stringify(data)}`);
     
     // Update prediction in store if available
     if (store.predictions) {
@@ -217,7 +237,7 @@ function setupSocketHandlers() {
   
   // New bet event
   socket.on('newBet', (data) => {
-    addMessage(`New bet: ${JSON.stringify(data)}`);
+    if (import.meta?.env?.DEV) addMessage(`New bet: ${JSON.stringify(data)}`);
     
     // Refresh assigned predictions in store if available
     if (store.predictions) {
@@ -231,7 +251,7 @@ function setupSocketHandlers() {
   
   // Market update event - real-time price changes
   socket.on('marketUpdate', (data) => {
-    console.log('📈 Market update received:', data);
+    if (import.meta?.env?.DEV) console.log('📈 Market update received:', data);
     
     // Notify registered handlers for real-time UI updates
     notifyHandlers('marketUpdate', data);
@@ -239,7 +259,7 @@ function setupSocketHandlers() {
   
   // User-specific notification event
   socket.on('notification', (data) => {
-    addMessage(`Notification: ${data.message || JSON.stringify(data)}`);
+    if (import.meta?.env?.DEV) addMessage(`Notification: ${data.message || JSON.stringify(data)}`);
     
     // Notify registered handlers
     notifyHandlers('notification', data);
@@ -247,28 +267,50 @@ function setupSocketHandlers() {
 
   // Messaging events
   socket.on('newMessage', (data) => {
-    console.log('[Socket] Received newMessage event:', data);
+    if (import.meta?.env?.DEV) console.log('[Socket] Received newMessage event:', data);
     notifyHandlers('newMessage', data);
   });
 
   socket.on('messageSent', (data) => {
-    console.log('[Socket] Received messageSent event:', data);
+    if (import.meta?.env?.DEV) console.log('[Socket] Received messageSent event:', data);
     notifyHandlers('messageSent', data);
   });
 
   socket.on('messagesRead', (data) => {
-    console.log('[Socket] Received messagesRead event:', data);
+    if (import.meta?.env?.DEV) console.log('[Socket] Received messagesRead event:', data);
     notifyHandlers('messagesRead', data);
   });
 
   socket.on('messageDeleted', (data) => {
-    console.log('[Socket] Received messageDeleted event:', data);
+    if (import.meta?.env?.DEV) console.log('[Socket] Received messageDeleted event:', data);
     notifyHandlers('messageDeleted', data);
   });
 
   socket.on('user-typing', (data) => {
-    console.log('[Socket] Received user-typing event:', data);
+    if (import.meta?.env?.DEV) console.log('[Socket] Received user-typing event:', data);
     notifyHandlers('user-typing', data);
+  });
+
+  // E2EE bootstrap flow: when someone needs our bundle, auto-bootstrap
+  socket.on('e2ee-bootstrap-trigger', async (data) => {
+    try {
+      if (import.meta?.env?.DEV) console.log('[Socket] e2ee-bootstrap-trigger received:', data);
+      const { bootstrapSignalIfNeeded } = await import('./signalBootstrap.js');
+      await bootstrapSignalIfNeeded();
+      // Optionally notify requester to retry sooner
+      const notifyUserId = data?.fromUserId;
+      if (notifyUserId) {
+        emit('e2ee-bootstrap-done', { notifyUserId });
+      }
+    } catch (e) {
+      console.warn('E2EE bootstrap trigger failed:', e?.message || e);
+    }
+  });
+
+  // Ack handler: allow clients to react immediately (handlers can subscribe if desired)
+  socket.on('e2ee-bootstrap-ack', (data) => {
+    if (import.meta?.env?.DEV) console.log('[Socket] e2ee-bootstrap-ack received:', data);
+    notifyHandlers('e2ee-bootstrap-ack', data);
   });
 }
 
@@ -293,18 +335,22 @@ function joinUserRooms() {
   
   // Join predictions room
     socket.emit('join-predictions');
-  console.log('Joined predictions room');
+  if (import.meta?.env?.DEV) console.log('Joined predictions room');
   
   // Join user-specific room if authenticated
   const tokenData = getTokenData();
   if (tokenData && tokenData.userId) {
     // Server derives user id from JWT; do not pass userId from client
     socket.emit('join-profile');
-    console.log(`Requested join to user-${tokenData.userId} room`);
+    if (import.meta?.env?.DEV) console.log(`Requested join to user-${tokenData.userId} room`);
     
     // Authenticate for notifications (no userId param)
     socket.emit('authenticate');
-    console.log(`Authenticated for notifications as user ${tokenData.userId}`);
+    if (import.meta?.env?.DEV) console.log(`Authenticated for notifications as user ${tokenData.userId}`);
+
+    // Join messaging room for real-time encrypted messaging
+    socket.emit('join-messaging');
+    if (import.meta?.env?.DEV) console.log(`Joined messaging room for user ${tokenData.userId}`);
   }
 }
 
@@ -360,8 +406,11 @@ function notifyHandlers(event, data) {
  */
 export function emit(event, data) {
   if (!socketState.connected.val) {
-    console.warn('Socket not connected, cannot emit:', event);
-    return false;
+    const item = { event, data };
+    if (_emitQueue.length >= 50) _emitQueue.shift();
+    _emitQueue.push(item);
+    if (import.meta?.env?.DEV) console.warn('Socket not connected, queued emit:', event);
+    return true; // queued successfully
   }
   
   socket.emit(event, data);

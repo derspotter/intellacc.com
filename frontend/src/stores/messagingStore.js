@@ -3,6 +3,7 @@
 
 import * as vanX from 'vanjs-ext';
 import { normalizeConversation } from '../utils/messagingUtils.js';
+import { getTokenData } from '../services/auth.js';
 
 // Helper: sort ids by their conversation's lastTs (desc)
 const sortIdsByTs = (byId, ids) => ids.sort((a, b) => ((byId[b]?.lastTs || 0) - (byId[a]?.lastTs || 0)));
@@ -23,6 +24,7 @@ const messagingStore = vanX.reactive({
   conversationsLoading: false,
   messagesLoading: false,
   error: '',
+  eventsMeta: {},
   
   // Typing indicators - use array instead of Set for VanX compatibility
   typingUsers: [],
@@ -44,7 +46,7 @@ const messagingStore = vanX.reactive({
   upsertConversations(rawList) {
     const currentUserId = (messagingStore.currentUserId != null)
       ? messagingStore.currentUserId
-      : (() => { try { const t = localStorage.getItem('token'); return t ? JSON.parse(atob(t.split('.')[1])).userId : null; } catch { return null; } })();
+      : (() => { try { return getTokenData()?.userId ?? null; } catch { return null; } })();
     const byId = { ...(messagingStore.conversationsById || {}) };
     for (const raw of rawList || []) {
       const norm = normalizeConversation(raw, currentUserId);
@@ -63,7 +65,7 @@ const messagingStore = vanX.reactive({
   upsertConversation(raw) {
     const currentUserId = (messagingStore.currentUserId != null)
       ? messagingStore.currentUserId
-      : (() => { try { const t = localStorage.getItem('token'); return t ? JSON.parse(atob(t.split('.')[1])).userId : null; } catch { return null; } })();
+      : (() => { try { return getTokenData()?.userId ?? null; } catch { return null; } })();
     const norm = normalizeConversation(raw, currentUserId);
     if (!norm) return;
     const byId = { ...(messagingStore.conversationsById || {}) };
@@ -78,17 +80,17 @@ const messagingStore = vanX.reactive({
     messagingStore.conversations = ids.map(id => byId[id]);
   },
   setConversations(conversations) {
-    try { /* dev-only logging removed */ } catch {}
-    // Delegate to upsert for normalization + indexing
-    messagingStore.upsertConversations(conversations);
-    try { /* dev-only logging removed */ } catch {}
+    // Replace current conversations with the provided list
+    messagingStore.conversationsById = {};
+    messagingStore.conversationIds = [];
+    messagingStore.conversations = [];
+    messagingStore.upsertConversations(conversations || []);
   },
   
   addConversation(conversation) {
-    const token = localStorage.getItem('token');
-    const currentUserId = (() => {
-      try { return token ? JSON.parse(atob(token.split('.')[1])).userId : null; } catch { return null; }
-    })();
+    const currentUserId = (messagingStore.currentUserId != null)
+      ? messagingStore.currentUserId
+      : (() => { try { return getTokenData()?.userId ?? null; } catch { return null; } })();
     const id = String(conversation?.id ?? conversation?.conversation_id ?? '');
     if (!id) return;
     // Delegate to normalized single upsert
@@ -96,8 +98,9 @@ const messagingStore = vanX.reactive({
   },
   
   updateConversation(conversationId, updates) {
+    const idStr = String(conversationId);
     messagingStore.conversations = messagingStore.conversations.map(conv => {
-      if (conv.id !== conversationId) return conv;
+      if (conv.id !== idStr) return conv;
       const next = { ...conv, ...updates };
       // Keep derived lastTime/lastTs in sync when backend time fields change
       const lt = updates?.last_message_created_at || updates?.last_message_at || updates?.updated_at || updates?.created_at;
@@ -110,16 +113,21 @@ const messagingStore = vanX.reactive({
       return next;
     });
     // also update byId entry
-    const current = messagingStore.conversations.find(c => c.id === conversationId);
+    const current = messagingStore.conversations.find(c => c.id === idStr);
     if (current) {
-      messagingStore.conversationsById = { ...messagingStore.conversationsById, [conversationId]: current };
+      messagingStore.conversationsById = { ...messagingStore.conversationsById, [idStr]: current };
     }
   },
 
+  // Single-mode E2EE: no per-conversation encryption mode toggles
+
   incrementUnread(conversationId, delta = 1) {
+    const idStr = String(conversationId);
     messagingStore.conversations = messagingStore.conversations.map(conv => {
-      if (conv.id === conversationId) {
-        const myId = Number(JSON.parse(atob(localStorage.getItem('token')?.split('.')[1] || 'e30='))?.userId);
+      if (conv.id === idStr) {
+        const myId = (messagingStore.currentUserId != null)
+          ? Number(messagingStore.currentUserId)
+          : (() => { try { return Number(getTokenData()?.userId); } catch { return NaN; } })();
         const field = (conv.participant_1 === myId) ? 'unread_count_participant_1' : 'unread_count_participant_2';
         const current = conv[field] || 0;
         const myUnread = (conv.my_unread_count || 0) + delta;
@@ -127,28 +135,38 @@ const messagingStore = vanX.reactive({
       }
       return conv;
     });
-    const current = messagingStore.conversations.find(c => c.id === conversationId);
+    const current = messagingStore.conversations.find(c => c.id === idStr);
     if (current) {
-      messagingStore.conversationsById = { ...messagingStore.conversationsById, [conversationId]: current };
+      messagingStore.conversationsById = { ...messagingStore.conversationsById, [idStr]: current };
     }
   },
   
   setMessages(conversationId, messages) {
     // Create new object to trigger reactivity
+    const key = String(conversationId);
     messagingStore.messagesByConversation = {
       ...messagingStore.messagesByConversation,
-      [conversationId]: [...messages]
+      [key]: [...messages]
     };
     // update meta
     // Track last fetched time
     const now = Date.now();
     const meta = { ...(messagingStore.messagesMeta || {}) };
-    meta[String(conversationId)] = { lastFetchedTs: now };
+    meta[key] = { lastFetchedTs: now };
+    messagingStore.messagesMeta = meta;
+  },
+
+  updateMessagesMeta(conversationId, updates) {
+    const key = String(conversationId);
+    const meta = { ...(messagingStore.messagesMeta || {}) };
+    const prev = meta[key] || {};
+    meta[key] = { ...prev, ...updates };
     messagingStore.messagesMeta = meta;
   },
   
   addMessage(conversationId, message) {
-    const existingMessages = messagingStore.messagesByConversation[conversationId] || [];
+    const key = String(conversationId);
+    const existingMessages = messagingStore.messagesByConversation[key] || [];
     
     // Check for duplicates by ID
     const messageExists = existingMessages.some(m => m.id === message.id);
@@ -167,9 +185,35 @@ const messagingStore = vanX.reactive({
     // Update object to trigger reactivity
     messagingStore.messagesByConversation = {
       ...messagingStore.messagesByConversation,
-      [conversationId]: newMessages
+      [key]: newMessages
     };
     
+    return true;
+  },
+
+  // Acknowledge a pending message by clientId and update with server data
+  ackPendingMessage(conversationId, clientId, serverMessage) {
+    const key = String(conversationId);
+    const existing = messagingStore.messagesByConversation[key] || [];
+    const findIdx = existing.findIndex(m => m.clientId === clientId || m.id === `c:${clientId}`);
+    if (findIdx === -1) {
+      // No pending message found; insert normally (will de-dupe by id)
+      return messagingStore.addMessage(conversationId, serverMessage);
+    }
+    const updated = [...existing];
+    const prev = updated[findIdx] || {};
+    // Preserve decrypted content if present; prefer server fields
+    updated[findIdx] = {
+      ...prev,
+      ...serverMessage,
+      id: serverMessage.id,
+      status: 'sent',
+      clientId
+    };
+    messagingStore.messagesByConversation = {
+      ...messagingStore.messagesByConversation,
+      [key]: updated
+    };
     return true;
   },
   
@@ -188,6 +232,28 @@ const messagingStore = vanX.reactive({
         break;
       }
     }
+  },
+
+  // Mark a conversation's messages as stale to force refresh on next selection
+  markConversationStale(conversationId) {
+    const meta = { ...(messagingStore.messagesMeta || {}) };
+    const key = String(conversationId);
+    const prev = meta[key] || {};
+    meta[key] = { ...prev, lastFetchedTs: 0 };
+    messagingStore.messagesMeta = meta;
+  },
+
+  getLastSeenMessageId(conversationId) {
+    const key = String(conversationId);
+    return (messagingStore.eventsMeta?.[key]?.lastSeenMessageId) ?? 0;
+  },
+
+  setLastSeenMessageId(conversationId, messageId) {
+    const key = String(conversationId);
+    const meta = { ...(messagingStore.eventsMeta || {}) };
+    const prev = meta[key] || {};
+    meta[key] = { ...prev, lastSeenMessageId: Number(messageId) || 0, lastSeenAt: Date.now() };
+    messagingStore.eventsMeta = meta;
   },
   
   removeMessage(messageId) {
@@ -283,7 +349,7 @@ const messagingStore = vanX.reactive({
   },
   
   setSearchQuery(query) {
-    console.log('[Store.setSearchQuery] ->', query);
+    try { if (import.meta?.env?.DEV) console.log('[Store.setSearchQuery] ->', query); } catch {}
     messagingStore.searchQuery = query;
   },
   
@@ -292,6 +358,8 @@ const messagingStore = vanX.reactive({
     messagingStore.conversationsById = {};
     messagingStore.conversationIds = [];
     messagingStore.messagesByConversation = {};
+    messagingStore.messagesMeta = {};
+    messagingStore.eventsMeta = {};
     messagingStore.selectedConversationId = null;
     messagingStore.typingUsers = [];
     messagingStore.error = '';

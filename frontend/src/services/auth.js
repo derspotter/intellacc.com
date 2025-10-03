@@ -117,7 +117,15 @@ export async function login(email, password) {
     window.location.hash = 'home';
     // Explicitly call updatePageFromHash to ensure page state and data are loaded
     updatePageFromHash();
-    
+
+    // Proactively bootstrap Signal identity/prekeys after login (non-blocking)
+    try {
+      const { bootstrapSignalIfNeeded } = await import('./signalBootstrap.js');
+      await bootstrapSignalIfNeeded();
+    } catch (e) {
+      console.warn('Signal bootstrap after login skipped:', e?.message || e);
+    }
+
     return { success: true };
   } catch (error) {
     console.error('Login error:', error);
@@ -168,7 +176,7 @@ export function logout() {
   userProfileState.val = null;
   
   // Also lock keys in memory for safety
-  try { require('./keyManager').default.lockKeys(); } catch {}
+  try { require('./keyManager.js').default.lockKeys(); } catch {}
   
   // Navigate to login page
   window.location.hash = 'login';

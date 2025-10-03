@@ -150,7 +150,8 @@ receiverUsername,
 contentHash,
 senderSessionKey,
 receiverSessionKey,
-messageType = 'text'
+messageType = 'text',
+clientId = null
 } = req.body;
 
     // Enforce maximum payload size (~16KB base64 ≈ 12KB raw)
@@ -173,8 +174,8 @@ messageType = 'text'
       });
     }
 
-    if (!encryptedContent || !contentHash) {
-      return res.status(400).json({ error: 'encryptedContent and contentHash are required' });
+    if (!encryptedContent) {
+      return res.status(400).json({ error: 'encryptedContent is required' });
     }
 
     // Determine receiverId: prefer explicit receiverId, else receiverUsername, else derive from conversation
@@ -208,11 +209,13 @@ messageType = 'text'
       });
     }
 
-    // Validate content hash format (should be SHA-256 hex)
-    if (!/^[a-fA-F0-9]{64}$/.test(contentHash)) {
-      return res.status(400).json({ 
-        error: 'Invalid content hash format' 
-      });
+    // Validate content hash format when provided (should be SHA-256 hex)
+    if (contentHash != null) {
+      if (!/^[a-fA-F0-9]{64}$/.test(contentHash)) {
+        return res.status(400).json({ 
+          error: 'Invalid content hash format' 
+        });
+      }
     }
 
     const message = await messagingService.sendMessage({
@@ -223,7 +226,8 @@ messageType = 'text'
       contentHash,
       senderSessionKey,
       receiverSessionKey,
-      messageType
+      messageType,
+      clientId
     });
     
     res.status(201).json({ 
@@ -236,7 +240,8 @@ messageType = 'text'
         messageType: message.message_type,
         contentHash: message.content_hash,
         createdAt: message.created_at,
-        readAt: message.read_at
+        readAt: message.read_at,
+        clientId
       }
     });
   } catch (error) {

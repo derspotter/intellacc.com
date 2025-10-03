@@ -396,6 +396,18 @@ export const api = {
       request('/keys/stats')
   },
 
+  // E2EE (Signal) key bundle endpoints
+  e2ee: {
+    publishIdentity: (identityKey, signingKey, deviceId = 'default') =>
+      request('/e2ee/keys/identity', { method: 'POST', body: { identityKey, signingKey, deviceId } }),
+
+    publishPrekeys: (signedPreKey, oneTimePreKeys = [], deviceId = 'default') =>
+      request('/e2ee/keys/prekeys', { method: 'POST', body: { signedPreKey, oneTimePreKeys, deviceId } }),
+
+    getBundle: (userId, deviceId = 'default') =>
+      request(`/e2ee/keys/bundle?userId=${encodeURIComponent(userId)}&deviceId=${encodeURIComponent(deviceId)}`),
+  },
+
   // Messaging endpoints (end-to-end encrypted)
   messages: {
     getConversations: (limit = 20, offset = 0) =>

@@ -1,6 +1,11 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  define: {
+    'process.env': {},
+    global: 'globalThis'
+  },
+  assetsInclude: ['**/*.wasm'],
   server: {
     host: '0.0.0.0',
     proxy: {
@@ -65,6 +70,11 @@ export default defineConfig({
         secure: false
       }
     }
+  }
+  ,
+  optimizeDeps: {
+    exclude: ['@signalapp/libsignal-client'],
+    include: ['@matrix-org/olm']
   }
   // esbuild configuration removed
 });

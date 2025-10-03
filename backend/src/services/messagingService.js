@@ -114,8 +114,9 @@ async function getUserConversations(userId, limit = 20, offset = 0) {
  * @param {string} messageData.senderSessionKey - Session key encrypted for sender
  * @param {string} messageData.receiverSessionKey - Session key encrypted for receiver
  * @param {string} messageData.messageType - Type of message (text, image, file)
+ * @param {string} [messageData.clientId] - Optional client-side message id to echo back
  * @returns {Promise<Object>} Created message record
- */
+*/
 async function sendMessage({
   conversationId,
   senderId,
@@ -124,7 +125,8 @@ async function sendMessage({
   contentHash,
   senderSessionKey = null,
   receiverSessionKey = null,
-  messageType = 'text'
+  messageType = 'text',
+  clientId = null
 }) {
   try {
     // Verify the sender is part of the conversation and receiver matches the other participant
@@ -168,18 +170,18 @@ async function sendMessage({
       [message.id]
     );
 
-    // Emit real-time message if socket.io is available (emit minimal tailored payloads)
+    // Emit real-time message if socket.io is available (include payload to avoid extra client fetch when open)
     if (io) {
       try {
-        // Emit IDs only; clients fetch via authenticated HTTP API
-        io.to(`messaging:${receiverId}`).emit('newMessage', {
+        const payload = {
           messageId: message.id,
-          conversationId
-        });
-        io.to(`messaging:${senderId}`).emit('messageSent', {
-          messageId: message.id,
-          conversationId
-        });
+          conversationId,
+          created_at: message.created_at,
+          message,
+          clientId
+        };
+        io.to(`messaging:${receiverId}`).emit('newMessage', payload);
+        io.to(`messaging:${senderId}`).emit('messageSent', payload);
 
         // Update delivery status
         await db.query(

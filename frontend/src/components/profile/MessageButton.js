@@ -19,8 +19,8 @@ export default function MessageButton({ user }) {
       // Initialize messaging if not already done
       await messagingService.initialize();
       
-      // Create or get conversation with this user
-      const conversation = await messagingService.createConversation(null, user.username);
+      // Create or get conversation with this user (expects numeric otherUserId)
+      const conversation = await messagingService.createConversation(user.id);
       
       // Set the conversation in the store
       messagingStore.selectConversation(conversation.id);

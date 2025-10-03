@@ -21,6 +21,8 @@ export default function MessagesPage() {
     try {
       messagingStore.setConversationsLoading(true);
       messagingStore.clearError();
+      // Ensure local cache is cleared after server resets or logins
+      try { messagingStore.clearCache(); } catch {}
       // Initialize current user for store normalization
       const uid = authGetUserId();
       if (uid != null) messagingStore.setCurrentUserId(uid);
@@ -58,12 +60,14 @@ export default function MessagesPage() {
       // Join conversation room for typing indicators
       messagingService.joinConversation(conversation.id);
       
-      // Load messages if not present or stale
+      // Fetch latest messages only if stale or older than freshness window
       const convId = String(conversation.id);
-      const existing = (messagingStore.messagesByConversation || {})[convId];
-      const meta = (messagingStore.messagesMeta || {})[convId];
-      const fresh = meta && (Date.now() - (meta.lastFetchedTs || 0) < 30000);
-      if (!existing || !Array.isArray(existing) || existing.length === 0 || !fresh) {
+      const meta = (messagingStore.messagesMeta || {})[convId] || {};
+      const lastFetchedTs = typeof meta.lastFetchedTs === 'number' ? meta.lastFetchedTs : undefined;
+      const isStale = lastFetchedTs === 0;
+      const ageMs = lastFetchedTs ? (Date.now() - lastFetchedTs) : Number.POSITIVE_INFINITY;
+      const FRESHNESS_WINDOW_MS = 30_000;
+      if (isStale || ageMs >= FRESHNESS_WINDOW_MS) {
         await messagingService.getMessages(conversation.id);
       }
       
@@ -197,12 +201,19 @@ export default function MessagesPage() {
   // Scroll to bottom of messages
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
-      const messagesContainer = document.querySelector('.messages-list');
-      if (messagesContainer) {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      }
+      requestAnimationFrame(() => {
+        const messagesContainer = document.querySelector('.messages-list');
+        if (messagesContainer) {
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+      });
     });
   };
+
+  // Simple virtualization: render only the last N messages by default
+  const MAX_RENDERED = 200;
+  const showAllState = van.state(false);
+  const lastRenderedConversationId = van.state(null);
 
   // Format timestamp
   const formatTime = (timestamp) => {
@@ -239,6 +250,7 @@ export default function MessagesPage() {
     const isSent = message.sender_id === messagingStore.currentUserId;
     
     return li({
+      key: message.id,
       class: `message-item ${isSent ? 'sent' : 'received'}`
     }, [
       div({ class: "message-content" }, [
@@ -322,7 +334,7 @@ export default function MessagesPage() {
               }
 
               // Build a plain snapshot to avoid reactive aliasing during render
-              try { console.log('[UI] view =', JSON.stringify(list, null, 2)); } catch {}
+              if (import.meta?.env?.DEV) { try { console.log('[UI] view =', JSON.stringify(list, null, 2)); } catch {} }
 
               return ul([
                 ...list.map(item => li({
@@ -371,7 +383,7 @@ export default function MessagesPage() {
               ]),
               
               // Messages list - now fully reactive!
-              div({ class: "messages-list" }, 
+              div({ class: "messages-list", key: () => messagingStore.selectedConversationId }, 
                 () => {
                   if (messagingStore.messagesLoading) {
                     return div({ class: "loading" }, "Loading messages...");
@@ -380,8 +392,35 @@ export default function MessagesPage() {
                     return div({ class: "empty-messages" }, "No messages yet. Say hello!");
                   }
                   
-                  // Create reactive list that updates automatically
-                  const messagesList = ul(messagingStore.currentMessages.map(MessageItem));
+                  const all = messagingStore.currentMessages;
+                  // Reset expansion when switching conversations
+                  if (lastRenderedConversationId.val !== messagingStore.selectedConversationId) {
+                    showAllState.val = false;
+                    lastRenderedConversationId.val = messagingStore.selectedConversationId;
+                  }
+                  const total = all.length;
+                  const useAll = showAllState.val || total <= MAX_RENDERED;
+                  const startIdx = useAll ? 0 : Math.max(0, total - MAX_RENDERED);
+                  const toRender = all.slice(startIdx);
+
+                  const headerControls = (!useAll && startIdx > 0) ? div({ class: 'older-bar' }, [
+                    button({
+                      class: 'btn btn-link',
+                      onclick: async () => {
+                        // Try fetch older if available, otherwise allow showing all
+                        try {
+                          await messagingService.loadOlder(messagingStore.selectedConversationId, 50);
+                        } catch {}
+                        // If no more older messages come in, allow expanding to all
+                        showAllState.val = true;
+                      }
+                    }, `Load older (${startIdx})`)
+                  ]) : null;
+
+                  const messagesList = div([
+                    headerControls,
+                    ul(toRender.map(MessageItem))
+                  ]);
                   
                   // Auto-scroll when messages change
                   setTimeout(scrollToBottom, 50);

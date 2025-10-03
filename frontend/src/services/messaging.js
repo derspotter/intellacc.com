@@ -5,6 +5,9 @@ import api from './api.js';
 import keyManager from './keyManager.js';
 import socketService from './socket.js';
 import messagingStore from '../stores/messagingStore.js';
+import cryptoService from './crypto.js';
+import signalAdapter from './signalAdapter.js';
+import { getTokenData } from './auth.js';
 // No pairKey work in service; store normalizes
 
 /**
@@ -12,21 +15,36 @@ import messagingStore from '../stores/messagingStore.js';
  */
 class MessagingService {
     constructor() {
+        this._connectHandlerAdded = false;
         this.setupSocketHandlers();
+    }
+
+    // Generate a compact clientId for optimistic sends
+    _generateClientId() {
+        try {
+            const rand = new Uint8Array(8);
+            window.crypto.getRandomValues(rand);
+            const hex = Array.from(rand).map(b => b.toString(16).padStart(2, '0')).join('');
+            return `${Date.now().toString(36)}-${hex}`;
+        } catch {
+            return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        }
     }
 
     /**
      * Setup Socket.io handlers for real-time messaging
      */
     setupSocketHandlers() {
-        const applyMessageEvent = async (conversationId, { createdAt = null, isSelected = false } = {}) => {
+        const applyMessageEvent = async (conversationId, { createdAt = null, isSelected = false, incrementUnread = true } = {}) => {
             try {
                 if (isSelected) {
                     const response = await api.messages.getMessages(conversationId, 50, 0);
                     const decryptedMessages = await this.decryptMessages(response.messages);
                     messagingStore.setMessages(conversationId, decryptedMessages);
                 } else {
-                    messagingStore.incrementUnread(conversationId, 1);
+                    if (incrementUnread) {
+                        messagingStore.incrementUnread(conversationId, 1);
+                    }
                     const ts = createdAt || new Date().toISOString();
                     messagingStore.updateConversation(conversationId, { last_message_created_at: ts });
                 }
@@ -34,28 +52,65 @@ class MessagingService {
                 // swallow socket event errors; list will reconcile on next fetch
             }
         };
-        // Listen for new messages (IDs-only strategy: fetch recent window)
-        socketService.on('newMessage', async (data) => {
-            const { conversationId, created_at } = data || {};
-            if (!conversationId) return;
-            const isSelected = (messagingStore.selectedConversationId === String(conversationId));
-            await applyMessageEvent(conversationId, { createdAt: created_at, isSelected });
-        });
 
-        // Listen for message sent confirmations: refresh recent window if open
-        socketService.on('messageSent', async (data) => {
-            const { conversationId, created_at } = data || {};
+        const handleSocketMessageEnvelope = async (eventType, data) => {
+            const { conversationId, created_at, messageId, message: socketMessage } = data || {};
             if (!conversationId) return;
-            const isSelected = (messagingStore.selectedConversationId === String(conversationId));
-            if (isSelected) {
-                const response = await api.messages.getMessages(conversationId, 50, 0);
-                const decryptedMessages = await this.decryptMessages(response.messages);
-                messagingStore.setMessages(conversationId, decryptedMessages);
-            } else {
-                const ts = created_at || new Date().toISOString();
-                messagingStore.updateConversation(conversationId, { last_message_created_at: ts });
+
+            // Event de-duplication by messageId
+            if (messageId) {
+                const lastSeen = messagingStore.getLastSeenMessageId(conversationId);
+                if (Number(messageId) <= Number(lastSeen)) return;
+                messagingStore.setLastSeenMessageId(conversationId, messageId);
             }
-        });
+
+            const isSelected = (messagingStore.selectedConversationId === String(conversationId));
+            if (isSelected && socketMessage) {
+                // Fast-path: decrypt and append without GET
+                try {
+                    const [decrypted] = await this.decryptMessages([socketMessage]);
+                    // Reconcile pending by clientId if present
+                    const clientId = socketMessage?.clientId || socketMessage?.client_id || data?.clientId || data?.client_id || null;
+                    let added = false;
+                    if (clientId) {
+                        added = messagingStore.ackPendingMessage(conversationId, String(clientId), decrypted);
+                    } else {
+                        added = messagingStore.addMessage(conversationId, decrypted);
+                    }
+                    if (added) {
+                        messagingStore.updateConversation(conversationId, {
+                            last_message_created_at: decrypted.created_at,
+                            last_message_encrypted: decrypted.encrypted_content,
+                            last_message_sender_id: decrypted.sender_id
+                        });
+                    }
+                } catch {
+                    await applyMessageEvent(conversationId, { createdAt: created_at, isSelected });
+                }
+            } else if (isSelected) {
+                // Refresh recent window if open
+                try {
+                    const response = await api.messages.getMessages(conversationId, 50, 0);
+                    const decryptedMessages = await this.decryptMessages(response.messages);
+                    messagingStore.setMessages(conversationId, decryptedMessages);
+                } catch {
+                    // swallow, next manual load will reconcile
+                }
+            } else {
+                // For messageSent (self-sent) on unselected, do not bump unread
+                const incrementUnread = eventType !== 'messageSent';
+                await applyMessageEvent(conversationId, { createdAt: created_at, isSelected, incrementUnread });
+            }
+
+            if (!isSelected) {
+                // Mark messages as stale so the next selection refetches
+                try { messagingStore.markConversationStale(conversationId); } catch {}
+            }
+        };
+
+        // Listen for new messages / message sent confirmations
+        socketService.on('newMessage', (d) => handleSocketMessageEnvelope('newMessage', d));
+        socketService.on('messageSent', (d) => handleSocketMessageEnvelope('messageSent', d));
 
         // Listen for read receipts
         socketService.on('messagesRead', (data) => {
@@ -84,22 +139,7 @@ class MessagingService {
             // Ensure user has encryption keys
             await keyManager.ensureKeys();
 
-            // Join messaging room for real-time updates (wait for socket connection)
-            const userData = this.getUserData();
-            if (userData && userData.userId) {
-                console.log(`Joining messaging room for user ${userData.userId}`);
-
-                // Try to join immediately, if socket not connected it will queue the emit
-                socketService.emit('join-messaging');
-
-                // Also listen for when socket connects to ensure we join
-                socketService.on('connect', () => {
-                    console.log(`Socket connected, ensuring messaging room join for user ${userData.userId}`);
-                    socketService.emit('join-messaging');
-                });
-            }
-
-            console.log('Messaging service initialized');
+            if (import.meta?.env?.DEV) console.log('Messaging service initialized');
         } catch (error) {
             console.error('Error initializing messaging service:', error);
             throw error;
@@ -111,10 +151,8 @@ class MessagingService {
      */
     getUserData() {
         try {
-            const token = localStorage.getItem('token');
-            if (!token) return null;
-
-            const payload = JSON.parse(atob(token.split('.')[1]));
+            const payload = getTokenData?.();
+            if (!payload) return null;
             return { userId: payload.userId, username: payload.username };
         } catch (error) {
             return null;
@@ -189,7 +227,7 @@ class MessagingService {
             // Decrypt messages
             const decryptedMessages = await this.decryptMessages(response.messages);
 
-            if (offset === 0) {
+            if (offset === 0 && !before) {
                 // Replace if getting latest messages
                 messagingStore.setMessages(conversationId, decryptedMessages);
             } else {
@@ -198,6 +236,14 @@ class MessagingService {
                     messagingStore.addMessage(conversationId, message);
                 }
             }
+            // Update pagination meta
+            const hasMore = (decryptedMessages.length === limit);
+            const oldestTime = decryptedMessages.length > 0 ? decryptedMessages[0]?.created_at || null : null;
+            messagingStore.updateMessagesMeta(conversationId, {
+                lastFetchedTs: Date.now(),
+                hasMore,
+                oldestTime
+            });
             return decryptedMessages;
         } catch (error) {
             console.error('Error getting messages:', error);
@@ -206,20 +252,69 @@ class MessagingService {
     }
 
     /**
+     * Load older messages for a conversation using pagination metadata
+     */
+    async loadOlder(conversationId, limit = 50) {
+        const meta = (messagingStore.messagesMeta || {})[String(conversationId)] || {};
+        const before = meta.oldestTime || null;
+        if (!before) return [];
+        return await this.getMessages(conversationId, limit, 0, before);
+    }
+
+    /**
      * Send an encrypted message
      */
     async sendMessage(conversationId, receiverId, message, messageType = 'text') {
+        // Small helper to attempt encryption, auto-bootstrap on sender, and optionally request peer bootstrap
+        const tryEncryptWithAutoBootstrap = async () => {
+            try {
+                return await signalAdapter.encrypt(conversationId, receiverId, message);
+            } catch (err) {
+                // If missing bundle on peer, request remote bootstrap and retry a couple times
+                const isApi = err && (err.name === 'ApiError' || err.status !== undefined);
+                const msg = String(err?.message || '');
+                const status = Number(err?.status || 0);
+                if (isApi && (status === 404 || msg.includes('No key bundle found'))) {
+                    try {
+                        // Ensure our own identity/prekeys are published now (sender-side)
+                        const { bootstrapSignalIfNeeded } = await import('./signalBootstrap.js');
+                        await bootstrapSignalIfNeeded();
+                    } catch {}
+                    // Ask the recipient to bootstrap via Socket.IO
+                    try { socketService.emit('e2ee-bootstrap-request', { targetUserId: receiverId }); } catch {}
+                    // Retry a few times with short delays to allow peer to publish
+                    for (let i = 0; i < 3; i++) {
+                        await new Promise(r => setTimeout(r, 800 + i * 400));
+                        try {
+                            const env = await signalAdapter.encrypt(conversationId, receiverId, message);
+                            return env;
+                        } catch (retryErr) {
+                            const rmsg = String(retryErr?.message || '');
+                            const rstatus = Number(retryErr?.status || 0);
+                            if (!(retryErr && (retryErr.name === 'ApiError' || retryErr.status !== undefined) && (rstatus === 404 || rmsg.includes('No key bundle found')))) {
+                                throw retryErr;
+                            }
+                        }
+                    }
+                }
+                throw err;
+            }
+        };
         try {
-            // Encrypt the message
-            const encryptedData = await keyManager.encryptMessage(message, receiverId);
+            // Use Signal adapter for encryption with auto-recovery behavior
+            const signalEnvelope = await tryEncryptWithAutoBootstrap();
+            // Generate client-side ID for optimistic reconciliation
+            const clientId = this._generateClientId();
 
-const response = await api.messages.sendMessage(conversationId, {
-                encryptedContent: encryptedData.encryptedContent,
+            const response = await api.messages.sendMessage(conversationId, {
+                encryptedContent: signalEnvelope.envelope,
                 receiverId: receiverId,
-                contentHash: encryptedData.contentHash,
-                receiverSessionKey: encryptedData.encryptedSessionKey,
-                senderSessionKey: encryptedData.senderSessionKey || null,
-                messageType: messageType
+                // Compute contentHash on plaintext for DB constraint compatibility
+                contentHash: await cryptoService.generateHash(message),
+                receiverSessionKey: null,
+                senderSessionKey: null,
+                messageType: messageType,
+                clientId
             });
 
             // Optimistic UI: insert the just-sent message immediately.
@@ -227,17 +322,19 @@ const response = await api.messages.sendMessage(conversationId, {
             try {
                 const userData = this.getUserData();
                 const optimistic = {
-                    id: response?.message?.id || Date.now(),
+                    id: response?.message?.id ? response.message.id : `c:${clientId}`,
                     conversation_id: conversationId,
                     sender_id: userData?.userId,
                     receiver_id: receiverId,
-                    encrypted_content: encryptedData.encryptedContent,
-                    sender_session_key: encryptedData.senderSessionKey || null,
-                    receiver_session_key: encryptedData.encryptedSessionKey,
+                    encrypted_content: signalEnvelope.envelope,
+                    sender_session_key: null,
+                    receiver_session_key: null,
                     created_at: new Date().toISOString(),
                     read_at: null,
                     decryptedContent: message,
-                    isDecrypted: true
+                    isDecrypted: true,
+                    status: response?.message?.id ? 'sent' : 'pending',
+                    clientId
                 };
                 messagingStore.addMessage(conversationId, optimistic);
             } catch (optErr) {
@@ -247,6 +344,12 @@ const response = await api.messages.sendMessage(conversationId, {
             return response.message;
         } catch (error) {
             console.error('Error sending message:', error);
+            // Provide a clearer error for UX when recipient is not yet provisioned
+            const msg = String(error?.message || '');
+            const status = Number(error?.status || 0);
+            if ((error && (error.name === 'ApiError' || error.status !== undefined)) && (status === 404 || msg.includes('No key bundle found'))) {
+                throw new Error('Recipient has not completed secure setup yet. We requested it automatically; please try again in a moment.');
+            }
             throw error;
         }
     }
@@ -321,7 +424,6 @@ const response = await api.messages.sendMessage(conversationId, {
             try {
                 // Determine which session key to use based on user role
                 const userData = this.getUserData();
-
                 const myId = userData ? Number(userData.userId) : NaN;
                 const senderId = Number(message.sender_id);
                 let sessionKey = (senderId === myId)
@@ -353,6 +455,7 @@ const response = await api.messages.sendMessage(conversationId, {
                           throw primaryErr;
                         }
                     }
+                    // Integrity: rely on AEAD (AES-GCM) during decrypt; no extra hash verification
 
                     decryptedMessages.push({
                         ...message,
@@ -360,12 +463,23 @@ const response = await api.messages.sendMessage(conversationId, {
                         isDecrypted: true
                     });
                 } else {
-                    // Messages without valid session keys are permanently lost due to key regeneration
-                    decryptedMessages.push({
-                        ...message,
-                        decryptedContent: '[Message encrypted with old keys - unable to decrypt]',
-                        isDecrypted: false
-                    });
+                    // Treat as Signal envelope when no legacy session keys are present
+                    try {
+                        const peerId = (Number(message.sender_id) === myId) ? Number(message.receiver_id) : Number(message.sender_id);
+                        const conv = message.conversation_id || message.conversationId || (message.conversation && (message.conversation.id || message.conversation.conversation_id)) || null;
+                        const plaintext = await signalAdapter.decrypt(conv, message.encrypted_content, peerId);
+                        decryptedMessages.push({
+                            ...message,
+                            decryptedContent: plaintext,
+                            isDecrypted: true
+                        });
+                    } catch (e) {
+                        decryptedMessages.push({
+                            ...message,
+                            decryptedContent: '[Encrypted message - decryption failed]',
+                            isDecrypted: false
+                        });
+                    }
                 }
             } catch (error) {
                 console.error('Error decrypting message:', message.id, error);
@@ -482,24 +596,16 @@ const response = await api.messages.sendMessage(conversationId, {
         if (!userData) return;
 
         const event = isTyping ? 'typing-start' : 'typing-stop';
-        if (socketService.state.connected.val) {
-            socketService.emit(event, { conversationId, userId: userData.userId });
-        } else {
-            // Defer until connected
-            socketService.on('connect', () => socketService.emit(event, { conversationId, userId: userData.userId }));
-        }
+        // Emit directly; socket service will queue when offline and flush on connect
+        socketService.emit(event, { conversationId, userId: userData.userId });
     }
 
     /**
      * Join conversation room for typing indicators
     */
     joinConversation(conversationId) {
-        if (socketService.state.connected.val) {
-            socketService.emit('join-conversation', conversationId);
-        } else {
-            // Ensure we join after connection
-            socketService.on('connect', () => socketService.emit('join-conversation', conversationId));
-        }
+        // Emit directly; socket service will queue when offline and flush on connect
+        socketService.emit('join-conversation', conversationId);
     }
 
     /**

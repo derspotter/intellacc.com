@@ -2,7 +2,8 @@ import van from 'vanjs-core';
 import { initializeStore } from './store';
 import { checkAuth, isLoggedInState } from './services/auth';
 import { initializeSocket } from './services/socket';
-import keyManager from './services/keyManager';
+import keyManager from './services/keyManager.js';
+import { bootstrapSignalIfNeeded } from './services/signalBootstrap.js';
 import { initIdleAutoLock } from './services/idleLock';
 import Router, { updatePageFromHash } from './router'; // Import updatePageFromHash
 
@@ -23,6 +24,9 @@ checkAuth();
       }
       // Start idle auto-lock when authenticated
       initIdleAutoLock();
+
+      // Auto-bootstrap Signal (identity/prekeys) in background
+      try { await bootstrapSignalIfNeeded(); } catch {}
     }
   } catch (e) {
     console.warn('Key bootstrap skipped/failed:', e?.message || e);
