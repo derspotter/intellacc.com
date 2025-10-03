@@ -19,6 +19,9 @@ logs/
 # Screenshots
 screenshots/
 
+# Local research artifacts
+recherche/
+
 # Docker
 docker-compose.override.yml
 
