@@ -1,4 +1,4 @@
-// frontend/src/services/signalStorage.js
+// frontend/src/services/messaging-legacy/signalStorage.js
 // Minimal, swappable storage for Signal identity/prekeys/sessions.
 // Uses in-memory fallback for tests; IndexedDB hooks can be added incrementally.
 

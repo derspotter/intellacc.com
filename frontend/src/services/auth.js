@@ -120,7 +120,7 @@ export async function login(email, password) {
 
     // Proactively bootstrap Signal identity/prekeys after login (non-blocking)
     try {
-      const { bootstrapSignalIfNeeded } = await import('./signalBootstrap.js');
+      const { bootstrapSignalIfNeeded } = await import('./messaging-legacy/signalBootstrap.js');
       await bootstrapSignalIfNeeded();
     } catch (e) {
       console.warn('Signal bootstrap after login skipped:', e?.message || e);

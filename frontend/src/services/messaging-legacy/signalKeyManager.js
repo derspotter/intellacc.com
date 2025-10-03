@@ -1,7 +1,7 @@
-// frontend/src/services/signalKeyManager.js
+// frontend/src/services/messaging-legacy/signalKeyManager.js
 // Scaffolding for Signal (libsignal) key provisioning/publish/fetch
 
-import api from './api.js';
+import api from '../api.js';
 import signalLib from './signalLib.js';
 
 const DEFAULT_DEVICE_ID = 'default';

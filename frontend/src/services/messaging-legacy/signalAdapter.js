@@ -1,4 +1,4 @@
-// frontend/src/services/signalAdapter.js
+// frontend/src/services/messaging-legacy/signalAdapter.js
 // Thin adapter to route messaging through Signal sessions when enabled
 
 import signalSessionManager from './signalSessionManager.js';
@@ -26,4 +26,3 @@ const signalAdapter = {
 };
 
 export default signalAdapter;
-

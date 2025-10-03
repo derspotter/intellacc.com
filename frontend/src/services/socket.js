@@ -159,7 +159,7 @@ function setupSocketHandlers() {
     // Proactively ensure E2EE identity/prekeys are published on every connect
     (async () => {
       try {
-        const { bootstrapSignalIfNeeded } = await import('./signalBootstrap.js');
+        const { bootstrapSignalIfNeeded } = await import('./messaging-legacy/signalBootstrap.js');
         await bootstrapSignalIfNeeded();
       } catch {}
     })();
@@ -295,7 +295,7 @@ function setupSocketHandlers() {
   socket.on('e2ee-bootstrap-trigger', async (data) => {
     try {
       if (import.meta?.env?.DEV) console.log('[Socket] e2ee-bootstrap-trigger received:', data);
-      const { bootstrapSignalIfNeeded } = await import('./signalBootstrap.js');
+      const { bootstrapSignalIfNeeded } = await import('./messaging-legacy/signalBootstrap.js');
       await bootstrapSignalIfNeeded();
       // Optionally notify requester to retry sooner
       const notifyUserId = data?.fromUserId;

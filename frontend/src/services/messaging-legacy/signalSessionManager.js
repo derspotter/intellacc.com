@@ -1,4 +1,4 @@
-// frontend/src/services/signalSessionManager.js
+// frontend/src/services/messaging-legacy/signalSessionManager.js
 // Scaffolding for Signal session management (ensureSession/encrypt/decrypt)
 
 import signalLib from './signalLib.js';

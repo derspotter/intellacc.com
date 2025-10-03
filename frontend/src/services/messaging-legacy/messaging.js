@@ -1,13 +1,13 @@
-// frontend/src/services/messaging.js
+// frontend/src/services/messaging-legacy/messaging.js
 // Frontend messaging service for end-to-end encrypted messaging
 
-import api from './api.js';
-import keyManager from './keyManager.js';
-import socketService from './socket.js';
-import messagingStore from '../stores/messagingStore.js';
-import cryptoService from './crypto.js';
+import api from '../api.js';
+import keyManager from '../keyManager.js';
+import socketService from '../socket.js';
+import messagingStore from '../../stores/messagingStore.js';
+import cryptoService from '../crypto.js';
 import signalAdapter from './signalAdapter.js';
-import { getTokenData } from './auth.js';
+import { getTokenData } from '../auth.js';
 // No pairKey work in service; store normalizes
 
 /**

@@ -1,6 +1,6 @@
-// frontend/src/services/signalIndexedDB.js
+// frontend/src/services/messaging-legacy/signalIndexedDB.js
 // Lightweight IndexedDB adapter for Signal identity, prekeys, and session state.
-import cryptoService from './crypto.js';
+import cryptoService from '../crypto.js';
 
 const DB_NAME = 'signal_store';
 const DB_VERSION = 1;

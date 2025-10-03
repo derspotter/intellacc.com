@@ -1,4 +1,4 @@
-// frontend/src/services/signalLib.js
+// frontend/src/services/messaging-legacy/signalLib.js
 // Wrapper around @signalapp/libsignal-client (WASM). Falls back to placeholders so the app keeps working.
 
 let _lib = null;

@@ -3,7 +3,7 @@ import { initializeStore } from './store';
 import { checkAuth, isLoggedInState } from './services/auth';
 import { initializeSocket } from './services/socket';
 import keyManager from './services/keyManager.js';
-import { bootstrapSignalIfNeeded } from './services/signalBootstrap.js';
+import { bootstrapSignalIfNeeded } from './services/messaging-legacy/signalBootstrap.js';
 import { initIdleAutoLock } from './services/idleLock';
 import Router, { updatePageFromHash } from './router'; // Import updatePageFromHash
 

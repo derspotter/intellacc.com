@@ -2,7 +2,7 @@
 import van from 'vanjs-core';
 import * as vanX from 'vanjs-ext';
 const { div, h1, h2, h3, button, input, span, p, ul, li, textarea, form, i } = van.tags;
-import messagingService from '../services/messaging.js';
+import messagingService from '../services/messaging-legacy/messaging.js';
 import { getUserId as authGetUserId } from '../services/auth.js';
 import messagingStore from '../stores/messagingStore.js';
 // Rendering uses store projections; no pair key or recomputed names

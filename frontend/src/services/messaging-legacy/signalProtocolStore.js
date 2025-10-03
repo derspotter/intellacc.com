@@ -1,4 +1,4 @@
-// frontend/src/services/signalProtocolStore.js
+// frontend/src/services/messaging-legacy/signalProtocolStore.js
 // Minimal Signal protocol store facade mapping to our storage adapters.
 // Mirrors the common libsignal store shape to ease wiring with @signalapp/libsignal-client.
 

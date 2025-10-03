@@ -1,10 +1,10 @@
-// frontend/src/services/signalBootstrap.js
+// frontend/src/services/messaging-legacy/signalBootstrap.js
 // Automatic, background bootstrap for Signal-style E2EE (no UI)
 
 import signalKeyManager, { generateAndPublishIdentity, topUpPrekeysIfNeeded } from './signalKeyManager.js';
 import { identityStore } from './signalStorage.js';
-import api from './api.js';
-import { getUserId } from './auth.js';
+import api from '../api.js';
+import { getUserId } from '../auth.js';
 
 function b64rand(len = 32) {
   const a = new Uint8Array(len);
