@@ -325,6 +325,12 @@ export const api = {
     calculateTimeWeights: () => 
       request('/scoring/time-weights', { method: 'POST' })
   },
+
+  // Weekly assignment endpoints
+  weekly: {
+    getUserStatus: (userId) =>
+      request(`/weekly/user/${userId}/status`)
+  },
   
   // Leaderboard endpoints (direct database queries for performance)
   leaderboard: {

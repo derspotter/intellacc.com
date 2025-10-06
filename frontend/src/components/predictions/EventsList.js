@@ -134,8 +134,16 @@ export default function EventsList() {
         return;
       }
 
-      const response = await api.get(`/weekly/user/${userId}/status`);
-      const assignment = response.data;
+      const response = await api.weekly.getUserStatus(userId);
+
+      if (!response?.success) {
+        weeklyError.val = response?.error || 'Failed to load weekly assignment';
+        weeklyAssignment.val = null;
+        weeklyLoading.val = false;
+        return;
+      }
+
+      const assignment = response.assignment || null;
       
       if (assignment && assignment.event_id) {
         // Find the corresponding event from our events list

@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS events (
     numerical_outcome DECIMAL(15,6) -- For resolved numerical events
 );
 
+-- Backfill category column for existing deployments
+ALTER TABLE events ADD COLUMN IF NOT EXISTS category VARCHAR(100);
+
 -- User visibility score table
 CREATE TABLE IF NOT EXISTS user_visibility_score (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -176,9 +179,31 @@ CREATE INDEX IF NOT EXISTS idx_predictions_type ON predictions(prediction_type);
 CREATE INDEX IF NOT EXISTS idx_predictions_log_loss ON predictions(raw_log_loss);
 CREATE INDEX IF NOT EXISTS idx_predictions_prob_vector ON predictions USING GIN(prob_vector);
 
--- Indexes for events
-CREATE INDEX IF NOT EXISTS idx_events_category ON events(category);
-CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'events'
+          AND column_name = 'category'
+    ) THEN
+        CREATE INDEX IF NOT EXISTS idx_events_category ON events(category);
+    END IF;
+END
+$$;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'events'
+          AND column_name = 'event_type'
+    ) THEN
+        CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+    END IF;
+END
+$$;
 
 -- Indexes for notifications
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
@@ -216,10 +241,12 @@ EXECUTE FUNCTION update_post_like_count();
 -- CONSTRAINTS --
 
 -- Add constraint to prevent self-notifications
+ALTER TABLE notifications DROP CONSTRAINT IF EXISTS check_no_self_notification;
 ALTER TABLE notifications ADD CONSTRAINT check_no_self_notification 
     CHECK (user_id != actor_id);
 
 -- Add constraint to prevent self-follows
+ALTER TABLE follows DROP CONSTRAINT IF EXISTS check_no_self_follow;
 ALTER TABLE follows ADD CONSTRAINT check_no_self_follow
     CHECK (follower_id != following_id);
 
@@ -263,9 +290,9 @@ CREATE TABLE IF NOT EXISTS market_updates (
 );
 
 -- Create indexes for market_updates
-CREATE INDEX idx_market_updates_user ON market_updates(user_id);
-CREATE INDEX idx_market_updates_event ON market_updates(event_id);
-CREATE INDEX idx_market_updates_created ON market_updates(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_market_updates_user ON market_updates(user_id);
+CREATE INDEX IF NOT EXISTS idx_market_updates_event ON market_updates(event_id);
+CREATE INDEX IF NOT EXISTS idx_market_updates_created ON market_updates(created_at DESC);
 
 -- Track user share holdings
 CREATE TABLE IF NOT EXISTS user_shares (
@@ -278,7 +305,7 @@ CREATE TABLE IF NOT EXISTS user_shares (
 );
 
 -- Create index for user_shares
-CREATE INDEX idx_user_shares_event ON user_shares(event_id);
+CREATE INDEX IF NOT EXISTS idx_user_shares_event ON user_shares(event_id);
 
 -- Create a trigger to update last_updated timestamp
 CREATE OR REPLACE FUNCTION update_user_shares_timestamp()
@@ -289,6 +316,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS user_shares_update_timestamp ON user_shares;
 CREATE TRIGGER user_shares_update_timestamp
     BEFORE UPDATE ON user_shares
     FOR EACH ROW
