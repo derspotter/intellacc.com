@@ -67,7 +67,8 @@
   - `sendCommitBundle` → `POST /api/mls/commit`: persists bundle, queues Socket.IO fan-out (`mls:commit`).
   - `sendMessage` → `POST /api/mls/message`: stores ciphertext, emits `mls:message` with conversation + epoch metadata.
   - Key-package upload → `POST /api/mls/key-packages`: replaces stored packages per (userId, clientId, ciphersuite).
-- [ ] `prepareForTransport` → `POST /api/mls/history-secret`: accept history secret payload and respond with delivery hints/IDs.
+  - History secret placeholder → `POST /api/mls/history-secret`: validates membership + echoes `data` for local transport until DS forwarding is implemented.
+- [ ] `prepareForTransport` → enhance `/api/mls/history-secret` to persist and fan-out history secrets once backend fan-out is available.
 - [ ] Build a fan-out worker that drains pending MLS messages and pushes them to each participant (`messaging:${userId}` rooms) while tagging payloads with `messageId`, `clientId`, and epoch.
 - [ ] Gate every endpoint with JWT auth → MLS identity mapping; deny requests for non-members and log anomalies.
 
@@ -172,3 +173,4 @@
 4. Track `mls_keypackages` table (user_id, client_id, ciphersuite, payload, inserted_at). Consider TTL cleanup job.
 5. Start with Basic credentials only; document future step for credential provisioning when backend signer is available.
 6. Keep removal key concept as a “future enhancement” (document in wire-messaging.md) but don’t implement yet.
+7. Manual smoke test script (`backend/scripts/smokeMls.js`) hits `/api/mls/key-packages`, `/api/mls/commit`, `/api/mls/message`, and `/api/mls/history-secret`. Provide `--token`, `--conversation`, and `--client`.

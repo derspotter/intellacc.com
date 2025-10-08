@@ -154,6 +154,7 @@ const mlsLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, standardHeaders: tr
 router.post('/mls/key-packages', authenticateJWT, mlsLimiter, mlsController.publishKeyPackages);
 router.post('/mls/commit', authenticateJWT, mlsLimiter, mlsController.postCommitBundle);
 router.post('/mls/message', authenticateJWT, mlsLimiter, mlsController.postApplicationMessage);
+router.post('/mls/history-secret', authenticateJWT, mlsLimiter, mlsController.postHistorySecret);
 
 // Attachments (pre-signed URL scaffold)
 router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);

@@ -219,3 +219,58 @@ exports.postApplicationMessage = async (req, res) => {
     return res.status(500).json({ message: 'Failed to accept MLS message' });
   }
 };
+
+exports.postHistorySecret = async (req, res) => {
+  try {
+    const userId = normalizeUserId(req.user);
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const {
+      conversationId,
+      senderClientId,
+      data
+    } = req.body || {};
+
+    if (!data) {
+      return res.status(400).json({ message: 'data is required' });
+    }
+
+    let numericConversationId = null;
+    if (conversationId !== undefined && conversationId !== null) {
+      numericConversationId = Number(conversationId);
+      if (!Number.isInteger(numericConversationId)) {
+        return res.status(400).json({ message: 'conversationId must be an integer when provided' });
+      }
+      const isParticipant = await messagingService.checkConversationMembership(numericConversationId, userId);
+      if (!isParticipant) {
+        return res.status(403).json({ message: 'You are not a participant in this conversation' });
+      }
+    }
+
+    let historyBuffer;
+    try {
+      historyBuffer = decodeBase64Field(data, 'data');
+    } catch (err) {
+      return res.status(400).json({ message: err.message });
+    }
+
+    if (historyBuffer.length > (16 * 1024)) {
+      return res.status(413).json({ message: 'history secret too large' });
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug?.('[MLS] prepareForTransport stub handled', {
+        userId,
+        conversationId: numericConversationId,
+        senderClientId
+      });
+    }
+
+    return res.status(200).json({ data });
+  } catch (error) {
+    console.error('Error handling MLS history secret:', error);
+    return res.status(500).json({ message: 'Failed to process history secret' });
+  }
+};

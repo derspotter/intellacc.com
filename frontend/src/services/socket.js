@@ -212,6 +212,11 @@ function setupSocketHandlers() {
       const store = await getMessagingStore();
       if (payload?.conversationId != null) {
         store.markConversationStale(payload.conversationId);
+        store.setMlsPending(payload.conversationId, {
+          reason: 'commit',
+          senderClientId: payload?.senderClientId ?? null,
+          epoch: payload?.epoch ?? null
+        });
       }
     } catch (err) {
       if (import.meta?.env?.DEV) console.warn('Failed to mark conversation stale for MLS commit', err);
@@ -225,6 +230,11 @@ function setupSocketHandlers() {
       const store = await getMessagingStore();
       if (payload?.conversationId != null) {
         store.markConversationStale(payload.conversationId);
+        store.setMlsPending(payload.conversationId, {
+          reason: 'message',
+          senderClientId: payload?.senderClientId ?? null,
+          epoch: payload?.epoch ?? null
+        });
       }
     } catch (err) {
       if (import.meta?.env?.DEV) console.warn('Failed to mark conversation stale for MLS message', err);

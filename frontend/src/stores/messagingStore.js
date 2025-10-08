@@ -25,6 +25,7 @@ const messagingStore = vanX.reactive({
   messagesLoading: false,
   error: '',
   eventsMeta: {},
+  mlsMeta: {},
   
   // Typing indicators - use array instead of Set for VanX compatibility
   typingUsers: [],
@@ -241,6 +242,17 @@ const messagingStore = vanX.reactive({
     const prev = meta[key] || {};
     meta[key] = { ...prev, lastFetchedTs: 0 };
     messagingStore.messagesMeta = meta;
+  },
+
+  setMlsPending(conversationId, info = {}) {
+    const key = String(conversationId);
+    const meta = { ...(messagingStore.mlsMeta || {}) };
+    meta[key] = {
+      receivedAt: Date.now(),
+      ...meta[key],
+      ...info
+    };
+    messagingStore.mlsMeta = meta;
   },
 
   getLastSeenMessageId(conversationId) {
