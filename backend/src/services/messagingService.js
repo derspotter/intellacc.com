@@ -13,6 +13,19 @@ function setSocketIo(socketIo) {
   io = socketIo;
 }
 
+function emitToUsers(eventName, payload, userIds = []) {
+  if (!io) return;
+  for (const userId of userIds) {
+    if (userId == null) continue;
+    io.to(`messaging:${userId}`).emit(eventName, payload);
+  }
+}
+
+function emitToConversationRoom(conversationId, eventName, payload) {
+  if (!io) return;
+  io.to(`conversation:${conversationId}`).emit(eventName, payload);
+}
+
 /**
  * Check if a user is a participant in a conversation
  * @param {number} conversationId
@@ -466,6 +479,8 @@ async function searchConversations(userId, searchTerm, limit = 10) {
 
 module.exports = {
   setSocketIo,
+  emitToUsers,
+  emitToConversationRoom,
   checkConversationMembership,
   getOrCreateConversation,
   getUserConversations,

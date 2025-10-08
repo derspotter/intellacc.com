@@ -54,17 +54,20 @@
 ### Phase 1 — Frontend Bootstrap (Weeks 2-3)
 - [ ] Call `await initWasmModule(import.meta.env.VITE_CORE_CRYPTO_WASM_BASE ?? undefined)` during app bootstrap; emit telemetry if the WASM load fails.
 - [ ] Initialize the keystore via `openDatabase({ databaseName, key: DatabaseKey.Bytes(secret) })`; store the key securely (passphrase or OS keystore) and add unlock UX.
+  - `ensureMlsBootstrap()` now calls `openDatabase` with a locally cached random key and opportunistically publishes generated keypackages via `/api/mls/key-packages`; passphrase storage/unlock flow remains TODO (`VITE_MLS_KEYPACKAGE_TARGET`, `VITE_MLS_KEYPACKAGE_UPLOAD_INTERVAL_MS` tune thresholds).
 - [ ] Inside `CoreCrypto.transaction`, flow through `ctx.mlsInit`, `ctx.provisionCredentialRequest`, backend signature, and `ctx.completeCredentialProvisioning` to finish credential bootstrap.
 - [ ] Register logging hooks using `setLogger` and `setMaxLogLevel` so MLS logs surface in dev builds (mapping to our console/logger service).
 - [ ] Extend `messagingStore` to track `encryptionMode: 'mls'`, `conversationEpoch`, and `mlsCiphersuite` (via `coreCrypto.conversationEpoch` / `conversationCiphersuite`).
 - [ ] Replace legacy encrypt/decrypt in `messaging-legacy/messaging.js` with MLS paths: `ctx.encryptMessage(conversationId, payload)` before hitting the transport and `ctx.decryptMessage(conversationId, ciphertext)` on receipt (guarded by the feature flag for rollback).
+  - Socket layer now listens for `mls:commit`/`mls:message` events and marks conversations stale pending MLS-aware message rendering.
 
 ### Phase 2 — Backend Transport (Weeks 3-4)
-- [ ] Create Postgres tables mirroring `CommitBundle` (`commit BYTEA`, `welcome BYTEA`, `group_info_encryption_type`, `group_info_ratchet_tree_type`, `group_info_payload BYTEA`, `encrypted_message BYTEA`, `epoch INT`, `sender_client_id TEXT`).
-- [ ] Implement API handlers that satisfy the `MlsTransport` callbacks:
-  - `sendCommitBundle` → `POST /api/mls/commit`: persist bundle, queue recipients, broadcast via Socket.IO.
-  - `sendMessage` → `POST /api/mls/message`: store ciphertext, emit to conversation sockets with metadata (conversationId, epoch, clientId).
-  - `prepareForTransport` → `POST /api/mls/history-secret`: accept history secret payload and respond with delivery hints/IDs.
+- [x] Create Postgres tables mirroring `CommitBundle` (`mls_commit_bundles`), key packages (`mls_key_packages`), and raw MLS application ciphertext (`mls_messages`).
+- [x] Implement API handlers that satisfy the `MlsTransport` callbacks:
+  - `sendCommitBundle` → `POST /api/mls/commit`: persists bundle, queues Socket.IO fan-out (`mls:commit`).
+  - `sendMessage` → `POST /api/mls/message`: stores ciphertext, emits `mls:message` with conversation + epoch metadata.
+  - Key-package upload → `POST /api/mls/key-packages`: replaces stored packages per (userId, clientId, ciphersuite).
+- [ ] `prepareForTransport` → `POST /api/mls/history-secret`: accept history secret payload and respond with delivery hints/IDs.
 - [ ] Build a fan-out worker that drains pending MLS messages and pushes them to each participant (`messaging:${userId}` rooms) while tagging payloads with `messageId`, `clientId`, and epoch.
 - [ ] Gate every endpoint with JWT auth → MLS identity mapping; deny requests for non-members and log anomalies.
 
@@ -149,3 +152,23 @@
 - Keystore details: `https://wireapp.github.io/core-crypto/KEYSTORE_IMPLEMENTATION.html`
 - MLS RFC 9420: `https://datatracker.ietf.org/doc/rfc9420/`
 - Legacy context: `docs/messaging-improvements.md`
+
+## Upstream Wire References
+*(Future work reminders: stage/push current MLS changes; teach messaging store/pages to process MLS ciphertext once backend decrypt APIs land; add `/api/mls/history-secret`.)*
+
+### Wire Server MLS Insights (2025-10-08)
+- **Deployment prerequisites**: Wire enables MLS by providing removal keys (one per supported ciphersuite) via `galley.secrets.mlsPrivateKeys.removal` and toggling `brig.config.optSettings.setEnableMLS`. Clients opt-in via `FEATURE_ENABLE_MLS`. We can omit removal keys for now (no server-side removals), but note the need if we implement admin-driven member removal later.
+- **Key package lifecycle**: Wire offers `/mls/key-packages/self/:client` (PUT) to replace a client’s key packages in bulk and `/mls/key-packages/claim` (POST) for DS to claim packages when other clients join. Our lighter setup can expose `POST /api/mls/key-packages` for uploads and reserve `claim` for future fan-out.
+- **Transport API**: Commit bundles are sent to `/mls/commit-bundles` and application messages to `/mls/messages`. Bundles include TLS-serialised welcome, group info, and optional first message. We need at least `POST /api/mls/commit` and `POST /api/mls/message` with analogous payloads, but we can skip history/propagation complexity initially.
+- **Credential provisioning**: Wire’s backend signs credential requests and handles ACME flows (E2E identity). For MVP we keep `CredentialType.Basic` only; no signing service needed yet, but docs reference the eventual flow (ctx.provisionCredentialRequest → backend signing → ctx.completeCredentialProvisioning).
+- **State management**: Brig/Galley persist MLS group state: conversation-member mapping, key packages, proposals, commit locks. Our minimal version only needs tables for key packages, commit/message blobs, and perhaps epoch metadata.
+- **Removal keys**: They use the helm config to store removal private keys for external remove proposals. Not required for immediate prototype but worth documenting if we add admin removals.
+- **Docs location**: `docs/src/understand/mls.md` (in wire-server) summarises the deployment requirements; nothing about client transaction specifics, so we rely on code to infer API shape.
+
+### Proposed Adaptations for Intellacc
+1. Add `/api/mls/key-packages` (POST) to accept `{ ciphersuite, credentialType, keyPackages: base64[] }`. Store rows with userId, clientId, ciphersuite, and expiry metadata. Return 204.
+2. Add `/api/mls/commit` accepting TLS-serialised commit bundle with optional welcome/message. Persist blob, enqueue socket fan-out to conversation participants.
+3. Add `/api/mls/message` accepting application ciphertext payload with epoch + sender client ID; dispatch via Socket.IO.
+4. Track `mls_keypackages` table (user_id, client_id, ciphersuite, payload, inserted_at). Consider TTL cleanup job.
+5. Start with Basic credentials only; document future step for credential provisioning when backend signer is available.
+6. Keep removal key concept as a “future enhancement” (document in wire-messaging.md) but don’t implement yet.

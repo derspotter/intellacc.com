@@ -28,7 +28,9 @@ const eventHandlers = {
   messageSent: [],
   messagesRead: [],
   messageDeleted: [],
-  'user-typing': []
+  'user-typing': [],
+  'mls:commit': [],
+  'mls:message': []
 };
 
 /**
@@ -57,6 +59,14 @@ export function registerSocketEventHandler(eventName, handler) {
 let socket = null;
 // Queue for emits attempted while disconnected
 const _emitQueue = [];
+let messagingStorePromise = null;
+
+async function getMessagingStore() {
+  if (!messagingStorePromise) {
+    messagingStorePromise = import('../stores/messagingStore.js').then(mod => mod.default);
+  }
+  return messagingStorePromise;
+}
 
 /**
  * Initialize Socket.IO connection
@@ -194,6 +204,32 @@ function setupSocketHandlers() {
     
     // Add error message
     addMessage(`Connection error: ${error.message}`);
+  });
+  
+  socket.on('mls:commit', async (payload) => {
+    if (import.meta?.env?.DEV) console.debug('MLS commit received', payload);
+    try {
+      const store = await getMessagingStore();
+      if (payload?.conversationId != null) {
+        store.markConversationStale(payload.conversationId);
+      }
+    } catch (err) {
+      if (import.meta?.env?.DEV) console.warn('Failed to mark conversation stale for MLS commit', err);
+    }
+    notifyHandlers('mls:commit', payload);
+  });
+
+  socket.on('mls:message', async (payload) => {
+    if (import.meta?.env?.DEV) console.debug('MLS message received', payload);
+    try {
+      const store = await getMessagingStore();
+      if (payload?.conversationId != null) {
+        store.markConversationStale(payload.conversationId);
+      }
+    } catch (err) {
+      if (import.meta?.env?.DEV) console.warn('Failed to mark conversation stale for MLS message', err);
+    }
+    notifyHandlers('mls:message', payload);
   });
   
   // Broadcast message event

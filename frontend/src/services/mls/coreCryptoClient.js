@@ -5,19 +5,28 @@ import {
   CoreCrypto,
   DatabaseKey,
   ClientId,
+  CredentialType,
   MlsTransportData,
   ciphersuiteDefault,
-  initWasmModule
+  initWasmModule,
+  openDatabase
 } from '@wireapp/core-crypto';
+import { api, ApiError } from '../api.js';
 
 const FEATURE_FLAG = String(import.meta.env.VITE_ENABLE_MLS ?? '').toLowerCase() === 'true';
 const WASM_BASE = import.meta.env.VITE_CORE_CRYPTO_WASM_BASE;
 const DATABASE_NAME = 'intellacc-mls-keystore';
 const KEY_STORAGE_KEY = 'intellacc.mls.databaseKey';
 const CLIENT_ID_STORAGE_KEY = 'intellacc.mls.clientId';
+const KEYPACKAGE_UPLOAD_TS_KEY = 'intellacc.mls.keypackages.lastUploadTs';
+
+const DEFAULT_CIPHERSUITE = ciphersuiteDefault();
+const DEFAULT_KEYPACKAGE_TARGET = Number(import.meta.env.VITE_MLS_KEYPACKAGE_TARGET ?? 5);
+const KEYPACKAGE_UPLOAD_MIN_INTERVAL_MS = Number(import.meta.env.VITE_MLS_KEYPACKAGE_UPLOAD_INTERVAL_MS ?? (6 * 60 * 60 * 1000)); // default 6h
 
 let coreCryptoInstance = null;
 let initPromise = null;
+let bootstrapPromise = null;
 
 const getCrypto = () => (typeof window !== 'undefined' ? window.crypto : null);
 const getStorage = () => (typeof window !== 'undefined' ? window.localStorage : null);
@@ -108,13 +117,19 @@ const bootstrapCoreCrypto = async () => {
     await initWasmModule();
   }
 
-  const databaseKey = new DatabaseKey(getOrCreateDatabaseKey());
+  const keyMaterial = getOrCreateDatabaseKey();
+
+  // Ensure the encrypted keystore exists before initializing CoreCrypto. `openDatabase`
+  // consumes the provided DatabaseKey instance, so instantiate it with a copy of the bytes.
+  await openDatabase(DATABASE_NAME, new DatabaseKey(keyMaterial.slice()));
+
+  const databaseKey = new DatabaseKey(keyMaterial.slice());
   const clientId = new ClientId(getOrCreateClientId());
   const params = {
     databaseName: DATABASE_NAME,
     key: databaseKey,
     clientId,
-    ciphersuites: [ciphersuiteDefault()]
+    ciphersuites: [DEFAULT_CIPHERSUITE]
   };
 
   const instance = await CoreCrypto.init(params);
@@ -149,4 +164,79 @@ export const resetCoreCrypto = async () => {
   }
   coreCryptoInstance = null;
   initPromise = null;
+};
+
+const shouldSkipKeyPackageUpload = () => {
+  const storage = getStorage();
+  if (!storage) return false;
+  const last = Number(storage.getItem(KEYPACKAGE_UPLOAD_TS_KEY) || 0);
+  if (!last) return false;
+  return (Date.now() - last) < KEYPACKAGE_UPLOAD_MIN_INTERVAL_MS;
+};
+
+const markKeyPackagesUploaded = () => {
+  const storage = getStorage();
+  if (!storage) return;
+  storage.setItem(KEYPACKAGE_UPLOAD_TS_KEY, String(Date.now()));
+};
+
+export const ensureMlsBootstrap = async () => {
+  if (!FEATURE_FLAG) return null;
+  if (bootstrapPromise) return bootstrapPromise;
+  bootstrapPromise = (async () => {
+    const coreCrypto = await getCoreCrypto();
+    if (!coreCrypto) return null;
+
+    const clientIdBytes = getOrCreateClientId();
+    const clientIdB64 = bytesToBase64(clientIdBytes);
+    const shouldPublish = !shouldSkipKeyPackageUpload();
+    const result = await coreCrypto.transaction(async (ctx) => {
+      // Touch the client's public key so that a basic credential exists.
+      await ctx.clientPublicKey(DEFAULT_CIPHERSUITE, CredentialType.Basic);
+
+      const currentCountBigInt = await ctx.clientValidKeypackagesCount(DEFAULT_CIPHERSUITE, CredentialType.Basic);
+      const currentCount = Number(currentCountBigInt ?? 0);
+      const target = Math.max(DEFAULT_KEYPACKAGE_TARGET, 1);
+      if (currentCount >= target && !shouldPublish) {
+        return { generated: [] };
+      }
+
+      const amountRequested = Math.max(target - currentCount, shouldPublish ? target : 0);
+      if (amountRequested <= 0) {
+        return { generated: [] };
+      }
+
+      const generated = await ctx.clientKeypackages(DEFAULT_CIPHERSUITE, CredentialType.Basic, amountRequested);
+      return { generated };
+    });
+
+    const generated = result?.generated || [];
+    if (generated.length && shouldPublish) {
+      const payload = generated.map(bytesToBase64);
+      try {
+        await api.mls.publishKeyPackages({
+          clientId: clientIdB64,
+          ciphersuite: DEFAULT_CIPHERSUITE,
+          credentialType: 'basic',
+          keyPackages: payload
+        });
+        markKeyPackagesUploaded();
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          // Backend not ready yet; surface as a warning but don't fail the bootstrap.
+          if (import.meta?.env?.DEV) {
+            console.warn('[MLS] Key package publish endpoint missing (404).', error);
+          }
+        } else {
+          console.warn('[MLS] Failed to publish key packages:', error?.message || error);
+          throw error;
+        }
+      }
+    }
+    return null;
+  })().catch((err) => {
+    bootstrapPromise = null;
+    throw err;
+  });
+  return bootstrapPromise;
 };

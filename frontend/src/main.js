@@ -6,7 +6,7 @@ import keyManager from './services/keyManager.js';
 import { bootstrapSignalIfNeeded } from './services/messaging-legacy/signalBootstrap.js';
 import { initIdleAutoLock } from './services/idleLock';
 import Router, { updatePageFromHash } from './router'; // Import updatePageFromHash
-import { getCoreCrypto, isMlsEnabled } from './services/mls/coreCryptoClient.js';
+import { ensureMlsBootstrap, isMlsEnabled } from './services/mls/coreCryptoClient.js';
 
 // Initialize store before anything else
 initializeStore();
@@ -31,7 +31,7 @@ checkAuth();
 
       if (isMlsEnabled()) {
         // Kick off experimental MLS bootstrap behind the feature flag; failures are non-fatal for now.
-        getCoreCrypto().catch(err => {
+        ensureMlsBootstrap().catch(err => {
           console.warn('MLS bootstrap failed:', err?.message || err);
         });
       }

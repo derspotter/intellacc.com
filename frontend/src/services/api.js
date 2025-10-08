@@ -7,7 +7,7 @@ const API_BASE = '/api';
 /**
  * Custom API error class
  */
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(status, message, data = {}) {
     super(message);
     this.status = status;
@@ -330,6 +330,12 @@ export const api = {
   weekly: {
     getUserStatus: (userId) =>
       request(`/weekly/user/${userId}/status`)
+  },
+
+  // MLS / Core Crypto endpoints
+  mls: {
+    publishKeyPackages: (body) =>
+      request('/mls/key-packages', { method: 'POST', body })
   },
   
   // Leaderboard endpoints (direct database queries for performance)

@@ -12,6 +12,7 @@ const notificationController = require('../controllers/notificationController');
 const weeklyAssignmentController = require('../controllers/weeklyAssignmentController');
 const keyManagementController = require('../controllers/keyManagementController');
 const messagingController = require('../controllers/messagingController');
+const mlsController = require('../controllers/mlsController');
 const authenticateJWT = require("../middleware/auth");
 const rateLimit = require('express-rate-limit');
 const attachmentsController = require('../controllers/attachmentsController');
@@ -147,6 +148,12 @@ router.post("/messages/conversations/:conversationId/messages", authenticateJWT,
 router.post("/messages/read", authenticateJWT, markReadLimiter, messagingController.markAsRead);
 router.get("/messages/unread-count", authenticateJWT, messagingController.getUnreadCount);
 router.delete("/messages/:messageId", authenticateJWT, messagingController.deleteMessage);
+
+// MLS endpoints (experimental)
+const mlsLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+router.post('/mls/key-packages', authenticateJWT, mlsLimiter, mlsController.publishKeyPackages);
+router.post('/mls/commit', authenticateJWT, mlsLimiter, mlsController.postCommitBundle);
+router.post('/mls/message', authenticateJWT, mlsLimiter, mlsController.postApplicationMessage);
 
 // Attachments (pre-signed URL scaffold)
 router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);
