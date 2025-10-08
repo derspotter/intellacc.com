@@ -166,14 +166,6 @@ function setupSocketHandlers() {
     // Join rooms based on authenticated user
     joinUserRooms();
 
-    // Proactively ensure E2EE identity/prekeys are published on every connect
-    (async () => {
-      try {
-        const { bootstrapSignalIfNeeded } = await import('./messaging-legacy/signalBootstrap.js');
-        await bootstrapSignalIfNeeded();
-      } catch {}
-    })();
-
     // Flush any queued emits from offline period
     try {
       while (_emitQueue.length > 0) {
@@ -337,27 +329,6 @@ function setupSocketHandlers() {
     notifyHandlers('user-typing', data);
   });
 
-  // E2EE bootstrap flow: when someone needs our bundle, auto-bootstrap
-  socket.on('e2ee-bootstrap-trigger', async (data) => {
-    try {
-      if (import.meta?.env?.DEV) console.log('[Socket] e2ee-bootstrap-trigger received:', data);
-      const { bootstrapSignalIfNeeded } = await import('./messaging-legacy/signalBootstrap.js');
-      await bootstrapSignalIfNeeded();
-      // Optionally notify requester to retry sooner
-      const notifyUserId = data?.fromUserId;
-      if (notifyUserId) {
-        emit('e2ee-bootstrap-done', { notifyUserId });
-      }
-    } catch (e) {
-      console.warn('E2EE bootstrap trigger failed:', e?.message || e);
-    }
-  });
-
-  // Ack handler: allow clients to react immediately (handlers can subscribe if desired)
-  socket.on('e2ee-bootstrap-ack', (data) => {
-    if (import.meta?.env?.DEV) console.log('[Socket] e2ee-bootstrap-ack received:', data);
-    notifyHandlers('e2ee-bootstrap-ack', data);
-  });
 }
 
 /**

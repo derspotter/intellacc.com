@@ -3,7 +3,6 @@ import { initializeStore } from './store';
 import { checkAuth, isLoggedInState } from './services/auth';
 import { initializeSocket } from './services/socket';
 import keyManager from './services/keyManager.js';
-import { bootstrapSignalIfNeeded } from './services/messaging-legacy/signalBootstrap.js';
 import { initIdleAutoLock } from './services/idleLock';
 import Router, { updatePageFromHash } from './router'; // Import updatePageFromHash
 import { ensureMlsBootstrap, isMlsEnabled } from './services/mls/coreCryptoClient.js';
@@ -25,9 +24,6 @@ checkAuth();
       }
       // Start idle auto-lock when authenticated
       initIdleAutoLock();
-
-      // Auto-bootstrap Signal (identity/prekeys) in background
-      try { await bootstrapSignalIfNeeded(); } catch {}
 
       if (isMlsEnabled()) {
         // Kick off experimental MLS bootstrap behind the feature flag; failures are non-fatal for now.

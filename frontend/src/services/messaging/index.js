@@ -1,24 +1,22 @@
 // frontend/src/services/messaging/index.js
-// Chooses between legacy Signal-based messaging and the MLS implementation
+// MLS-native messaging service
 
-import legacyMessagingService from '../messaging-legacy/messaging.js';
-import socketService from '../socket.js';
-import messagingStore from '../../stores/messagingStore.js';
 import api from '../api.js';
+import messagingStore from '../../stores/messagingStore.js';
+import socketService from '../socket.js';
+import { getTokenData } from '../auth.js';
 import {
-  isMlsEnabled,
   ensureMlsBootstrap,
   getCoreCrypto,
-  getClientIdBase64,
   createConversationId,
-  uint8ToBase64,
+  getClientIdBase64,
   DEFAULT_MLS_CIPHERSUITE
 } from '../mls/coreCryptoClient.js';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-function base64ToBytes(value) {
+const base64ToBytes = (value) => {
   if (!value) return new Uint8Array();
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
@@ -26,153 +24,234 @@ function base64ToBytes(value) {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
-}
+};
 
-function bytesToBase64(bytes) {
-  return uint8ToBase64(bytes);
-}
+const bytesToBase64 = (bytes) => {
+  if (!bytes) return '';
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+};
 
-function applyMlsOverrides(service) {
-  if (service.__mlsPatched) return service;
+class MlsMessagingService {
+  constructor() {
+    this._connectHandlerAdded = false;
+    this._clientIdBase64 = null;
+    this.setupSocketHandlers();
+  }
 
-  let clientIdBase64 = null;
-  let handlersRegistered = false;
-
-  const ensureClientId = () => {
-    if (!clientIdBase64) clientIdBase64 = getClientIdBase64();
-    return clientIdBase64;
-  };
-
-  const decryptMessages = async (conversationId, messages) => {
-    const coreCrypto = await getCoreCrypto();
-    if (!coreCrypto) return [];
-    const convId = createConversationId(conversationId);
-    const results = [];
-    for (const item of messages) {
-      try {
-        const ciphertextB64 = item.ciphertext || item.encrypted_content;
-        if (!ciphertextB64) continue;
-        const ciphertext = base64ToBytes(ciphertextB64);
-        const decrypted = await coreCrypto.transaction(async (ctx) => ctx.decryptMessage(convId, ciphertext));
-        const plaintext = decrypted?.message ? textDecoder.decode(decrypted.message) : '';
-        results.push({
-          id: item.id,
-          conversation_id: conversationId,
-          sender_id: item.senderUserId ?? item.user_id ?? item.sender_id,
-          encrypted_content: ciphertextB64,
-          created_at: item.createdAt ?? item.created_at,
-          decryptedContent: plaintext,
-          isDecrypted: true,
-          epoch: item.epoch ?? null,
-          sender_client_id: item.senderClientId ?? null,
-          status: 'sent'
-        });
-      } catch (err) {
-        console.warn('MLS decrypt failed; leaving ciphertext', err);
-        results.push({
-          id: item.id,
-          conversation_id: conversationId,
-          sender_id: item.senderUserId ?? item.user_id ?? item.sender_id,
-          encrypted_content: item.ciphertext || item.encrypted_content,
-          created_at: item.createdAt ?? item.created_at,
-          decryptedContent: null,
-          isDecrypted: false,
-          epoch: item.epoch ?? null,
-          sender_client_id: item.senderClientId ?? null,
-          status: 'sent'
-        });
-      }
+  _generateClientId() {
+    try {
+      const rand = new Uint8Array(8);
+      window.crypto.getRandomValues(rand);
+      const hex = Array.from(rand).map(b => b.toString(16).padStart(2, '0')).join('');
+      return `${Date.now().toString(36)}-${hex}`;
+    } catch {
+      return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     }
-    results.sort((a, b) => (new Date(a.created_at).getTime()) - (new Date(b.created_at).getTime()));
-    return results;
-  };
+  }
 
-  const registerSocketHandlers = () => {
-    if (handlersRegistered) return;
-    handlersRegistered = true;
+  setupSocketHandlers() {
+    const applyMessageEvent = async (conversationId, { createdAt = null, isSelected = false, incrementUnread = true } = {}) => {
+      try {
+        if (isSelected) {
+          await this.getMessages(conversationId, 50, 0, null);
+        } else {
+          if (incrementUnread) {
+            messagingStore.incrementUnread(conversationId, 1);
+          }
+          const ts = createdAt || new Date().toISOString();
+          messagingStore.updateConversation(conversationId, { last_message_created_at: ts });
+        }
+      } catch {}
+    };
 
-    const handleMlsMessage = async (payload = {}) => {
-      const conversationId = payload.conversationId ?? payload.conversation_id;
-      if (conversationId == null) return;
-      const isSelected = String(messagingStore.selectedConversationId) === String(conversationId);
+    const handleSocketMessageEnvelope = async (eventType, data) => {
+      const { conversationId, created_at, messageId } = data || {};
+      if (!conversationId) return;
+
+      if (messageId) {
+        const lastSeen = messagingStore.getLastSeenMessageId(conversationId);
+        if (Number(messageId) <= Number(lastSeen)) return;
+        messagingStore.setLastSeenMessageId(conversationId, messageId);
+      }
+
+      const isSelected = (messagingStore.selectedConversationId === String(conversationId));
       if (isSelected) {
         try {
-          await service.getMessages(conversationId, 50, 0, null);
-        } catch (err) {
-          console.warn('Failed to refresh MLS messages from socket event', err);
-        }
+          await this.getMessages(conversationId, 50, 0, null);
+        } catch {}
       } else {
-        try { messagingStore.incrementUnread(conversationId, 1); } catch {}
+        const incrementUnread = eventType !== 'messageSent';
+        await applyMessageEvent(conversationId, { createdAt: created_at, isSelected, incrementUnread });
+      }
+
+      if (!isSelected) {
         try { messagingStore.markConversationStale(conversationId); } catch {}
       }
     };
 
-    const handleMlsCommit = (payload = {}) => {
+    socketService.on('newMessage', (d) => handleSocketMessageEnvelope('newMessage', d));
+    socketService.on('messageSent', (d) => handleSocketMessageEnvelope('messageSent', d));
+
+    socketService.on('messagesRead', (data) => this.handleMessagesRead(data));
+    socketService.on('messageDeleted', (data) => this.handleMessageDeleted(data));
+    socketService.on('user-typing', (data) => this.handleTypingIndicator(data));
+    socketService.on('mls:message', () => {
+      const conversationId = messagingStore.selectedConversationId;
+      if (conversationId) {
+        this.getMessages(conversationId, 50, 0, null).catch(() => {});
+      }
+    });
+    socketService.on('mls:commit', (payload = {}) => {
       const conversationId = payload.conversationId ?? payload.conversation_id;
-      if (conversationId == null) return;
-      try { messagingStore.markConversationStale(conversationId); } catch {}
-    };
+      if (conversationId) {
+        try { messagingStore.markConversationStale(conversationId); } catch {}
+      }
+    });
+  }
 
-    socketService.on('mls:message', handleMlsMessage);
-    socketService.on('mls:commit', handleMlsCommit);
-  };
-
-  service.initialize = async function initializeMls() {
+  async initialize() {
     await ensureMlsBootstrap();
-    ensureClientId();
-    registerSocketHandlers();
+    this._clientIdBase64 = getClientIdBase64();
     if (import.meta?.env?.DEV) console.log('MLS messaging initialized');
-  };
+  }
 
-  service.getMessages = async function mlsGetMessages(conversationId, limit = 50, offset = 0, before = null) {
+  getUserData() {
+    try {
+      const payload = getTokenData?.();
+      if (!payload) return null;
+      return { userId: payload.userId, username: payload.username };
+    } catch {
+      return null;
+    }
+  }
+
+  async ensureConversation(conversationId) {
+    const idStr = String(conversationId);
+    const existing = (messagingStore.conversations || []).find(c => String(c.id) === idStr);
+    if (existing) return existing;
+    try {
+      const resp = await api.messages.getConversation(conversationId);
+      const conv = resp?.conversation;
+      if (!conv) return null;
+      messagingStore.upsertConversation(conv);
+      try {
+        await api.mls.upsertConversation({ conversationId, ciphersuite: DEFAULT_MLS_CIPHERSUITE });
+      } catch {}
+      return messagingStore.conversationsById?.[idStr] || conv;
+    } catch {
+      return null;
+    }
+  }
+
+  async getConversations(limit = 20, offset = 0) {
+    const response = await api.messages.getConversations(limit, offset);
+    messagingStore.upsertConversations(response.conversations || []);
+    return messagingStore.conversations;
+  }
+
+  async createConversation(otherUserId) {
+    const response = await api.messages.createConversation(otherUserId);
+    messagingStore.addConversation(response.conversation);
+    try {
+      await api.mls.upsertConversation({ conversationId: response.conversation.id, ciphersuite: DEFAULT_MLS_CIPHERSUITE });
+    } catch {}
+    return response.conversation;
+  }
+
+  async decryptMessages(conversationId, messages) {
+    const coreCrypto = await getCoreCrypto();
+    if (!coreCrypto) return [];
+    const convId = createConversationId(conversationId);
+    const decrypted = [];
+    for (const message of messages) {
+      const ciphertextB64 = message.ciphertext || message.encrypted_content;
+      if (!ciphertextB64) continue;
+      try {
+        const ciphertext = base64ToBytes(ciphertextB64);
+        const result = await coreCrypto.transaction((ctx) => ctx.decryptMessage(convId, ciphertext));
+        const plaintext = result?.message ? textDecoder.decode(result.message) : '';
+        decrypted.push({
+          id: message.id,
+          conversation_id: conversationId,
+          sender_id: message.senderUserId ?? message.user_id ?? message.sender_id,
+          encrypted_content: ciphertextB64,
+          created_at: message.createdAt ?? message.created_at,
+          decryptedContent: plaintext,
+          isDecrypted: true,
+          epoch: message.epoch ?? null,
+          sender_client_id: message.senderClientId ?? null,
+          status: 'sent'
+        });
+      } catch (err) {
+        console.warn('Failed to decrypt MLS message', err);
+        decrypted.push({
+          id: message.id,
+          conversation_id: conversationId,
+          sender_id: message.senderUserId ?? message.user_id ?? message.sender_id,
+          encrypted_content: ciphertextB64,
+          created_at: message.createdAt ?? message.created_at,
+          decryptedContent: null,
+          isDecrypted: false,
+          epoch: message.epoch ?? null,
+          sender_client_id: message.senderClientId ?? null,
+          status: 'sent'
+        });
+      }
+    }
+    decrypted.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return decrypted;
+  }
+
+  async getMessages(conversationId, limit = 50, offset = 0, before = null) {
     const params = { limit };
     if (before) params.before = before;
     const response = await api.mls.getMessages(conversationId, params);
-    const decrypted = await decryptMessages(conversationId, response.items || []);
+    const decryptedMessages = await this.decryptMessages(conversationId, response.items || []);
     if (offset === 0 && !before) {
-      messagingStore.setMessages(conversationId, decrypted);
+      messagingStore.setMessages(conversationId, decryptedMessages);
     } else {
-      decrypted.forEach((msg) => messagingStore.addMessage(conversationId, msg));
+      decryptedMessages.forEach((msg) => messagingStore.addMessage(conversationId, msg));
     }
-    const hasMore = decrypted.length === limit;
-    const oldest = decrypted.length ? decrypted[0]?.created_at ?? null : null;
+    const hasMore = decryptedMessages.length === limit;
+    const oldestTime = decryptedMessages.length > 0 ? decryptedMessages[0]?.created_at || null : null;
     messagingStore.updateMessagesMeta(conversationId, {
       lastFetchedTs: Date.now(),
       hasMore,
-      oldestTime: oldest
+      oldestTime
     });
-    return decrypted;
-  };
+    return decryptedMessages;
+  }
 
-  service.loadOlder = async function mlsLoadOlder(conversationId, limit = 50) {
+  async loadOlder(conversationId, limit = 50) {
     const meta = (messagingStore.messagesMeta || {})[String(conversationId)] || {};
     const before = meta.oldestTime || null;
     if (!before) return [];
-    return await service.getMessages(conversationId, limit, 0, before);
-  };
+    return await this.getMessages(conversationId, limit, 0, before);
+  }
 
-  service.sendMessage = async function mlsSendMessage(conversationId, receiverId, message, messageType = 'text') {
+  async sendMessage(conversationId, receiverId, message, messageType = 'text') {
     await ensureMlsBootstrap();
     const coreCrypto = await getCoreCrypto();
-    if (!coreCrypto) {
-      throw new Error('MLS core crypto not initialized');
-    }
-    ensureClientId();
-    const clientId = service._generateClientId();
+    if (!coreCrypto) throw new Error('MLS core crypto not ready');
+    this._clientIdBase64 = this._clientIdBase64 || getClientIdBase64();
+    const clientId = this._generateClientId();
+
     const plaintext = textEncoder.encode(String(message ?? ''));
     const convId = createConversationId(conversationId);
-    const ciphertext = await coreCrypto.transaction(async (ctx) => ctx.encryptMessage(convId, plaintext));
+    const ciphertext = await coreCrypto.transaction((ctx) => ctx.encryptMessage(convId, plaintext));
     const ciphertextB64 = bytesToBase64(ciphertext);
 
     await api.mls.sendMessage({
       conversationId,
-      senderClientId: clientIdBase64,
+      senderClientId: this._clientIdBase64,
       epoch: null,
       ciphertext: ciphertextB64
     });
 
     try {
-      const userData = service.getUserData();
+      const userData = this.getUserData();
       const optimistic = {
         id: `c:${clientId}`,
         conversation_id: conversationId,
@@ -194,30 +273,69 @@ function applyMlsOverrides(service) {
     } catch (optErr) {
       console.warn('Optimistic MLS insert skipped:', optErr?.message || optErr);
     }
-  };
+  }
 
-  service.getUnreadCount = async function mlsGetUnreadCount() {
-    const response = await api.messages.getUnreadCount();
-    return response.count;
-  };
-
-  service.markMessagesAsRead = async function mlsMarkRead(messageIds) {
+  async markMessagesAsRead(messageIds) {
     const response = await api.messages.markAsRead(messageIds);
     messagingStore.markMessagesAsRead(messageIds);
     return response;
-  };
+  }
 
-  service.deleteMessage = async function mlsDeleteMessage(messageId) {
+  async getUnreadCount() {
+    const response = await api.messages.getUnreadCount();
+    return response.count;
+  }
+
+  async deleteMessage(messageId) {
     const response = await api.messages.deleteMessage(messageId);
     messagingStore.removeMessage(messageId);
     return response;
-  };
+  }
 
-  service.mlsCiphersuite = DEFAULT_MLS_CIPHERSUITE;
-  service.__mlsPatched = true;
-  return service;
+  sendTypingIndicator(conversationId, isTyping) {
+    const userData = this.getUserData();
+    if (!userData) return;
+    const event = isTyping ? 'typing-start' : 'typing-stop';
+    socketService.emit(event, { conversationId, userId: userData.userId });
+  }
+
+  joinConversation(conversationId) {
+    socketService.emit('join-conversation', conversationId);
+  }
+
+  leaveConversation(conversationId) {
+    if (socketService.state.connected.val) {
+      socketService.emit('leave-conversation', conversationId);
+    }
+  }
+
+  clearCache() {
+    messagingStore.clearCache();
+  }
+
+  handleMessagesRead(data) {
+    const { messageIds } = data || {};
+    if (Array.isArray(messageIds)) {
+      messagingStore.markMessagesAsRead(messageIds);
+    }
+  }
+
+  handleMessageDeleted(data) {
+    const { messageId } = data || {};
+    if (messageId != null) messagingStore.removeMessage(messageId);
+  }
+
+  handleTypingIndicator(data = {}) {
+    const { userId, isTyping } = data;
+    if (isTyping) {
+      messagingStore.addTypingUser(userId);
+    } else {
+      messagingStore.removeTypingUser(userId);
+    }
+  }
 }
 
-const messagingService = isMlsEnabled() ? applyMlsOverrides(legacyMessagingService) : legacyMessagingService;
+const messagingService = new MlsMessagingService();
+messagingService.ciphersuite = DEFAULT_MLS_CIPHERSUITE;
 
 export default messagingService;

@@ -1,6 +1,7 @@
 # Wire MLS Integration Plan
 
 ## Context
+- Legacy Signal/libsignal implementation has been removed; MLS is the sole messaging path
 - Replace legacy Signal/libsignal scaffolding with Wire's `@wireapp/core-crypto` TypeScript bindings (published from `crypto-ffi/bindings/js`, current tag `9.1.0`) to deliver browser-based MLS E2EE.
 - Maintain existing messaging UX, socket plumbing, and store architecture while swapping the crypto/session layer.
 - Project is open source, so GPL-3.0 obligations from Wire's distribution are acceptable and will be surfaced in our licensing docs.

@@ -142,31 +142,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Request the peer to bootstrap E2EE keys client-side (no server-side key generation)
-  socket.on('e2ee-bootstrap-request', (data) => {
-    try {
-      const { targetUserId } = data || {};
-      if (!socket.userId || !targetUserId) return;
-      // Forward a bootstrap trigger to the target user's messaging room
-      io.to(`messaging:${targetUserId}`).emit('e2ee-bootstrap-trigger', {
-        fromUserId: socket.userId,
-        requestedAt: new Date().toISOString(),
-      });
-    } catch {}
-  });
-
-  // Optional: recipient can acknowledge bootstrap completion to notify requester to retry sooner
-  socket.on('e2ee-bootstrap-done', (data) => {
-    try {
-      const { notifyUserId } = data || {};
-      if (!socket.userId || !notifyUserId) return;
-      io.to(`messaging:${notifyUserId}`).emit('e2ee-bootstrap-ack', {
-        fromUserId: socket.userId,
-        completedAt: new Date().toISOString(),
-      });
-    } catch {}
-  });
-
   socket.on('disconnect', () => {
     console.log('User disconnected');
   });

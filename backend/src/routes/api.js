@@ -19,7 +19,6 @@ const mlsConversationController = require('../controllers/mlsConversationControl
 const authenticateJWT = require("../middleware/auth");
 const rateLimit = require('express-rate-limit');
 const attachmentsController = require('../controllers/attachmentsController');
-const e2eeController = require('../controllers/e2eeController');
 
 // Base test route
 router.get("/", (req, res) => {
@@ -170,13 +169,6 @@ router.get('/mls/conversations/:conversationId', authenticateJWT, mlsLimiter, ml
 // Attachments (pre-signed URL scaffold)
 router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);
 router.get('/attachments/presign-download', authenticateJWT, attachmentsController.presignDownload);
-
-// E2EE (Signal) key bundle routes
-const e2eeLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false });
-router.post('/e2ee/keys/identity', authenticateJWT, e2eeLimiter, e2eeController.publishIdentity);
-router.post('/e2ee/keys/prekeys', authenticateJWT, e2eeLimiter, e2eeController.publishPrekeys);
-router.get('/e2ee/keys/bundle', authenticateJWT, e2eeLimiter, e2eeController.getBundle);
-router.post('/e2ee/keys/consume', authenticateJWT, e2eeLimiter, e2eeController.consumePrekey);
 
 // LMSR Market API proxy routes (bypass CORS issues)
 router.get("/events/:eventId/shares", async (req, res) => {
