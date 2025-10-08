@@ -76,6 +76,7 @@
 - [ ] Wrap conversation lifecycle helpers around `CoreCryptoContext`: `ctx.mlsCreateConversation`, `ctx.mlsAddMembers`, `ctx.mlsRemoveMembers`, `ctx.commitPendingProposals`.
   - In progress: backend routes scaffolded (`/api/mls/credentials/*`, `/api/mls/messages/:conversationId`) with persistence; decrypt pipeline still returns ciphertext until core-crypto backend integration is ready.
 - [ ] Adapt send pipeline: optimistically insert plaintext, but store MLS ciphertext/application payload returned by `ctx.encryptMessage`; on `decryptMessage`, surface `hasEpochChanged`, `commitDelay`, and `senderClientId` to the UI/store.
+  - Frontend send/receive now routes through CoreCrypto (encrypt/decrypt) with optimistic MLS messages; awaiting backend decrypt pipeline for plaintext fetch.
 - [ ] Persist `GroupInfoBundle.payload` alongside conversation records so new devices can join via external commit if needed.
 - [ ] Show MLS diagnostics (epoch number, history sharing flag, credential expiry) in developer tools/support UI for debugging.
 - [ ] Provide migration toggles: new conversations default to MLS; legacy threads remain readable until users trigger "Upgrade to MLS" (creates MLS group, sends welcome, locks legacy send).

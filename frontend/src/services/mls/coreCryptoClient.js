@@ -5,6 +5,7 @@ import {
   CoreCrypto,
   DatabaseKey,
   ClientId,
+  ConversationId,
   CredentialType,
   MlsTransportData,
   ciphersuiteDefault,
@@ -23,6 +24,8 @@ const KEYPACKAGE_UPLOAD_TS_KEY = 'intellacc.mls.keypackages.lastUploadTs';
 const DEFAULT_CIPHERSUITE = ciphersuiteDefault();
 const DEFAULT_KEYPACKAGE_TARGET = Number(import.meta.env.VITE_MLS_KEYPACKAGE_TARGET ?? 5);
 const KEYPACKAGE_UPLOAD_MIN_INTERVAL_MS = Number(import.meta.env.VITE_MLS_KEYPACKAGE_UPLOAD_INTERVAL_MS ?? (6 * 60 * 60 * 1000)); // default 6h
+
+const textEncoder = new TextEncoder();
 
 let coreCryptoInstance = null;
 let initPromise = null;
@@ -240,3 +243,16 @@ export const ensureMlsBootstrap = async () => {
   });
   return bootstrapPromise;
 };
+
+export const getClientIdBase64 = () => bytesToBase64(getOrCreateClientId());
+
+const encodeConversationId = (conversationId) => {
+  if (conversationId instanceof Uint8Array) return conversationId;
+  return textEncoder.encode(String(conversationId));
+};
+
+export const createConversationId = (conversationId) => new ConversationId(encodeConversationId(conversationId));
+
+export const base64ToUint8 = (value) => base64ToBytes(value);
+export const uint8ToBase64 = (bytes) => bytesToBase64(bytes);
+export const DEFAULT_MLS_CIPHERSUITE = DEFAULT_CIPHERSUITE;
