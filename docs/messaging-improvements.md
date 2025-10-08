@@ -2,6 +2,8 @@
 
 This document consolidates our prior DRY messaging plan and the messaging improvements plan into a single source of truth. It captures what is shipped, what remains, and how we will migrate to a modern, forward-secure E2EE stack.
 
+> **Note:** `@signalapp/libsignal-client` and `@matrix-org/olm` are no longer bundled in the frontend. The legacy wrappers remain for archival reference while we pivot to Wire MLS.
+
 ### Current State (Shipped)
 - Idempotent init: Messaging service is a singleton; handlers are registered once.
 - Centralized joins: All room joins (predictions, profile, authenticate, messaging) happen in `socket.joinUserRooms()`.

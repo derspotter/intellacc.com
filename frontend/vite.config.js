@@ -73,8 +73,7 @@ export default defineConfig({
   }
   ,
   optimizeDeps: {
-    exclude: ['@signalapp/libsignal-client'],
-    include: ['@matrix-org/olm']
+    exclude: ['@wireapp/core-crypto']
   }
   // esbuild configuration removed
 });

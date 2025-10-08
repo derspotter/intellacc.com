@@ -76,3 +76,12 @@ Intellacc is a social network platform that combines prediction markets with tra
 - Build out user authentication and profile management.
 - Enhance the API and integrate more prediction market features.
 - Implement a comprehensive UI layout with improved user experience.
+
+## Licensing Notes
+
+- The MLS prototype depends on `@wireapp/core-crypto` (GPL-3.0). Install it via npm and keep Wire's GPL attribution visible in downstream distributions.
+
+## MLS Feature Flagging
+
+- Enable the experimental MLS bootstrap by defining `VITE_ENABLE_MLS=true` in the frontend environment.
+- Override the WASM asset location (e.g., for CDN hosting) with `VITE_CORE_CRYPTO_WASM_BASE=https://cdn.example.com/crypto`.
