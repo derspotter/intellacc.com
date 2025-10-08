@@ -153,10 +153,12 @@ router.delete("/messages/:messageId", authenticateJWT, messagingController.delet
 
 // MLS endpoints (experimental)
 const mlsLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+router.get('/mls/key-packages/:userId', authenticateJWT, mlsLimiter, mlsController.listKeyPackages);
 router.post('/mls/key-packages', authenticateJWT, mlsLimiter, mlsController.publishKeyPackages);
 router.post('/mls/commit', authenticateJWT, mlsLimiter, mlsController.postCommitBundle);
 router.post('/mls/message', authenticateJWT, mlsLimiter, mlsController.postApplicationMessage);
 router.post('/mls/history-secret', authenticateJWT, mlsLimiter, mlsController.postHistorySecret);
+router.post('/mls/migrate', authenticateJWT, mlsLimiter, mlsController.migrateConversation);
 router.post('/mls/credentials/request', authenticateJWT, mlsLimiter, mlsCredentialController.createCredentialRequest);
 router.post('/mls/credentials/complete', authenticateJWT, mlsLimiter, mlsCredentialController.completeCredential);
 router.get('/mls/credentials', authenticateJWT, mlsLimiter, mlsCredentialController.listCredentials);

@@ -2,6 +2,11 @@
 
 const { Buffer } = require('buffer');
 const mlsCredentialService = require('../services/mlsCredentialService');
+const {
+  parseCredentialRequest,
+  signCredentialRequest,
+  verifyCredentialResponse
+} = require('../utils/mlsCredentialSigner');
 
 function normalizeUserId(user) {
   if (!user) return null;
@@ -56,11 +61,34 @@ exports.createCredentialRequest = async (req, res) => {
       return res.status(413).json({ message: 'credential request too large' });
     }
 
+    let requestMeta;
+    try {
+      requestMeta = parseCredentialRequest(requestBytes);
+    } catch (err) {
+      return res.status(400).json({ message: err.message });
+    }
+
+    if (Number(requestMeta.userId) !== Number(userId)) {
+      return res.status(400).json({ message: 'Credential request subject does not match user' });
+    }
+
+    if (requestMeta.clientId !== clientId) {
+      return res.status(400).json({ message: 'Credential request clientId mismatch' });
+    }
+
+    if (Number(requestMeta.ciphersuite) !== ciphersuiteInt) {
+      return res.status(400).json({ message: 'Credential request ciphersuite mismatch' });
+    }
+
+    const signed = signCredentialRequest(requestBytes, requestMeta);
+
     const record = await mlsCredentialService.insertCredentialRequest({
       userId,
       clientId,
       ciphersuite: ciphersuiteInt,
-      requestBytes
+      requestBytes,
+      responseBytes: signed.responseBytes,
+      expiresAt: signed.expiresAt
     });
 
     return res.status(201).json({
@@ -68,7 +96,12 @@ exports.createCredentialRequest = async (req, res) => {
       clientId: record.client_id,
       ciphersuite: record.ciphersuite,
       status: record.status,
-      createdAt: record.created_at
+      createdAt: record.created_at,
+      expiresAt: record.expires_at,
+      credential: signed.responseBytes.toString('base64'),
+      issuedAt: signed.response?.credential?.issuedAt,
+      signer: signed.response?.signer,
+      requestHash: signed.response?.requestHash
     });
   } catch (error) {
     console.error('Error creating MLS credential request:', error);
@@ -103,15 +136,31 @@ exports.completeCredential = async (req, res) => {
       return res.status(413).json({ message: 'credential response too large' });
     }
 
+    let verifiedPayload = null;
     const record = await mlsCredentialService.completeCredentialRequest({
       requestId,
-      responseBytes
+      userId,
+      responseBytes,
+      verify: (storedRecord, incomingBytes) => {
+        const payload = verifyCredentialResponse(storedRecord.request_bytes, incomingBytes);
+        const subject = payload?.credential?.subject || {};
+
+        if (Number(subject.userId ?? 0) !== Number(userId)) {
+          throw new Error('Credential response subject does not match user');
+        }
+        if (subject.clientId && subject.clientId !== storedRecord.client_id) {
+          throw new Error('Credential response clientId mismatch');
+        }
+        verifiedPayload = payload;
+      }
     });
 
     return res.status(200).json({
       id: record.id,
       status: record.status,
-      completedAt: record.completed_at
+      completedAt: record.completed_at,
+      expiresAt: record.expires_at,
+      credential: verifiedPayload?.credential ?? null
     });
   } catch (error) {
     console.error('Error completing MLS credential request:', error);
@@ -127,7 +176,16 @@ exports.listCredentials = async (req, res) => {
     }
 
     const { status } = req.query || {};
-    const items = await mlsCredentialService.listCredentialRequests(userId, status || null);
+    const rows = await mlsCredentialService.listCredentialRequests(userId, status || null);
+    const items = rows.map(row => ({
+      id: row.id,
+      clientId: row.client_id,
+      ciphersuite: row.ciphersuite,
+      status: row.status,
+      createdAt: row.created_at,
+      completedAt: row.completed_at,
+      expiresAt: row.expires_at
+    }));
     return res.status(200).json({ items });
   } catch (error) {
     console.error('Error listing MLS credential requests:', error);

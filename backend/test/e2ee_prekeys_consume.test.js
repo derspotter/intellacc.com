@@ -4,7 +4,8 @@ const API = 'http://localhost:3000/api';
 
 jest.setTimeout(30000);
 
-describe('E2EE one-time prekey reserve/consume', () => {
+// Legacy Signal endpoints have been retired in favor of MLS. Skip until MLS equivalents land.
+describe.skip('E2EE one-time prekey reserve/consume', () => {
   const ts = Date.now();
   const user = { username: `sig_only_${ts}`, email: `sig_only_${ts}@e.com`, password: 'x12345!' };
   let uid, token;

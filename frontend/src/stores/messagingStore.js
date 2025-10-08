@@ -5,6 +5,8 @@ import * as vanX from 'vanjs-ext';
 import { normalizeConversation } from '../utils/messagingUtils.js';
 import { getTokenData } from '../services/auth.js';
 
+const MAX_DIAGNOSTIC_EVENTS = 100;
+
 // Helper: sort ids by their conversation's lastTs (desc)
 const sortIdsByTs = (byId, ids) => ids.sort((a, b) => ((byId[b]?.lastTs || 0) - (byId[a]?.lastTs || 0)));
 
@@ -26,6 +28,8 @@ const messagingStore = vanX.reactive({
   error: '',
   eventsMeta: {},
   mlsMeta: {},
+  mlsCredential: null,
+  mlsDiagnosticEvents: [],
   
   // Typing indicators - use array instead of Set for VanX compatibility
   typingUsers: [],
@@ -247,12 +251,75 @@ const messagingStore = vanX.reactive({
   setMlsPending(conversationId, info = {}) {
     const key = String(conversationId);
     const meta = { ...(messagingStore.mlsMeta || {}) };
-    meta[key] = {
-      receivedAt: Date.now(),
-      ...meta[key],
-      ...info
-    };
+    const previous = meta[key] || {};
+    const next = { ...previous };
+    if (info && typeof info === 'object') {
+      if (info.epoch != null) next.epoch = Number(info.epoch);
+      if (info.historySharingEnabled != null) next.historySharing = Boolean(info.historySharingEnabled);
+      if (info.ciphersuite) next.ciphersuite = info.ciphersuite;
+      Object.assign(next, info);
+    }
+    next.receivedAt = Date.now();
+    meta[key] = next;
     messagingStore.mlsMeta = meta;
+  },
+
+  recordMlsDiagnostics(conversationId, info = {}) {
+    if (!conversationId && conversationId !== 0) return;
+    const key = String(conversationId);
+    const meta = { ...(messagingStore.mlsMeta || {}) };
+    const prev = meta[key] || {};
+    const next = { ...prev };
+    if (info && typeof info === 'object') {
+      if (info.epoch != null) next.epoch = Number(info.epoch);
+      if (info.historySharingEnabled != null) next.historySharing = Boolean(info.historySharingEnabled);
+      if (info.ciphersuite) next.ciphersuite = info.ciphersuite;
+      Object.assign(next, info);
+    }
+    next.lastUpdatedAt = Date.now();
+    meta[key] = next;
+    messagingStore.mlsMeta = meta;
+  },
+
+  setMlsCredential(info) {
+    messagingStore.mlsCredential = info ? { ...info } : null;
+  },
+
+  pushDiagnosticEvent(entry = {}) {
+    const timestamp = Number.isFinite(entry.timestamp) ? Number(entry.timestamp) : Date.now();
+    const conversationId = entry.conversationId != null ? String(entry.conversationId) : null;
+    const level = typeof entry.level === 'string' ? entry.level.toLowerCase() : 'info';
+    const category = entry.category || entry.type || 'general';
+    const id = entry.id || `${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const record = {
+      id,
+      timestamp,
+      level,
+      category,
+      conversationId,
+      message: entry.message ?? '',
+      data: entry.data ?? null,
+      error: entry.error ?? null,
+      context: entry.context ?? null
+    };
+
+    const next = [...(messagingStore.mlsDiagnosticEvents || []), record];
+    messagingStore.mlsDiagnosticEvents = next.slice(-MAX_DIAGNOSTIC_EVENTS);
+
+    if (conversationId) {
+      messagingStore.recordMlsDiagnostics(conversationId, {
+        lastEventId: id,
+        lastEventLevel: level,
+        lastEventCategory: category,
+        lastEventMessage: record.message,
+        lastEventAt: timestamp
+      });
+    }
+  },
+
+  clearDiagnosticEvents() {
+    messagingStore.mlsDiagnosticEvents = [];
   },
 
   getLastSeenMessageId(conversationId) {
@@ -372,6 +439,9 @@ const messagingStore = vanX.reactive({
     messagingStore.messagesByConversation = {};
     messagingStore.messagesMeta = {};
     messagingStore.eventsMeta = {};
+    messagingStore.mlsMeta = {};
+    messagingStore.mlsCredential = null;
+    messagingStore.mlsDiagnosticEvents = [];
     messagingStore.selectedConversationId = null;
     messagingStore.typingUsers = [];
     messagingStore.error = '';
@@ -399,11 +469,11 @@ messagingStore.selectedConversationName = vanX.calc(() => {
 });
 
   // Plain reactive projection for the sidebar, avoids Proxy aliasing
-  messagingStore.sidebarItems = vanX.calc(() => {
-    const q = (messagingStore.searchQuery || '').toLowerCase();
-    const ids = messagingStore.conversationIds || [];
-    const byId = messagingStore.conversationsById || {};
-    const items = ids.map(id => {
+messagingStore.sidebarItems = vanX.calc(() => {
+  const q = (messagingStore.searchQuery || '').toLowerCase();
+  const ids = messagingStore.conversationIds || [];
+  const byId = messagingStore.conversationsById || {};
+  const items = ids.map(id => {
       const conv = byId[id];
       const item = conv ? {
         id: String(conv.id),
@@ -420,6 +490,50 @@ messagingStore.selectedConversationName = vanX.calc(() => {
   });
 
 // filteredConversations deprecated; use sidebarItems for filter/sort/projection
+
+export const deriveMlsDiagnostics = (conversationId) => {
+  const key = conversationId != null ? String(conversationId) : null;
+  const conversation = key ? (messagingStore.conversationsById?.[key] || null) : null;
+  const meta = key ? (messagingStore.mlsMeta?.[key] || {}) : {};
+  const credential = messagingStore.mlsCredential || null;
+  const eventsSource = messagingStore.mlsDiagnosticEvents || [];
+  const events = key
+    ? eventsSource.filter(event => !event.conversationId || event.conversationId === key)
+    : eventsSource;
+
+  const encryptionMode = conversation?.encryptionMode ?? conversation?.encryption_mode ?? null;
+  const history = meta.historySharing ?? conversation?.history_sharing ?? conversation?.history_sharing_enabled ?? null;
+  const epoch = meta.epoch ?? meta.lastSentEpoch ?? conversation?.last_message_epoch ?? conversation?.mls_epoch ?? null;
+  const ciphersuite = meta.ciphersuite ?? conversation?.mlsCiphersuite ?? conversation?.mls_ciphersuite ?? null;
+
+  let credentialStatus = 'unknown';
+  let credentialExpiresAt = null;
+  if (credential?.expiresAt) {
+    const expTs = Date.parse(credential.expiresAt);
+    if (Number.isFinite(expTs)) {
+      credentialExpiresAt = expTs;
+      const now = Date.now();
+      credentialStatus = expTs <= now
+        ? 'expired'
+        : ((expTs - now) <= (7 * 24 * 60 * 60 * 1000) ? 'expiring' : 'valid');
+    }
+  }
+
+  return {
+    conversationId: key,
+    conversation,
+    meta,
+    credential,
+    epoch,
+    ciphersuite,
+    encryptionMode,
+    historySharingEnabled: history == null ? null : Boolean(history),
+    credentialStatus,
+    credentialExpiresAt,
+    lastUpdatedAt: meta.lastUpdatedAt ?? null,
+    events
+  };
+};
 
 export default messagingStore;
 

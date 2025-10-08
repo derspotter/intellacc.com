@@ -342,6 +342,15 @@ export const api = {
       request('/mls/message', { method: 'POST', body }),
     sendHistorySecret: (body) =>
       request('/mls/history-secret', { method: 'POST', body }),
+    migrateConversation: (body) =>
+      request('/mls/migrate', { method: 'POST', body }),
+    getKeyPackages: (userId, { ciphersuite, limit } = {}) => {
+      const search = new URLSearchParams();
+      if (ciphersuite != null) search.set('ciphersuite', String(ciphersuite));
+      if (limit != null) search.set('limit', String(limit));
+      const suffix = search.size ? `?${search.toString()}` : '';
+      return request(`/mls/key-packages/${userId}${suffix}`);
+    },
     createCredentialRequest: (body) =>
       request('/mls/credentials/request', { method: 'POST', body }),
     completeCredential: (body) =>

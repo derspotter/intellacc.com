@@ -4,7 +4,8 @@ const API = 'http://localhost:3000/api';
 
 jest.setTimeout(30000);
 
-describe('E2EE Signal Key Bundle Endpoints', () => {
+// Legacy Signal endpoints have been retired in favor of MLS. Skip until MLS equivalents land.
+describe.skip('E2EE Signal Key Bundle Endpoints', () => {
   const ts = Date.now();
   const alice = { username: `sig_alice_${ts}`, email: `sig_alice_${ts}@e.com`, password: 'x12345!' };
   const bob = { username: `sig_bob_${ts}`, email: `sig_bob_${ts}@e.com`, password: 'x12345!' };
@@ -57,4 +58,3 @@ describe('E2EE Signal Key Bundle Endpoints', () => {
     }
   });
 });
-

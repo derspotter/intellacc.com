@@ -30,7 +30,9 @@ const eventHandlers = {
   messageDeleted: [],
   'user-typing': [],
   'mls:commit': [],
-  'mls:message': []
+  'mls:message': [],
+  'mls:history-secret': [],
+  'mls:migration': []
 };
 
 /**
@@ -232,6 +234,46 @@ function setupSocketHandlers() {
       if (import.meta?.env?.DEV) console.warn('Failed to mark conversation stale for MLS message', err);
     }
     notifyHandlers('mls:message', payload);
+  });
+
+  socket.on('mls:history-secret', async (payload) => {
+    if (import.meta?.env?.DEV) console.debug('MLS history secret received', payload);
+    try {
+      const store = await getMessagingStore();
+      if (payload?.conversationId != null) {
+        store.markConversationStale(payload.conversationId);
+        store.setMlsPending(payload.conversationId, {
+          reason: 'history-secret',
+          senderClientId: payload?.senderClientId ?? null,
+          epoch: payload?.epoch ?? null
+        });
+      }
+    } catch (err) {
+      if (import.meta?.env?.DEV) console.warn('Failed to process MLS history secret event', err);
+    }
+    notifyHandlers('mls:history-secret', payload);
+  });
+
+  socket.on('mls:migration', async (payload) => {
+    if (import.meta?.env?.DEV) console.debug('MLS migration event received', payload);
+    try {
+      const store = await getMessagingStore();
+      if (payload?.conversationId != null) {
+        store.markConversationStale(payload.conversationId);
+        store.setMlsPending(payload.conversationId, {
+          reason: 'migration',
+          encryptionMode: payload?.encryptionMode ?? 'mls',
+          ciphersuite: payload?.ciphersuite ?? null
+        });
+        store.updateConversation(payload.conversationId, {
+          encryptionMode: payload?.encryptionMode ?? 'mls',
+          mlsMigrationEligible: false
+        });
+      }
+    } catch (err) {
+      if (import.meta?.env?.DEV) console.warn('Failed to process MLS migration event', err);
+    }
+    notifyHandlers('mls:migration', payload);
   });
   
   // Broadcast message event

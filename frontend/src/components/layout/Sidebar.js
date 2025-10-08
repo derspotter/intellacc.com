@@ -5,6 +5,8 @@ import { logout } from '../../services/auth';
 import api from '../../services/api';
 import socketService from '../../services/socket';
 import { isMobile } from '../../utils/deviceDetection';
+import messagingService from '../../services/messaging/index.js';
+import { isMlsEnabled } from '../../services/mls/coreCryptoClient.js';
 
 /**
  * Sidebar navigation component
@@ -32,8 +34,7 @@ export default function Sidebar({ isOpen = van.state(false) } = {}) {
   const loadUnreadMessages = async () => {
     if (isLoggedInState.val) {
       try {
-        const result = await api.messages.getUnreadCount();
-        unreadMessages.val = result.count;
+        unreadMessages.val = await messagingService.getUnreadCount();
       } catch (error) {
         console.error('Error loading unread messages count:', error);
       }
@@ -115,6 +116,10 @@ export default function Sidebar({ isOpen = van.state(false) } = {}) {
                 : null
             ])
           ])
+        : null,
+
+      () => (isLoggedInState.val && isMlsEnabled())
+        ? div({ class: "sidebar-item" }, a({ href: "#mls-diagnostics" }, "MLS Diagnostics"))
         : null,
       
       div({ class: "sidebar-item" }, a({ href: "#settings" }, "Settings")),

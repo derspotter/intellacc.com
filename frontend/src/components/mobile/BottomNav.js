@@ -3,8 +3,9 @@ const { nav, a, div, span } = van.tags;
 import { isMobile } from '../../utils/deviceDetection';
 import { isLoggedInState } from '../../services/auth';
 import { currentPageState } from '../../store';
-import api from '../../services/api';
 import socketService from '../../services/socket';
+import messagingService from '../../services/messaging/index.js';
+import { isMlsEnabled } from '../../services/mls/coreCryptoClient.js';
 
 /**
  * Bottom navigation bar for mobile devices
@@ -18,8 +19,7 @@ export default function BottomNav() {
   const loadUnreadMessages = async () => {
     if (isLoggedInState.val) {
       try {
-        const result = await api.messages.getUnreadCount();
-        unreadMessages.val = result.count;
+        unreadMessages.val = await messagingService.getUnreadCount();
       } catch (error) {
         console.error('Error loading unread messages:', error);
       }
@@ -84,6 +84,16 @@ export default function BottomNav() {
       fallbackHref: '#login'
     }
   ];
+
+  if (isMlsEnabled()) {
+    navItems.splice(navItems.length - 1, 0, {
+      id: 'mls-diagnostics',
+      href: '#mls-diagnostics',
+      icon: '🔐',
+      label: 'MLS',
+      requiresAuth: true
+    });
+  }
   
   // Only render on mobile
   return () => isMobile.val ? nav({ class: "bottom-nav" }, 

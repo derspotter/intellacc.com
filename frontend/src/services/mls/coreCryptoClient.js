@@ -13,23 +13,100 @@ import {
   openDatabase
 } from '@wireapp/core-crypto';
 import { api, ApiError } from '../api.js';
+import { getTokenData } from '../auth.js';
+import messagingStore from '../../stores/messagingStore.js';
 
-const FEATURE_FLAG = String(import.meta.env.VITE_ENABLE_MLS ?? '').toLowerCase() === 'true';
+const featureFlagRaw = import.meta.env.VITE_ENABLE_MLS;
+const FEATURE_FLAG = featureFlagRaw == null
+  ? true
+  : String(featureFlagRaw).toLowerCase() === 'true';
 const WASM_BASE = import.meta.env.VITE_CORE_CRYPTO_WASM_BASE;
 const DATABASE_NAME = 'intellacc-mls-keystore';
 const KEY_STORAGE_KEY = 'intellacc.mls.databaseKey';
 const CLIENT_ID_STORAGE_KEY = 'intellacc.mls.clientId';
 const KEYPACKAGE_UPLOAD_TS_KEY = 'intellacc.mls.keypackages.lastUploadTs';
 
-const DEFAULT_CIPHERSUITE = ciphersuiteDefault();
+let DEFAULT_CIPHERSUITE = 1;
+let defaultCiphersuiteResolved = false;
 const DEFAULT_KEYPACKAGE_TARGET = Number(import.meta.env.VITE_MLS_KEYPACKAGE_TARGET ?? 5);
 const KEYPACKAGE_UPLOAD_MIN_INTERVAL_MS = Number(import.meta.env.VITE_MLS_KEYPACKAGE_UPLOAD_INTERVAL_MS ?? (6 * 60 * 60 * 1000)); // default 6h
+const CREDENTIAL_STORAGE_KEY = 'intellacc.mls.credential';
+const CREDENTIAL_REFRESH_GRACE_MS = Number(import.meta.env.VITE_MLS_CREDENTIAL_REFRESH_GRACE_MS ?? (5 * 60 * 1000));
 
 const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+const transportContext = {
+  conversationId: null
+};
+
+const pushTransportDiagnostic = (entry = {}) => {
+  try {
+    messagingStore.pushDiagnosticEvent({
+      category: 'transport',
+      ...entry
+    });
+  } catch (err) {
+    if (import.meta?.env?.DEV) console.warn('[MLS] Failed to record transport diagnostic', err);
+  }
+};
+
+const installCoreCryptoLogger = (instance) => {
+  if (!import.meta?.env?.DEV) return;
+  const setLoggerFn = typeof CoreCrypto?.setLogger === 'function'
+    ? CoreCrypto.setLogger.bind(CoreCrypto)
+    : (typeof instance?.setLogger === 'function' ? instance.setLogger.bind(instance) : null);
+  if (!setLoggerFn) return;
+
+  const logger = (level, target, message) => {
+    const normalizedLevel = typeof level === 'string' ? level.toLowerCase() : String(level || 'info').toLowerCase();
+    const text = typeof message === 'string' ? message : (() => {
+      try { return JSON.stringify(message); } catch { return String(message); }
+    })();
+    const targetLabel = target || 'core';
+    const entry = {
+      category: 'core-crypto',
+      level: normalizedLevel,
+      message: `[${targetLabel}] ${text}`,
+      data: { level, target }
+    };
+    try {
+      messagingStore.pushDiagnosticEvent(entry);
+    } catch {}
+
+    const prefix = `[MLS ${targetLabel}]`;
+    if (normalizedLevel === 'error') {
+      console.error(prefix, text);
+    } else if (normalizedLevel === 'warn' || normalizedLevel === 'warning') {
+      console.warn(prefix, text);
+    } else {
+      console.debug(prefix, text);
+    }
+  };
+
+  try {
+    setLoggerFn(logger);
+  } catch (err) {
+    console.warn('[MLS] Failed to install CoreCrypto logger', err);
+  }
+
+  const setLevelFn = typeof CoreCrypto?.setMaxLogLevel === 'function'
+    ? CoreCrypto.setMaxLogLevel.bind(CoreCrypto)
+    : (typeof instance?.setMaxLogLevel === 'function' ? instance.setMaxLogLevel.bind(instance) : null);
+  if (setLevelFn) {
+    const desired = CoreCrypto?.LogLevel?.Debug ?? instance?.LogLevel?.Debug ?? 'debug';
+    try {
+      setLevelFn(desired);
+    } catch (err) {
+      console.warn('[MLS] Failed to set CoreCrypto log level', err);
+    }
+  }
+};
 
 let coreCryptoInstance = null;
 let initPromise = null;
 let bootstrapPromise = null;
+let cachedCredentialInfo = null;
 
 const getCrypto = () => (typeof window !== 'undefined' ? window.crypto : null);
 const getStorage = () => (typeof window !== 'undefined' ? window.localStorage : null);
@@ -84,22 +161,76 @@ const getOrCreateClientId = () => {
   return fresh;
 };
 
-const createStubTransport = () => ({
-  async sendCommitBundle() {
-    if (import.meta?.env?.DEV) {
-      console.warn('[MLS] sendCommitBundle stub transport invoked — backend wiring pending');
+const createTransport = () => ({
+  async sendCommitBundle(commitBundle) {
+    const conversationId = transportContext.conversationId;
+    if (conversationId == null) {
+      if (import.meta?.env?.DEV) {
+        console.warn('[MLS] sendCommitBundle invoked without active conversation context');
+      }
+      pushTransportDiagnostic({
+        level: 'error',
+        message: 'sendCommitBundle invoked without conversation context'
+      });
+      return { abort: { reason: 'missing_conversation' } };
     }
-    return 'success';
+
+    const payload = {
+      conversationId,
+      senderClientId: getClientIdBase64(),
+      bundle: commitBundle?.commit ? bytesToBase64(commitBundle.commit) : null,
+      welcome: commitBundle?.welcome ? bytesToBase64(commitBundle.welcome) : null,
+      groupInfo: commitBundle?.groupInfo?.payload ? bytesToBase64(commitBundle.groupInfo.payload) : null,
+      encryptedMessage: commitBundle?.encryptedMessage ? bytesToBase64(commitBundle.encryptedMessage) : null
+    };
+
+    try {
+      await api.mls.sendCommitBundle(payload);
+      return 'success';
+    } catch (error) {
+      console.warn('[MLS] Failed to send commit bundle', error);
+      pushTransportDiagnostic({
+        conversationId,
+        level: 'error',
+        message: 'Failed to send commit bundle',
+        error: error?.message || String(error)
+      });
+      return { abort: { reason: error?.message || 'commit_failed' } };
+    }
   },
-  async sendMessage() {
-    if (import.meta?.env?.DEV) {
-      console.warn('[MLS] sendMessage stub transport invoked — backend wiring pending');
-    }
+  async sendMessage(message) {
+    // CoreCrypto may request direct fan-out for application messages; the messaging service already handles this path.
+    // Acknowledge success to avoid duplicate delivery attempts.
     return 'success';
   },
   async prepareForTransport(secret) {
-    if (!secret?.data) return new MlsTransportData(new Uint8Array());
-    return new MlsTransportData(secret.data);
+    try {
+      if (secret?.data?.length) {
+        const senderClientId = secret.clientId?.copyBytes?.()
+          ? bytesToBase64(secret.clientId.copyBytes())
+          : null;
+        const epochValue = typeof secret?.epoch === 'number'
+          ? secret.epoch
+          : (typeof secret?.epoch?.valueOf === 'function' ? Number(secret.epoch.valueOf()) : null);
+        await api.mls.sendHistorySecret({
+          conversationId: transportContext.conversationId ?? null,
+          senderClientId,
+          epoch: Number.isInteger(epochValue) ? epochValue : null,
+          data: bytesToBase64(secret.data)
+        });
+      }
+    } catch (error) {
+      if (import.meta?.env?.DEV) {
+        console.warn('[MLS] Failed to send history secret', error);
+      }
+      pushTransportDiagnostic({
+        conversationId: transportContext.conversationId ?? null,
+        level: 'warn',
+        message: 'Failed to send history secret',
+        error: error?.message || String(error)
+      });
+    }
+    return new MlsTransportData(secret?.data ?? new Uint8Array());
   }
 });
 
@@ -120,6 +251,18 @@ const bootstrapCoreCrypto = async () => {
     await initWasmModule();
   }
 
+  if (!defaultCiphersuiteResolved) {
+    try {
+      DEFAULT_CIPHERSUITE = ciphersuiteDefault();
+      DEFAULT_MLS_CIPHERSUITE = DEFAULT_CIPHERSUITE;
+      defaultCiphersuiteResolved = true;
+    } catch (err) {
+      if (import.meta?.env?.DEV) {
+        console.warn('[MLS] Failed to resolve default ciphersuite from core-crypto, using fallback 1', err);
+      }
+    }
+  }
+
   const keyMaterial = getOrCreateDatabaseKey();
 
   // Ensure the encrypted keystore exists before initializing CoreCrypto. `openDatabase`
@@ -136,7 +279,8 @@ const bootstrapCoreCrypto = async () => {
   };
 
   const instance = await CoreCrypto.init(params);
-  await instance.provideTransport(createStubTransport());
+  installCoreCryptoLogger(instance);
+  await instance.provideTransport(createTransport());
   return instance;
 };
 
@@ -183,6 +327,201 @@ const markKeyPackagesUploaded = () => {
   storage.setItem(KEYPACKAGE_UPLOAD_TS_KEY, String(Date.now()));
 };
 
+const readStoredCredential = () => {
+  const storage = getStorage();
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(CREDENTIAL_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    cachedCredentialInfo = parsed;
+    return parsed;
+  } catch {
+    storage.removeItem?.(CREDENTIAL_STORAGE_KEY);
+    cachedCredentialInfo = null;
+    return null;
+  }
+};
+
+const writeStoredCredential = (value) => {
+  const storage = getStorage();
+  if (!storage) return;
+  if (!value) {
+    storage.removeItem(CREDENTIAL_STORAGE_KEY);
+    cachedCredentialInfo = null;
+    return;
+  }
+  try {
+    storage.setItem(CREDENTIAL_STORAGE_KEY, JSON.stringify(value));
+    cachedCredentialInfo = value;
+  } catch {
+    storage.removeItem(CREDENTIAL_STORAGE_KEY);
+    cachedCredentialInfo = null;
+  }
+};
+
+const shouldRefreshCredential = (entry) => {
+  if (!entry || typeof entry !== 'object') return true;
+  const expiresAt = entry.expiresAt ? Date.parse(entry.expiresAt) : NaN;
+  if (!Number.isFinite(expiresAt)) return true;
+  return (expiresAt - Date.now()) <= CREDENTIAL_REFRESH_GRACE_MS;
+};
+
+const parseCredentialResponse = (credentialB64) => {
+  if (!credentialB64) return null;
+  try {
+    const bytes = base64ToBytes(credentialB64);
+    if (!bytes) return null;
+    return JSON.parse(textDecoder.decode(bytes));
+  } catch {
+    return null;
+  }
+};
+
+const isIgnorableMlsInitError = (error) => {
+  const message = typeof error?.message === 'string' ? error.message : '';
+  if (!message) return false;
+  return /already\s+(?:initialized|exists)/i.test(message);
+};
+
+export const runWithConversationContext = async (conversationId, fn) => {
+  const previous = transportContext.conversationId;
+  transportContext.conversationId = Number.isInteger(Number(conversationId)) ? Number(conversationId) : null;
+  try {
+    return await fn();
+  } finally {
+    transportContext.conversationId = previous;
+  }
+};
+
+export const ensureConversationCreated = async (conversationId) => {
+  if (!FEATURE_FLAG) return false;
+  const coreCrypto = await getCoreCrypto();
+  if (!coreCrypto) return false;
+  const convId = createConversationId(conversationId);
+  return coreCrypto.transaction(async (ctx) => {
+    const exists = await ctx.conversationExists(convId);
+    if (exists) return false;
+    await ctx.createConversation(convId, CredentialType.Basic);
+    return true;
+  });
+};
+
+export const addClientsToConversation = async (conversationId, keyPackages) => {
+  if (!FEATURE_FLAG) return false;
+  if (!Array.isArray(keyPackages) || keyPackages.length === 0) return false;
+  const coreCrypto = await getCoreCrypto();
+  if (!coreCrypto) return false;
+  const convId = createConversationId(conversationId);
+  return runWithConversationContext(conversationId, async () => coreCrypto.transaction(async (ctx) => {
+    await ctx.addClientsToConversation(convId, keyPackages);
+    return true;
+  }));
+};
+
+export const commitPendingProposals = async (conversationId) => {
+  if (!FEATURE_FLAG) return false;
+  const coreCrypto = await getCoreCrypto();
+  if (!coreCrypto) return false;
+  const convId = createConversationId(conversationId);
+  return runWithConversationContext(conversationId, async () => coreCrypto.transaction(async (ctx) => {
+    await ctx.commitPendingProposals(convId);
+    return true;
+  }).catch((err) => {
+    if (import.meta?.env?.DEV) {
+      console.warn('[MLS] commitPendingProposals failed', err);
+    }
+    return false;
+  }));
+};
+
+const ensureCredentialProvisioned = async (coreCrypto, { userId, clientIdBytes, clientIdBase64 }) => {
+  const cached = readStoredCredential();
+  if (!shouldRefreshCredential(cached)) return cached;
+
+  if (!Number.isInteger(Number(userId))) {
+    throw new Error('MLS credential provisioning requires a numeric user id');
+  }
+
+  let publicKeyBytes = null;
+  await coreCrypto.transaction(async (ctx) => {
+    const clientId = new ClientId(clientIdBytes.slice());
+    try {
+      await ctx.mlsInit(clientId, [DEFAULT_CIPHERSUITE]);
+    } catch (err) {
+      if (!isIgnorableMlsInitError(err)) {
+        throw err;
+      }
+    }
+    publicKeyBytes = await ctx.clientPublicKey(DEFAULT_CIPHERSUITE, CredentialType.Basic);
+  });
+
+  if (!publicKeyBytes) {
+    throw new Error('Failed to retrieve MLS public key for credential provisioning');
+  }
+
+  const nowIso = new Date().toISOString();
+  const requestPayload = {
+    version: 1,
+    subject: { userId, clientId: clientIdBase64 },
+    ciphersuite: DEFAULT_CIPHERSUITE,
+    credentialType: 'basic',
+    publicKey: bytesToBase64(publicKeyBytes),
+    nonce: bytesToBase64(randomBytes(16)),
+    createdAt: nowIso
+  };
+  const requestBytes = textEncoder.encode(JSON.stringify(requestPayload));
+  const requestBase64 = bytesToBase64(requestBytes);
+
+  let createResponse;
+  try {
+    createResponse = await api.mls.requestCredential({
+      clientId: clientIdBase64,
+      ciphersuite: DEFAULT_CIPHERSUITE,
+      request: requestBase64
+    });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      console.warn('[MLS] Credential provisioning endpoint not available (404).');
+      return cached;
+    }
+    throw error;
+  }
+
+  const rawRequestId = createResponse?.id ?? null;
+  const numericRequestId = Number(rawRequestId);
+  const requestId = Number.isInteger(numericRequestId) ? numericRequestId : rawRequestId;
+  const credentialB64 = createResponse?.credential;
+  if (!credentialB64) {
+    throw new Error('MLS credential provisioning failed: missing credential payload');
+  }
+
+  try {
+    await api.mls.completeCredential({
+      requestId,
+      response: credentialB64
+    });
+  } catch (error) {
+    writeStoredCredential(null);
+    throw error;
+  }
+
+  const credentialPayload = parseCredentialResponse(credentialB64) || {};
+  const credentialInfo = credentialPayload?.credential || {};
+  const stored = {
+    requestId: Number.isInteger(numericRequestId) ? numericRequestId : rawRequestId,
+    credential: credentialB64,
+    issuedAt: credentialInfo.issuedAt ?? createResponse?.issuedAt ?? null,
+    expiresAt: credentialInfo.expiresAt ?? createResponse?.expiresAt ?? null,
+    signer: credentialPayload?.signer ?? createResponse?.signer ?? null,
+    requestHash: createResponse?.requestHash ?? credentialPayload?.requestHash ?? null
+  };
+
+  writeStoredCredential(stored);
+  return stored;
+};
+
 export const ensureMlsBootstrap = async () => {
   if (!FEATURE_FLAG) return null;
   if (bootstrapPromise) return bootstrapPromise;
@@ -190,8 +529,26 @@ export const ensureMlsBootstrap = async () => {
     const coreCrypto = await getCoreCrypto();
     if (!coreCrypto) return null;
 
+    const tokenData = getTokenData?.();
+    const userId = Number(tokenData?.userId ?? null);
+    if (!Number.isInteger(userId)) {
+      throw new Error('MLS bootstrap requires an authenticated user');
+    }
+
     const clientIdBytes = getOrCreateClientId();
     const clientIdB64 = bytesToBase64(clientIdBytes);
+    const credentialInfo = await ensureCredentialProvisioned(coreCrypto, {
+      userId,
+      clientIdBytes,
+      clientIdBase64: clientIdB64
+    }).catch((error) => {
+      console.warn('[MLS] Credential provisioning failed', error);
+      throw error;
+    });
+    if (credentialInfo) {
+      cachedCredentialInfo = credentialInfo;
+    }
+
     const shouldPublish = !shouldSkipKeyPackageUpload();
     const result = await coreCrypto.transaction(async (ctx) => {
       // Touch the client's public key so that a basic credential exists.
@@ -246,6 +603,13 @@ export const ensureMlsBootstrap = async () => {
 
 export const getClientIdBase64 = () => bytesToBase64(getOrCreateClientId());
 
+export const getCachedCredentialInfo = () => {
+  if (cachedCredentialInfo) return cachedCredentialInfo;
+  const stored = readStoredCredential();
+  cachedCredentialInfo = stored;
+  return stored;
+};
+
 const encodeConversationId = (conversationId) => {
   if (conversationId instanceof Uint8Array) return conversationId;
   return textEncoder.encode(String(conversationId));
@@ -255,4 +619,4 @@ export const createConversationId = (conversationId) => new ConversationId(encod
 
 export const base64ToUint8 = (value) => base64ToBytes(value);
 export const uint8ToBase64 = (bytes) => bytesToBase64(bytes);
-export const DEFAULT_MLS_CIPHERSUITE = DEFAULT_CIPHERSUITE;
+export let DEFAULT_MLS_CIPHERSUITE = DEFAULT_CIPHERSUITE;

@@ -1,10 +1,11 @@
 // frontend/src/pages/Messages.js
 import van from 'vanjs-core';
 import * as vanX from 'vanjs-ext';
-const { div, h1, h2, h3, button, input, span, p, ul, li, textarea, form, i } = van.tags;
+const { div, h1, h2, h3, h4, button, input, span, p, ul, li, textarea, form, i } = van.tags;
 import messagingService from '../services/messaging/index.js';
 import { getUserId as authGetUserId } from '../services/auth.js';
-import messagingStore from '../stores/messagingStore.js';
+import messagingStore, { deriveMlsDiagnostics } from '../stores/messagingStore.js';
+import { isMlsEnabled } from '../services/mls/coreCryptoClient.js';
 // Rendering uses store projections; no pair key or recomputed names
 
 /**
@@ -196,6 +197,22 @@ export default function MessagesPage() {
     }, 2000);
   };
 
+  const migrateSelectedConversation = async () => {
+    if (!isMlsEnabled()) return;
+    if (migratingState.val) return;
+    const conversation = messagingStore.selectedConversation;
+    if (!conversation) return;
+    migratingState.val = true;
+    try {
+      await messagingService.migrateConversation(conversation.id);
+    } catch (err) {
+      console.error('Failed to migrate conversation to MLS', err);
+      messagingStore.setError('Failed to migrate conversation to MLS. Please try again.');
+    } finally {
+      migratingState.val = false;
+    }
+  };
+
   // No local getUserId; use messagingStore.currentUserId (set during init)
 
   // Scroll to bottom of messages
@@ -214,6 +231,7 @@ export default function MessagesPage() {
   const MAX_RENDERED = 200;
   const showAllState = van.state(false);
   const lastRenderedConversationId = van.state(null);
+  const migratingState = van.state(false);
 
   // Format timestamp
   const formatTime = (timestamp) => {
@@ -269,6 +287,58 @@ export default function MessagesPage() {
   };
 
   // No more manual DOM manipulation needed - VanX handles everything!
+
+  const formatDetailedTs = (value) => {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString();
+  };
+
+  const renderMlsDiagnostics = () => {
+    const convoId = messagingStore.selectedConversationId;
+    if (!convoId) return null;
+    const diag = deriveMlsDiagnostics(convoId);
+    if (!diag) return null;
+    const { meta = {}, credential, events = [], epoch, ciphersuite, encryptionMode, historySharingEnabled, credentialStatus } = diag;
+    const entries = [];
+
+    entries.push(['Encryption mode', encryptionMode || 'mls']);
+    entries.push(['Current epoch', epoch != null ? String(epoch) : '—']);
+    entries.push(['Ciphersuite', ciphersuite || '—']);
+    entries.push(['History sharing', historySharingEnabled === null ? 'unknown' : (historySharingEnabled ? 'enabled' : 'disabled')]);
+
+    if (credential) {
+      entries.push(['Credential status', credentialStatus]);
+      entries.push(['Credential issued', formatDetailedTs(credential.issuedAt)]);
+      entries.push(['Credential expires', formatDetailedTs(credential.expiresAt)]);
+      if (credential.signer?.id) entries.push(['Credential signer', credential.signer.id]);
+    }
+
+    if (meta.lastSentEpoch != null) entries.push(['Last sent epoch', meta.lastSentEpoch]);
+    if (meta.lastSentClientId) entries.push(['Last sent client', meta.lastSentClientId]);
+    if (meta.lastSenderClientId) entries.push(['Last recv client', meta.lastSenderClientId]);
+    if (meta.lastCommitDelaySeconds != null) entries.push(['Commit delay (s)', meta.lastCommitDelaySeconds]);
+    if (meta.lastEpochChanged != null) entries.push(['Epoch changed', meta.lastEpochChanged ? 'yes' : 'no']);
+    if (meta.lastDecryptionError) entries.push(['Last decrypt error', meta.lastDecryptionError]);
+    if (meta.lastEventMessage) entries.push(['Last MLS event', meta.lastEventMessage]);
+    if (meta.lastEventAt) entries.push(['Last MLS event at', formatDetailedTs(meta.lastEventAt)]);
+    if (meta.lastUpdatedAt) entries.push(['Diagnostics updated', formatDetailedTs(meta.lastUpdatedAt)]);
+
+    const lastEvent = events.length > 0 ? events[events.length - 1] : null;
+    if (lastEvent) {
+      entries.push(['Latest event', `${lastEvent.level ?? 'info'} • ${lastEvent.message || '(no message)'}`]);
+      entries.push(['Latest event time', formatDetailedTs(lastEvent.timestamp)]);
+    }
+
+    return div({ class: 'mls-diagnostics' }, [
+      h4('MLS Diagnostics'),
+      ul(entries.map(([label, value]) => li({ key: label }, [
+        span({ class: 'diag-label' }, `${label}: `),
+        span({ class: 'diag-value' }, value ?? '—')
+      ])))
+    ]);
+  };
 
   // Initialize once per page lifetime to avoid duplicate fetch/reset on re-renders
   if (!MessagesPage.__initialized) {
@@ -377,10 +447,27 @@ export default function MessagesPage() {
                   h3(() => messagingStore.selectedConversationName || 'Unknown'),
                   div({ class: "encryption-status" }, [
                     i({ class: "icon-lock" }),
-                    span("End-to-end encrypted")
+                    span("End-to-end encrypted"),
+                    () => {
+                      if (!isMlsEnabled()) return null;
+                      const convo = messagingStore.selectedConversation;
+                      if (!convo) return null;
+                      const mode = (convo.encryptionMode || convo.encryption_mode || 'legacy').toLowerCase();
+                      if (mode === 'mls') {
+                        return span({ class: 'mls-mode-tag' }, 'MLS active');
+                      }
+                      const eligible = convo.mlsMigrationEligible ?? convo.mls_migration_eligible ?? false;
+                      if (!eligible) return null;
+                      return button({
+                        class: 'btn btn-secondary btn-xs',
+                        disabled: () => migratingState.val,
+                        onclick: migrateSelectedConversation
+                      }, () => migratingState.val ? 'Upgrading…' : 'Upgrade to MLS');
+                    }
                   ])
                 ])
               ]),
+              renderMlsDiagnostics(),
               
               // Messages list - now fully reactive!
               div({ class: "messages-list", key: () => messagingStore.selectedConversationId }, 

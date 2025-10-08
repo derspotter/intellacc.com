@@ -6,7 +6,7 @@ const { verifyToken } = require('./utils/jwt');
 const notificationService = require('./services/notificationService');
 
 const app = express();
-const port = process.env.NODE_PORT || 3000;
+const DEFAULT_PORT = Number(process.env.PORT || process.env.NODE_PORT || 3000);
 
 // PostgreSQL Pool
 const pool = new Pool({
@@ -189,7 +189,35 @@ app.use('/api', require('./routes/api'));
 app.set('io', io);
 
 // IMPORTANT FIX: Use the server with Socket.IO attached instead of app.listen
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running with Socket.IO on port ${PORT}`);
+const startServer = (port = DEFAULT_PORT) => new Promise((resolve, reject) => {
+  if (server.listening) {
+    return resolve(server);
+  }
+
+  const handleError = (err) => {
+    server.off('error', handleError);
+    reject(err);
+  };
+
+  server.once('error', handleError);
+  server.listen(port, '0.0.0.0', () => {
+    server.off('error', handleError);
+    console.log(`Server running with Socket.IO on port ${port}`);
+    resolve(server);
+  });
 });
+
+if (require.main === module) {
+  startServer().catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  app,
+  server,
+  io,
+  pool,
+  startServer
+};

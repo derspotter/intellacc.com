@@ -77,6 +77,30 @@ async function insertApplicationMessage({
      RETURNING id, created_at`,
     [conversationId, userId, senderClientId, epoch, ciphertext]
   );
+  await db.query(
+    `UPDATE conversations
+        SET last_message_at = GREATEST(NOW(), COALESCE(last_message_at, NOW())),
+            updated_at = NOW()
+      WHERE id = $1`,
+    [conversationId]
+  );
+  return result.rows[0];
+}
+
+async function insertHistorySecret({
+  conversationId,
+  userId,
+  senderClientId,
+  epoch,
+  secret
+}) {
+  const result = await db.query(
+    `INSERT INTO mls_history_secrets (
+       conversation_id, sender_user_id, sender_client_id, epoch, secret
+     ) VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, created_at`,
+    [conversationId, userId, senderClientId, epoch ?? null, secret]
+  );
   return result.rows[0];
 }
 
@@ -115,10 +139,25 @@ async function listApplicationMessages(conversationId, userId, limit = 50, befor
   return result.rows;
 }
 
+async function listKeyPackages({ userId, ciphersuite, limit }) {
+  const cappedLimit = Math.max(1, Math.min(Number(limit) || 5, 20));
+  const result = await db.query(
+    `SELECT id, client_id, credential_type, key_package, created_at
+       FROM mls_key_packages
+      WHERE user_id = $1 AND ciphersuite = $2
+      ORDER BY created_at DESC
+      LIMIT $3`,
+    [userId, ciphersuite, cappedLimit]
+  );
+  return result.rows;
+}
+
 module.exports = {
   replaceKeyPackages,
   insertCommitBundle,
   insertApplicationMessage,
+  insertHistorySecret,
   getConversationParticipants,
-  listApplicationMessages
+  listApplicationMessages,
+  listKeyPackages
 };

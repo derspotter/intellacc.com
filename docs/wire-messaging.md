@@ -74,12 +74,15 @@
 - [ ] Gate every endpoint with JWT auth → MLS identity mapping; deny requests for non-members and log anomalies.
 
 ### Phase 3 — End-to-End Messaging (Weeks 5-6)
+- [x] Implement credential provisioning handshake: backend signs `/api/mls/credentials/request` payloads with `MLS_CREDENTIAL_ISSUER_KEY`, frontend bootstraps via CoreCrypto and caches signed credentials before calling `/api/mls/credentials/complete`.
 - [ ] Wrap conversation lifecycle helpers around `CoreCryptoContext`: `ctx.mlsCreateConversation`, `ctx.mlsAddMembers`, `ctx.mlsRemoveMembers`, `ctx.commitPendingProposals`.
-  - In progress: backend routes scaffolded (`/api/mls/credentials/*`, `/api/mls/messages/:conversationId`) with persistence; decrypt pipeline still returns ciphertext until core-crypto backend integration is ready.
-- [ ] Adapt send pipeline: optimistically insert plaintext, but store MLS ciphertext/application payload returned by `ctx.encryptMessage`; on `decryptMessage`, surface `hasEpochChanged`, `commitDelay`, and `senderClientId` to the UI/store.
-  - Frontend send/receive now routes through CoreCrypto (encrypt/decrypt) with optimistic MLS messages; awaiting backend decrypt pipeline for plaintext fetch.
-- [ ] Persist `GroupInfoBundle.payload` alongside conversation records so new devices can join via external commit if needed.
+  - Partial: frontend now creates groups and stages member adds via `ensureConversationLifecycle`, pushing commit bundles through the transport to `/api/mls/commit`; removal flows remain TODO.
+- [x] Adapt send pipeline: optimistically insert plaintext, but store MLS ciphertext/application payload returned by `ctx.encryptMessage`; on `decryptMessage`, surface `hasEpochChanged`, `commitDelay`, and `senderClientId` to the UI/store.
+  - Frontend `messagingService` now records epochs/client IDs on send and captures `commitDelay`/`hasEpochChanged` diagnostics during decrypt for DevTools consumption.
+- [x] Persist `GroupInfoBundle.payload` alongside conversation records so new devices can join via external commit if needed.
+  - `/api/mls/commit` now hydrates `mls_conversations.group_info` whenever a bundle supplies the payload.
 - [ ] Show MLS diagnostics (epoch number, history sharing flag, credential expiry) in developer tools/support UI for debugging.
+  - Store-level diagnostics (credential expiry, last sender client ID, commit delay) are wired up; Messages view now renders an `MLS Diagnostics` panel for selected conversations, but we still need a dedicated developer tooling surface and history-sharing flag wiring.
 - [ ] Provide migration toggles: new conversations default to MLS; legacy threads remain readable until users trigger "Upgrade to MLS" (creates MLS group, sends welcome, locks legacy send).
 
 ### Phase 4 — Hardening & Launch (Weeks 6-7)
@@ -100,16 +103,20 @@
   - Hooks `EpochObserver`/`HistoryObserver` to refresh `messagingStore` when `epochChanged` or history clients are materialized.
 - Update UI components to surface MLS status (credential provisioned, epoch, history sharing) using selectors tied to `coreCrypto.conversationEpoch` and `coreCrypto.isHistorySharingEnabled`.
 - Add error boundaries translating `CoreCryptoError` helpers (`isMlsDuplicateMessageError`, `isMlsStaleCommitError`, etc.) into user-visible toasts or silent retries.
+  - Store now captures MLS diagnostics (credential expiry, last sender client, commit delay) so future UI can render a developer/debug panel without reworking the transport.
 
 ### Backend
 - Define TypeScript types aligning with `MlsTransport` payloads (`CommitBundle`, `HistorySecret`) to ensure shape parity.
 - Add Express controllers for `/api/mls/commit`, `/api/mls/message`, `/api/mls/history-secret`, plus polling endpoints if needed for offline clients.
 - Extend Socket.IO emitter to include MLS metadata (`epoch`, `senderClientId`, `groupInfoEncryptionType`) so the frontend can reconcile state.
 - Introduce cron/worker scripts to expire orphaned welcome messages and purge retired MLS blobs.
+  - `/api/mls/commit` now persists `group_info` payloads to `mls_conversations`, keeping backend state aligned with client CoreCrypto state.
+  - Added `GET /api/mls/key-packages/:userId` so clients can fetch remote key packages when staging MLS joins.
 
 ### Tooling & Ops
 - Add npm script (`npm run verify:core-crypto`) to ensure the WASM asset is copied to `dist/` and the bundle size stays within limits.
 - Update Docker compose to mount the WASM artifact and expose new env vars (`MLS_TRANSPORT_BASE_URL`, `MLS_CREDENTIAL_ISSUER_KEY`).
+  - `MLS_CREDENTIAL_ISSUER_KEY` should be a 32-byte Ed25519 seed encoded as base64 or hex; missing keys fall back to a derived development seed and must be set explicitly in production.
 - Configure CI jobs to run MLS-enabled integration tests in headless browsers and to lint for GPL notices.
 - Set up Renovate (or equivalent) rules to watch `@wireapp/core-crypto`; auto-open PRs with changelog links.
 
@@ -124,6 +131,8 @@
   - Group membership churn (add/remove) verifying new welcomes are persisted and served correctly.
 - **Load tests:**
   - K6 or custom script hitting `/api/mls/commit` with concurrent commits to validate DB throughput and socket fan-out.
+  - Legacy Signal suites remain skipped in backend Jest runs; MLS-focused tests will replace them in a later phase.
+  - Backend Jest now includes a happy-path `/mls/key-packages` roundtrip test to guard persistence + listing.
 
 ---
 
@@ -191,3 +200,41 @@
    - extend `backend/scripts/smokeMls.js` or add Jest tests for credential/decrypt endpoints
    - add Vitest coverage around MLS store/service once decrypt is wired
 
+### Remaining MLS Gaps (Before GA)
+- **Server-side lifecycle helpers**: backend still needs to invoke `mlsCreateConversation`, `mlsAddMembers`, `mlsRemoveMembers`, and `commitPendingProposals`; frontend shim covers adds, but removals/history sharing are TODO.
+- **History sharing pipeline**: flesh out `/api/mls/history-secret` with persistence/fan-out and expose client UX toggles that call `enableHistorySharing` / `disableHistorySharing`.
+- **Diagnostics UI**: expand the new diagnostics panel into a proper developer tooling surface (include history-sharing flag, transport errors, credential status) and expose it outside the Messages view.
+- **Delivery service / worker**: implement commit/message fan-out workers (or DS integration) so queued MLS payloads reach offline participants; honour transport retries/backoff.
+- **Testing overhaul**: replace skipped Signal suites with MLS-focused Jest/Vitest/Playwright coverage (credential flow, lifecycle helpers, decrypt pipeline, transport error handling).
+- **Ops & migration**: wire `prepareForTransport` storage, cron cleanup for stale blobs, CI jobs with MLS enabled, and build the "Upgrade to MLS" migration toggle for legacy threads.
+
+## Current Focus Notes (2025-02-17)
+
+### Developer Diagnostics Surface
+- Promote the in-thread panel into `/frontend/src/pages/MlsDiagnosticsPage.js` (new) that reads from `messagingStore.mlsMeta` / `messagingStore.mlsCredential`; expose routes and a header nav entry guarded by `VITE_ENABLE_MLS`.
+- Add `deriveMlsDiagnostics(conversationId)` selector in `frontend/src/stores/messagingStore.js` so components can render the latest epoch, history sharing flag, and credential freshness without duplicating store logic.
+- Pipe transport and decrypt errors through `frontend/src/services/messaging/index.js` into a central `messagingStore.pushDiagnosticEvent` helper (retain last N events) to aid support triage.
+- Emit structured console logs behind `import.meta.env.DEV` using `setLogger` so the diagnostics page can stream recent entries even when sockets reconnect offline.
+
+### Migration Toggle UX
+- ✅ Conversations now expose `encryptionMode`/`mlsMigrationEligible` via `conversation_summaries`, and the Messages header renders an "Upgrade to MLS" action when eligible.
+- ✅ Backend `/api/mls/migrate` flips `encryption_mode` to `mls`, stores MLS metadata, and emits `mls:migration` to refresh clients.
+- Lock legacy senders by updating `frontend/src/components/messages/Composer.js` to check `conversation.encryptionMode === 'mls'` before submitting via the legacy transport.
+- Document backend behaviour: `/api/mls/migrate` should enqueue a commit bundle, set `encryption_mode='mls'`, and emit `mls:migration` so existing clients refresh.
+
+### History Secret Handling
+- ✅ Durable storage lands via `mls_history_secrets` (see `backend/migrations/20251018_add_mls_history_secrets.sql`) with fan-out in `mlsController.postHistorySecret`.
+- Extend `frontend/src/services/mls/coreCryptoClient.js` with `coreCrypto.provideTransport({ prepareForTransport })` that bridges to the new endpoint and caches returned hints locally.
+- Ensure worker jobs purge expired secrets after `HISTORY_SECRET_TTL_MINUTES` while retaining metadata needed for audit/logging.
+
+### Fan-out Worker & Observability
+- Add a BullMQ queue (`mls-transport`) that consumes commit/message rows and emits Socket.IO events with retry/backoff semantics informed by `MlsTransportResponse`.
+- Tag every enqueued job with `conversationId`, `epoch`, and `senderClientId` so Grafana dashboards can chart delivery latency; persist metrics to `mls_delivery_metrics` for long-term analysis.
+- Provide a `/api/internal/mls/queues` read-only endpoint for ops to inspect lag/backlog during incidents.
+
+### Legacy Signal Cleanup
+- ✅ Signal-era modules and libsignal integration are gone; MLS is the only send/receive path.
+- Update `docs/messaging-improvements.md` to reference `coreCryptoClient` and the new MLS transport so future contributors do not reach for the deprecated Signal scaffolding.
+- After deletion, run `npm run lint` and `npm run test` in frontend/backend to ensure no stale imports remain, then bump the docs checklist to mark legacy messaging as removed.
+
+**Defaults:** `VITE_ENABLE_MLS` now defaults to `true`; only set it to `false` when explicitly testing the legacy stack in development.

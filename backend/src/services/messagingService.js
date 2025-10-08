@@ -21,6 +21,33 @@ function emitToUsers(eventName, payload, userIds = []) {
   }
 }
 
+async function updateConversationEncryption(conversationId, { mode, migrationEligible }) {
+  const values = [];
+  const setters = [];
+
+  if (mode) {
+    setters.push('encryption_mode = $' + (values.length + 1));
+    values.push(mode);
+  }
+
+  if (migrationEligible !== undefined) {
+    setters.push('mls_migration_eligible = $' + (values.length + 1));
+    values.push(Boolean(migrationEligible));
+  }
+
+  if (setters.length === 0) {
+    return null;
+  }
+
+  values.push(conversationId);
+  const query = `UPDATE conversations
+    SET ${setters.join(', ')}, updated_at = NOW()
+    WHERE id = $${values.length}
+    RETURNING *`;
+  const result = await db.query(query, values);
+  return result.rows[0] || null;
+}
+
 function emitToConversationRoom(conversationId, eventName, payload) {
   if (!io) return;
   io.to(`conversation:${conversationId}`).emit(eventName, payload);
@@ -482,6 +509,7 @@ module.exports = {
   emitToUsers,
   emitToConversationRoom,
   checkConversationMembership,
+  updateConversationEncryption,
   getOrCreateConversation,
   getUserConversations,
   sendMessage,

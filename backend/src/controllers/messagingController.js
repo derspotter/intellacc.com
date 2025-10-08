@@ -80,8 +80,25 @@ async function createConversation(req, res) {
     }
 
     const conversation = await messagingService.getOrCreateConversation(userId, otherUserIdInt);
-    
-    res.json({ conversation });
+
+    try {
+      await messagingService.updateConversationEncryption(conversation.id, {
+        mode: 'mls',
+        migrationEligible: false
+      });
+    } catch (err) {
+      console.warn('Failed to enforce MLS encryption mode on new conversation', err);
+    }
+
+    let refreshed = conversation;
+    try {
+      const updated = await messagingService.getConversation(conversation.id, userId);
+      if (updated) refreshed = updated;
+    } catch (err) {
+      console.warn('Failed to refresh conversation after MLS enforcement', err);
+    }
+
+    res.json({ conversation: refreshed });
   } catch (error) {
     console.error('Error creating conversation:', error);
     res.status(500).json({ 
