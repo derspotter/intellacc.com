@@ -99,9 +99,26 @@ async function getConversationParticipants(conversationId) {
   return [participant_1, participant_2].filter(Boolean);
 }
 
+async function listApplicationMessages(conversationId, userId, limit = 50, before = null) {
+  const params = [conversationId, limit];
+  let query = `
+    SELECT id, conversation_id, user_id, sender_client_id, epoch, ciphertext, created_at
+      FROM mls_messages
+     WHERE conversation_id = $1
+  `;
+  if (before) {
+    params.push(before);
+    query += ` AND created_at < $${params.length}`;
+  }
+  query += ' ORDER BY created_at DESC LIMIT $2';
+  const result = await db.query(query, params);
+  return result.rows;
+}
+
 module.exports = {
   replaceKeyPackages,
   insertCommitBundle,
   insertApplicationMessage,
-  getConversationParticipants
+  getConversationParticipants,
+  listApplicationMessages
 };

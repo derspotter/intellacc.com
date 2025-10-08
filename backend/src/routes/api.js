@@ -13,6 +13,8 @@ const weeklyAssignmentController = require('../controllers/weeklyAssignmentContr
 const keyManagementController = require('../controllers/keyManagementController');
 const messagingController = require('../controllers/messagingController');
 const mlsController = require('../controllers/mlsController');
+const mlsCredentialController = require('../controllers/mlsCredentialController');
+const mlsMessageController = require('../controllers/mlsMessageController');
 const authenticateJWT = require("../middleware/auth");
 const rateLimit = require('express-rate-limit');
 const attachmentsController = require('../controllers/attachmentsController');
@@ -155,6 +157,10 @@ router.post('/mls/key-packages', authenticateJWT, mlsLimiter, mlsController.publ
 router.post('/mls/commit', authenticateJWT, mlsLimiter, mlsController.postCommitBundle);
 router.post('/mls/message', authenticateJWT, mlsLimiter, mlsController.postApplicationMessage);
 router.post('/mls/history-secret', authenticateJWT, mlsLimiter, mlsController.postHistorySecret);
+router.post('/mls/credentials/request', authenticateJWT, mlsLimiter, mlsCredentialController.createCredentialRequest);
+router.post('/mls/credentials/complete', authenticateJWT, mlsLimiter, mlsCredentialController.completeCredential);
+router.get('/mls/credentials', authenticateJWT, mlsLimiter, mlsCredentialController.listCredentials);
+router.get('/mls/messages/:conversationId', authenticateJWT, mlsLimiter, mlsMessageController.listMessages);
 
 // Attachments (pre-signed URL scaffold)
 router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);
