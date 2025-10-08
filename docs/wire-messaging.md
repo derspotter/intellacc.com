@@ -174,3 +174,17 @@
 5. Start with Basic credentials only; document future step for credential provisioning when backend signer is available.
 6. Keep removal key concept as a “future enhancement” (document in wire-messaging.md) but don’t implement yet.
 7. Manual smoke test script (`backend/scripts/smokeMls.js`) hits `/api/mls/key-packages`, `/api/mls/commit`, `/api/mls/message`, and `/api/mls/history-secret`. Provide `--token`, `--conversation`, and `--client`.
+
+### Next Milestone Checklist (WIP)
+1. Backend decrypt pipeline & credential provisioning
+   - add credential provisioning endpoints (`/api/mls/credentials/request` / `/api/mls/credentials/complete`)
+   - expose MLS conversation lifecycle (`create`, `addMembers`, `removeMembers`, `commitPendingProposals`)
+   - decide on server decrypt vs client decrypt: if server-side, wire core-crypto in backend to produce plaintext for GET `/api/mls/messages`; otherwise pass ciphertext + metadata to frontend for ctx.decryptMessage
+   - persist `GroupInfoBundle.payload` for rejoin and record ack metadata (epoch, sender client id)
+2. Frontend MLS send/receive integration
+   - wrap send path with `ctx.encryptMessage` (store ciphertext) and fetch path with `ctx.decryptMessage`
+   - integrate with new decrypt/get APIs, replace stale-flag placeholder, surface epoch/sender in store
+3. Tests & tooling
+   - extend `backend/scripts/smokeMls.js` or add Jest tests for credential/decrypt endpoints
+   - add Vitest coverage around MLS store/service once decrypt is wired
+
