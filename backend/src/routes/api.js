@@ -15,6 +15,7 @@ const messagingController = require('../controllers/messagingController');
 const mlsController = require('../controllers/mlsController');
 const mlsCredentialController = require('../controllers/mlsCredentialController');
 const mlsMessageController = require('../controllers/mlsMessageController');
+const mlsConversationController = require('../controllers/mlsConversationController');
 const authenticateJWT = require("../middleware/auth");
 const rateLimit = require('express-rate-limit');
 const attachmentsController = require('../controllers/attachmentsController');
@@ -161,6 +162,10 @@ router.post('/mls/credentials/request', authenticateJWT, mlsLimiter, mlsCredenti
 router.post('/mls/credentials/complete', authenticateJWT, mlsLimiter, mlsCredentialController.completeCredential);
 router.get('/mls/credentials', authenticateJWT, mlsLimiter, mlsCredentialController.listCredentials);
 router.get('/mls/messages/:conversationId', authenticateJWT, mlsLimiter, mlsMessageController.listMessages);
+router.post('/mls/conversations', authenticateJWT, mlsLimiter, mlsConversationController.upsertConversation);
+router.put('/mls/conversations/:conversationId/group-info', authenticateJWT, mlsLimiter, mlsConversationController.updateGroupInfo);
+router.put('/mls/conversations/:conversationId/history-sharing', authenticateJWT, mlsLimiter, mlsConversationController.setHistorySharing);
+router.get('/mls/conversations/:conversationId', authenticateJWT, mlsLimiter, mlsConversationController.getConversation);
 
 // Attachments (pre-signed URL scaffold)
 router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);
