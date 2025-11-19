@@ -19,6 +19,9 @@ logs/
 # Screenshots
 screenshots/
 
+# Local research artifacts
+recherche/
+
 # Docker
 docker-compose.override.yml
 
@@ -44,4 +47,10 @@ AGENT.md
 
 # Rust build artifacts
 /prediction-engine/target/
+/openmls-wasm/target/
+/openmls-wasm/pkg/
+/openmls-wasm/Cargo.lock
 recherche/2504.01781v2.pdf
+
+# Documentation PDFs
+*.pdf

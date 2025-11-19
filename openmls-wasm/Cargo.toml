@@ -1,0 +1,19 @@
+[package]
+name = "openmls-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+getrandom = { version = "0.2", features = ["js"] }
+serde = { version = "1.0", features = ["derive"] }
+console_error_panic_hook = "0.1"
+# OpenMLS dependencies
+openmls = { version = "0.7.1", features = ["crypto-subtle", "js"] }
+openmls_rust_crypto = "0.4.1"
+openmls_basic_credential = "0.4.1"
+tls_codec = { version = "0.4.2", features = ["derive"] }
+fluvio-wasm-timer = "0.2"

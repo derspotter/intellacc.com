@@ -1,6 +1,23 @@
 import { defineConfig } from 'vite';
+import wasm from 'vite-plugin-wasm';
+import topLevelAwait from 'vite-plugin-top-level-await';
+import path from 'path';
 
 export default defineConfig({
+  define: {
+    'process.env': {},
+    global: 'globalThis'
+  },
+  plugins: [
+    wasm(),
+    topLevelAwait()
+  ],
+  resolve: {
+    alias: {
+      '@openmls': path.resolve(__dirname, '../openmls-wasm/pkg')
+    }
+  },
+  assetsInclude: ['**/*.wasm'],
   server: {
     host: '0.0.0.0',
     proxy: {
@@ -65,6 +82,10 @@ export default defineConfig({
         secure: false
       }
     }
+  }
+  ,
+  optimizeDeps: {
+    exclude: []
   }
   // esbuild configuration removed
 });
