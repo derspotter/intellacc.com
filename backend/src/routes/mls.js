@@ -1,0 +1,107 @@
+const express = require('express');
+const router = express.Router();
+const mlsService = require('../services/mlsService');
+const authenticateJWT = require('../middleware/auth');
+
+// Middleware to ensure user is authenticated
+router.use(authenticateJWT);
+
+// Upload Key Package
+router.post('/key-package', async (req, res) => {
+  try {
+    const { deviceId, packageData, hash } = req.body;
+    const userId = req.user.id; 
+    
+    // packageData is expected to be a hex string (starting with \x) or Buffer-compatible format.
+    // Postgres 'bytea' accepts hex format like '\xDEADBEEF'.
+    
+    const result = await mlsService.upsertKeyPackage(userId, deviceId, packageData, hash);
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to upload key package' });
+  }
+});
+
+// Get Key Package for a user
+router.get('/key-package/:userId', async (req, res) => {
+  try {
+    const result = await mlsService.getKeyPackage(req.params.userId);
+    if (!result) {
+      return res.status(404).json({ error: 'Key package not found' });
+    }
+    res.json(result); 
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch key package' });
+  }
+});
+
+// Send Welcome Message
+router.post('/messages/welcome', async (req, res) => {
+  try {
+    const { groupId, receiverId, data } = req.body;
+    const result = await mlsService.storeWelcomeMessage(groupId, receiverId, data);
+    
+    // TODO: Emit socket event to receiver
+    
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to send welcome message' });
+  }
+});
+
+// Get Welcome Messages
+router.get('/messages/welcome', async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const messages = await mlsService.getWelcomeMessages(userId);
+        res.json(messages);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch welcome messages' });
+    }
+});
+
+// Delete Welcome Message (after processing)
+router.delete('/messages/welcome/:id', async (req, res) => {
+    try {
+        await mlsService.deleteWelcomeMessage(req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to delete welcome message' });
+    }
+});
+
+// Send Group Message (Commit/Application)
+router.post('/messages/group', async (req, res) => {
+  try {
+    const { groupId, epoch, contentType, data } = req.body;
+    const senderId = req.user.id;
+    
+    const result = await mlsService.storeGroupMessage(groupId, senderId, epoch, contentType, data);
+    
+    // TODO: Emit socket event to group members
+    
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to send group message' });
+  }
+});
+
+// Get Group Messages
+router.get('/messages/group/:groupId', async (req, res) => {
+  try {
+    const { afterId } = req.query;
+    const messages = await mlsService.getGroupMessages(req.params.groupId, afterId || 0);
+    res.json(messages);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch group messages' });
+  }
+});
+
+module.exports = router;
