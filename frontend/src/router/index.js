@@ -32,8 +32,9 @@ const { div, h1, h2, p, button } = van.tags;
 // Update page from hash (now async to handle store loading and initial fetch)
 export const updatePageFromHash = async () => {
   const page = window.location.hash.slice(1) || 'home';
-
-// Removed GlobalLeaderboard and WeeklyAssignment imports
+  
+  // Update the reactive state so the router re-renders
+  currentPageState.val = page;
 
   // Preload store and potentially fetch initial data based on route
   try {

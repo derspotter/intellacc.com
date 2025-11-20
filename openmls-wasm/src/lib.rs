@@ -19,7 +19,7 @@ use openmls::credentials::{Credential, CredentialType};
 use openmls::extensions::Extensions;
 use openmls::key_packages::{KeyPackage, KeyPackageIn, KeyPackageBundle};
 use openmls::treesync::RatchetTreeIn;
-use openmls_traits::storage::{Entity, StorageProvider}; // For writing KeyPackageBundle
+use openmls_traits::storage::StorageProvider; // For writing KeyPackageBundle
 
 use openmls::framing::{ProcessedMessageContent, MlsMessageIn};
 use openmls::messages::Welcome;
@@ -90,7 +90,6 @@ impl MlsClient {
             .wire_format_policy(WireFormatPolicy::default())
             .build();
             
-        let group_id = GroupId::from_slice(group_id_bytes);
         
         let group = MlsGroup::new(
             provider,
