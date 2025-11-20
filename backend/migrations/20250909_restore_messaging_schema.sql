@@ -1,0 +1,4 @@
+-- DEPRECATED MIGRATION
+-- Messaging schema restored inline in initial_migration.sql.
+-- Retained as a no-op so schema_migrations entries can remain unchanged.
+-- This file intentionally left blank.

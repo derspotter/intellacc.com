@@ -34,9 +34,11 @@ async function getConversations(req, res) {
 /**
  * Get or create a conversation with another user
  * POST /api/messages/conversations
+ * Accepts either otherUsername or otherUserId (for backwards compatibility)
  */
 async function createConversation(req, res) {
   try {
+<<<<<<< Updated upstream
     const { otherUserId, otherUsername } = req.body;
     const userId = req.user.id;
     let otherUserIdInt = undefined;
@@ -52,10 +54,45 @@ async function createConversation(req, res) {
         return res.status(400).json({ error: 'Valid otherUserId or otherUsername is required' });
       }
       otherUserIdInt = parseInt(otherUserId);
+=======
+    const { otherUsername, otherUserId } = req.body;
+    const userId = req.user.id;
+    let targetUserId;
+
+    // Handle username-based conversation creation
+    if (otherUsername) {
+      // Look up user by username
+      const userResult = await db.query(
+        'SELECT id, username FROM users WHERE LOWER(username) = LOWER($1)',
+        [otherUsername.trim()]
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ 
+          error: `User "${otherUsername}" not found` 
+        });
+      }
+
+      targetUserId = userResult.rows[0].id;
+    } 
+    // Fallback to userId for backwards compatibility
+    else if (otherUserId) {
+      if (isNaN(parseInt(otherUserId))) {
+        return res.status(400).json({ 
+          error: 'Valid otherUserId is required' 
+        });
+      }
+      targetUserId = parseInt(otherUserId);
+    } 
+    else {
+      return res.status(400).json({ 
+        error: 'Either otherUsername or otherUserId is required' 
+      });
+>>>>>>> Stashed changes
     }
 
     // Prevent conversation with self
-    if (otherUserIdInt === userId) {
+    if (targetUserId === userId) {
       return res.status(400).json({ 
         error: 'Cannot create conversation with yourself' 
       });
@@ -64,7 +101,7 @@ async function createConversation(req, res) {
     // Check if both users have public keys (required for encryption)
     const [myKey, otherKey] = await Promise.all([
       keyManagementService.getUserPublicKey(userId),
-      keyManagementService.getUserPublicKey(otherUserIdInt)
+      keyManagementService.getUserPublicKey(targetUserId)
     ]);
 
     if (!myKey) {
@@ -79,7 +116,7 @@ async function createConversation(req, res) {
       });
     }
 
-    const conversation = await messagingService.getOrCreateConversation(userId, otherUserIdInt);
+    const conversation = await messagingService.getOrCreateConversation(userId, targetUserId);
     
     res.json({ conversation });
   } catch (error) {

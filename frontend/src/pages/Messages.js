@@ -134,16 +134,16 @@ export default function MessagesPage() {
     try {
       messagingStore.setMessagesLoading(true);
       
-      // For now, assume the input is a user ID
-      // In a real app, you'd search by username
-      const otherUserId = parseInt(messagingStore.newConversationUser.trim());
+      // Use username to create conversation
+      const username = messagingStore.newConversationUser.trim();
       
-      if (isNaN(otherUserId)) {
-        messagingStore.setError('Please enter a valid user ID');
+      // Basic username validation
+      if (username.length < 1) {
+        messagingStore.setError('Please enter a username');
         return;
       }
       
-      const conversation = await messagingService.createConversation(otherUserId);
+      const conversation = await messagingService.createConversation(null, username);
       
       // Conversation is automatically added to store by createConversation
       
@@ -157,7 +157,9 @@ export default function MessagesPage() {
     } catch (err) {
       console.error('Error creating conversation:', err);
       // Provide specific error messages based on the error type
-      if (err.message && err.message.includes('You must have a public key')) {
+      if (err.message && err.message.includes('not found')) {
+        messagingStore.setError(`User "${messagingStore.newConversationUser.trim()}" not found`);
+      } else if (err.message && err.message.includes('You must have a public key')) {
         messagingStore.setError('Your encryption keys are not set up properly. Please refresh the page to initialize them.');
       } else if (err.message && err.message.includes('other user must have a public key')) {
         messagingStore.setError('The other user does not have encryption keys set up and cannot receive messages.');
@@ -286,8 +288,8 @@ export default function MessagesPage() {
             () => messagingStore.showNewConversation ? div({ class: "new-conversation-form" }, [
               form({ onsubmit: createNewConversation }, [
                 input({
-                  type: "number",
-                  placeholder: "Enter user ID...",
+                  type: "text",
+                  placeholder: "Enter username...",
                   value: () => messagingStore.newConversationUser,
                   oninput: (e) => messagingStore.setNewConversationUser(e.target.value),
                   class: "form-input"

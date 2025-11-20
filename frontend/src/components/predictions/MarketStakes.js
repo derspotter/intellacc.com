@@ -4,7 +4,7 @@ import Button from '../common/Button.js';
 
 const { div, h3, h4, p, span, small, table, thead, tbody, tr, th, td } = van.tags;
 
-export const MarketStakes = ({ eventId, title = "Market Stakes", showTitle = true }) => {
+const MarketStakes = ({ eventId, title = "Market Stakes", showTitle = true }) => {
   const marketState = van.state(null);
   const recentTrades = van.state([]);
   const loading = van.state(true);
@@ -189,3 +189,4 @@ export const MarketStakes = ({ eventId, title = "Market Stakes", showTitle = tru
     ]
   });
 };
+export default MarketStakes;

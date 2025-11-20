@@ -32,6 +32,7 @@ router.use('/webauthn', authenticateJWT, require('./webauthn'));
 router.post("/users", userController.createUser);
 router.post("/users/register", userController.createUser); // Alias for registration
 router.get("/users/:id", authenticateJWT, userController.getUser);
+router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
 router.post('/login', userController.loginUser);
 router.get("/me", authenticateJWT, userController.getUserProfile);
 router.patch("/users/profile", authenticateJWT, userController.editUserProfile);

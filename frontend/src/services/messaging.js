@@ -62,10 +62,31 @@ class MessagingService {
             this.handleMessagesRead(data);
         });
 
+<<<<<<< Updated upstream
         // Listen for message deletions
         socketService.on('messageDeleted', (data) => {
             this.handleMessageDeleted(data);
         });
+=======
+  /**
+   * Create or get conversation with another user
+   * @param {number|null} otherUserId - User ID (for backwards compatibility)
+   * @param {string|null} otherUsername - Username (preferred method)
+   */
+  async createConversation(otherUserId, otherUsername) {
+    try {
+      const response = await api.messages.createConversation(otherUserId, otherUsername);
+      
+      // Add conversation to store
+      messagingStore.addConversation(response.conversation);
+      
+      return response.conversation;
+    } catch (error) {
+      console.error('Error creating conversation:', error);
+      throw error;
+    }
+  }
+>>>>>>> Stashed changes
 
         // Listen for typing indicators
         socketService.on('user-typing', (data) => {
