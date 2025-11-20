@@ -113,13 +113,8 @@ function createSocketConnection() {
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
-<<<<<<< Updated upstream
         timeout: 5000, // Add a timeout to fail faster
         auth: token ? { token } : undefined
-=======
-        timeout: 5000,
-        auth: { token: getToken() }
->>>>>>> Stashed changes
       });
 
       // Ensure latest token is used on reconnect attempts

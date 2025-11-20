@@ -22,6 +22,7 @@ import CreatePredictionForm from '../components/predictions/CreatePredictionForm
 import AdminEventManagement from '../components/predictions/AdminEventManagement.js';
 import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
+import ProfilePredictions from '../components/profile/ProfilePredictions';
 import NetworkTabs from '../components/profile/NetworkTabs';
 import SettingsPage from '../components/settings/SettingsPage';
 
@@ -30,6 +31,8 @@ const { div, h1, h2, p, button } = van.tags;
 
 // Update page from hash (now async to handle store loading and initial fetch)
 export const updatePageFromHash = async () => {
+  const page = window.location.hash.slice(1) || 'home';
+
 // Removed GlobalLeaderboard and WeeklyAssignment imports
 
   // Preload store and potentially fetch initial data based on route

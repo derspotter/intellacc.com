@@ -1,4 +1,3 @@
-require('dotenv').config({ path: '/usr/src/app/.env' });
 const express = require('express');
 const { Pool } = require('pg');
 const http = require('http'); // Import the http module
@@ -17,17 +16,8 @@ const pool = new Pool({
 // Create HTTP server
 const server = http.createServer(app);
 
-<<<<<<< Updated upstream
 // Initialize Socket.IO with restricted CORS
 const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['http://localhost:5173'];
-=======
-
-// JWT authentication middleware for Socket.IO
-const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET;
-
-const allowedOrigins = [process.env.FRONTEND_URL || "http://localhost:5173"];
->>>>>>> Stashed changes
 const io = socketIo(server, {
   cors: {
     origin: allowedOrigins,
@@ -56,25 +46,6 @@ notificationService.setSocketIo(io);
 const messagingService = require('./services/messagingService');
 messagingService.setSocketIo(io);
 
-// Socket.IO JWT authentication middleware
-io.use((socket, next) => {
-  const token = socket.handshake.auth?.token || socket.handshake.query?.token;
-  console.log('[Socket.IO Auth] Middleware triggered. Token:', token);
-  if (!token) {
-    console.log('[Socket.IO Auth] Authentication required: no token provided');
-    return next(new Error('Authentication required'));
-  }
-  try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    socket.userId = payload.userId;
-    console.log('[Socket.IO Auth] Token valid. userId:', socket.userId);
-    next();
-  } catch (err) {
-    console.log('[Socket.IO Auth] Invalid token:', token);
-    next(new Error('Invalid token'));
-  }
-});
-
 // Socket.IO logic
 io.on('connection', (socket) => {
   console.log(`[Socket.IO] Connection handler. userId: ${socket.userId}, token:`, socket.handshake.auth?.token || socket.handshake.query?.token);
@@ -93,13 +64,8 @@ io.on('connection', (socket) => {
     socket.join('predictions');
     console.log('User joined predictions room');
   });
-<<<<<<< Updated upstream
   
   // Join profile room (for personalized updates) - derive from authenticated socket
-=======
-
-  // Join profile room (for personalized updates)
->>>>>>> Stashed changes
   socket.on('join-profile', () => {
     if (socket.userId) {
       socket.join(`user-${socket.userId}`);
@@ -107,11 +73,7 @@ io.on('connection', (socket) => {
     }
   });
 
-<<<<<<< Updated upstream
   // Join user notification room (no client-provided id)
-=======
-  // Join user notification room
->>>>>>> Stashed changes
   socket.on('authenticate', () => {
     if (socket.userId) {
       socket.join(`user:${socket.userId}`);
@@ -119,11 +81,7 @@ io.on('connection', (socket) => {
     }
   });
 
-<<<<<<< Updated upstream
   // Join messaging room for real-time message delivery (no client-provided id)
-=======
-  // Join messaging room for real-time message delivery
->>>>>>> Stashed changes
   socket.on('join-messaging', () => {
     if (socket.userId) {
       socket.join(`messaging:${socket.userId}`);
@@ -131,7 +89,6 @@ io.on('connection', (socket) => {
     }
   });
 
-<<<<<<< Updated upstream
   // Handle typing indicators for messaging (use authenticated userId)
   socket.on('typing-start', async (data) => {
     try {
@@ -140,12 +97,6 @@ io.on('connection', (socket) => {
       const messagingService = require('./services/messagingService');
       const isParticipant = await messagingService.checkConversationMembership(conversationId, socket.userId);
       if (!isParticipant) return;
-=======
-  // Handle typing indicators for messaging
-  socket.on('typing-start', (data) => {
-    const { conversationId } = data;
-    if (conversationId && socket.userId) {
->>>>>>> Stashed changes
       socket.to(`conversation:${conversationId}`).emit('user-typing', {
         conversationId,
         userId: socket.userId,
@@ -154,7 +105,6 @@ io.on('connection', (socket) => {
     } catch {}
   });
 
-<<<<<<< Updated upstream
   socket.on('typing-stop', async (data) => {
     try {
       const { conversationId } = data || {};
@@ -162,11 +112,6 @@ io.on('connection', (socket) => {
       const messagingService = require('./services/messagingService');
       const isParticipant = await messagingService.checkConversationMembership(conversationId, socket.userId);
       if (!isParticipant) return;
-=======
-  socket.on('typing-stop', (data) => {
-    const { conversationId } = data;
-    if (conversationId && socket.userId) {
->>>>>>> Stashed changes
       socket.to(`conversation:${conversationId}`).emit('user-typing', {
         conversationId,
         userId: socket.userId,
@@ -175,7 +120,6 @@ io.on('connection', (socket) => {
     } catch {}
   });
 
-<<<<<<< Updated upstream
   // Join specific conversation room for typing indicators (validate membership)
   socket.on('join-conversation', async (conversationId) => {
     try {
@@ -187,20 +131,6 @@ io.on('connection', (socket) => {
         console.log(`User ${socket.userId} joined conversation room: ${conversationId}`);
       }
     } catch {}
-=======
-  // Join specific conversation room for typing indicators
-  socket.on('join-conversation', async (conversationId) => {
-    if (conversationId && socket.userId) {
-      // Check DB that socket.userId is a participant
-      const isParticipant = await messagingService.getConversation(conversationId, socket.userId);
-      if (isParticipant) {
-        socket.join(`conversation:${conversationId}`);
-        console.log(`User ${socket.userId} joined conversation room ${conversationId}`);
-      } else {
-        console.log(`User ${socket.userId} is not a participant in conversation ${conversationId}`);
-      }
-    }
->>>>>>> Stashed changes
   });
 
   // Leave conversation room

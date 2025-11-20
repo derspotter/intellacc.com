@@ -1,4 +1,4 @@
-import init, { MlsClient, init_logging } from '@openmls';
+import init, { MlsClient, init_logging } from 'openmls-wasm';
 
 /**
  * Core Crypto Client for OpenMLS integration

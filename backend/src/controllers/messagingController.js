@@ -38,23 +38,6 @@ async function getConversations(req, res) {
  */
 async function createConversation(req, res) {
   try {
-<<<<<<< Updated upstream
-    const { otherUserId, otherUsername } = req.body;
-    const userId = req.user.id;
-    let otherUserIdInt = undefined;
-    if (otherUsername && typeof otherUsername === 'string') {
-      // Resolve username to user ID
-      const u = await db.query('SELECT id FROM users WHERE username = $1', [otherUsername]);
-      if (u.rowCount === 0) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-      otherUserIdInt = u.rows[0].id;
-    } else {
-      if (!otherUserId || isNaN(parseInt(otherUserId))) {
-        return res.status(400).json({ error: 'Valid otherUserId or otherUsername is required' });
-      }
-      otherUserIdInt = parseInt(otherUserId);
-=======
     const { otherUsername, otherUserId } = req.body;
     const userId = req.user.id;
     let targetUserId;
@@ -88,7 +71,6 @@ async function createConversation(req, res) {
       return res.status(400).json({ 
         error: 'Either otherUsername or otherUserId is required' 
       });
->>>>>>> Stashed changes
     }
 
     // Prevent conversation with self
