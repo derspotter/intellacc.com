@@ -62,36 +62,34 @@ class MessagingService {
             this.handleMessagesRead(data);
         });
 
-<<<<<<< Updated upstream
         // Listen for message deletions
         socketService.on('messageDeleted', (data) => {
             this.handleMessageDeleted(data);
         });
-=======
-  /**
-   * Create or get conversation with another user
-   * @param {number|null} otherUserId - User ID (for backwards compatibility)
-   * @param {string|null} otherUsername - Username (preferred method)
-   */
-  async createConversation(otherUserId, otherUsername) {
-    try {
-      const response = await api.messages.createConversation(otherUserId, otherUsername);
-      
-      // Add conversation to store
-      messagingStore.addConversation(response.conversation);
-      
-      return response.conversation;
-    } catch (error) {
-      console.error('Error creating conversation:', error);
-      throw error;
-    }
-  }
->>>>>>> Stashed changes
 
         // Listen for typing indicators
         socketService.on('user-typing', (data) => {
             this.handleTypingIndicator(data);
         });
+    }
+
+    /**
+     * Create or get conversation with another user
+     * @param {number|null} otherUserId - User ID (for backwards compatibility)
+     * @param {string|null} otherUsername - Username (preferred method)
+     */
+    async createConversation(otherUserId, otherUsername) {
+        try {
+            const response = await api.messages.createConversation(otherUserId, otherUsername);
+
+            // Add conversation to store
+            messagingStore.addConversation(response.conversation);
+
+            return response.conversation;
+        } catch (error) {
+            console.error('Error creating conversation:', error);
+            throw error;
+        }
     }
 
     /**
@@ -183,22 +181,7 @@ class MessagingService {
         }
     }
 
-    /**
-     * Create or get conversation with another user
-     */
-    async createConversation(otherUserId) {
-        try {
-            const response = await api.messages.createConversation(otherUserId);
 
-            // Add conversation to store
-            messagingStore.addConversation(response.conversation);
-
-            return response.conversation;
-        } catch (error) {
-            console.error('Error creating conversation:', error);
-            throw error;
-        }
-    }
 
     /**
      * Get messages in a conversation
@@ -234,7 +217,7 @@ class MessagingService {
             // Encrypt the message
             const encryptedData = await keyManager.encryptMessage(message, receiverId);
 
-const response = await api.messages.sendMessage(conversationId, {
+            const response = await api.messages.sendMessage(conversationId, {
                 encryptedContent: encryptedData.encryptedContent,
                 receiverId: receiverId,
                 contentHash: encryptedData.contentHash,
@@ -359,19 +342,19 @@ const response = await api.messages.sendMessage(conversationId, {
                     } catch (primaryErr) {
                         // Fallback: try the opposite session key in case of sender/receiver mismatch
                         const altKey = (sessionKey === message.sender_session_key)
-                          ? message.receiver_session_key
-                          : message.sender_session_key;
+                            ? message.receiver_session_key
+                            : message.sender_session_key;
                         if (altKey) {
-                          try {
-                            decryptedContent = await keyManager.decryptMessage(
-                                message.encrypted_content,
-                                altKey
-                            );
-                          } catch (altErr) {
-                            throw altErr;
-                          }
+                            try {
+                                decryptedContent = await keyManager.decryptMessage(
+                                    message.encrypted_content,
+                                    altKey
+                                );
+                            } catch (altErr) {
+                                throw altErr;
+                            }
                         } else {
-                          throw primaryErr;
+                            throw primaryErr;
                         }
                     }
 
@@ -436,7 +419,7 @@ const response = await api.messages.sendMessage(conversationId, {
             const decryptedMessages = await this.decryptMessages([messageData]);
             const decryptedMessage = decryptedMessages[0];
 
-// Add to store (built-in deduplication)
+            // Add to store (built-in deduplication)
             const added = messagingStore.addMessage(messageData.conversation_id, decryptedMessage);
 
             if (added) {
@@ -446,9 +429,9 @@ const response = await api.messages.sendMessage(conversationId, {
                     last_message_encrypted: decryptedMessage.encrypted_content,
                     last_message_sender_id: decryptedMessage.sender_id
                 });
-} else {
-// already exists; no update needed
-}
+            } else {
+                // already exists; no update needed
+            }
 
         } catch (error) {
             console.error('Error handling sent message:', error);
@@ -469,7 +452,7 @@ const response = await api.messages.sendMessage(conversationId, {
             });
         }
 
-    
+
     }
 
     /**
@@ -480,7 +463,7 @@ const response = await api.messages.sendMessage(conversationId, {
 
         // Remove from store
         messagingStore.removeMessage(messageId);
-}
+    }
 
     /**
      * Handle typing indicators
@@ -493,7 +476,7 @@ const response = await api.messages.sendMessage(conversationId, {
         } else {
             messagingStore.removeTypingUser(userId);
         }
-}
+    }
 
     /**
      * Send typing indicator
