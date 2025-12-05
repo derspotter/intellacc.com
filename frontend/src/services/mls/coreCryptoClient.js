@@ -126,6 +126,12 @@ class CoreCryptoClient {
         // Try to load existing state
         if (await this.loadState()) {
             if (this.identityName === username) {
+                // Upload key package to ensure server has it
+                try {
+                    await this.uploadKeyPackage();
+                } catch (uploadError) {
+                    console.warn('Failed to upload key package:', uploadError);
+                }
                 return;
             }
             console.warn('Stored identity does not match requested username, resetting...');
@@ -143,6 +149,14 @@ class CoreCryptoClient {
 
             // Persist state
             await this.saveState();
+
+            // Upload key package to server
+            try {
+                await this.uploadKeyPackage();
+            } catch (uploadError) {
+                console.warn('Failed to upload key package:', uploadError);
+                // Continue even if upload fails - can retry later
+            }
         } catch (error) {
             console.error('Error bootstrapping MLS client:', error);
             throw error;
@@ -167,6 +181,59 @@ class CoreCryptoClient {
         return Array.from(bytes)
             .map(b => b.toString(16).padStart(2, '0'))
             .join('');
+    }
+
+    /**
+     * Compute SHA-256 hash of data and return as hex string
+     * @param {Uint8Array} data - Data to hash
+     * @returns {Promise<string>} Hex string of hash
+     */
+    async computeHash(data) {
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    /**
+     * Upload the key package to the server
+     * @param {string} deviceId - Device identifier (defaults to 'default')
+     * @returns {Promise<Object>} Server response
+     */
+    async uploadKeyPackage(deviceId = 'default') {
+        if (!this.client) throw new Error('Client not initialized');
+
+        // Get token directly from localStorage to avoid circular import with auth.js
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const keyPackageBytes = this.getKeyPackageBytes();
+        const keyPackageHex = this.getKeyPackageHex();
+        const hash = await this.computeHash(keyPackageBytes);
+
+        // Format for postgres bytea: \x prefix
+        const packageData = '\\x' + keyPackageHex;
+
+        const response = await fetch('/api/mls/key-package', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                deviceId,
+                packageData,
+                hash
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Failed to upload key package');
+        }
+
+        const result = await response.json();
+        console.log('Key package uploaded successfully:', result);
+        return result;
     }
 }
 
