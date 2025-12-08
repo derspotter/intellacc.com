@@ -7,10 +7,10 @@ Each step is small, testable, and builds on the previous one.
 ## Step 1: Verify WASM Loads in Browser
 **Goal**: Confirm the OpenMLS WASM module initializes correctly in the running app.
 
-- [ ] Check that `openmls-wasm` pkg is copied to `frontend/openmls-pkg/`
-- [ ] Verify WASM loads on login (check browser console for "OpenMLS WASM initialized")
-- [ ] Test `ensureMlsBootstrap(username)` creates identity
-- [ ] Verify identity persists in IndexedDB across page refresh
+- [x] Check that `openmls-wasm` pkg is copied to `frontend/openmls-pkg/`
+- [x] Verify WASM loads on login (check browser console for "OpenMLS WASM initialized")
+- [x] Test `ensureMlsBootstrap(username)` creates identity
+- [x] Verify identity persists in IndexedDB across page refresh
 
 **Test**: Open browser console, login, check for success logs.
 
@@ -19,10 +19,10 @@ Each step is small, testable, and builds on the previous one.
 ## Step 2: Key Package Upload on Login
 **Goal**: After identity creation, upload the public KeyPackage to the server.
 
-- [ ] Add `uploadKeyPackage()` method to `CoreCryptoClient`
-- [ ] Call it after `ensureMlsBootstrap()` succeeds
-- [ ] Compute hash of key package for the `hash` field
-- [ ] POST to `/api/mls/key-package`
+- [x] Add `uploadKeyPackage()` method to `CoreCryptoClient`
+- [x] Call it after `ensureMlsBootstrap()` succeeds
+- [x] Compute hash of key package for the `hash` field
+- [x] POST to `/api/mls/key-package`
 
 **Test**: Login, check `mls_key_packages` table in DB for the user's key package.
 
@@ -31,9 +31,9 @@ Each step is small, testable, and builds on the previous one.
 ## Step 3: Fetch Another User's Key Package
 **Goal**: Be able to retrieve a key package to invite someone to a group.
 
-- [ ] Add `fetchKeyPackage(userId)` to CoreCryptoClient
-- [ ] GET from `/api/mls/key-package/:userId`
-- [ ] Parse response and return bytes
+- [x] Add `fetchKeyPackage(userId)` to CoreCryptoClient
+- [x] GET from `/api/mls/key-package/:userId`
+- [x] Parse response and return bytes
 
 **Test**: Call from console: `await coreCryptoClient.fetchKeyPackage(2)` - should return bytes.
 
@@ -42,25 +42,27 @@ Each step is small, testable, and builds on the previous one.
 ## Step 4: Create Group
 **Goal**: Create an MLS group locally and track it.
 
-- [ ] Add `createGroup(groupName)` to CoreCryptoClient
+- [x] Add `createGroup(groupName)` to CoreCryptoClient
   - Generate random group ID
   - Call WASM `create_group()`
   - Store group metadata locally (IndexedDB)
-- [ ] Add backend endpoint to register group: `POST /api/mls/groups`
-- [ ] Add `mls_groups` table migration
+- [x] Add backend endpoint to register group: `POST /api/mls/groups`
+- [x] Add `mls_groups` table migration
 
 **Test**: Create group, verify it appears in local IndexedDB and backend DB.
 
 ---
 
 ## Step 5: Invite User to Group
-**Goal**: Add a member to the group and send them a Welcome.
+**Goal**: Allow a user to invite another user (fetch KeyPackage -> Add Member -> Upload Welcome).
 
-- [ ] Add `inviteToGroup(groupId, userId)` to CoreCryptoClient
-  - Fetch user's key package
-  - Call WASM `add_member()` → returns (welcome, commit)
-  - POST welcome to `/api/mls/messages/welcome`
-  - POST commit to `/api/mls/messages/group`
+- [x] Add backend route `POST /groups/:groupId/members`
+- [x] Add `inviteToGroup(groupId, userId)` to `CoreCryptoClient`
+- [x] Fetch invitee's KeyPackage
+- [x] Call `client.add_member()` -> returns Commit & Welcome
+- [x] Upload Welcome message for invitee
+- [x] Upload Commit message for group
+- [x] Update `mls_group_members` in DB
 - [ ] Add socket emit for `mls-welcome` event in backend route
 
 **Test**: Invite user, check `mls_welcome_messages` table for pending welcome.

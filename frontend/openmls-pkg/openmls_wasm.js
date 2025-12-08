@@ -153,6 +153,22 @@ export class MlsClient {
     }
     /**
      * @param {Uint8Array} group_id_bytes
+     * @param {Uint8Array} key_package_bytes
+     * @returns {Array<any>}
+     */
+    add_member(group_id_bytes, key_package_bytes) {
+        const ptr0 = passArray8ToWasm0(group_id_bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(key_package_bytes, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlsclient_add_member(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
+     * @param {Uint8Array} group_id_bytes
      * @returns {Uint8Array}
      */
     create_group(group_id_bytes) {
@@ -165,6 +181,20 @@ export class MlsClient {
         var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v2;
+    }
+    /**
+     * @param {Uint8Array} group_id_bytes
+     * @param {Uint8Array} commit_bytes
+     */
+    process_commit(group_id_bytes, commit_bytes) {
+        const ptr0 = passArray8ToWasm0(group_id_bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(commit_bytes, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlsclient_process_commit(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * @param {string} identity_name
@@ -191,6 +221,60 @@ export class MlsClient {
         }
     }
     /**
+     * @param {Uint8Array} group_id_bytes
+     * @param {Uint8Array} ciphertext
+     * @returns {Uint8Array}
+     */
+    decrypt_message(group_id_bytes, ciphertext) {
+        const ptr0 = passArray8ToWasm0(group_id_bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlsclient_decrypt_message(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
+     * @param {Uint8Array} group_id_bytes
+     * @param {Uint8Array} message
+     * @returns {Uint8Array}
+     */
+    encrypt_message(group_id_bytes, message) {
+        const ptr0 = passArray8ToWasm0(group_id_bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(message, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlsclient_encrypt_message(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
+     * @param {Uint8Array} welcome_bytes
+     * @param {Uint8Array | null} [ratchet_tree_bytes]
+     * @returns {Uint8Array}
+     */
+    process_welcome(welcome_bytes, ratchet_tree_bytes) {
+        const ptr0 = passArray8ToWasm0(welcome_bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(ratchet_tree_bytes) ? 0 : passArray8ToWasm0(ratchet_tree_bytes, wasm.__wbindgen_malloc);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlsclient_process_welcome(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
      * @param {Uint8Array} credential_bytes
      * @param {Uint8Array} bundle_bytes
      * @param {Uint8Array} signature_key_bytes
@@ -206,6 +290,24 @@ export class MlsClient {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * @param {string} password
+     * @param {Uint8Array} salt
+     * @returns {Uint8Array}
+     */
+    static derive_key_argon2id(password, salt) {
+        const ptr0 = passStringToWasm0(password, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(salt, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlsclient_derive_key_argon2id(ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
     }
     /**
      * @returns {Uint8Array}
@@ -230,6 +332,27 @@ export class MlsClient {
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
+    }
+    /**
+     * @returns {string}
+     */
+    get_identity_fingerprint() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.mlsclient_get_identity_fingerprint(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
     }
     /**
      * @returns {Uint8Array}
@@ -363,6 +486,14 @@ function __wbg_get_imports() {
         const ret = new Error();
         return ret;
     };
+    imports.wbg.__wbg_new_e17d9f43105b08be = function() {
+        const ret = new Array();
+        return ret;
+    };
+    imports.wbg.__wbg_new_from_slice_92f4d78ca282a2d2 = function(arg0, arg1) {
+        const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
+        return ret;
+    };
     imports.wbg.__wbg_new_no_args_ee98eee5275000a4 = function(arg0, arg1) {
         const ret = new Function(getStringFromWasm0(arg0, arg1));
         return ret;
@@ -385,6 +516,10 @@ function __wbg_get_imports() {
     };
     imports.wbg.__wbg_prototypesetcall_2a6620b6922694b2 = function(arg0, arg1, arg2) {
         Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), arg2);
+    };
+    imports.wbg.__wbg_push_df81a39d04db858c = function(arg0, arg1) {
+        const ret = arg0.push(arg1);
+        return ret;
     };
     imports.wbg.__wbg_randomFillSync_ac0988aba3254290 = function() { return handleError(function (arg0, arg1) {
         arg0.randomFillSync(arg1);

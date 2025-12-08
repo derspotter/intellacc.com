@@ -6,6 +6,7 @@
 - `007_add_user_positions_aggregates.sql`
 - `add_weekly_assignment_system.sql`
 - `20250812_add_device_credentials.sql`
+- `20251120_add_mls_tables.sql`
 
 ## Deprecated (no-op) migrations
 The following files remain in place so existing `schema_migrations` entries stay valid, but they no longer perform any changes:

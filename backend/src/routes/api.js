@@ -12,6 +12,7 @@ const notificationController = require('../controllers/notificationController');
 const weeklyAssignmentController = require('../controllers/weeklyAssignmentController');
 const keyManagementController = require('../controllers/keyManagementController');
 const messagingController = require('../controllers/messagingController');
+const mlsRoutes = require('./mls');
 const authenticateJWT = require("../middleware/auth");
 const rateLimit = require('express-rate-limit');
 const attachmentsController = require('../controllers/attachmentsController');
@@ -45,8 +46,8 @@ router.get("/users/:id/following", authenticateJWT, userController.getFollowing)
 
 // Portfolio Routes
 router.get("/users/:id/positions", (req, res, next) => {
-  console.log('🚀 ROUTE HIT: /users/:id/positions for userId:', req.params.id);
-  next();
+    console.log('🚀 ROUTE HIT: /users/:id/positions for userId:', req.params.id);
+    next();
 }, authenticateJWT, userController.getUserPositions);
 
 // Prediction/Events Routes
@@ -148,6 +149,9 @@ router.post("/messages/read", authenticateJWT, markReadLimiter, messagingControl
 router.get("/messages/unread-count", authenticateJWT, messagingController.getUnreadCount);
 router.delete("/messages/:messageId", authenticateJWT, messagingController.deleteMessage);
 
+// MLS Routes (Messaging Layer Security)
+router.use('/mls', mlsRoutes);
+
 // Attachments (pre-signed URL scaffold)
 router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);
 router.get('/attachments/presign-download', authenticateJWT, attachmentsController.presignDownload);
@@ -157,10 +161,10 @@ router.get("/events/:eventId/shares", async (req, res) => {
     try {
         const { eventId } = req.params;
         const { user_id } = req.query;
-        
+
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/shares?user_id=${user_id}`);
         const data = await response.json();
-        
+
         res.json(data);
     } catch (error) {
         console.error('Shares proxy error:', error);
@@ -172,10 +176,10 @@ router.get("/events/:eventId/kelly", async (req, res) => {
     try {
         const { eventId } = req.params;
         const { belief, user_id } = req.query;
-        
+
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/kelly?belief=${belief}&user_id=${user_id}`);
         const data = await response.json();
-        
+
         res.json(data);
     } catch (error) {
         console.error('Kelly proxy error:', error);
@@ -187,7 +191,7 @@ router.post("/events/:eventId/sell", async (req, res) => {
     try {
         const { eventId } = req.params;
         const { user_id, share_type, amount } = req.body;
-        
+
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/sell`, {
             method: 'POST',
             headers: {
@@ -195,9 +199,9 @@ router.post("/events/:eventId/sell", async (req, res) => {
             },
             body: JSON.stringify({ user_id, share_type, amount })
         });
-        
+
         const data = await response.json();
-        
+
         if (response.ok) {
             // Broadcast market update to all connected clients using new_prob from sell response
             if (data.success && data.new_prob !== undefined) {
@@ -216,7 +220,7 @@ router.post("/events/:eventId/sell", async (req, res) => {
                     console.log('📡 Market update broadcast (sell):', eventId, 'new_prob:', data.new_prob);
                 }
             }
-            
+
             res.json(data);
         } else {
             res.status(response.status).json(data);
@@ -231,7 +235,7 @@ router.post("/events/:eventId/update", async (req, res) => {
     try {
         const { eventId } = req.params;
         const { user_id, stake, target_prob } = req.body;
-        
+
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/update`, {
             method: 'POST',
             headers: {
@@ -239,9 +243,9 @@ router.post("/events/:eventId/update", async (req, res) => {
             },
             body: JSON.stringify({ user_id, stake, target_prob })
         });
-        
+
         const data = await response.json();
-        
+
         if (response.ok) {
             // Broadcast market update to all connected clients
             const io = req.app.get('io');
@@ -258,7 +262,7 @@ router.post("/events/:eventId/update", async (req, res) => {
                 });
                 console.log('📡 Market update broadcast:', eventId, 'new_prob:', data.new_prob);
             }
-            
+
             res.json(data);
         } else {
             res.status(response.status).json(data);

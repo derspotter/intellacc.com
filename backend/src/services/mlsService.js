@@ -38,10 +38,10 @@ const mlsService = {
     const { rows } = await db.query(query, [userId]);
     return rows;
   },
-  
+
   async deleteWelcomeMessage(id) {
-      const query = 'DELETE FROM mls_welcome_messages WHERE id = $1';
-      await db.query(query, [id]);
+    const query = 'DELETE FROM mls_welcome_messages WHERE id = $1';
+    await db.query(query, [id]);
   },
 
   async storeGroupMessage(groupId, senderId, epoch, contentType, data) {
@@ -63,6 +63,47 @@ const mlsService = {
     `;
     const { rows } = await db.query(query, [groupId, afterId]);
     return rows;
+  },
+
+  async createGroup(groupId, name, createdBy) {
+    const client = await db.getPool().connect();
+    try {
+      await client.query('BEGIN');
+
+      // Create group
+      const groupQuery = `
+            INSERT INTO mls_groups (group_id, name, created_by)
+            VALUES ($1, $2, $3)
+            RETURNING *;
+        `;
+      const { rows: [group] } = await client.query(groupQuery, [groupId, name, createdBy]);
+
+      // Add creator as member
+      const memberQuery = `
+            INSERT INTO mls_group_members (group_id, user_id)
+            VALUES ($1, $2);
+        `;
+      await client.query(memberQuery, [groupId, createdBy]);
+
+      await client.query('COMMIT');
+      return group;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  },
+
+  async addGroupMember(groupId, userId) {
+    const query = `
+      INSERT INTO mls_group_members (group_id, user_id)
+      VALUES ($1, $2)
+      ON CONFLICT (group_id, user_id) DO NOTHING
+      RETURNING *;
+    `;
+    const { rows } = await db.query(query, [groupId, userId]);
+    return rows[0];
   }
 };
 

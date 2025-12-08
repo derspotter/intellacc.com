@@ -94,8 +94,8 @@ From the OpenMLS Book:
 - [x] `mls_welcome_messages` table (group_id, receiver_id, data)
 - [x] `mls_group_messages` table (group_id, sender_id, epoch, content_type, data)
 - [x] Indexes on user_id, receiver_id, group_id+epoch
-- [ ] `mls_groups` table (group_id, name, created_by, created_at) - group metadata
-- [ ] `mls_group_members` table (group_id, user_id, joined_at) - membership tracking
+- [x] `mls_groups` table (group_id, name, created_by, created_at) - group metadata
+- [x] `mls_group_members` table (group_id, user_id, joined_at) - membership tracking
 - [ ] Key package validity/expiration tracking (see Book: "Example: Key packages")
 
 ### Phase 1C: Backend API Routes
@@ -105,7 +105,8 @@ From the OpenMLS Book:
 - [x] `POST /api/mls/messages/welcome` - send welcome message
 - [x] `GET /api/mls/messages/welcome` - fetch pending welcome messages
 - [x] `DELETE /api/mls/messages/welcome/:id` - delete processed welcome
-- [x] `POST /api/mls/messages/group` - send commit/application message
+- [x] `POST /api/mls/groups` - create new group
+- [x] `POST /api/mls/messages` - send group messagend commit/application message
 - [x] `GET /api/mls/messages/group/:groupId` - fetch group messages
 - [ ] Strict message ordering with DB locking in `storeGroupMessage`
 - [ ] Socket.io `mls-message` event for real-time group message delivery
@@ -119,9 +120,9 @@ From the OpenMLS Book:
 - [x] `ensureMlsBootstrap(username)` - create or restore identity
 - [x] `saveState()` / `loadState()` - persist/restore from IndexedDB
 - [x] `getKeyPackageBytes()` / `getKeyPackageHex()` - export public key package
-- [ ] Upload key package to server on login/identity creation
-- [ ] `createGroup(groupId)` - wrapper for WASM create_group
-- [ ] `inviteToGroup(groupId, userId)` - fetch key package + add_member + send welcome
+- [x] Upload key package to server on login/identity creation
+- [x] `createGroup(groupId)` - wrapper for WASM create_group
+- [x] `inviteToGroup(groupId, userId)` - fetch key package + add_member + send welcome
 - [ ] `joinGroup(welcomeBytes)` - process welcome message
 - [ ] `sendMessage(groupId, plaintext)` - encrypt + POST to server
 - [ ] `handleIncomingMessage(groupId, ciphertext)` - decrypt incoming
