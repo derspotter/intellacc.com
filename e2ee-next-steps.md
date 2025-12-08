@@ -73,12 +73,45 @@ Each step is small, testable, and builds on the previous one.
 **Goal**: Process incoming Welcome and join the group.
 
 - [ ] Add socket listener for `mls-welcome` event in frontend
-- [ ] Add `joinGroup(welcomeBytes)` to CoreCryptoClient
+- [x] Add `joinGroup(welcomeBytes)` to CoreCryptoClient
   - Call WASM `process_welcome()`
   - Store group state locally
+- [x] Add `checkForInvites()` to poll for pending welcome messages
 - [ ] Fetch and delete welcome after processing
 
 **Test**: Login as invited user, verify they join the group and can see group state.
+
+### Step 6 Verification Status (2025-12-08)
+
+**BLOCKED** - `process_welcome()` fails with `NoMatchingKeyPackage` error.
+
+**Test Scenario Executed:**
+1. User A (mlstestA, userId=7) creates identity and uploads KeyPackage ✅
+2. User B (mlstestB, userId=9) fetches User A's KeyPackage ✅
+3. User B creates group and invites User A (generates Welcome) ✅
+4. User A attempts to process Welcome ❌
+
+**Error:** `Error creating staged welcome: NoMatchingKeyPackage`
+
+**Investigation Findings:**
+- KeyPackageBundle IS in User A's provider storage (verified: 1786 bytes)
+- KeyPackage from server matches local KeyPackage (verified: 282 bytes, same hash)
+- User A's MLS client can create groups (client is functional)
+- Issue persists even using the SAME MlsClient instance (no backup/restore involved)
+
+**Root Cause Analysis:**
+The issue is in how OpenMLS's `StagedWelcome::new_from_welcome()` looks up the KeyPackageBundle from the provider's storage. The hash used for lookup (derived from the Welcome message) doesn't match the hash used when storing the bundle during `create_identity()`.
+
+**Fix Required in `openmls-wasm/src/lib.rs`:**
+The KeyPackageBundle storage mechanism needs investigation. Potential issues:
+1. Hash computation might differ between storage and lookup
+2. OpenMLS might expect a different storage format
+3. The `OpenMlsRustCrypto` provider may have specific storage requirements not being met
+
+**Workaround Options:**
+1. Debug OpenMLS storage trait to understand lookup mechanism
+2. Check if KeyPackageBundle should be stored differently
+3. Consider using OpenMLS's internal storage instead of manual `write_key_package()`
 
 ---
 

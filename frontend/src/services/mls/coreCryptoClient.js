@@ -493,7 +493,7 @@ class CoreCryptoClient {
 
     /**
      * Join a group from a Welcome message
-     * @param {Uint8Array} welcomeBytes 
+     * @param {Uint8Array} welcomeBytes
      * @returns {Promise<string>} Group ID (hex)
      */
     async joinGroup(welcomeBytes) {
@@ -511,6 +511,94 @@ class CoreCryptoClient {
         console.log('Joined group:', groupId);
 
         return groupId;
+    }
+
+    /**
+     * Export the current IndexedDB state for backup
+     * @returns {Promise<Object|null>} The exported state object or null if no state exists
+     */
+    async exportState() {
+        if (!this.db) await this.initDB();
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['state'], 'readonly');
+            const store = transaction.objectStore('state');
+            const request = store.get('current_identity');
+
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                const record = request.result;
+                if (record) {
+                    // Convert Uint8Arrays to regular arrays for JSON serialization
+                    const exported = {
+                        id: record.id,
+                        credential: Array.from(record.credential),
+                        bundle: Array.from(record.bundle),
+                        signatureKey: Array.from(record.signatureKey),
+                        identityName: record.identityName,
+                        updatedAt: record.updatedAt
+                    };
+                    console.log('State exported for:', record.identityName);
+                    resolve(exported);
+                } else {
+                    resolve(null);
+                }
+            };
+        });
+    }
+
+    /**
+     * Import a previously exported state into IndexedDB
+     * @param {Object} exportedState - The state object from exportState()
+     * @returns {Promise<void>}
+     */
+    async importState(exportedState) {
+        if (!exportedState) throw new Error('No state to import');
+        if (!this.db) await this.initDB();
+
+        // Convert arrays back to Uint8Arrays
+        const record = {
+            id: exportedState.id,
+            credential: new Uint8Array(exportedState.credential),
+            bundle: new Uint8Array(exportedState.bundle),
+            signatureKey: new Uint8Array(exportedState.signatureKey),
+            identityName: exportedState.identityName,
+            updatedAt: exportedState.updatedAt
+        };
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['state'], 'readwrite');
+            const store = transaction.objectStore('state');
+            const request = store.put(record);
+
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                console.log('State imported for:', record.identityName);
+                resolve();
+            };
+        });
+    }
+
+    /**
+     * Clear all stored state (for switching users)
+     * @returns {Promise<void>}
+     */
+    async clearState() {
+        if (!this.db) await this.initDB();
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['state'], 'readwrite');
+            const store = transaction.objectStore('state');
+            const request = store.clear();
+
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                this.client = null;
+                this.identityName = null;
+                console.log('State cleared');
+                resolve();
+            };
+        });
     }
 }
 

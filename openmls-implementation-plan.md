@@ -72,7 +72,7 @@ From the OpenMLS Book:
 - [x] `get_key_package_bytes()` - serialize public KeyPackage for upload
 - [x] `create_group(group_id)` - create new MLS group
 - [x] `add_member(group_id, key_package)` - add member, returns (welcome, commit)
-- [x] `process_welcome(welcome_bytes)` - join group from welcome message
+- [x] `process_welcome(welcome_bytes)` - join group from welcome message (**BLOCKED: NoMatchingKeyPackage bug**)
 - [x] `process_commit(group_id, commit_bytes)` - process incoming commits
 - [x] `encrypt_message(group_id, message)` - encrypt application message
 - [x] `decrypt_message(group_id, ciphertext)` - decrypt application message
@@ -245,6 +245,52 @@ From the Book: "Fork Resolution", "Discarding Commits", "Forward Secrecy Conside
 
 ---
 
+## Known Issues
+
+### CRITICAL: NoMatchingKeyPackage Bug (2025-12-08)
+
+**Status:** BLOCKING Step 6 (Join Group from Welcome)
+
+**Symptom:** `process_welcome()` fails with `Error creating staged welcome: NoMatchingKeyPackage` even when:
+- KeyPackageBundle IS in provider storage (verified)
+- KeyPackage on server matches local KeyPackage (byte-for-byte identical)
+- Using the same MlsClient instance (no serialization/deserialization involved)
+
+**Test Environment:**
+- User A creates identity, uploads KeyPackage
+- User B fetches User A's KeyPackage, creates group, sends Welcome
+- User A attempts `process_welcome()` → FAILS
+
+**Technical Details:**
+```
+In create_identity():
+  let hash = key_package_ref.hash_ref(provider.crypto())?;
+  provider.storage().write_key_package(&hash, &key_package_bundle)?;
+
+In process_welcome():
+  StagedWelcome::new_from_welcome(provider, ...)
+  → Internally looks up KeyPackageBundle by hash
+  → Returns NoMatchingKeyPackage
+```
+
+**Hypothesis:**
+The hash used by `StagedWelcome::new_from_welcome()` for looking up the KeyPackageBundle differs from the hash we used when storing it. This could be due to:
+1. Different hash computation paths in OpenMLS
+2. KeyPackageBundle needing to be stored via a different mechanism
+3. The `OpenMlsRustCrypto` provider expecting a specific storage format
+
+**Investigation Steps:**
+1. Add debug logging to compare hashes (storage vs lookup)
+2. Check OpenMLS source for how `new_from_welcome` looks up key packages
+3. Review `openmls-rust-crypto` storage implementation
+4. Consider if `KeyPackage::builder().build()` already stores the bundle internally
+
+**Related Files:**
+- `openmls-wasm/src/lib.rs:139-140` (storage)
+- `openmls-wasm/src/lib.rs:303-308` (lookup via process_welcome)
+
+---
+
 ## Key Implementation Notes (from OpenMLS Book)
 
 ### Credential Validation (CRITICAL for SOTA)
@@ -317,6 +363,8 @@ curl http://localhost:3000/api/health-check
 | Authentication | Fingerprint in WASM | Add UI + credential validation |
 | Encryption at Rest | Argon2 in WASM | Implement "Vault" flow |
 | Secure Deletion | IndexedDB | Verify no copies/snapshots |
-| Group Messaging | Core ops done | Wire up UI + sockets |
+| Group Messaging | **BLOCKED** | Fix NoMatchingKeyPackage bug first |
 
-**Estimated completion to MVP E2EE messaging:** Phases 1D, 1E, 1F, and Phase 5 (Chat UI)
+**Current Blocker:** The `process_welcome()` function fails with `NoMatchingKeyPackage`. This must be resolved before proceeding with group messaging.
+
+**Estimated completion to MVP E2EE messaging:** Fix blocker, then Phases 1D, 1E, 1F, and Phase 5 (Chat UI)
