@@ -69,7 +69,7 @@ Each step is small, testable, and builds on the previous one.
 
 ---
 
-## Step 6: Join Group from Welcome
+## Step 6: Join Group from Welcome ✅ COMPLETE
 **Goal**: Process incoming Welcome and join the group.
 
 - [ ] Add socket listener for `mls-welcome` event in frontend
@@ -77,66 +77,56 @@ Each step is small, testable, and builds on the previous one.
   - Call WASM `process_welcome()`
   - Store group state locally
 - [x] Add `checkForInvites()` to poll for pending welcome messages
-- [ ] Fetch and delete welcome after processing
+- [x] Fetch and delete welcome after processing
+- [x] Regenerate KeyPackage after joining (KeyPackages are single-use)
 
-**Test**: Login as invited user, verify they join the group and can see group state.
+**Test**: Login as invited user, verify they join the group and can see group state. ✅
 
-### Step 6 Verification Status (2025-12-08)
+### Step 6 Resolution (2025-12-15)
 
-**BLOCKED** - `process_welcome()` fails with `NoMatchingKeyPackage` error.
+**FIXED** - The `NoMatchingKeyPackage` error has been resolved.
 
-**Test Scenario Executed:**
-1. User A (mlstestA, userId=7) creates identity and uploads KeyPackage ✅
-2. User B (mlstestB, userId=9) fetches User A's KeyPackage ✅
-3. User B creates group and invites User A (generates Welcome) ✅
-4. User A attempts to process Welcome ❌
+**Root Causes Identified & Fixed:**
 
-**Error:** `Error creating staged welcome: NoMatchingKeyPackage`
+1. **Per-User Storage** - IndexedDB was using a single key `current_identity` instead of per-user keys like `identity_${username}`. This caused identity overwrite when switching users in the same browser.
+   - **Fix**: Updated `saveState()` and `loadState()` to use `identity_${username}` keys.
 
-**Investigation Findings:**
-- KeyPackageBundle IS in User A's provider storage (verified: 1786 bytes)
-- KeyPackage from server matches local KeyPackage (verified: 282 bytes, same hash)
-- User A's MLS client can create groups (client is functional)
-- Issue persists even using the SAME MlsClient instance (no backup/restore involved)
+2. **Group ID Mismatch** - `MlsGroup::new()` generates its own internal group ID, which differed from our external group ID stored in the database. When the invitee processed the Welcome, they joined with the internal MLS group ID but messages were stored under the external ID.
+   - **Fix**: Changed to `MlsGroup::new_with_group_id()` in `lib.rs` to ensure external and internal group IDs match.
 
-**Root Cause Analysis:**
-The issue is in how OpenMLS's `StagedWelcome::new_from_welcome()` looks up the KeyPackageBundle from the provider's storage. The hash used for lookup (derived from the Welcome message) doesn't match the hash used when storing the bundle during `create_identity()`.
-
-**Fix Required in `openmls-wasm/src/lib.rs`:**
-The KeyPackageBundle storage mechanism needs investigation. Potential issues:
-1. Hash computation might differ between storage and lookup
-2. OpenMLS might expect a different storage format
-3. The `OpenMlsRustCrypto` provider may have specific storage requirements not being met
-
-**Workaround Options:**
-1. Debug OpenMLS storage trait to understand lookup mechanism
-2. Check if KeyPackageBundle should be stored differently
-3. Consider using OpenMLS's internal storage instead of manual `write_key_package()`
+3. **KeyPackage Regeneration** - After `process_welcome()` consumes a KeyPackage, it must be regenerated.
+   - **Fix**: Added `regenerate_key_package()` method to WASM and call it after joining.
 
 ---
 
-## Step 7: Send Encrypted Message
+## Step 7: Send Encrypted Message ✅ COMPLETE
 **Goal**: Encrypt and send a message to the group.
 
-- [ ] Add `sendGroupMessage(groupId, plaintext)` to CoreCryptoClient
+- [x] Add `sendMessage(groupId, plaintext)` to CoreCryptoClient
   - Call WASM `encrypt_message()`
   - POST to `/api/mls/messages/group` with `content_type: 'application'`
-- [ ] Add socket emit for `mls-message` event in backend
+- [ ] Add socket emit for `mls-message` event in backend (real-time delivery)
 
-**Test**: Send message, verify encrypted bytes in `mls_group_messages` table.
+**Test**: Send message, verify encrypted bytes in `mls_group_messages` table. ✅
+
+**Verified (2025-12-15)**: Message "Hello from mlstestB! E2EE works!" encrypted from 32 bytes to 177 bytes.
 
 ---
 
-## Step 8: Receive and Decrypt Message
+## Step 8: Receive and Decrypt Message ✅ COMPLETE
 **Goal**: Receive encrypted message and decrypt it.
 
-- [ ] Add socket listener for `mls-message` event in frontend
-- [ ] Add `handleIncomingMessage(groupId, ciphertext)` to CoreCryptoClient
-  - Call WASM `decrypt_message()`
+- [ ] Add socket listener for `mls-message` event in frontend (real-time)
+- [x] Add `handleIncomingMessage(messageData)` to CoreCryptoClient
+  - Routes application vs commit messages
+  - Call WASM `decrypt_message()` for application messages
   - Return plaintext
-- [ ] Log decrypted message to console (temporary)
+- [x] Add `fetchAndDecryptMessages(groupId)` for polling-based retrieval
+- [x] Add `decryptMessage(groupId, ciphertext)` core decryption method
 
-**Test**: Send message from one user, verify other user's console shows decrypted text.
+**Test**: Send message from one user, verify other user's console shows decrypted text. ✅
+
+**Verified (2025-12-15)**: mlstestA successfully decrypted message: "Hello from mlstestB! E2EE works!"
 
 ---
 
@@ -174,12 +164,19 @@ The KeyPackageBundle storage mechanism needs investigation. Potential issues:
 
 ---
 
-## Current Starting Point
+## Current Status (2025-12-15)
 
-Based on the codebase review:
-- WASM module exists and has core functions
-- `CoreCryptoClient` has init and identity bootstrap
-- Backend has MLS routes for key packages and messages
-- Socket infrastructure exists but no MLS events yet
+**Steps 1-8 COMPLETE** - Core E2EE flow works end-to-end:
+- ✅ WASM module loads and initializes
+- ✅ Identity creation with per-user storage
+- ✅ KeyPackage upload/fetch
+- ✅ Group creation with consistent group IDs
+- ✅ User invitation (Welcome + Commit generation)
+- ✅ Group joining from Welcome message
+- ✅ Message encryption and sending
+- ✅ Message decryption
 
-**Recommended first action**: Run Step 1 to verify everything loads correctly.
+**Next Steps**:
+1. Add Socket.io events for real-time message delivery (`mls-message`, `mls-welcome`)
+2. Build minimal chat UI (Step 9)
+3. Handle commit processing for member changes (Step 10)

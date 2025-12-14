@@ -15,6 +15,11 @@ export class MlsClient {
   static derive_key_argon2id(password: string, salt: Uint8Array): Uint8Array;
   get_credential_bytes(): Uint8Array;
   get_key_package_bytes(): Uint8Array;
+  /**
+   * Regenerate a new KeyPackage using the existing credential and signature key
+   * Per OpenMLS Book: KeyPackages are single-use and must be regenerated after being consumed
+   */
+  regenerate_key_package(): void;
   get_identity_fingerprint(): string;
   get_signature_keypair_bytes(): Uint8Array;
   get_key_package_bundle_bytes(): Uint8Array;
@@ -40,6 +45,7 @@ export interface InitOutput {
   readonly mlsclient_new: () => number;
   readonly mlsclient_process_commit: (a: number, b: number, c: number, d: number, e: number) => [number, number];
   readonly mlsclient_process_welcome: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+  readonly mlsclient_regenerate_key_package: (a: number) => [number, number];
   readonly mlsclient_restore_identity: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
   readonly init_logging: () => void;
   readonly __wbindgen_exn_store: (a: number) => void;

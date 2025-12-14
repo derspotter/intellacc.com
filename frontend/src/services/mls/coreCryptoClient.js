@@ -53,10 +53,11 @@ class CoreCryptoClient {
     }
 
     /**
-     * Save client state to IndexedDB
+     * Save client state to IndexedDB for current user
+     * Uses per-user storage keys to support multiple identities
      */
     async saveState() {
-        if (!this.client || !this.db) return;
+        if (!this.client || !this.db || !this.identityName) return;
         try {
             const credential = this.client.get_credential_bytes();
             const bundle = this.client.get_key_package_bundle_bytes();
@@ -65,9 +66,10 @@ class CoreCryptoClient {
             const transaction = this.db.transaction(['state'], 'readwrite');
             const store = transaction.objectStore('state');
 
+            // Store with per-user key: identity_${username}
             await new Promise((resolve, reject) => {
                 const request = store.put({
-                    id: 'current_identity',
+                    id: `identity_${this.identityName}`,
                     credential,
                     bundle,
                     signatureKey,
@@ -77,23 +79,31 @@ class CoreCryptoClient {
                 request.onerror = () => reject(request.error);
                 request.onsuccess = () => resolve();
             });
-            console.log('OpenMLS state saved');
+            console.log('OpenMLS state saved for:', this.identityName);
         } catch (error) {
             console.error('Error saving OpenMLS state:', error);
         }
     }
 
     /**
-     * Load client state from IndexedDB
+     * Load client state from IndexedDB for a specific user
+     * @param {string} username - The username to load state for
+     * @returns {boolean} True if state was loaded successfully
      */
-    async loadState() {
+    async loadState(username) {
         if (!this.db) return false;
+        if (!username) {
+            console.warn('loadState called without username');
+            return false;
+        }
+
         try {
             const transaction = this.db.transaction(['state'], 'readonly');
             const store = transaction.objectStore('state');
 
+            // Load using per-user key: identity_${username}
             const record = await new Promise((resolve, reject) => {
-                const request = store.get('current_identity');
+                const request = store.get(`identity_${username}`);
                 request.onerror = () => reject(request.error);
                 request.onsuccess = () => resolve(request.result);
             });
@@ -118,26 +128,31 @@ class CoreCryptoClient {
     async ensureMlsBootstrap(username) {
         if (!this.initialized) await this.initialize();
 
-        if (this.client) {
-            console.log('MLS Client already initialized');
+        // If client exists for the correct user, we're done
+        if (this.client && this.identityName === username) {
+            console.log('MLS Client already initialized for:', username);
             return;
         }
 
-        // Try to load existing state
-        if (await this.loadState()) {
-            if (this.identityName === username) {
-                // Upload key package to ensure server has it
-                try {
-                    await this.uploadKeyPackage();
-                } catch (uploadError) {
-                    console.warn('Failed to upload key package:', uploadError);
-                }
-                return;
-            }
-            console.warn('Stored identity does not match requested username, resetting...');
+        // Reset client if switching users
+        if (this.client && this.identityName !== username) {
+            console.log('Switching MLS identity from', this.identityName, 'to', username);
             this.client = null;
+            this.identityName = null;
         }
 
+        // Try to load existing state for this specific user
+        if (await this.loadState(username)) {
+            // Successfully loaded - upload key package to ensure server has it
+            try {
+                await this.uploadKeyPackage();
+            } catch (uploadError) {
+                console.warn('Failed to upload key package:', uploadError);
+            }
+            return;
+        }
+
+        // No existing state found - create new identity
         try {
             this.client = new MlsClient();
             this.identityName = username;
@@ -147,7 +162,7 @@ class CoreCryptoClient {
             const result = this.client.create_identity(username);
             console.log('Identity created:', result);
 
-            // Persist state
+            // Persist state for this user
             await this.saveState();
 
             // Upload key package to server
@@ -288,7 +303,7 @@ class CoreCryptoClient {
      */
     async createGroup(name) {
         if (!this.initialized) await this.initialize();
-        if (!this.client) await this.loadState(); // Try to load state if not in memory
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
         if (!this.client) throw new Error('Client not initialized (Identity not found)');
 
         // Generate a random group ID (16 bytes as hex string)
@@ -298,11 +313,8 @@ class CoreCryptoClient {
 
         try {
             // Call WASM to create the group state
-            // Note: MlsClient.create_group returns the group state handle/object inside WASM memory
-            // We need to manage this state properly. For now assuming create_group persists internally or returns success.
-            // Actual OpenMLS WASM binding might return a tuple or struct.
-            // Based on checking the lib.rs earlier, it takes a group_id string.
-            const groupState = this.client.create_group(groupId);
+            // WASM expects raw bytes, not hex string
+            const groupState = this.client.create_group(groupIdBytes);
             console.log('MLS Group Created Locally:', groupId);
 
             // Persist group metadata in backend
@@ -343,7 +355,7 @@ class CoreCryptoClient {
      */
     async inviteToGroup(groupId, userId) {
         if (!this.initialized) await this.initialize();
-        if (!this.client) await this.loadState();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
         if (!this.client) throw new Error('Client not initialized');
 
         try {
@@ -351,9 +363,12 @@ class CoreCryptoClient {
             const keyPackageBytes = await this.fetchKeyPackage(userId);
             console.log(`Fetched key package for user ${userId}, bytes: ${keyPackageBytes.length}`);
 
-            // 2. Add member in WASM (creates Proposal + Commit + Welcome)
+            // 2. Convert groupId to bytes for WASM
+            const groupIdBytes = new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+
+            // 3. Add member in WASM (creates Proposal + Commit + Welcome)
             // Returns [welcome, commit] tuple
-            const result = this.client.add_member(groupId, keyPackageBytes);
+            const result = this.client.add_member(groupIdBytes, keyPackageBytes);
             console.log('Add member result:', result);
 
             if (!result || !Array.isArray(result) || result.length < 2) {
@@ -498,7 +513,7 @@ class CoreCryptoClient {
      */
     async joinGroup(welcomeBytes) {
         if (!this.initialized) await this.initialize();
-        if (!this.client) await this.loadState();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
 
         // process_welcome returns group_id bytes
         // signature: process_welcome(welcome_bytes, ratchet_tree_bytes?)
@@ -510,7 +525,221 @@ class CoreCryptoClient {
         const groupId = toHex(groupIdBytes);
         console.log('Joined group:', groupId);
 
+        // Regenerate KeyPackage after joining (it was consumed by process_welcome)
+        await this.regenerateKeyPackage();
+
         return groupId;
+    }
+
+    /**
+     * Regenerate KeyPackage after it's been consumed (e.g., by joining a group)
+     * Per OpenMLS Book: KeyPackages are single-use
+     * @returns {Promise<void>}
+     */
+    async regenerateKeyPackage() {
+        if (!this.client) throw new Error('Client not initialized');
+
+        // Generate new KeyPackage in WASM
+        this.client.regenerate_key_package();
+        console.log('[MLS] KeyPackage regenerated');
+
+        // Save updated state
+        await this.saveState();
+
+        // Upload new KeyPackage to server
+        try {
+            await this.uploadKeyPackage();
+            console.log('[MLS] New KeyPackage uploaded to server');
+        } catch (e) {
+            console.warn('[MLS] Failed to upload new KeyPackage:', e);
+        }
+    }
+
+    /**
+     * Send an encrypted message to a group
+     * Per OpenMLS Book (p.45 "Creating application messages")
+     * @param {Uint8Array|string} groupId - The group ID (bytes or hex string)
+     * @param {string} plaintext - The message to encrypt
+     * @returns {Promise<Object>} Server response with message ID
+     */
+    async sendMessage(groupId, plaintext) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
+
+        // Convert groupId to bytes if it's a hex string
+        let groupIdBytes;
+        if (typeof groupId === 'string') {
+            groupIdBytes = new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+        } else {
+            groupIdBytes = groupId;
+        }
+
+        // Convert plaintext to bytes
+        const encoder = new TextEncoder();
+        const plaintextBytes = encoder.encode(plaintext);
+
+        // Encrypt the message using WASM
+        const ciphertextBytes = this.client.encrypt_message(groupIdBytes, plaintextBytes);
+        console.log(`[MLS] Encrypted message: ${plaintextBytes.length} bytes -> ${ciphertextBytes.length} bytes`);
+
+        // Convert to hex for PostgreSQL bytea storage
+        const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
+        const ciphertextHex = '\\x' + toHex(ciphertextBytes);
+        const groupIdHex = typeof groupId === 'string' ? groupId : toHex(groupId);
+
+        // Send to server
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const response = await fetch('/api/mls/messages/group', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                groupId: groupIdHex,
+                epoch: 0,
+                contentType: 'application',
+                data: ciphertextHex
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Failed to send message');
+        }
+
+        const result = await response.json();
+        console.log('[MLS] Message sent:', result.id);
+        return result;
+    }
+
+    /**
+     * Decrypt an incoming message
+     * Per OpenMLS Book (p.48-49 "Processing messages in groups")
+     * @param {Uint8Array|string} groupId - The group ID (bytes or hex string)
+     * @param {Uint8Array|string|Object} ciphertext - The encrypted message
+     * @returns {string} The decrypted plaintext
+     */
+    decryptMessage(groupId, ciphertext) {
+        if (!this.client) throw new Error('Client not initialized');
+
+        // Convert groupId to bytes if it's a hex string
+        let groupIdBytes;
+        if (typeof groupId === 'string') {
+            groupIdBytes = new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+        } else {
+            groupIdBytes = groupId;
+        }
+
+        // Convert ciphertext to bytes if needed
+        let ciphertextBytes;
+        if (typeof ciphertext === 'string') {
+            let hex = ciphertext;
+            if (hex.startsWith('\\x')) hex = hex.substring(2);
+            ciphertextBytes = new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+        } else if (ciphertext.type === 'Buffer' && Array.isArray(ciphertext.data)) {
+            ciphertextBytes = new Uint8Array(ciphertext.data);
+        } else {
+            ciphertextBytes = ciphertext;
+        }
+
+        // Decrypt using WASM
+        const plaintextBytes = this.client.decrypt_message(groupIdBytes, ciphertextBytes);
+
+        // Convert bytes back to string
+        const decoder = new TextDecoder();
+        const plaintext = decoder.decode(plaintextBytes);
+        console.log(`[MLS] Decrypted message: ${ciphertextBytes.length} bytes -> "${plaintext}"`);
+
+        return plaintext;
+    }
+
+    /**
+     * Handle an incoming encrypted message from the server
+     * @param {Object} messageData - Message object from server/socket
+     * @returns {Object} Processed message with plaintext
+     */
+    handleIncomingMessage(messageData) {
+        if (!this.client) throw new Error('Client not initialized');
+
+        const { group_id, data, content_type, sender_id, id } = messageData;
+
+        if (content_type === 'application') {
+            const plaintext = this.decryptMessage(group_id, data);
+            return { id, groupId: group_id, senderId: sender_id, plaintext, type: 'application' };
+        } else if (content_type === 'commit') {
+            this.processCommit(group_id, data);
+            return { id, groupId: group_id, senderId: sender_id, type: 'commit' };
+        } else {
+            console.warn('[MLS] Unknown message content_type:', content_type);
+            return { id, groupId: group_id, type: 'unknown' };
+        }
+    }
+
+    /**
+     * Process a commit message (for member changes, key updates)
+     * @param {string} groupId - Group ID (hex)
+     * @param {Object|string} commitData - Commit message data
+     */
+    processCommit(groupId, commitData) {
+        if (!this.client) throw new Error('Client not initialized');
+
+        const groupIdBytes = new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+
+        let commitBytes;
+        if (typeof commitData === 'string') {
+            let hex = commitData;
+            if (hex.startsWith('\\x')) hex = hex.substring(2);
+            commitBytes = new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+        } else if (commitData.type === 'Buffer' && Array.isArray(commitData.data)) {
+            commitBytes = new Uint8Array(commitData.data);
+        } else {
+            commitBytes = commitData;
+        }
+
+        this.client.process_commit(groupIdBytes, commitBytes);
+        console.log('[MLS] Processed commit for group:', groupId);
+    }
+
+    /**
+     * Fetch and process new messages for a group
+     * @param {string} groupId - Group ID (hex)
+     * @param {number} afterId - Fetch messages after this ID
+     * @returns {Promise<Array>} Array of processed messages with plaintext
+     */
+    async fetchAndDecryptMessages(groupId, afterId = 0) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const response = await fetch(`/api/mls/messages/group/${groupId}?afterId=${afterId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Failed to fetch messages');
+        }
+
+        const messages = await response.json();
+        console.log(`[MLS] Fetched ${messages.length} messages for group ${groupId}`);
+
+        const processed = [];
+        for (const msg of messages) {
+            try {
+                const result = this.handleIncomingMessage(msg);
+                processed.push(result);
+            } catch (e) {
+                console.error('[MLS] Failed to process message:', msg.id, e);
+            }
+        }
+
+        return processed;
     }
 
     /**

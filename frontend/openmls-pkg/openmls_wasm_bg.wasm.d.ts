@@ -16,6 +16,7 @@ export const mlsclient_get_signature_keypair_bytes: (a: number) => [number, numb
 export const mlsclient_new: () => number;
 export const mlsclient_process_commit: (a: number, b: number, c: number, d: number, e: number) => [number, number];
 export const mlsclient_process_welcome: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+export const mlsclient_regenerate_key_package: (a: number) => [number, number];
 export const mlsclient_restore_identity: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
 export const init_logging: () => void;
 export const __wbindgen_exn_store: (a: number) => void;

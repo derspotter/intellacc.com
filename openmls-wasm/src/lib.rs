@@ -14,15 +14,14 @@ use tls_codec::{Serialize, Deserialize};
 use std::collections::HashMap;
 
 // Explicit imports
-use openmls::group::{MlsGroupCreateConfig, MlsGroupJoinConfig, StagedWelcome};
+use openmls::group::{MlsGroupCreateConfig, MlsGroupJoinConfig, StagedWelcome, GroupId};
 use openmls::credentials::{Credential, CredentialType};
 use openmls::extensions::Extensions;
 use openmls::key_packages::{KeyPackage, KeyPackageIn, KeyPackageBundle};
 use openmls::treesync::RatchetTreeIn;
 use openmls_traits::storage::StorageProvider; // For writing KeyPackageBundle
 
-use openmls::framing::{ProcessedMessageContent, MlsMessageIn};
-use openmls::messages::Welcome;
+use openmls::framing::{ProcessedMessageContent, MlsMessageIn, MlsMessageBodyIn};
 
 #[wasm_bindgen]
 extern "C" {
@@ -88,19 +87,27 @@ impl MlsClient {
 
         let group_config = MlsGroupCreateConfig::builder()
             .wire_format_policy(WireFormatPolicy::default())
+            .use_ratchet_tree_extension(true)
             .build();
-            
-        
-        let group = MlsGroup::new(
+
+        // Use new_with_group_id to ensure our external group ID matches MLS internal ID
+        let group_id = GroupId::from_slice(group_id_bytes);
+
+        let group = MlsGroup::new_with_group_id(
             provider,
             signature_keypair,
             &group_config,
+            group_id,
             credential_with_key,
         ).map_err(|e| JsValue::from_str(&format!("Error creating group: {:?}", e)))?;
-        
-        self.groups.insert(group_id_bytes.to_vec(), group);
-        
-        Ok(group_id_bytes.to_vec())
+
+        // Store using the MLS group ID to ensure consistency
+        let mls_group_id = group.group_id().as_slice().to_vec();
+        log(&format!("[WASM] create_group: MLS group ID = {}", hex::encode(&mls_group_id)));
+
+        self.groups.insert(mls_group_id.clone(), group);
+
+        Ok(mls_group_id)
     }
 
     pub fn create_identity(&mut self, identity_name: &str) -> Result<String, JsValue> {
@@ -136,6 +143,11 @@ impl MlsClient {
         let hash = key_package_ref.hash_ref(provider.crypto())
              .map_err(|e| JsValue::from_str(&format!("Error hashing key package: {:?}", e)))?;
              
+        let hash = key_package_ref.hash_ref(provider.crypto())
+             .map_err(|e| JsValue::from_str(&format!("Error hashing key package: {:?}", e)))?;
+             
+        log(&format!("[WASM] Writing KeyPackage Hash: {}", hex::encode(hash.as_slice())));
+        
         provider.storage().write_key_package(&hash, &key_package_bundle)
             .map_err(|e| JsValue::from_str(&format!("Error saving key package bundle: {:?}", e)))?;
 
@@ -200,24 +212,69 @@ impl MlsClient {
         let mut slice = credential_bytes.as_slice();
         let credential = <Credential as Deserialize>::tls_deserialize(&mut slice)
             .map_err(|e| JsValue::from_str(&format!("Error deserializing credential: {:?}", e)))?;
-            
+
         let signature_keypair: SignatureKeyPair = serde_json::from_slice(&signature_key_bytes)
             .map_err(|e| JsValue::from_str(&format!("Error deserializing signature keypair: {:?}", e)))?;
-            
+
         let bundle: KeyPackageBundle = serde_json::from_slice(&bundle_bytes)
             .map_err(|e| JsValue::from_str(&format!("Error deserializing bundle: {:?}", e)))?;
-            
+
         let key_package = bundle.key_package();
         let hash = key_package.hash_ref(self.provider.crypto())
              .map_err(|e| JsValue::from_str(&format!("Error hashing key package: {:?}", e)))?;
-             
+
+        log(&format!("[WASM] restore_identity: Writing KeyPackage Hash: {}", hex::encode(hash.as_slice())));
+
         self.provider.storage().write_key_package(&hash, &bundle)
             .map_err(|e| JsValue::from_str(&format!("Error saving key package bundle: {:?}", e)))?;
-            
+
         self.credential = Some(credential);
         self.signature_keypair = Some(signature_keypair);
         self.key_package = Some(key_package.clone());
-        
+
+        Ok(())
+    }
+
+    /// Regenerate a new KeyPackage using the existing credential and signature key
+    /// Per OpenMLS Book: KeyPackages are single-use and must be regenerated after being consumed
+    pub fn regenerate_key_package(&mut self) -> Result<(), JsValue> {
+        let provider = &self.provider;
+
+        let signature_keypair = self.signature_keypair.as_ref()
+            .ok_or_else(|| JsValue::from_str("No signature keypair available"))?;
+
+        let credential = self.credential.as_ref()
+            .ok_or_else(|| JsValue::from_str("No credential available"))?;
+
+        let credential_with_key = CredentialWithKey {
+            credential: credential.clone(),
+            signature_key: signature_keypair.to_public_vec().into(),
+        };
+
+        // Build a new key package
+        let key_package_bundle = KeyPackage::builder()
+            .key_package_extensions(Extensions::default())
+            .build(
+                Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519,
+                provider,
+                signature_keypair,
+                credential_with_key,
+            )
+            .map_err(|e| JsValue::from_str(&format!("Error creating key package: {:?}", e)))?;
+
+        let key_package_ref = key_package_bundle.key_package();
+        let hash = key_package_ref.hash_ref(provider.crypto())
+             .map_err(|e| JsValue::from_str(&format!("Error hashing key package: {:?}", e)))?;
+
+        log(&format!("[WASM] regenerate_key_package: Writing new KeyPackage Hash: {}", hex::encode(hash.as_slice())));
+
+        provider.storage().write_key_package(&hash, &key_package_bundle)
+            .map_err(|e| JsValue::from_str(&format!("Error saving key package bundle: {:?}", e)))?;
+
+        self.key_package = Some(key_package_ref.clone());
+
+        log("[WASM] KeyPackage regenerated successfully");
+
         Ok(())
     }
 
@@ -262,7 +319,7 @@ impl MlsClient {
         let key_package = key_package_in.validate(provider.crypto(), ProtocolVersion::Mls10)
              .map_err(|e| JsValue::from_str(&format!("Error validating key package: {:?}", e)))?;
 
-        let (commit, welcome, _group_info) = group.add_members(
+        let (commit, welcome_msg, _group_info) = group.add_members(
             provider,
             signer,
             &[key_package],
@@ -271,11 +328,15 @@ impl MlsClient {
         group.merge_pending_commit(provider)
             .map_err(|e| JsValue::from_str(&format!("Error merging commit: {:?}", e)))?;
 
+        // Serialize as full MlsMessage (includes type tag)
         let commit_bytes = commit.tls_serialize_detached()
             .map_err(|e| JsValue::from_str(&format!("Error serializing commit: {:?}", e)))?;
-            
-        let welcome_bytes = welcome.tls_serialize_detached()
+
+        // Serialize welcome as full MlsMessage (includes type tag for Welcome)
+        let welcome_bytes = welcome_msg.tls_serialize_detached()
             .map_err(|e| JsValue::from_str(&format!("Error serializing welcome: {:?}", e)))?;
+
+        log(&format!("[WASM] add_member: Welcome MlsMessage serialized to {} bytes", welcome_bytes.len()));
 
         let array = js_sys::Array::new();
         array.push(&js_sys::Uint8Array::from(&welcome_bytes[..]));
@@ -285,9 +346,16 @@ impl MlsClient {
 
     pub fn process_welcome(&mut self, welcome_bytes: &[u8], ratchet_tree_bytes: Option<Vec<u8>>) -> Result<Vec<u8>, JsValue> {
         let provider = &self.provider;
-        
-        let welcome = Welcome::tls_deserialize(&mut &welcome_bytes[..])
-            .map_err(|e| JsValue::from_str(&format!("Error deserializing welcome: {:?}", e)))?;
+
+        // First deserialize as MlsMessageIn (the full MLS message wrapper)
+        let mls_message_in = MlsMessageIn::tls_deserialize(&mut &welcome_bytes[..])
+            .map_err(|e| JsValue::from_str(&format!("Error deserializing MLS message: {:?}", e)))?;
+
+        // Extract the Welcome from the MLS message body
+        let welcome = match mls_message_in.extract() {
+            MlsMessageBodyIn::Welcome(welcome) => welcome,
+            other => return Err(JsValue::from_str(&format!("Message is not a Welcome, got: {:?}", std::mem::discriminant(&other)))),
+        };
 
         let ratchet_tree = if let Some(bytes) = ratchet_tree_bytes {
             Some(RatchetTreeIn::tls_deserialize(&mut &bytes[..])
@@ -299,6 +367,11 @@ impl MlsClient {
         let group_config = MlsGroupJoinConfig::builder()
             .wire_format_policy(WireFormatPolicy::default())
             .build();
+
+        log(&format!("[WASM] Processing Welcome with secrets count: {}", welcome.secrets().len()));
+        for (i, secret) in welcome.secrets().iter().enumerate() {
+            log(&format!("[WASM] Welcome secret #{} expects KeyPackage Hash: {:?}", i, secret.new_member()));
+        }
 
         let staged_welcome = StagedWelcome::new_from_welcome(
             provider,

@@ -334,6 +334,16 @@ export class MlsClient {
         return v1;
     }
     /**
+     * Regenerate a new KeyPackage using the existing credential and signature key
+     * Per OpenMLS Book: KeyPackages are single-use and must be regenerated after being consumed
+     */
+    regenerate_key_package() {
+        const ret = wasm.mlsclient_regenerate_key_package(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @returns {string}
      */
     get_identity_fingerprint() {
