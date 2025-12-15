@@ -111,7 +111,7 @@ exports.loginUser = async (req, res) => {
     }
 
     // Use the centralized JWT utility to generate a token
-    const token = generateToken({ 
+    const token = generateToken({
       userId: user.id,
       role: user.role || 'user'
     });

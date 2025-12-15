@@ -361,3 +361,40 @@ CREATE TABLE IF NOT EXISTS mls_group_members (
 
 CREATE INDEX IF NOT EXISTS idx_mls_groups_created_by ON mls_groups(created_by);
 CREATE INDEX IF NOT EXISTS idx_mls_group_members_user ON mls_group_members(user_id);
+
+-- Legacy Messaging Tables (non-E2EE)
+-- Required for the messaging system UI components
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id SERIAL PRIMARY KEY,
+    participant_1 INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    participant_2 INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_message_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(participant_1, participant_2)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id SERIAL PRIMARY KEY,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    read_at TIMESTAMP WITH TIME ZONE,
+    deleted_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS message_delivery (
+    id SERIAL PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    delivered_at TIMESTAMP WITH TIME ZONE,
+    read_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_participants ON conversations(participant_1, participant_2);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_receiver_unread ON messages(receiver_id, read_at) WHERE read_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_message_delivery_message ON message_delivery(message_id);

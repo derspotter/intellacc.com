@@ -20,6 +20,7 @@ export default defineConfig({
   assetsInclude: ['**/*.wasm'],
   server: {
     host: '0.0.0.0',
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'http://intellacc_backend:3000',  // Updated to use container_name instead of service name

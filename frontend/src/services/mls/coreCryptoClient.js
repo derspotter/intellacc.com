@@ -1,4 +1,5 @@
 import init, { MlsClient, init_logging } from 'openmls-wasm';
+import { registerSocketEventHandler } from '../socket.js';
 
 /**
  * Core Crypto Client for OpenMLS integration
@@ -12,6 +13,9 @@ class CoreCryptoClient {
         this.dbName = 'openmls_storage';
         this.dbVersion = 1;
         this.db = null;
+        this.messageHandlers = []; // Callbacks for decrypted messages
+        this.welcomeHandlers = []; // Callbacks for new group invites
+        this._socketCleanup = null;
     }
 
     /**
@@ -131,12 +135,14 @@ class CoreCryptoClient {
         // If client exists for the correct user, we're done
         if (this.client && this.identityName === username) {
             console.log('MLS Client already initialized for:', username);
+            this.setupSocketListeners();
             return;
         }
 
         // Reset client if switching users
         if (this.client && this.identityName !== username) {
             console.log('Switching MLS identity from', this.identityName, 'to', username);
+            this.cleanupSocketListeners();
             this.client = null;
             this.identityName = null;
         }
@@ -149,6 +155,7 @@ class CoreCryptoClient {
             } catch (uploadError) {
                 console.warn('Failed to upload key package:', uploadError);
             }
+            this.setupSocketListeners();
             return;
         }
 
@@ -172,6 +179,9 @@ class CoreCryptoClient {
                 console.warn('Failed to upload key package:', uploadError);
                 // Continue even if upload fails - can retry later
             }
+
+            // Set up real-time socket listeners
+            this.setupSocketListeners();
         } catch (error) {
             console.error('Error bootstrapping MLS client:', error);
             throw error;
@@ -828,6 +838,81 @@ class CoreCryptoClient {
                 resolve();
             };
         });
+    }
+
+    /**
+     * Register a handler for decrypted messages
+     * @param {Function} handler - Callback(message) where message = { id, groupId, senderId, plaintext, type }
+     * @returns {Function} Unregister function
+     */
+    onMessage(handler) {
+        this.messageHandlers.push(handler);
+        return () => {
+            this.messageHandlers = this.messageHandlers.filter(h => h !== handler);
+        };
+    }
+
+    /**
+     * Register a handler for new group invites
+     * @param {Function} handler - Callback({ groupId })
+     * @returns {Function} Unregister function
+     */
+    onWelcome(handler) {
+        this.welcomeHandlers.push(handler);
+        return () => {
+            this.welcomeHandlers = this.welcomeHandlers.filter(h => h !== handler);
+        };
+    }
+
+    /**
+     * Set up socket event listeners for real-time MLS events
+     */
+    setupSocketListeners() {
+        if (this._socketCleanup) return; // Already set up
+
+        const cleanupWelcome = registerSocketEventHandler('mls-welcome', async (data) => {
+            console.log('[MLS] Real-time welcome received:', data);
+            try {
+                // Fetch and process the welcome
+                const joinedGroups = await this.checkForInvites();
+                // Notify handlers
+                for (const groupId of joinedGroups) {
+                    this.welcomeHandlers.forEach(h => h({ groupId }));
+                }
+            } catch (e) {
+                console.error('[MLS] Error processing welcome:', e);
+            }
+        });
+
+        const cleanupMessage = registerSocketEventHandler('mls-message', async (data) => {
+            console.log('[MLS] Real-time message received:', data);
+            try {
+                // Fetch and decrypt the message
+                const messages = await this.fetchAndDecryptMessages(data.groupId, data.id - 1);
+                // Notify handlers
+                for (const msg of messages) {
+                    this.messageHandlers.forEach(h => h(msg));
+                }
+            } catch (e) {
+                console.error('[MLS] Error processing message:', e);
+            }
+        });
+
+        this._socketCleanup = () => {
+            cleanupWelcome();
+            cleanupMessage();
+        };
+        console.log('[MLS] Socket listeners set up');
+    }
+
+    /**
+     * Clean up socket listeners
+     */
+    cleanupSocketListeners() {
+        if (this._socketCleanup) {
+            this._socketCleanup();
+            this._socketCleanup = null;
+        }
     }
 }
 

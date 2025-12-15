@@ -92,6 +92,18 @@ router.post('/messages/group', async (req, res) => {
   }
 });
 
+// Get User's Groups
+router.get('/groups', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const groups = await mlsService.getUserGroups(userId);
+    res.json(groups);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch groups' });
+  }
+});
+
 // Create Group
 router.post('/groups', async (req, res) => {
   try {

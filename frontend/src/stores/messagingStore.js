@@ -23,15 +23,26 @@ const messagingStore = vanX.reactive({
   conversationsLoading: false,
   messagesLoading: false,
   error: '',
-  
+
+  // MLS E2EE state
+  mlsInitialized: false,
+  mlsGroups: [],                    // List of MLS groups
+  mlsGroupsById: {},                // Groups by ID for quick lookup
+  selectedMlsGroupId: null,         // Currently selected MLS group
+  mlsMessages: {},                  // Messages by groupId: { [groupId]: [{id, senderId, plaintext, timestamp}] }
+  showMlsMode: true,                // Toggle between MLS and legacy mode (default to MLS)
+  showCreateMlsGroup: false,        // Show create MLS group form
+  mlsInviteUserId: '',              // User ID to invite to MLS group
+  showMlsInvite: false,             // Show invite form
+
   // Typing indicators - use array instead of Set for VanX compatibility
   typingUsers: [],
-  
+
   // New conversation form
   showNewConversation: false,
   newConversationUser: '',
   newMessage: '',
-  
+
   // Search
   searchQuery: '',
   
@@ -286,7 +297,65 @@ const messagingStore = vanX.reactive({
     console.log('[Store.setSearchQuery] ->', query);
     messagingStore.searchQuery = query;
   },
-  
+
+  // MLS-specific methods
+  setMlsInitialized(initialized) {
+    messagingStore.mlsInitialized = initialized;
+  },
+
+  setMlsGroups(groups) {
+    const byId = {};
+    for (const g of groups || []) {
+      byId[g.group_id] = g;
+    }
+    messagingStore.mlsGroups = groups || [];
+    messagingStore.mlsGroupsById = byId;
+  },
+
+  addMlsGroup(group) {
+    if (!group || !group.group_id) return;
+    const exists = messagingStore.mlsGroups.some(g => g.group_id === group.group_id);
+    if (!exists) {
+      messagingStore.mlsGroups = [...messagingStore.mlsGroups, group];
+      messagingStore.mlsGroupsById = { ...messagingStore.mlsGroupsById, [group.group_id]: group };
+    }
+  },
+
+  selectMlsGroup(groupId) {
+    messagingStore.selectedMlsGroupId = groupId;
+    messagingStore.selectedConversationId = null; // Deselect legacy conversation
+  },
+
+  setMlsMessages(groupId, messages) {
+    messagingStore.mlsMessages = { ...messagingStore.mlsMessages, [groupId]: messages || [] };
+  },
+
+  addMlsMessage(groupId, message) {
+    const existing = messagingStore.mlsMessages[groupId] || [];
+    // Avoid duplicates by ID
+    if (existing.some(m => m.id === message.id)) return;
+    messagingStore.mlsMessages = {
+      ...messagingStore.mlsMessages,
+      [groupId]: [...existing, message]
+    };
+  },
+
+  setShowMlsMode(show) {
+    messagingStore.showMlsMode = show;
+  },
+
+  setShowCreateMlsGroup(show) {
+    messagingStore.showCreateMlsGroup = show;
+  },
+
+  setMlsInviteUserId(userId) {
+    messagingStore.mlsInviteUserId = userId;
+  },
+
+  setShowMlsInvite(show) {
+    messagingStore.showMlsInvite = show;
+  },
+
   clearCache() {
     messagingStore.conversations = [];
     messagingStore.conversationsById = {};
@@ -295,6 +364,12 @@ const messagingStore = vanX.reactive({
     messagingStore.selectedConversationId = null;
     messagingStore.typingUsers = [];
     messagingStore.error = '';
+    // Clear MLS state too
+    messagingStore.mlsGroups = [];
+    messagingStore.mlsGroupsById = {};
+    messagingStore.selectedMlsGroupId = null;
+    messagingStore.mlsMessages = {};
+    messagingStore.mlsInitialized = false;
   }
 });
 
@@ -338,6 +413,32 @@ messagingStore.selectedConversationName = vanX.calc(() => {
     filtered.sort((a, b) => (b.ts || 0) - (a.ts || 0));
     return filtered;
   });
+
+// MLS computed properties
+messagingStore.selectedMlsGroup = vanX.calc(() => {
+  if (!messagingStore.selectedMlsGroupId) return null;
+  return messagingStore.mlsGroupsById?.[messagingStore.selectedMlsGroupId] || null;
+});
+
+messagingStore.currentMlsMessages = vanX.calc(() => {
+  if (!messagingStore.selectedMlsGroupId) return [];
+  return messagingStore.mlsMessages[messagingStore.selectedMlsGroupId] || [];
+});
+
+messagingStore.mlsSidebarItems = vanX.calc(() => {
+  const q = (messagingStore.searchQuery || '').toLowerCase();
+  const groups = messagingStore.mlsGroups || [];
+  const items = groups.map(g => ({
+    id: g.group_id,
+    name: g.name || 'Unnamed Group',
+    time: g.created_at || null,
+    ts: g.created_at ? Date.parse(g.created_at) : 0,
+    isMls: true
+  }));
+  const filtered = q ? items.filter(it => (it.name || '').toLowerCase().includes(q)) : items;
+  filtered.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return filtered;
+});
 
 // filteredConversations deprecated; use sidebarItems for filter/sort/projection
 

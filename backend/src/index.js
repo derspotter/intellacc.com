@@ -1,7 +1,7 @@
 const express = require('express');
 const { Pool } = require('pg');
-const http = require('http'); // Import the http module
-const socketIo = require('socket.io'); // Import Socket.IO
+const http = require('http');
+const socketIo = require('socket.io');
 const { verifyToken } = require('./utils/jwt');
 const notificationService = require('./services/notificationService');
 
@@ -42,13 +42,13 @@ io.use((socket, next) => {
 // Set Socket.IO instance in notification service
 notificationService.setSocketIo(io);
 
-// Set Socket.IO instance in messaging service
-const messagingService = require('./services/messagingService');
-messagingService.setSocketIo(io);
+// Set Socket.IO instance in MLS service
+const mlsService = require('./services/mlsService');
+mlsService.setSocketIo(io);
 
 // Socket.IO logic
 io.on('connection', (socket) => {
-  console.log(`[Socket.IO] Connection handler. userId: ${socket.userId}, token:`, socket.handshake.auth?.token || socket.handshake.query?.token);
+  console.log(`[Socket.IO] Connection handler. userId: ${socket.userId}`);
 
   socket.on('test-message', (data) => {
     console.log('Received test message:', data);
@@ -64,8 +64,8 @@ io.on('connection', (socket) => {
     socket.join('predictions');
     console.log('User joined predictions room');
   });
-  
-  // Join profile room (for personalized updates) - derive from authenticated socket
+
+  // Join profile room (for personalized updates)
   socket.on('join-profile', () => {
     if (socket.userId) {
       socket.join(`user-${socket.userId}`);
@@ -73,7 +73,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Join user notification room (no client-provided id)
+  // Join user notification room
   socket.on('authenticate', () => {
     if (socket.userId) {
       socket.join(`user:${socket.userId}`);
@@ -81,7 +81,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Join messaging room for real-time message delivery (no client-provided id)
+  // Join messaging room for real-time message delivery
   socket.on('join-messaging', () => {
     if (socket.userId) {
       socket.join(`messaging:${socket.userId}`);
@@ -89,55 +89,11 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle typing indicators for messaging (use authenticated userId)
-  socket.on('typing-start', async (data) => {
-    try {
-      const { conversationId } = data || {};
-      if (!conversationId || !socket.userId) return;
-      const messagingService = require('./services/messagingService');
-      const isParticipant = await messagingService.checkConversationMembership(conversationId, socket.userId);
-      if (!isParticipant) return;
-      socket.to(`conversation:${conversationId}`).emit('user-typing', {
-        conversationId,
-        userId: socket.userId,
-        isTyping: true
-      });
-    } catch {}
-  });
-
-  socket.on('typing-stop', async (data) => {
-    try {
-      const { conversationId } = data || {};
-      if (!conversationId || !socket.userId) return;
-      const messagingService = require('./services/messagingService');
-      const isParticipant = await messagingService.checkConversationMembership(conversationId, socket.userId);
-      if (!isParticipant) return;
-      socket.to(`conversation:${conversationId}`).emit('user-typing', {
-        conversationId,
-        userId: socket.userId,
-        isTyping: false
-      });
-    } catch {}
-  });
-
-  // Join specific conversation room for typing indicators (validate membership)
-  socket.on('join-conversation', async (conversationId) => {
-    try {
-      if (!conversationId || !socket.userId) return;
-      const messagingService = require('./services/messagingService');
-      const isParticipant = await messagingService.checkConversationMembership(conversationId, socket.userId);
-      if (isParticipant) {
-        socket.join(`conversation:${conversationId}`);
-        console.log(`User ${socket.userId} joined conversation room: ${conversationId}`);
-      }
-    } catch {}
-  });
-
-  // Leave conversation room
-  socket.on('leave-conversation', (conversationId) => {
-    if (conversationId) {
-      socket.leave(`conversation:${conversationId}`);
-      console.log(`Socket left conversation room: ${conversationId}`);
+  // Join MLS room for E2EE message delivery
+  socket.on('join-mls', () => {
+    if (socket.userId) {
+      socket.join(`mls:${socket.userId}`);
+      console.log(`[MLS] User ${socket.userId} joined MLS room`);
     }
   });
 
@@ -149,7 +105,7 @@ io.on('connection', (socket) => {
 // Middleware
 app.use(express.json());
 
-// Security headers (baseline hardening)
+// Security headers
 app.use((req, res, next) => {
   try {
     const csp = [
@@ -181,13 +137,13 @@ app.get('/', async (req, res) => {
   }
 });
 
-// Additional Routes
+// API Routes
 app.use('/api', require('./routes/api'));
 
 // Attach io instance to app for controllers to use
 app.set('io', io);
 
-// IMPORTANT FIX: Use the server with Socket.IO attached instead of app.listen
+// Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running with Socket.IO on port ${PORT}`);

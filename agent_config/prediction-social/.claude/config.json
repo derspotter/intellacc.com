@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "prediction-social",
+  "description": "Prediction market social platform with agent orchestra",
+  
+  "agents": {
+    "architect": {
+      "description": "System design and cross-cutting concerns",
+      "prompt_file": ".claude/agents/architect.md",
+      "triggers": ["design", "interface", "architecture", "cross-cutting", "security"]
+    },
+    "frontend": {
+      "description": "VanJS frontend development",
+      "prompt_file": ".claude/agents/frontend.md",
+      "triggers": ["component", "ui", "vanjs", "frontend", "css", "layout"]
+    },
+    "backend": {
+      "description": "Node.js API development",
+      "prompt_file": ".claude/agents/backend.md",
+      "triggers": ["api", "route", "endpoint", "auth", "backend", "fastify"]
+    },
+    "engine": {
+      "description": "Rust prediction engine",
+      "prompt_file": ".claude/agents/engine.md",
+      "triggers": ["rust", "scoring", "visibility", "algorithm", "engine", "ffi"]
+    },
+    "data": {
+      "description": "Database schema and queries",
+      "prompt_file": ".claude/agents/data.md",
+      "triggers": ["database", "schema", "migration", "query", "postgresql", "sql"]
+    },
+    "test": {
+      "description": "Testing across all layers",
+      "prompt_file": ".claude/agents/test.md",
+      "triggers": ["test", "spec", "coverage", "e2e", "unit", "integration"]
+    },
+    "devops": {
+      "description": "Build, deploy, and infrastructure",
+      "prompt_file": ".claude/agents/devops.md",
+      "triggers": ["deploy", "docker", "ci", "cd", "infrastructure", "monitoring"]
+    }
+  },
+  
+  "workflows": {
+    "new-feature": {
+      "description": "Implement a new feature end-to-end",
+      "steps": ["architect", "engine|backend|frontend|data", "test", "devops"]
+    },
+    "bug-fix": {
+      "description": "Debug and fix an issue",
+      "steps": ["architect", "{affected-agent}", "test"]
+    },
+    "optimization": {
+      "description": "Performance optimization",
+      "steps": ["architect", "{affected-agent}", "test", "devops"]
+    }
+  },
+  
+  "context": {
+    "tech_stack": {
+      "frontend": "VanJS",
+      "backend": "Node.js + Fastify",
+      "engine": "Rust + napi-rs",
+      "database": "PostgreSQL",
+      "testing": "Vitest, Playwright, proptest"
+    },
+    "key_concepts": {
+      "visibility_score": "0.0-1.0 score determining user reach, based on prediction accuracy",
+      "visibility_tiers": ["Novice (<0.3)", "Predictor (0.3-0.5)", "Forecaster (0.5-0.7)", "Seer (0.7-0.9)", "Oracle (>0.9)"],
+      "market_types": ["binary", "multi-outcome", "continuous"]
+    }
+  }
+}

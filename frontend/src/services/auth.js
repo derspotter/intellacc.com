@@ -175,10 +175,7 @@ export async function register(username, email, password) {
 export function logout() {
   clearToken();
   userProfileState.val = null;
-  
-  // Also lock keys in memory for safety
-  try { require('./keyManager').default.lockKeys(); } catch {}
-  
+
   // Navigate to login page
   window.location.hash = 'login';
 }

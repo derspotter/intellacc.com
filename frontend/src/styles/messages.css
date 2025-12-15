@@ -430,6 +430,71 @@
   justify-content: center;
 }
 
+/* MLS E2EE Styles */
+.mode-toggle {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: var(--blue-bg);
+  font-size: 0.875rem;
+}
+
+.mls-status {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  background: var(--border-color);
+  color: var(--secondary-text);
+}
+
+.mls-status.active {
+  background: rgba(0, 200, 83, 0.15);
+  color: var(--success-color);
+}
+
+.mls-group .lock-icon {
+  font-size: 0.875rem;
+}
+
+.mls-conversation .chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.encryption-status.mls-active {
+  color: var(--success-color);
+  font-weight: 500;
+}
+
+.invite-form {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--blue-bg);
+}
+
+.invite-form form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.invite-form input {
+  flex: 1;
+}
+
+.group-id {
+  font-size: 0.7rem;
+  font-family: monospace;
+}
+
+.message-sender {
+  font-size: 0.7rem;
+  font-weight: 500;
+  margin-right: 0.5rem;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .messages-container {

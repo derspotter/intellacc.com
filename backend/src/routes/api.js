@@ -10,8 +10,6 @@ const scoringController = require('../controllers/scoringController');
 const leaderboardController = require('../controllers/leaderboardController');
 const notificationController = require('../controllers/notificationController');
 const weeklyAssignmentController = require('../controllers/weeklyAssignmentController');
-const keyManagementController = require('../controllers/keyManagementController');
-const messagingController = require('../controllers/messagingController');
 const mlsRoutes = require('./mls');
 const authenticateJWT = require("../middleware/auth");
 const rateLimit = require('express-rate-limit');
@@ -122,34 +120,7 @@ router.post("/weekly/run-all", weeklyAssignmentController.runWeeklyProcesses);
 router.get("/weekly/stats", weeklyAssignmentController.getWeeklyStats);
 router.get("/weekly/user/:userId/status", authenticateJWT, weeklyAssignmentController.getUserWeeklyStatus);
 
-// Key Management Routes (for end-to-end encryption)
-router.post("/keys", authenticateJWT, keyManagementController.storePublicKey);
-router.get("/keys/me", authenticateJWT, keyManagementController.getMyPublicKey);
-router.get("/keys/user/:userId", authenticateJWT, keyManagementController.getUserPublicKey);
-router.post("/keys/batch", authenticateJWT, keyManagementController.getMultiplePublicKeys);
-router.get("/keys/users", authenticateJWT, keyManagementController.getUsersWithKeys);
-router.post("/keys/verify", authenticateJWT, keyManagementController.verifyKeyFingerprint);
-router.delete("/keys/me", authenticateJWT, keyManagementController.deleteMyPublicKey);
-router.get("/keys/stats", authenticateJWT, keyManagementController.getKeyStats);
-
-// Messaging Routes (end-to-end encrypted direct messages)
-// Rate limiters for messaging
-const sendMessageLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false });
-const createConversationLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
-const searchConversationsLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
-const markReadLimiter = rateLimit({ windowMs: 60 * 1000, max: 240, standardHeaders: true, legacyHeaders: false });
-
-router.get("/messages/conversations", authenticateJWT, messagingController.getConversations);
-router.post("/messages/conversations", authenticateJWT, createConversationLimiter, messagingController.createConversation);
-router.get("/messages/conversations/search", authenticateJWT, searchConversationsLimiter, messagingController.searchConversations);
-router.get("/messages/conversations/:conversationId", authenticateJWT, messagingController.getConversation);
-router.get("/messages/conversations/:conversationId/messages", authenticateJWT, messagingController.getMessages);
-router.post("/messages/conversations/:conversationId/messages", authenticateJWT, sendMessageLimiter, messagingController.sendMessage);
-router.post("/messages/read", authenticateJWT, markReadLimiter, messagingController.markAsRead);
-router.get("/messages/unread-count", authenticateJWT, messagingController.getUnreadCount);
-router.delete("/messages/:messageId", authenticateJWT, messagingController.deleteMessage);
-
-// MLS Routes (Messaging Layer Security)
+// MLS Routes (Messaging Layer Security - E2EE)
 router.use('/mls', mlsRoutes);
 
 // Attachments (pre-signed URL scaffold)

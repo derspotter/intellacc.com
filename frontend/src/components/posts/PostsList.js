@@ -12,7 +12,8 @@ export default function PostsList() {
   const error = postsStore.state.error;
   
   // Fetch posts if needed (similar to PredictionsList approach)
-  if (posts.val.length === 0 && !loading.val) {
+  // Check initialFetchAttempted to prevent infinite loop when posts are legitimately empty
+  if (posts.val.length === 0 && !loading.val && !postsStore.state.initialFetchAttempted.val) {
     console.log('PostsList: Fetching posts data');
     setTimeout(() => postsStore.actions.fetchPosts.call(postsStore), 0);
   }

@@ -1,200 +1,187 @@
 // frontend/src/pages/Messages.js
+// MLS E2EE Messaging - No legacy modes
 import van from 'vanjs-core';
-import * as vanX from 'vanjs-ext';
-const { div, h1, h2, h3, button, input, span, p, ul, li, textarea, form, i } = van.tags;
+const { div, h2, h3, button, input, span, p, ul, li, textarea, form, i } = van.tags;
 import messagingService from '../services/messaging.js';
 import { getUserId as authGetUserId } from '../services/auth.js';
 import messagingStore from '../stores/messagingStore.js';
-// Rendering uses store projections; no pair key or recomputed names
+import coreCryptoClient from '../services/mls/coreCryptoClient.js';
 
 /**
- * Messages page component for end-to-end encrypted messaging
+ * Messages page component for MLS E2EE messaging
  */
 export default function MessagesPage() {
-  // All state now comes from the reactive store
-  // We derive reactive views from the store using van.derive()
-  
-  // Render from store's reactive projection to keep UI live
 
-  // Initialize messaging
+  // Initialize MLS messaging
   const initialize = async () => {
     try {
       messagingStore.setConversationsLoading(true);
       messagingStore.clearError();
-      // Initialize current user for store normalization
+
       const uid = authGetUserId();
       if (uid != null) messagingStore.setCurrentUserId(uid);
-      
+
       await messagingService.initialize();
-      await loadConversations();
-      
-    } catch (err) {
-      // Initialization error surfaced to UI
-      console.error('Error initializing messages:', err);
-      // Don't set error if messaging service initialized successfully
-      if (!err.message || !err.message.includes('conversations')) {
-        messagingStore.setError('Failed to initialize messaging. Please check your encryption keys.');
+
+      // Initialize MLS E2EE using userId
+      const userId = messagingStore.currentUserId;
+      if (!userId) {
+        messagingStore.setError('Not logged in');
+        return;
       }
+
+      await coreCryptoClient.ensureMlsBootstrap(String(userId));
+      messagingStore.setMlsInitialized(true);
+      console.log('[Messages] MLS initialized for userId:', userId);
+
+      // Check for pending invites
+      await coreCryptoClient.checkForInvites();
+
+      // Load MLS groups
+      await loadMlsGroups();
+
+      // Set up real-time MLS handlers
+      setupMlsHandlers();
+
+    } catch (err) {
+      console.error('[Messages] Initialization error:', err);
+      messagingStore.setError(err.message || 'Failed to initialize MLS');
     } finally {
       messagingStore.setConversationsLoading(false);
     }
   };
 
-  // Load conversations - now just calls service, store is updated automatically
-  const loadConversations = async () => {
+  // Load MLS groups from backend
+  const loadMlsGroups = async () => {
     try {
-      await messagingService.getConversations();
-      // Store is reactive; sidebar reads from messagingStore.sidebarItems
-    } catch (err) { console.error('Error loading conversations:', err); messagingStore.setError('Failed to load conversations'); }
-  };
-
-  // Select conversation
-  const selectConversation = async (conversation) => {
-    try {
-      // Update store selection
-      messagingStore.selectConversation(conversation.id);
-      messagingStore.setMessagesLoading(true);
-      
-      // Join conversation room for typing indicators
-      messagingService.joinConversation(conversation.id);
-      
-      // Load messages if not present or stale
-      const convId = String(conversation.id);
-      const existing = (messagingStore.messagesByConversation || {})[convId];
-      const meta = (messagingStore.messagesMeta || {})[convId];
-      const fresh = meta && (Date.now() - (meta.lastFetchedTs || 0) < 30000);
-      if (!existing || !Array.isArray(existing) || existing.length === 0 || !fresh) {
-        await messagingService.getMessages(conversation.id);
-      }
-      
-      // Mark messages as read
-      const msgsNow = (messagingStore.messagesByConversation || {})[convId] || [];
-      const myId = messagingStore.currentUserId != null ? messagingStore.currentUserId : null;
-      const unreadMessages = msgsNow.filter(m => !m.read_at && m.receiver_id === myId);
-      
-      if (unreadMessages.length > 0) {
-        await messagingService.markMessagesAsRead(unreadMessages.map(m => m.id));
-      }
-      
-    } catch (err) { console.error('Error selecting conversation:', err); messagingStore.setError('Failed to load conversation'); }
-    finally {
-      messagingStore.setMessagesLoading(false);
-    }
-  };
-
-  // Helper: select by ID to avoid stale closures over objects
-  const selectConversationById = async (conversationId) => {
-    let conv = (messagingStore.conversations || []).find(c => String(c.id) === String(conversationId));
-    if (!conv) {
-      // Try to fetch from API if store is missing the record
-      try {
-        conv = await messagingService.ensureConversation(conversationId);
-      } catch (e) {
-        console.warn('ensureConversation failed for id', conversationId, e);
-      }
-    }
-    if (conv) {
-      await selectConversation(conv);
-    } else {
-      // As last resort, select by id so messages load even without full convo data
-      messagingStore.selectConversation(String(conversationId));
-      try { await messagingService.getMessages(conversationId); } catch {}
-    }
-  };
-
-  // Send message
-  const sendMessage = async (e) => {
-    e.preventDefault();
-    
-    if (!messagingStore.newMessage.trim() || !messagingStore.selectedConversation) return;
-    
-    try {
-      const conversation = messagingStore.selectedConversation;
-      const uid = messagingStore.currentUserId;
-      const otherUserId = conversation.participant_1 === uid ? conversation.participant_2 : conversation.participant_1;
-      
-      await messagingService.sendMessage(
-        conversation.id,
-        otherUserId,
-        messagingStore.newMessage.trim()
-      );
-      
-      // Clear input (message will be added via socket event)
-      messagingStore.setNewMessage('');
-      
-    } catch (err) { console.error('Error sending message:', err); messagingStore.setError('Failed to send message'); }
-  };
-
-  // Create new conversation
-  const createNewConversation = async (e) => {
-    e.preventDefault();
-    
-    if (!messagingStore.newConversationUser.trim()) return;
-    
-    try {
-      messagingStore.setMessagesLoading(true);
-      
-      // Use username to create conversation
-      const username = messagingStore.newConversationUser.trim();
-      
-      // Basic username validation
-      if (username.length < 1) {
-        messagingStore.setError('Please enter a username');
-        return;
-      }
-      
-      const conversation = await messagingService.createConversation(null, username);
-      
-      // Conversation is automatically added to store by createConversation
-      
-      // Select the new conversation
-      await selectConversation(conversation);
-      
-      // Hide new conversation form
-      messagingStore.setShowNewConversation(false);
-      messagingStore.setNewConversationUser('');
-      
+      const groups = await messagingService.getMlsGroups();
+      messagingStore.setMlsGroups(groups);
+      console.log('[Messages] Loaded MLS groups:', groups.length);
     } catch (err) {
-      console.error('Error creating conversation:', err);
-      // Provide specific error messages based on the error type
-      if (err.message && err.message.includes('not found')) {
-        messagingStore.setError(`User "${messagingStore.newConversationUser.trim()}" not found`);
-      } else if (err.message && err.message.includes('You must have a public key')) {
-        messagingStore.setError('Your encryption keys are not set up properly. Please refresh the page to initialize them.');
-      } else if (err.message && err.message.includes('other user must have a public key')) {
-        messagingStore.setError('The other user does not have encryption keys set up and cannot receive messages.');
-      } else if (err.message && err.message.includes('Key synchronization issue')) {
-        messagingStore.setError('There is an issue with your encryption keys. Please refresh the page or contact support.');
-      } else {
-        messagingStore.setError('Failed to create conversation. Make sure the user exists and has encryption keys.');
+      console.warn('[Messages] Error loading MLS groups:', err);
+    }
+  };
+
+  // Set up real-time MLS event handlers
+  const setupMlsHandlers = () => {
+    coreCryptoClient.onMessage((message) => {
+      console.log('[Messages] MLS message received:', message);
+      if (message.type === 'application' && message.plaintext) {
+        messagingStore.addMlsMessage(message.groupId, {
+          id: message.id,
+          senderId: message.senderId,
+          plaintext: message.plaintext,
+          timestamp: new Date().toISOString(),
+          type: 'received'
+        });
       }
+    });
+
+    coreCryptoClient.onWelcome(async ({ groupId }) => {
+      console.log('[Messages] Joined new MLS group:', groupId);
+      await loadMlsGroups();
+    });
+  };
+
+  // Select an MLS group and load its messages
+  const selectMlsGroup = async (groupId) => {
+    messagingStore.selectMlsGroup(groupId);
+    messagingStore.setMessagesLoading(true);
+
+    try {
+      const messages = await coreCryptoClient.fetchAndDecryptMessages(groupId);
+      const formatted = messages
+        .filter(m => m.type === 'application' && m.plaintext)
+        .map(m => ({
+          id: m.id,
+          senderId: m.senderId,
+          plaintext: m.plaintext,
+          timestamp: new Date().toISOString(),
+          type: 'received'
+        }));
+      messagingStore.setMlsMessages(groupId, formatted);
+    } catch (err) {
+      console.warn('[Messages] Error loading MLS messages:', err);
     } finally {
       messagingStore.setMessagesLoading(false);
     }
   };
 
-  // No more event listeners needed - VanX reactivity handles everything!
+  // Send an MLS-encrypted message
+  const sendMessage = async (e) => {
+    e.preventDefault();
+    const text = messagingStore.newMessage.trim();
+    const groupId = messagingStore.selectedMlsGroupId;
 
-  // Handle typing
-  let typingTimer = null;
-  const handleTyping = () => {
-    if (!messagingStore.selectedConversation) return;
-    
-    // Send typing start
-    messagingService.sendTypingIndicator(messagingStore.selectedConversation.id, true);
-    
-    // Clear previous timer
-    if (typingTimer) {
-      clearTimeout(typingTimer);
+    if (!text || !groupId) return;
+
+    try {
+      const result = await coreCryptoClient.sendMessage(groupId, text);
+      console.log('[Messages] MLS message sent:', result);
+
+      // Optimistic update
+      messagingStore.addMlsMessage(groupId, {
+        id: result.id || Date.now(),
+        senderId: messagingStore.currentUserId,
+        plaintext: text,
+        timestamp: new Date().toISOString(),
+        type: 'sent'
+      });
+
+      messagingStore.setNewMessage('');
+    } catch (err) {
+      console.error('[Messages] MLS send error:', err);
+      messagingStore.setError(err.message || 'Failed to send encrypted message');
     }
-    
-    // Set timer to send typing stop
-    typingTimer = setTimeout(() => {
-      messagingService.sendTypingIndicator(messagingStore.selectedConversation.id, false);
-    }, 2000);
   };
 
-  // No local getUserId; use messagingStore.currentUserId (set during init)
+  // Create a new MLS group
+  const createMlsGroup = async (e) => {
+    e.preventDefault();
+    const name = messagingStore.newConversationUser.trim();
+    if (!name) return;
+
+    try {
+      messagingStore.setMessagesLoading(true);
+      messagingStore.clearError();
+
+      const group = await coreCryptoClient.createGroup(name);
+      console.log('[Messages] MLS group created:', group);
+
+      messagingStore.addMlsGroup(group);
+      messagingStore.setNewConversationUser('');
+      messagingStore.setShowNewConversation(false);
+      messagingStore.selectMlsGroup(group.group_id);
+    } catch (err) {
+      console.error('[Messages] Create MLS group error:', err);
+      messagingStore.setError(err.message || 'Failed to create group');
+    } finally {
+      messagingStore.setMessagesLoading(false);
+    }
+  };
+
+  // Invite user to the selected MLS group
+  const inviteMlsUser = async (e) => {
+    e.preventDefault();
+    const userId = messagingStore.mlsInviteUserId.trim();
+    const groupId = messagingStore.selectedMlsGroupId;
+
+    if (!userId || !groupId) return;
+
+    try {
+      messagingStore.setMessagesLoading(true);
+      await coreCryptoClient.inviteToGroup(groupId, userId);
+      console.log('[Messages] User invited to MLS group:', userId);
+
+      messagingStore.setMlsInviteUserId('');
+      messagingStore.setShowMlsInvite(false);
+    } catch (err) {
+      console.error('[Messages] Invite error:', err);
+      messagingStore.setError(err.message || 'Failed to invite user');
+    } finally {
+      messagingStore.setMessagesLoading(false);
+    }
+  };
 
   // Scroll to bottom of messages
   const scrollToBottom = () => {
@@ -208,260 +195,226 @@ export default function MessagesPage() {
 
   // Format timestamp
   const formatTime = (timestamp) => {
-    if (!timestamp) return 'Invalid date';
+    if (!timestamp) return '';
     const date = new Date(timestamp);
-    if (isNaN(date.getTime())) return 'Invalid date';
-    
+    if (isNaN(date.getTime())) return '';
+
     const now = new Date();
     const diff = now - date;
-    
+
     if (diff < 24 * 60 * 60 * 1000) {
-      // Today - show time
-      return date.toLocaleTimeString('en-US', { 
-        hour: 'numeric', 
-        minute: '2-digit',
-        hour12: true 
-      });
+      return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
     } else if (diff < 7 * 24 * 60 * 60 * 1000) {
-      // This week - show day
       return date.toLocaleDateString('en-US', { weekday: 'short' });
     } else {
-      // Older - show date
-      return date.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric' 
-      });
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
   };
 
-  // No snapshot helpers; render directly from store
-
-  // Message component
-  const MessageItem = (message) => {
-    const isSent = message.sender_id === messagingStore.currentUserId;
-    
-    return li({
-      class: `message-item ${isSent ? 'sent' : 'received'}`
-    }, [
-      div({ class: "message-content" }, [
-        div({ class: "message-text" }, 
-          message.isDecrypted ? message.decryptedContent : message.encrypted_content
-        ),
-        div({ class: "message-meta" }, [
-          span({ class: "message-time" }, formatTime(message.created_at)),
-          () => isSent && message.read_at ? 
-            span({ class: "read-indicator" }, "✓✓") : 
-            isSent ? 
-              span({ class: "sent-indicator" }, "✓") : null
-        ])
-      ])
-    ]);
-  };
-
-  // No more manual DOM manipulation needed - VanX handles everything!
-
-  // Initialize once per page lifetime to avoid duplicate fetch/reset on re-renders
-  if (!MessagesPage.__initialized) {
-    MessagesPage.__initialized = true;
+  // Initialize MLS on page load (checks store to avoid re-initializing)
+  if (!messagingStore.mlsInitialized) {
     initialize();
   }
 
   return div({ class: "messages-page" }, [
-      div({ class: "messages-container" }, [
-        
-        // Sidebar - Conversations List
-        div({ class: "conversations-sidebar" }, [
-          div({ class: "sidebar-header" }, [
-            h2("Messages"),
-            button({
-              class: "btn btn-primary btn-sm",
-              onclick: () => {
-                console.log('New button clicked, toggling showNewConversation from', messagingStore.showNewConversation);
-                messagingStore.setShowNewConversation(!messagingStore.showNewConversation);
-                console.log('showNewConversation is now', messagingStore.showNewConversation);
-              }
-            }, "+ New")
-          ]),
-          
-          // New conversation form container
-          div({ class: "new-conversation-container" }, 
-            () => messagingStore.showNewConversation ? div({ class: "new-conversation-form" }, [
-              form({ onsubmit: createNewConversation }, [
-                input({
-                  type: "text",
-                  placeholder: "Enter username...",
-                  value: () => messagingStore.newConversationUser,
-                  oninput: (e) => messagingStore.setNewConversationUser(e.target.value),
-                  class: "form-input"
-                }),
-                button({ type: "submit", class: "btn btn-primary btn-sm" }, "Start Chat")
-              ])
-            ]) : ""
-          ),
-          
-          // Search
-          div({ class: "search-box" }, [
-            input({
-              type: "text",
-              placeholder: "Search conversations...",
-              value: () => messagingStore.searchQuery,
-              oninput: (e) => messagingStore.setSearchQuery(e.target.value),
-              class: "form-input"
-            })
-          ]),
-          
-          // Conversations list
-          div({ class: "conversations-list" }, [
-            () => {
-              if (messagingStore.conversationsLoading) return div({ class: "loading" }, "Loading conversations...");
+    div({ class: "messages-container" }, [
 
-              const list = messagingStore.sidebarItems || [];
-              if (list.length === 0) {
-                return div({ class: "empty-state" }, [
-                  p("No conversations yet"),
-                  p({ class: "text-muted" }, "Start a new conversation to begin messaging")
-                ]);
-              }
+      // Sidebar - MLS Groups List
+      div({ class: "conversations-sidebar" }, [
+        div({ class: "sidebar-header" }, [
+          h2("E2EE Messages"),
+          button({
+            class: "btn btn-primary btn-sm",
+            onclick: () => messagingStore.setShowNewConversation(!messagingStore.showNewConversation)
+          }, "+ New")
+        ]),
 
-              // Build a plain snapshot to avoid reactive aliasing during render
-              try { console.log('[UI] view =', JSON.stringify(list, null, 2)); } catch {}
+        // MLS status indicator
+        div({ class: "mode-toggle" }, [
+          () => messagingStore.mlsInitialized ?
+            span({ class: "mls-status active" }, "MLS Ready") :
+            span({ class: "mls-status" }, "Initializing MLS...")
+        ]),
 
-              return ul([
-                ...list.map(item => li({
-                  key: item.id,
-                  'data-conversation-id': item.id,
-                  class: () => {
-                    const selected = messagingStore.selectedConversationId === item.id;
-                    return `conversation-item ${selected ? 'selected' : ''}`;
-                  },
-                  onclick: () => selectConversationById(item.id)
-                }, [
-                  div({ class: "conversation-info" }, [
-                    div({ class: "conversation-name" }, item.name || 'Unknown'),
-                    div({ class: "last-message-time" }, formatTime(item.time)),
-                    () => item.unread > 0 ? span({ class: "unread-badge" }, item.unread) : null
-                  ])
-                ]))
+        // Create group form
+        div({ class: "new-conversation-container" },
+          () => messagingStore.showNewConversation ? div({ class: "new-conversation-form" }, [
+            form({ onsubmit: createMlsGroup }, [
+              input({
+                type: "text",
+                placeholder: "Group name...",
+                value: () => messagingStore.newConversationUser,
+                oninput: (e) => messagingStore.setNewConversationUser(e.target.value),
+                class: "form-input"
+              }),
+              button({ type: "submit", class: "btn btn-primary btn-sm" }, "Create Group")
+            ])
+          ]) : ""
+        ),
+
+        // Search
+        div({ class: "search-box" }, [
+          input({
+            type: "text",
+            placeholder: "Search groups...",
+            value: () => messagingStore.searchQuery,
+            oninput: (e) => messagingStore.setSearchQuery(e.target.value),
+            class: "form-input"
+          })
+        ]),
+
+        // Groups list
+        div({ class: "conversations-list" }, [
+          () => {
+            if (messagingStore.conversationsLoading) return div({ class: "loading" }, "Loading...");
+
+            const groups = messagingStore.mlsSidebarItems || [];
+            if (groups.length === 0) {
+              return div({ class: "empty-state" }, [
+                p("No E2EE groups yet"),
+                p({ class: "text-muted" }, "Create a group to start encrypted messaging")
               ]);
             }
-          ])
-        ]),
-        
-        // Main chat area
-        div({ class: "chat-area" }, [
-          () => messagingStore.selectedConversation === null ? 
-            // No conversation selected
-            div({ class: "no-conversation" }, [
+
+            return ul([
+              ...groups.map(item => li({
+                key: item.id,
+                'data-group-id': item.id,
+                class: () => {
+                  const selected = messagingStore.selectedMlsGroupId === item.id;
+                  return `conversation-item mls-group ${selected ? 'selected' : ''}`;
+                },
+                onclick: () => selectMlsGroup(item.id)
+              }, [
+                div({ class: "conversation-info" }, [
+                  div({ class: "conversation-name" }, [
+                    span({ class: "lock-icon" }, "🔒 "),
+                    item.name || 'Unnamed Group'
+                  ]),
+                  div({ class: "group-id text-muted" }, item.id?.substring(0, 8) + '...')
+                ])
+              ]))
+            ]);
+          }
+        ])
+      ]),
+
+      // Main chat area
+      div({ class: "chat-area" }, [
+        () => {
+          if (!messagingStore.selectedMlsGroupId) {
+            return div({ class: "no-conversation" }, [
               div({ class: "empty-state" }, [
                 i({ class: "icon-message" }),
-                h2("Select a conversation"),
-                p("Choose a conversation from the sidebar to start messaging")
+                h2("Select an E2EE group"),
+                p("Choose a group from the sidebar or create a new one")
               ])
-            ]) :
-            
-            // Conversation selected
-            div({ class: "conversation-view" }, [
-              // Chat header
-              div({ class: "chat-header" }, [
-                div({ class: "chat-title" }, [
-                  h3(() => messagingStore.selectedConversationName || 'Unknown'),
-                  div({ class: "encryption-status" }, [
-                    i({ class: "icon-lock" }),
-                    span("End-to-end encrypted")
-                  ])
+            ]);
+          }
+
+          // MLS Group selected
+          return div({ class: "conversation-view mls-conversation" }, [
+            // Chat header
+            div({ class: "chat-header" }, [
+              div({ class: "chat-title" }, [
+                h3(() => messagingStore.selectedMlsGroup?.name || 'E2EE Group'),
+                div({ class: "encryption-status mls-active" }, [
+                  i({ class: "icon-lock" }),
+                  span("MLS End-to-End Encrypted")
                 ])
               ]),
-              
-              // Messages list - now fully reactive!
-              div({ class: "messages-list" }, 
-                () => {
-                  if (messagingStore.messagesLoading) {
-                    return div({ class: "loading" }, "Loading messages...");
-                  }
-                  if (messagingStore.currentMessages.length === 0) {
-                    return div({ class: "empty-messages" }, "No messages yet. Say hello!");
-                  }
-                  
-                  // Create reactive list that updates automatically
-                  const messagesList = ul(messagingStore.currentMessages.map(MessageItem));
-                  
-                  // Auto-scroll when messages change
-                  setTimeout(scrollToBottom, 50);
-                  
-                  return messagesList;
-                }
-              ),
-                
-              // Debug test button
               button({
-                onclick: () => {
-                  console.log('Test button clicked, adding dummy message');
-                  const dummyMessage = {
-                    id: Date.now(),
-                    sender_id: messagingStore.currentUserId,
-                    created_at: new Date().toISOString(),
-                    isDecrypted: true,
-                    decryptedContent: 'Test message ' + Date.now(),
-                    read_at: null
-                  };
-                  messagingStore.addMessage(messagingStore.selectedConversationId, dummyMessage);
-                  console.log('Dummy message added via store');
-                }
-              }, "Add Test Message"),
+                class: "btn btn-sm",
+                onclick: () => messagingStore.setShowMlsInvite(!messagingStore.showMlsInvite)
+              }, "+ Invite")
+            ]),
 
-              // Typing indicator
-              () => messagingStore.typingUsers.length > 0 ? 
-                div({ class: "typing-indicator" }, [
-                  span("Typing..."),
-                  div({ class: "typing-dots" }, [
-                    span("."), span("."), span(".")
-                  ])
-                ]) : null,
-              
-              // Message input
-              div({ class: "message-input-area" }, [
-                form({ onsubmit: sendMessage }, [
-                  div({ class: "input-group" }, [
-                    textarea({
-                      placeholder: "Type your message...",
-                      value: () => messagingStore.newMessage,
-                      oninput: (e) => {
-                        messagingStore.setNewMessage(e.target.value);
-                        handleTyping();
-                      },
-                      onkeydown: (e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          sendMessage(e);
-                        }
-                      },
-                      class: "message-textarea",
-                      rows: 1
-                    }),
-                    button({
-                      type: "submit",
-                      class: "send-button",
-                      disabled: () => !messagingStore.newMessage.trim()
-                    }, [
-                      i({ class: "icon-send" }),
-                      "Send"
+            // Invite form
+            () => messagingStore.showMlsInvite ? div({ class: "invite-form" }, [
+              form({ onsubmit: inviteMlsUser }, [
+                input({
+                  type: "text",
+                  placeholder: "User ID to invite...",
+                  value: () => messagingStore.mlsInviteUserId,
+                  oninput: (e) => messagingStore.setMlsInviteUserId(e.target.value),
+                  class: "form-input"
+                }),
+                button({ type: "submit", class: "btn btn-primary btn-sm" }, "Invite")
+              ])
+            ]) : null,
+
+            // Messages list
+            div({ class: "messages-list" },
+              () => {
+                if (messagingStore.messagesLoading) {
+                  return div({ class: "loading" }, "Loading encrypted messages...");
+                }
+                const messages = messagingStore.currentMlsMessages || [];
+                if (messages.length === 0) {
+                  return div({ class: "empty-messages" }, "No messages yet. Send an encrypted message!");
+                }
+
+                const messagesList = ul([
+                  ...messages.map(msg => li({
+                    class: `message-item ${msg.type === 'sent' || msg.senderId === messagingStore.currentUserId ? 'sent' : 'received'}`
+                  }, [
+                    div({ class: "message-content" }, [
+                      div({ class: "message-text" }, msg.plaintext),
+                      div({ class: "message-meta" }, [
+                        span({ class: "message-sender" }, `User ${msg.senderId}`),
+                        span({ class: "message-time" }, formatTime(msg.timestamp))
+                      ])
                     ])
+                  ]))
+                ]);
+
+                setTimeout(scrollToBottom, 50);
+                return messagesList;
+              }
+            ),
+
+            // Message input
+            div({ class: "message-input-area" }, [
+              form({ onsubmit: sendMessage }, [
+                div({ class: "input-group" }, [
+                  textarea({
+                    placeholder: "Type an encrypted message...",
+                    value: () => messagingStore.newMessage,
+                    oninput: (e) => messagingStore.setNewMessage(e.target.value),
+                    onkeydown: (e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage(e);
+                      }
+                    },
+                    class: "message-textarea",
+                    rows: 1
+                  }),
+                  button({
+                    type: "submit",
+                    class: "send-button",
+                    disabled: () => !messagingStore.newMessage.trim()
+                  }, [
+                    i({ class: "icon-send" }),
+                    "Send"
                   ])
                 ])
               ])
             ])
-        ])
-      ]),
-      
-      // Error display
-      () => messagingStore.error ? div({ class: "error-message" }, [
-        div({ class: "alert alert-error" }, [
-          messagingStore.error,
-          button({
-            class: "btn-close",
-            onclick: () => messagingStore.clearError()
-          }, "×")
-        ])
-      ]) : null
-    ]);
+          ]);
+        }
+      ])
+    ]),
+
+    // Error display
+    () => messagingStore.error ? div({ class: "error-message" }, [
+      div({ class: "alert alert-error" }, [
+        messagingStore.error,
+        button({
+          class: "btn-close",
+          onclick: () => messagingStore.clearError()
+        }, "×")
+      ])
+    ]) : null
+  ]);
 }

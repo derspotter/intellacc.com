@@ -28,7 +28,10 @@ const eventHandlers = {
   messageSent: [],
   messagesRead: [],
   messageDeleted: [],
-  'user-typing': []
+  'user-typing': [],
+  // MLS E2EE events
+  'mls-welcome': [],
+  'mls-message': []
 };
 
 /**
@@ -270,6 +273,17 @@ function setupSocketHandlers() {
     console.log('[Socket] Received user-typing event:', data);
     notifyHandlers('user-typing', data);
   });
+
+  // MLS E2EE events
+  socket.on('mls-welcome', (data) => {
+    console.log('[Socket] Received mls-welcome event:', data);
+    notifyHandlers('mls-welcome', data);
+  });
+
+  socket.on('mls-message', (data) => {
+    console.log('[Socket] Received mls-message event:', data);
+    notifyHandlers('mls-message', data);
+  });
 }
 
 /**
@@ -290,21 +304,25 @@ function addMessage(message) {
  */
 function joinUserRooms() {
   if (!socketState.connected.val) return;
-  
+
   // Join predictions room
     socket.emit('join-predictions');
   console.log('Joined predictions room');
-  
+
   // Join user-specific room if authenticated
   const tokenData = getTokenData();
   if (tokenData && tokenData.userId) {
     // Server derives user id from JWT; do not pass userId from client
     socket.emit('join-profile');
     console.log(`Requested join to user-${tokenData.userId} room`);
-    
+
     // Authenticate for notifications (no userId param)
     socket.emit('authenticate');
     console.log(`Authenticated for notifications as user ${tokenData.userId}`);
+
+    // Join MLS room for E2EE messaging
+    socket.emit('join-mls');
+    console.log(`[MLS] Joined MLS room for user ${tokenData.userId}`);
   }
 }
 
