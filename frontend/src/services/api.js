@@ -155,6 +155,9 @@ export const api = {
     getUser: (id) => 
       request(`/users/${id}`),
       
+    getUserByUsername: (username) => 
+      request(`/users/username/${username}`),
+      
     follow: (id) => 
       request(`/users/${id}/follow`, { method: 'POST' }),
       
@@ -451,8 +454,15 @@ export const api = {
     getConversations: (limit = 20, offset = 0) =>
       request(`/messages/conversations?limit=${limit}&offset=${offset}`),
 
-    createConversation: (otherUserId) =>
-      request('/messages/conversations', { method: 'POST', body: { otherUserId } }),
+    createConversation: (otherUserId, otherUsername) => {
+      const body = {};
+      if (otherUsername) {
+        body.otherUsername = otherUsername;
+      } else if (otherUserId) {
+        body.otherUserId = otherUserId;
+      }
+      return request('/messages/conversations', { method: 'POST', body });
+    },
 
     searchConversations: (query, limit = 10) =>
       request(`/messages/conversations/search?q=${encodeURIComponent(query)}&limit=${limit}`),

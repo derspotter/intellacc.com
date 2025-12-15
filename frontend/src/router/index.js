@@ -1,7 +1,8 @@
 import van from 'vanjs-core';
 import MainLayout from '../components/layout/MainLayout';
+import NotificationsPage from '../pages/Notifications.js';
+import MessagesPage from '../pages/Messages.js';
 import { currentPageState } from '../store';
-import navigationStore from '../store/navigation';
 import { isLoggedInState, isAdminState } from '../services/auth';
 import { getStore } from '../store';
 
@@ -11,31 +12,29 @@ import SignUpForm from '../components/auth/SignUpForm';
 import PostsList from '../components/posts/PostsList';
 import CreatePostForm from '../components/posts/CreatePostForm';
 // Replace PredictionsList with ProfilePredictions
+import EventsList from '../components/predictions/EventsList.js';
+import EventCard from '../components/predictions/EventCard.js';
+import MarketStakes from '../components/predictions/MarketStakes.js';
+import LeaderboardCard from '../components/predictions/LeaderboardCard.js';
+import RPBalance from '../components/predictions/RPBalance.js';
+import WeeklyAssignment from '../components/predictions/WeeklyAssignment.js';
+import CreatePredictionForm from '../components/predictions/CreatePredictionForm.js';
+import AdminEventManagement from '../components/predictions/AdminEventManagement.js';
+import ProfileCard from '../components/profile/ProfileCard';
+import ProfileEditor from '../components/profile/ProfileEditor';
 import ProfilePredictions from '../components/profile/ProfilePredictions';
-import CreatePredictionForm from '../components/predictions/CreatePredictionForm';
-import CreateEventForm from '../components/predictions/CreateEventForm';
-import AdminEventManagement from '../components/predictions/AdminEventManagement';
-import EventsList from '../components/predictions/EventsList';
-import RPBalance from '../components/predictions/RPBalance';
-import GlobalLeaderboard from '../components/predictions/GlobalLeaderboard';
-import ProfilePage from '../components/profile/ProfilePage';
+import NetworkTabs from '../components/profile/NetworkTabs';
 import SettingsPage from '../components/settings/SettingsPage';
-import NotificationsPage from '../pages/Notifications';
-import MessagesPage from '../pages/Messages';
-import MlsDiagnosticsPage from '../pages/MlsDiagnosticsPage';
 
 // Use shorthand for tag functions
-const { div, h1, h2, h3, p, button } = van.tags;
+const { div, h1, h2, p, button } = van.tags;
 
 // Update page from hash (now async to handle store loading and initial fetch)
 export const updatePageFromHash = async () => {
-  const hash = window.location.hash.slice(1) || 'home';
-  const page = hash.split('/')[0]; // Get the base page (e.g., 'user' from 'user/123')
+  const page = window.location.hash.slice(1) || 'home';
   
-  // Update navigation store state
-  navigationStore.actions.updatePageFromHash.call(navigationStore);
-  
-  currentPageState.val = hash;
+  // Update the reactive state so the router re-renders
+  currentPageState.val = page;
 
   // Preload store and potentially fetch initial data based on route
   try {
@@ -107,48 +106,59 @@ export default function Router() {
     login: () => LoginForm(),
     signup: () => SignUpForm(),
     settings: () => SettingsPage(),
-    notifications: () => NotificationsPage(),
-    messages: () => MessagesPage(),
-    'mls-diagnostics': () => MlsDiagnosticsPage(),
     
-    predictions: () => div({ class: "markets-page" }, [
-      
-      // User stats bar or description for non-logged users  
-      () => isLoggedInState.val ? 
-        // Show user stats horizontally
-        div({ class: "user-stats-bar" }, [
-          RPBalance({ horizontal: true })
-        ]) :
-        // Show description and login prompt for non-logged users
-        div([
-          p({ class: "page-description" }, "Trade on future events with LMSR automated market making. Earn rewards through weekly assignments and optimal staking."),
-          div({ class: "login-prompt-inline" }, [
-            p("Join the markets to trade on predictions and earn rewards!"),
-            button({ 
-              onclick: () => { window.location.hash = 'login' },
-              class: "cta-button"
-            }, "Sign Up / Log In")
-          ])
-        ]),
-      
-      // Admin Event Management
-      () => isAdminState.val ? AdminEventManagement() : null,
-      
-      // Market Overview Section - moved above leaderboard
-      div({ class: "market-overview" }, [
-        // Main Markets Trading Interface
-        EventsList()
+    predictions: () => div({ class: "predictions-page" }, [
+      h1("Predictions & Betting"),
+      div({ class: "predictions-header" }, [
+        RPBalance({ horizontal: true })
       ]),
-      
-      // Global Leaderboard Section
-      div({ class: "leaderboard-section" }, [
-        GlobalLeaderboard({ limit: 10 })
+      div({ class: "predictions-main" }, [
+        div({ class: "events-list-column" }, [
+          EventsList()
+        ]),
+        div({ class: "market-stakes-column" }, [
+          MarketStakes({ eventId: null }), // eventId should be set by selection logic
+        ]),
+        div({ class: "leaderboard-column" }, [
+          LeaderboardCard()
+        ])
+      ]),
+      () => isAdminState.val ? AdminEventManagement() : null,
+      div({ class: "create-prediction-column" }, [
+        CreatePredictionForm()
       ])
     ]),
     
-    profile: () => ProfilePage(),
+    profile: () => {
+      // Fetching logic is now handled by updatePageFromHash on route change
+      const editMode = van.state(false); // Keep editMode state local to profile page
+
+      return div({ class: "profile-page" }, [
+        h1("My Profile"),
+        div({ class: "profile-container" }, [
+          div({ class: "profile-column main" }, [
+            () => editMode.val
+              ? ProfileEditor({ onCancel: () => editMode.val = false })
+              : ProfileCard({ onEdit: () => editMode.val = true }),
+            // Use ProfilePredictions with compact mode (default settings work fine)
+            ProfilePredictions({
+              compact: true,
+              limit: 5,
+              showViewAll: true,
+              title: 'Your Predictions',
+              className: 'profile-predictions'
+            })
+          ]),
+          div({ class: "profile-column sidebar" }, [
+            NetworkTabs()
+          ])
+        ])
+      ])
+    },
     
-    notFound: () => div({ class: "not-found-page" }, [
+  notifications: () => NotificationsPage(),
+  messages: () => MessagesPage(),
+  notFound: () => div({ class: "not-found-page" }, [
       h1("404 - Page Not Found"),
       p("The page you're looking for doesn't exist."),
       button({ onclick: () => { window.location.hash = 'home' }}, "Back to Home")
@@ -157,21 +167,11 @@ export default function Router() {
   
   // Render the appropriate page content
   return () => {
-    const hash = currentPageState.val;
-    const parts = hash.split('/');
-    const page = parts[0];
+    const page = currentPageState.val;
     
     // Special case for login and signup (no layout)
     if (page === 'login' || page === 'signup') {
       return pages[page] ? pages[page]() : pages.notFound();
-    }
-    
-    // Handle user profile routes
-    if (page === 'user' && parts[1]) {
-      const userId = parts[1];
-      return MainLayout({ 
-        children: ProfilePage({ userId })
-      });
     }
     
     // Wrap other pages in layout

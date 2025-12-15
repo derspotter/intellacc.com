@@ -29,10 +29,9 @@ const eventHandlers = {
   messagesRead: [],
   messageDeleted: [],
   'user-typing': [],
-  'mls:commit': [],
-  'mls:message': [],
-  'mls:history-secret': [],
-  'mls:migration': []
+  // MLS E2EE events
+  'mls-welcome': [],
+  'mls-message': []
 };
 
 /**
@@ -59,16 +58,6 @@ export function registerSocketEventHandler(eventName, handler) {
 
 // Socket.IO instance
 let socket = null;
-// Queue for emits attempted while disconnected
-const _emitQueue = [];
-let messagingStorePromise = null;
-
-async function getMessagingStore() {
-  if (!messagingStorePromise) {
-    messagingStorePromise = import('../stores/messagingStore.js').then(mod => mod.default);
-  }
-  return messagingStorePromise;
-}
 
 /**
  * Initialize Socket.IO connection
@@ -118,7 +107,7 @@ function createSocketConnection() {
       // In development, use same origin to leverage Vite proxy
       const socketUrl = window.location.origin;
       
-      if (import.meta?.env?.DEV) console.log('Creating Socket.IO connection to:', socketUrl);
+      console.log('Creating Socket.IO connection to:', socketUrl);
       
       const token = getToken();
       socket = io(socketUrl, {
@@ -153,7 +142,7 @@ function createSocketConnection() {
 function setupSocketHandlers() {
   // Connection event
   socket.on('connect', () => {
-    if (import.meta?.env?.DEV) console.log('Connected to Socket.IO server!');
+    console.log('Connected to Socket.IO server!');
     socketState.connected.val = true;
 
     // Notify custom handlers
@@ -167,21 +156,11 @@ function setupSocketHandlers() {
     
     // Join rooms based on authenticated user
     joinUserRooms();
-
-    // Flush any queued emits from offline period
-    try {
-      while (_emitQueue.length > 0) {
-        const { event, data } = _emitQueue.shift();
-        socket.emit(event, data);
-      }
-    } catch (e) {
-      // leave remaining items for next connect
-    }
   });
   
   // Disconnection event
   socket.on('disconnect', () => {
-    if (import.meta?.env?.DEV) console.log('Disconnected from Socket.IO server');
+    console.log('Disconnected from Socket.IO server');
     socketState.connected.val = false;
 
     // Notify custom handlers
@@ -193,92 +172,16 @@ function setupSocketHandlers() {
   
   // Connection error event
   socket.on('connect_error', (error) => {
-    if (import.meta?.env?.DEV) console.log('Connection error:', error.message);
+    console.log('Connection error:', error.message);
     socketState.connected.val = false;
     
     // Add error message
     addMessage(`Connection error: ${error.message}`);
   });
   
-  socket.on('mls:commit', async (payload) => {
-    if (import.meta?.env?.DEV) console.debug('MLS commit received', payload);
-    try {
-      const store = await getMessagingStore();
-      if (payload?.conversationId != null) {
-        store.markConversationStale(payload.conversationId);
-        store.setMlsPending(payload.conversationId, {
-          reason: 'commit',
-          senderClientId: payload?.senderClientId ?? null,
-          epoch: payload?.epoch ?? null
-        });
-      }
-    } catch (err) {
-      if (import.meta?.env?.DEV) console.warn('Failed to mark conversation stale for MLS commit', err);
-    }
-    notifyHandlers('mls:commit', payload);
-  });
-
-  socket.on('mls:message', async (payload) => {
-    if (import.meta?.env?.DEV) console.debug('MLS message received', payload);
-    try {
-      const store = await getMessagingStore();
-      if (payload?.conversationId != null) {
-        store.markConversationStale(payload.conversationId);
-        store.setMlsPending(payload.conversationId, {
-          reason: 'message',
-          senderClientId: payload?.senderClientId ?? null,
-          epoch: payload?.epoch ?? null
-        });
-      }
-    } catch (err) {
-      if (import.meta?.env?.DEV) console.warn('Failed to mark conversation stale for MLS message', err);
-    }
-    notifyHandlers('mls:message', payload);
-  });
-
-  socket.on('mls:history-secret', async (payload) => {
-    if (import.meta?.env?.DEV) console.debug('MLS history secret received', payload);
-    try {
-      const store = await getMessagingStore();
-      if (payload?.conversationId != null) {
-        store.markConversationStale(payload.conversationId);
-        store.setMlsPending(payload.conversationId, {
-          reason: 'history-secret',
-          senderClientId: payload?.senderClientId ?? null,
-          epoch: payload?.epoch ?? null
-        });
-      }
-    } catch (err) {
-      if (import.meta?.env?.DEV) console.warn('Failed to process MLS history secret event', err);
-    }
-    notifyHandlers('mls:history-secret', payload);
-  });
-
-  socket.on('mls:migration', async (payload) => {
-    if (import.meta?.env?.DEV) console.debug('MLS migration event received', payload);
-    try {
-      const store = await getMessagingStore();
-      if (payload?.conversationId != null) {
-        store.markConversationStale(payload.conversationId);
-        store.setMlsPending(payload.conversationId, {
-          reason: 'migration',
-          encryptionMode: payload?.encryptionMode ?? 'mls',
-          ciphersuite: payload?.ciphersuite ?? null
-        });
-        store.updateConversation(payload.conversationId, {
-          encryptionMode: payload?.encryptionMode ?? 'mls',
-          mlsMigrationEligible: false
-        });
-      }
-    } catch (err) {
-      if (import.meta?.env?.DEV) console.warn('Failed to process MLS migration event', err);
-    }
-    notifyHandlers('mls:migration', payload);
-  });
-  
   // Broadcast message event
   socket.on('broadcast', (data) => {
-    if (import.meta?.env?.DEV) addMessage(`Broadcast: ${JSON.stringify(data)}`);
+    addMessage(`Broadcast: ${JSON.stringify(data)}`);
   });
   
   // We are no longer using socket for post updates
@@ -286,7 +189,7 @@ function setupSocketHandlers() {
   
   // New prediction event
   socket.on('newPrediction', (data) => {
-    if (import.meta?.env?.DEV) addMessage(`New prediction: ${data.event || JSON.stringify(data)}`);
+    addMessage(`New prediction: ${data.event || JSON.stringify(data)}`);
     
     // Update predictions in store if available
     if (store.predictions) {
@@ -300,7 +203,7 @@ function setupSocketHandlers() {
   
   // Prediction resolved event
   socket.on('predictionResolved', (data) => {
-    if (import.meta?.env?.DEV) addMessage(`Prediction resolved: ${data.event || JSON.stringify(data)}`);
+    addMessage(`Prediction resolved: ${data.event || JSON.stringify(data)}`);
     
     // Update prediction in store if available
     if (store.predictions) {
@@ -317,7 +220,7 @@ function setupSocketHandlers() {
   
   // New bet event
   socket.on('newBet', (data) => {
-    if (import.meta?.env?.DEV) addMessage(`New bet: ${JSON.stringify(data)}`);
+    addMessage(`New bet: ${JSON.stringify(data)}`);
     
     // Refresh assigned predictions in store if available
     if (store.predictions) {
@@ -331,7 +234,7 @@ function setupSocketHandlers() {
   
   // Market update event - real-time price changes
   socket.on('marketUpdate', (data) => {
-    if (import.meta?.env?.DEV) console.log('📈 Market update received:', data);
+    console.log('📈 Market update received:', data);
     
     // Notify registered handlers for real-time UI updates
     notifyHandlers('marketUpdate', data);
@@ -339,7 +242,7 @@ function setupSocketHandlers() {
   
   // User-specific notification event
   socket.on('notification', (data) => {
-    if (import.meta?.env?.DEV) addMessage(`Notification: ${data.message || JSON.stringify(data)}`);
+    addMessage(`Notification: ${data.message || JSON.stringify(data)}`);
     
     // Notify registered handlers
     notifyHandlers('notification', data);
@@ -347,30 +250,40 @@ function setupSocketHandlers() {
 
   // Messaging events
   socket.on('newMessage', (data) => {
-    if (import.meta?.env?.DEV) console.log('[Socket] Received newMessage event:', data);
+    console.log('[Socket] Received newMessage event:', data);
     notifyHandlers('newMessage', data);
   });
 
   socket.on('messageSent', (data) => {
-    if (import.meta?.env?.DEV) console.log('[Socket] Received messageSent event:', data);
+    console.log('[Socket] Received messageSent event:', data);
     notifyHandlers('messageSent', data);
   });
 
   socket.on('messagesRead', (data) => {
-    if (import.meta?.env?.DEV) console.log('[Socket] Received messagesRead event:', data);
+    console.log('[Socket] Received messagesRead event:', data);
     notifyHandlers('messagesRead', data);
   });
 
   socket.on('messageDeleted', (data) => {
-    if (import.meta?.env?.DEV) console.log('[Socket] Received messageDeleted event:', data);
+    console.log('[Socket] Received messageDeleted event:', data);
     notifyHandlers('messageDeleted', data);
   });
 
   socket.on('user-typing', (data) => {
-    if (import.meta?.env?.DEV) console.log('[Socket] Received user-typing event:', data);
+    console.log('[Socket] Received user-typing event:', data);
     notifyHandlers('user-typing', data);
   });
 
+  // MLS E2EE events
+  socket.on('mls-welcome', (data) => {
+    console.log('[Socket] Received mls-welcome event:', data);
+    notifyHandlers('mls-welcome', data);
+  });
+
+  socket.on('mls-message', (data) => {
+    console.log('[Socket] Received mls-message event:', data);
+    notifyHandlers('mls-message', data);
+  });
 }
 
 /**
@@ -391,25 +304,25 @@ function addMessage(message) {
  */
 function joinUserRooms() {
   if (!socketState.connected.val) return;
-  
+
   // Join predictions room
     socket.emit('join-predictions');
-  if (import.meta?.env?.DEV) console.log('Joined predictions room');
-  
+  console.log('Joined predictions room');
+
   // Join user-specific room if authenticated
   const tokenData = getTokenData();
   if (tokenData && tokenData.userId) {
     // Server derives user id from JWT; do not pass userId from client
     socket.emit('join-profile');
-    if (import.meta?.env?.DEV) console.log(`Requested join to user-${tokenData.userId} room`);
-    
+    console.log(`Requested join to user-${tokenData.userId} room`);
+
     // Authenticate for notifications (no userId param)
     socket.emit('authenticate');
-    if (import.meta?.env?.DEV) console.log(`Authenticated for notifications as user ${tokenData.userId}`);
+    console.log(`Authenticated for notifications as user ${tokenData.userId}`);
 
-    // Join messaging room for real-time encrypted messaging
-    socket.emit('join-messaging');
-    if (import.meta?.env?.DEV) console.log(`Joined messaging room for user ${tokenData.userId}`);
+    // Join MLS room for E2EE messaging
+    socket.emit('join-mls');
+    console.log(`[MLS] Joined MLS room for user ${tokenData.userId}`);
   }
 }
 
@@ -465,11 +378,8 @@ function notifyHandlers(event, data) {
  */
 export function emit(event, data) {
   if (!socketState.connected.val) {
-    const item = { event, data };
-    if (_emitQueue.length >= 50) _emitQueue.shift();
-    _emitQueue.push(item);
-    if (import.meta?.env?.DEV) console.warn('Socket not connected, queued emit:', event);
-    return true; // queued successfully
+    console.warn('Socket not connected, cannot emit:', event);
+    return false;
   }
   
   socket.emit(event, data);

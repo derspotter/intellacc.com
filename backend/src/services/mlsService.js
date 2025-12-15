@@ -1,163 +1,164 @@
-// backend/src/services/mlsService.js
-
 const db = require('../db');
 
-/**
- * Replace all MLS key packages for a given user/client/ciphersuite tuple.
- * @param {Object} params
- * @param {number} params.userId
- * @param {string} params.clientId
- * @param {number} params.ciphersuite
- * @param {string} params.credentialType
- * @param {Buffer[]} params.keyPackages
- */
-async function replaceKeyPackages({ userId, clientId, ciphersuite, credentialType, keyPackages }) {
-  const pool = db.getPool();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query(
-      'DELETE FROM mls_key_packages WHERE user_id = $1 AND client_id = $2 AND ciphersuite = $3',
-      [userId, clientId, ciphersuite]
-    );
+let io = null;
 
-    for (const keyPackage of keyPackages) {
-      await client.query(
-        `INSERT INTO mls_key_packages (user_id, client_id, ciphersuite, credential_type, key_package)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [userId, clientId, ciphersuite, credentialType, keyPackage]
-      );
+const mlsService = {
+  setSocketIo(socketIo) {
+    io = socketIo;
+    console.log('[MLS] Socket.IO instance set');
+  },
+
+  async upsertKeyPackage(userId, deviceId, packageData, hash) {
+    const query = `
+      INSERT INTO mls_key_packages (user_id, device_id, package_data, hash, last_updated_at)
+      VALUES ($1, $2, $3, $4, NOW())
+      ON CONFLICT (user_id, device_id)
+      DO UPDATE SET package_data = $3, hash = $4, last_updated_at = NOW()
+      RETURNING *;
+    `;
+    const { rows } = await db.query(query, [userId, deviceId, packageData, hash]);
+    return rows[0];
+  },
+
+  async getKeyPackage(userId) {
+    const query = `
+      SELECT * FROM mls_key_packages WHERE user_id = $1 ORDER BY last_updated_at DESC LIMIT 1;
+    `;
+    const { rows } = await db.query(query, [userId]);
+    return rows[0];
+  },
+
+  async storeWelcomeMessage(groupId, receiverId, data) {
+    const query = `
+      INSERT INTO mls_welcome_messages (group_id, receiver_id, data)
+      VALUES ($1, $2, $3)
+      RETURNING *;
+    `;
+    const { rows } = await db.query(query, [groupId, receiverId, data]);
+    const welcome = rows[0];
+
+    // Emit socket event to receiver for real-time notification
+    if (io) {
+      io.to(`mls:${receiverId}`).emit('mls-welcome', {
+        id: welcome.id,
+        groupId: welcome.group_id
+      });
+      console.log(`[MLS] Emitted mls-welcome to mls:${receiverId}`);
     }
 
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
+    return welcome;
+  },
+
+  async getWelcomeMessages(userId) {
+    const query = `
+      SELECT * FROM mls_welcome_messages WHERE receiver_id = $1 ORDER BY created_at ASC;
+    `;
+    const { rows } = await db.query(query, [userId]);
+    return rows;
+  },
+
+  async deleteWelcomeMessage(id) {
+    const query = 'DELETE FROM mls_welcome_messages WHERE id = $1';
+    await db.query(query, [id]);
+  },
+
+  async storeGroupMessage(groupId, senderId, epoch, contentType, data) {
+    // TODO: Add locking or check for strict ordering if needed by MLS
+    const query = `
+      INSERT INTO mls_group_messages (group_id, sender_id, epoch, content_type, data)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *;
+    `;
+    const { rows } = await db.query(query, [groupId, senderId, epoch, contentType, data]);
+    const message = rows[0];
+
+    // Emit socket event to all group members
+    if (io) {
+      // Get all group members
+      const membersQuery = `SELECT user_id FROM mls_group_members WHERE group_id = $1`;
+      const { rows: members } = await db.query(membersQuery, [groupId]);
+
+      // Emit to each member's MLS room (except sender for application messages)
+      for (const member of members) {
+        // For application messages, don't echo back to sender
+        if (contentType === 'application' && member.user_id === senderId) continue;
+
+        io.to(`mls:${member.user_id}`).emit('mls-message', {
+          id: message.id,
+          groupId: message.group_id,
+          senderId: message.sender_id,
+          contentType: message.content_type,
+          epoch: message.epoch
+        });
+      }
+      console.log(`[MLS] Emitted mls-message to ${members.length} members of group ${groupId}`);
+    }
+
+    return message;
+  },
+
+  async getGroupMessages(groupId, afterId = 0) {
+    const query = `
+      SELECT * FROM mls_group_messages
+      WHERE group_id = $1 AND id > $2
+      ORDER BY id ASC;
+    `;
+    const { rows } = await db.query(query, [groupId, afterId]);
+    return rows;
+  },
+
+  async getUserGroups(userId) {
+    const query = `
+      SELECT g.group_id, g.name, g.created_at, g.created_by
+      FROM mls_groups g
+      JOIN mls_group_members m ON g.group_id = m.group_id
+      WHERE m.user_id = $1
+      ORDER BY g.created_at DESC;
+    `;
+    const { rows } = await db.query(query, [userId]);
+    return rows;
+  },
+
+  async createGroup(groupId, name, createdBy) {
+    const client = await db.getPool().connect();
+    try {
+      await client.query('BEGIN');
+
+      // Create group
+      const groupQuery = `
+            INSERT INTO mls_groups (group_id, name, created_by)
+            VALUES ($1, $2, $3)
+            RETURNING *;
+        `;
+      const { rows: [group] } = await client.query(groupQuery, [groupId, name, createdBy]);
+
+      // Add creator as member
+      const memberQuery = `
+            INSERT INTO mls_group_members (group_id, user_id)
+            VALUES ($1, $2);
+        `;
+      await client.query(memberQuery, [groupId, createdBy]);
+
+      await client.query('COMMIT');
+      return group;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  },
+
+  async addGroupMember(groupId, userId) {
+    const query = `
+      INSERT INTO mls_group_members (group_id, user_id)
+      VALUES ($1, $2)
+      ON CONFLICT (group_id, user_id) DO NOTHING
+      RETURNING *;
+    `;
+    const { rows } = await db.query(query, [groupId, userId]);
+    return rows[0];
   }
-}
-
-/**
- * Persist a commit bundle emitted by a client.
- */
-async function insertCommitBundle({
-  conversationId,
-  userId,
-  senderClientId,
-  bundle,
-  welcome,
-  groupInfo,
-  encryptedMessage
-}) {
-  const result = await db.query(
-    `INSERT INTO mls_commit_bundles (
-       conversation_id, user_id, sender_client_id, commit_bundle, welcome, group_info, encrypted_message
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id, created_at`,
-    [conversationId, userId, senderClientId, bundle, welcome, groupInfo, encryptedMessage]
-  );
-  return result.rows[0];
-}
-
-/**
- * Persist a plain MLS application message.
- */
-async function insertApplicationMessage({
-  conversationId,
-  userId,
-  senderClientId,
-  epoch,
-  ciphertext
-}) {
-  const result = await db.query(
-    `INSERT INTO mls_messages (
-       conversation_id, user_id, sender_client_id, epoch, ciphertext
-     ) VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, created_at`,
-    [conversationId, userId, senderClientId, epoch, ciphertext]
-  );
-  await db.query(
-    `UPDATE conversations
-        SET last_message_at = GREATEST(NOW(), COALESCE(last_message_at, NOW())),
-            updated_at = NOW()
-      WHERE id = $1`,
-    [conversationId]
-  );
-  return result.rows[0];
-}
-
-async function insertHistorySecret({
-  conversationId,
-  userId,
-  senderClientId,
-  epoch,
-  secret
-}) {
-  const result = await db.query(
-    `INSERT INTO mls_history_secrets (
-       conversation_id, sender_user_id, sender_client_id, epoch, secret
-     ) VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, created_at`,
-    [conversationId, userId, senderClientId, epoch ?? null, secret]
-  );
-  return result.rows[0];
-}
-
-/**
- * Fetch the participants for a conversation (two-party today).
- */
-async function getConversationParticipants(conversationId) {
-  const result = await db.query(
-    `SELECT participant_1, participant_2
-       FROM conversations
-      WHERE id = $1`,
-    [conversationId]
-  );
-
-  if (result.rowCount === 0) {
-    return [];
-  }
-
-  const { participant_1, participant_2 } = result.rows[0];
-  return [participant_1, participant_2].filter(Boolean);
-}
-
-async function listApplicationMessages(conversationId, userId, limit = 50, before = null) {
-  const params = [conversationId, limit];
-  let query = `
-    SELECT id, conversation_id, user_id, sender_client_id, epoch, ciphertext, created_at
-      FROM mls_messages
-     WHERE conversation_id = $1
-  `;
-  if (before) {
-    params.push(before);
-    query += ` AND created_at < $${params.length}`;
-  }
-  query += ' ORDER BY created_at DESC LIMIT $2';
-  const result = await db.query(query, params);
-  return result.rows;
-}
-
-async function listKeyPackages({ userId, ciphersuite, limit }) {
-  const cappedLimit = Math.max(1, Math.min(Number(limit) || 5, 20));
-  const result = await db.query(
-    `SELECT id, client_id, credential_type, key_package, created_at
-       FROM mls_key_packages
-      WHERE user_id = $1 AND ciphersuite = $2
-      ORDER BY created_at DESC
-      LIMIT $3`,
-    [userId, ciphersuite, cappedLimit]
-  );
-  return result.rows;
-}
-
-module.exports = {
-  replaceKeyPackages,
-  insertCommitBundle,
-  insertApplicationMessage,
-  insertHistorySecret,
-  getConversationParticipants,
-  listApplicationMessages,
-  listKeyPackages
 };
+
+module.exports = mlsService;

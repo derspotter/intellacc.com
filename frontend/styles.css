@@ -3294,6 +3294,26 @@ body.dark-mode .market-link:hover {
   }
 }
 
+/* Profile Actions - Message and Follow buttons */
+.profile-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.profile-actions button {
+  flex: 1;
+}
+
+.message-button {
+  background-color: var(--info-color);
+  color: white;
+}
+
+.message-button:hover {
+  background-color: var(--primary-color);
+}
+
 /* Responsive Layout */
 @media (max-width: 1200px) {
   .events-container {

@@ -107,14 +107,7 @@ export default function WeeklyAssignment() {
         }
         
         if (error.val) {
-          return div({ class: 'weekly-assignment-error' }, [
-            h3('⚠️ Error Loading Assignment'),
-            p(`Error: ${error.val}`),
-            Button({
-              onclick: loadAssignment,
-              children: 'Retry'
-            })
-          ]);
+          return null;
         }
         
         if (!assignment.val) {

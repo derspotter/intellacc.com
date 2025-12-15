@@ -1,13 +1,26 @@
 import { defineConfig } from 'vite';
+import wasm from 'vite-plugin-wasm';
+import topLevelAwait from 'vite-plugin-top-level-await';
+import path from 'path';
 
 export default defineConfig({
   define: {
     'process.env': {},
     global: 'globalThis'
   },
+  plugins: [
+    wasm(),
+    topLevelAwait()
+  ],
+  resolve: {
+    alias: {
+      '@openmls': path.resolve(__dirname, '../openmls-wasm/pkg')
+    }
+  },
   assetsInclude: ['**/*.wasm'],
   server: {
     host: '0.0.0.0',
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'http://intellacc_backend:3000',  // Updated to use container_name instead of service name
@@ -73,7 +86,7 @@ export default defineConfig({
   }
   ,
   optimizeDeps: {
-    exclude: ['@wireapp/core-crypto']
+    exclude: []
   }
   // esbuild configuration removed
 });

@@ -5,6 +5,7 @@ import userStore from '../store/user';
 import { updatePageFromHash } from '../router'; // Import updatePageFromHash
 import { getStore } from '../store';
 import socketService from './socket';
+import coreCryptoClient from './mls/coreCryptoClient';
 
 // Create reactive state for auth
 export const isLoggedInState = van.state(!!localStorage.getItem('token'));
@@ -53,7 +54,11 @@ export function checkAuth() {
     isLoggedInState.val = true;
     
     // Update user profile after authentication check
-    userStore.actions.fetchUserProfile.call(userStore);
+    userStore.actions.fetchUserProfile.call(userStore).then(profile => {
+      if (profile && profile.username) {
+        coreCryptoClient.ensureMlsBootstrap(profile.username).catch(console.error);
+      }
+    });
     return true;
   }
   
@@ -93,8 +98,12 @@ export async function login(email, password) {
     saveToken(response.token);
     
     // Fetch user profile after login
+    let profile = null;
     try {
-      await userStore.actions.fetchUserProfile.call(userStore);
+      profile = await userStore.actions.fetchUserProfile.call(userStore);
+      if (profile && profile.username) {
+        await coreCryptoClient.ensureMlsBootstrap(profile.username);
+      }
     } catch (profileError) {
       console.warn('Could not fetch profile after login:', profileError);
       // Continue with login success even if profile fetch fails
@@ -117,7 +126,7 @@ export async function login(email, password) {
     window.location.hash = 'home';
     // Explicitly call updatePageFromHash to ensure page state and data are loaded
     updatePageFromHash();
-
+    
     return { success: true };
   } catch (error) {
     console.error('Login error:', error);
@@ -166,10 +175,7 @@ export async function register(username, email, password) {
 export function logout() {
   clearToken();
   userProfileState.val = null;
-  
-  // Also lock keys in memory for safety
-  try { require('./keyManager.js').default.lockKeys(); } catch {}
-  
+
   // Navigate to login page
   window.location.hash = 'login';
 }

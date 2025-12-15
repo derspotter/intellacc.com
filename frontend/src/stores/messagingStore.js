@@ -3,9 +3,6 @@
 
 import * as vanX from 'vanjs-ext';
 import { normalizeConversation } from '../utils/messagingUtils.js';
-import { getTokenData } from '../services/auth.js';
-
-const MAX_DIAGNOSTIC_EVENTS = 100;
 
 // Helper: sort ids by their conversation's lastTs (desc)
 const sortIdsByTs = (byId, ids) => ids.sort((a, b) => ((byId[b]?.lastTs || 0) - (byId[a]?.lastTs || 0)));
@@ -26,19 +23,26 @@ const messagingStore = vanX.reactive({
   conversationsLoading: false,
   messagesLoading: false,
   error: '',
-  eventsMeta: {},
-  mlsMeta: {},
-  mlsCredential: null,
-  mlsDiagnosticEvents: [],
-  
+
+  // MLS E2EE state
+  mlsInitialized: false,
+  mlsGroups: [],                    // List of MLS groups
+  mlsGroupsById: {},                // Groups by ID for quick lookup
+  selectedMlsGroupId: null,         // Currently selected MLS group
+  mlsMessages: {},                  // Messages by groupId: { [groupId]: [{id, senderId, plaintext, timestamp}] }
+  showMlsMode: true,                // Toggle between MLS and legacy mode (default to MLS)
+  showCreateMlsGroup: false,        // Show create MLS group form
+  mlsInviteUserId: '',              // User ID to invite to MLS group
+  showMlsInvite: false,             // Show invite form
+
   // Typing indicators - use array instead of Set for VanX compatibility
   typingUsers: [],
-  
+
   // New conversation form
   showNewConversation: false,
   newConversationUser: '',
   newMessage: '',
-  
+
   // Search
   searchQuery: '',
   
@@ -51,7 +55,7 @@ const messagingStore = vanX.reactive({
   upsertConversations(rawList) {
     const currentUserId = (messagingStore.currentUserId != null)
       ? messagingStore.currentUserId
-      : (() => { try { return getTokenData()?.userId ?? null; } catch { return null; } })();
+      : (() => { try { const t = localStorage.getItem('token'); return t ? JSON.parse(atob(t.split('.')[1])).userId : null; } catch { return null; } })();
     const byId = { ...(messagingStore.conversationsById || {}) };
     for (const raw of rawList || []) {
       const norm = normalizeConversation(raw, currentUserId);
@@ -70,7 +74,7 @@ const messagingStore = vanX.reactive({
   upsertConversation(raw) {
     const currentUserId = (messagingStore.currentUserId != null)
       ? messagingStore.currentUserId
-      : (() => { try { return getTokenData()?.userId ?? null; } catch { return null; } })();
+      : (() => { try { const t = localStorage.getItem('token'); return t ? JSON.parse(atob(t.split('.')[1])).userId : null; } catch { return null; } })();
     const norm = normalizeConversation(raw, currentUserId);
     if (!norm) return;
     const byId = { ...(messagingStore.conversationsById || {}) };
@@ -85,17 +89,17 @@ const messagingStore = vanX.reactive({
     messagingStore.conversations = ids.map(id => byId[id]);
   },
   setConversations(conversations) {
-    // Replace current conversations with the provided list
-    messagingStore.conversationsById = {};
-    messagingStore.conversationIds = [];
-    messagingStore.conversations = [];
-    messagingStore.upsertConversations(conversations || []);
+    try { /* dev-only logging removed */ } catch {}
+    // Delegate to upsert for normalization + indexing
+    messagingStore.upsertConversations(conversations);
+    try { /* dev-only logging removed */ } catch {}
   },
   
   addConversation(conversation) {
-    const currentUserId = (messagingStore.currentUserId != null)
-      ? messagingStore.currentUserId
-      : (() => { try { return getTokenData()?.userId ?? null; } catch { return null; } })();
+    const token = localStorage.getItem('token');
+    const currentUserId = (() => {
+      try { return token ? JSON.parse(atob(token.split('.')[1])).userId : null; } catch { return null; }
+    })();
     const id = String(conversation?.id ?? conversation?.conversation_id ?? '');
     if (!id) return;
     // Delegate to normalized single upsert
@@ -103,9 +107,8 @@ const messagingStore = vanX.reactive({
   },
   
   updateConversation(conversationId, updates) {
-    const idStr = String(conversationId);
     messagingStore.conversations = messagingStore.conversations.map(conv => {
-      if (conv.id !== idStr) return conv;
+      if (conv.id !== conversationId) return conv;
       const next = { ...conv, ...updates };
       // Keep derived lastTime/lastTs in sync when backend time fields change
       const lt = updates?.last_message_created_at || updates?.last_message_at || updates?.updated_at || updates?.created_at;
@@ -118,21 +121,16 @@ const messagingStore = vanX.reactive({
       return next;
     });
     // also update byId entry
-    const current = messagingStore.conversations.find(c => c.id === idStr);
+    const current = messagingStore.conversations.find(c => c.id === conversationId);
     if (current) {
-      messagingStore.conversationsById = { ...messagingStore.conversationsById, [idStr]: current };
+      messagingStore.conversationsById = { ...messagingStore.conversationsById, [conversationId]: current };
     }
   },
 
-  // Single-mode E2EE: no per-conversation encryption mode toggles
-
   incrementUnread(conversationId, delta = 1) {
-    const idStr = String(conversationId);
     messagingStore.conversations = messagingStore.conversations.map(conv => {
-      if (conv.id === idStr) {
-        const myId = (messagingStore.currentUserId != null)
-          ? Number(messagingStore.currentUserId)
-          : (() => { try { return Number(getTokenData()?.userId); } catch { return NaN; } })();
+      if (conv.id === conversationId) {
+        const myId = Number(JSON.parse(atob(localStorage.getItem('token')?.split('.')[1] || 'e30='))?.userId);
         const field = (conv.participant_1 === myId) ? 'unread_count_participant_1' : 'unread_count_participant_2';
         const current = conv[field] || 0;
         const myUnread = (conv.my_unread_count || 0) + delta;
@@ -140,38 +138,28 @@ const messagingStore = vanX.reactive({
       }
       return conv;
     });
-    const current = messagingStore.conversations.find(c => c.id === idStr);
+    const current = messagingStore.conversations.find(c => c.id === conversationId);
     if (current) {
-      messagingStore.conversationsById = { ...messagingStore.conversationsById, [idStr]: current };
+      messagingStore.conversationsById = { ...messagingStore.conversationsById, [conversationId]: current };
     }
   },
   
   setMessages(conversationId, messages) {
     // Create new object to trigger reactivity
-    const key = String(conversationId);
     messagingStore.messagesByConversation = {
       ...messagingStore.messagesByConversation,
-      [key]: [...messages]
+      [conversationId]: [...messages]
     };
     // update meta
     // Track last fetched time
     const now = Date.now();
     const meta = { ...(messagingStore.messagesMeta || {}) };
-    meta[key] = { lastFetchedTs: now };
-    messagingStore.messagesMeta = meta;
-  },
-
-  updateMessagesMeta(conversationId, updates) {
-    const key = String(conversationId);
-    const meta = { ...(messagingStore.messagesMeta || {}) };
-    const prev = meta[key] || {};
-    meta[key] = { ...prev, ...updates };
+    meta[String(conversationId)] = { lastFetchedTs: now };
     messagingStore.messagesMeta = meta;
   },
   
   addMessage(conversationId, message) {
-    const key = String(conversationId);
-    const existingMessages = messagingStore.messagesByConversation[key] || [];
+    const existingMessages = messagingStore.messagesByConversation[conversationId] || [];
     
     // Check for duplicates by ID
     const messageExists = existingMessages.some(m => m.id === message.id);
@@ -190,35 +178,9 @@ const messagingStore = vanX.reactive({
     // Update object to trigger reactivity
     messagingStore.messagesByConversation = {
       ...messagingStore.messagesByConversation,
-      [key]: newMessages
+      [conversationId]: newMessages
     };
     
-    return true;
-  },
-
-  // Acknowledge a pending message by clientId and update with server data
-  ackPendingMessage(conversationId, clientId, serverMessage) {
-    const key = String(conversationId);
-    const existing = messagingStore.messagesByConversation[key] || [];
-    const findIdx = existing.findIndex(m => m.clientId === clientId || m.id === `c:${clientId}`);
-    if (findIdx === -1) {
-      // No pending message found; insert normally (will de-dupe by id)
-      return messagingStore.addMessage(conversationId, serverMessage);
-    }
-    const updated = [...existing];
-    const prev = updated[findIdx] || {};
-    // Preserve decrypted content if present; prefer server fields
-    updated[findIdx] = {
-      ...prev,
-      ...serverMessage,
-      id: serverMessage.id,
-      status: 'sent',
-      clientId
-    };
-    messagingStore.messagesByConversation = {
-      ...messagingStore.messagesByConversation,
-      [key]: updated
-    };
     return true;
   },
   
@@ -237,102 +199,6 @@ const messagingStore = vanX.reactive({
         break;
       }
     }
-  },
-
-  // Mark a conversation's messages as stale to force refresh on next selection
-  markConversationStale(conversationId) {
-    const meta = { ...(messagingStore.messagesMeta || {}) };
-    const key = String(conversationId);
-    const prev = meta[key] || {};
-    meta[key] = { ...prev, lastFetchedTs: 0 };
-    messagingStore.messagesMeta = meta;
-  },
-
-  setMlsPending(conversationId, info = {}) {
-    const key = String(conversationId);
-    const meta = { ...(messagingStore.mlsMeta || {}) };
-    const previous = meta[key] || {};
-    const next = { ...previous };
-    if (info && typeof info === 'object') {
-      if (info.epoch != null) next.epoch = Number(info.epoch);
-      if (info.historySharingEnabled != null) next.historySharing = Boolean(info.historySharingEnabled);
-      if (info.ciphersuite) next.ciphersuite = info.ciphersuite;
-      Object.assign(next, info);
-    }
-    next.receivedAt = Date.now();
-    meta[key] = next;
-    messagingStore.mlsMeta = meta;
-  },
-
-  recordMlsDiagnostics(conversationId, info = {}) {
-    if (!conversationId && conversationId !== 0) return;
-    const key = String(conversationId);
-    const meta = { ...(messagingStore.mlsMeta || {}) };
-    const prev = meta[key] || {};
-    const next = { ...prev };
-    if (info && typeof info === 'object') {
-      if (info.epoch != null) next.epoch = Number(info.epoch);
-      if (info.historySharingEnabled != null) next.historySharing = Boolean(info.historySharingEnabled);
-      if (info.ciphersuite) next.ciphersuite = info.ciphersuite;
-      Object.assign(next, info);
-    }
-    next.lastUpdatedAt = Date.now();
-    meta[key] = next;
-    messagingStore.mlsMeta = meta;
-  },
-
-  setMlsCredential(info) {
-    messagingStore.mlsCredential = info ? { ...info } : null;
-  },
-
-  pushDiagnosticEvent(entry = {}) {
-    const timestamp = Number.isFinite(entry.timestamp) ? Number(entry.timestamp) : Date.now();
-    const conversationId = entry.conversationId != null ? String(entry.conversationId) : null;
-    const level = typeof entry.level === 'string' ? entry.level.toLowerCase() : 'info';
-    const category = entry.category || entry.type || 'general';
-    const id = entry.id || `${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
-
-    const record = {
-      id,
-      timestamp,
-      level,
-      category,
-      conversationId,
-      message: entry.message ?? '',
-      data: entry.data ?? null,
-      error: entry.error ?? null,
-      context: entry.context ?? null
-    };
-
-    const next = [...(messagingStore.mlsDiagnosticEvents || []), record];
-    messagingStore.mlsDiagnosticEvents = next.slice(-MAX_DIAGNOSTIC_EVENTS);
-
-    if (conversationId) {
-      messagingStore.recordMlsDiagnostics(conversationId, {
-        lastEventId: id,
-        lastEventLevel: level,
-        lastEventCategory: category,
-        lastEventMessage: record.message,
-        lastEventAt: timestamp
-      });
-    }
-  },
-
-  clearDiagnosticEvents() {
-    messagingStore.mlsDiagnosticEvents = [];
-  },
-
-  getLastSeenMessageId(conversationId) {
-    const key = String(conversationId);
-    return (messagingStore.eventsMeta?.[key]?.lastSeenMessageId) ?? 0;
-  },
-
-  setLastSeenMessageId(conversationId, messageId) {
-    const key = String(conversationId);
-    const meta = { ...(messagingStore.eventsMeta || {}) };
-    const prev = meta[key] || {};
-    meta[key] = { ...prev, lastSeenMessageId: Number(messageId) || 0, lastSeenAt: Date.now() };
-    messagingStore.eventsMeta = meta;
   },
   
   removeMessage(messageId) {
@@ -428,23 +294,82 @@ const messagingStore = vanX.reactive({
   },
   
   setSearchQuery(query) {
-    try { if (import.meta?.env?.DEV) console.log('[Store.setSearchQuery] ->', query); } catch {}
+    console.log('[Store.setSearchQuery] ->', query);
     messagingStore.searchQuery = query;
   },
-  
+
+  // MLS-specific methods
+  setMlsInitialized(initialized) {
+    messagingStore.mlsInitialized = initialized;
+  },
+
+  setMlsGroups(groups) {
+    const byId = {};
+    for (const g of groups || []) {
+      byId[g.group_id] = g;
+    }
+    messagingStore.mlsGroups = groups || [];
+    messagingStore.mlsGroupsById = byId;
+  },
+
+  addMlsGroup(group) {
+    if (!group || !group.group_id) return;
+    const exists = messagingStore.mlsGroups.some(g => g.group_id === group.group_id);
+    if (!exists) {
+      messagingStore.mlsGroups = [...messagingStore.mlsGroups, group];
+      messagingStore.mlsGroupsById = { ...messagingStore.mlsGroupsById, [group.group_id]: group };
+    }
+  },
+
+  selectMlsGroup(groupId) {
+    messagingStore.selectedMlsGroupId = groupId;
+    messagingStore.selectedConversationId = null; // Deselect legacy conversation
+  },
+
+  setMlsMessages(groupId, messages) {
+    messagingStore.mlsMessages = { ...messagingStore.mlsMessages, [groupId]: messages || [] };
+  },
+
+  addMlsMessage(groupId, message) {
+    const existing = messagingStore.mlsMessages[groupId] || [];
+    // Avoid duplicates by ID
+    if (existing.some(m => m.id === message.id)) return;
+    messagingStore.mlsMessages = {
+      ...messagingStore.mlsMessages,
+      [groupId]: [...existing, message]
+    };
+  },
+
+  setShowMlsMode(show) {
+    messagingStore.showMlsMode = show;
+  },
+
+  setShowCreateMlsGroup(show) {
+    messagingStore.showCreateMlsGroup = show;
+  },
+
+  setMlsInviteUserId(userId) {
+    messagingStore.mlsInviteUserId = userId;
+  },
+
+  setShowMlsInvite(show) {
+    messagingStore.showMlsInvite = show;
+  },
+
   clearCache() {
     messagingStore.conversations = [];
     messagingStore.conversationsById = {};
     messagingStore.conversationIds = [];
     messagingStore.messagesByConversation = {};
-    messagingStore.messagesMeta = {};
-    messagingStore.eventsMeta = {};
-    messagingStore.mlsMeta = {};
-    messagingStore.mlsCredential = null;
-    messagingStore.mlsDiagnosticEvents = [];
     messagingStore.selectedConversationId = null;
     messagingStore.typingUsers = [];
     messagingStore.error = '';
+    // Clear MLS state too
+    messagingStore.mlsGroups = [];
+    messagingStore.mlsGroupsById = {};
+    messagingStore.selectedMlsGroupId = null;
+    messagingStore.mlsMessages = {};
+    messagingStore.mlsInitialized = false;
   }
 });
 
@@ -469,11 +394,11 @@ messagingStore.selectedConversationName = vanX.calc(() => {
 });
 
   // Plain reactive projection for the sidebar, avoids Proxy aliasing
-messagingStore.sidebarItems = vanX.calc(() => {
-  const q = (messagingStore.searchQuery || '').toLowerCase();
-  const ids = messagingStore.conversationIds || [];
-  const byId = messagingStore.conversationsById || {};
-  const items = ids.map(id => {
+  messagingStore.sidebarItems = vanX.calc(() => {
+    const q = (messagingStore.searchQuery || '').toLowerCase();
+    const ids = messagingStore.conversationIds || [];
+    const byId = messagingStore.conversationsById || {};
+    const items = ids.map(id => {
       const conv = byId[id];
       const item = conv ? {
         id: String(conv.id),
@@ -489,51 +414,33 @@ messagingStore.sidebarItems = vanX.calc(() => {
     return filtered;
   });
 
+// MLS computed properties
+messagingStore.selectedMlsGroup = vanX.calc(() => {
+  if (!messagingStore.selectedMlsGroupId) return null;
+  return messagingStore.mlsGroupsById?.[messagingStore.selectedMlsGroupId] || null;
+});
+
+messagingStore.currentMlsMessages = vanX.calc(() => {
+  if (!messagingStore.selectedMlsGroupId) return [];
+  return messagingStore.mlsMessages[messagingStore.selectedMlsGroupId] || [];
+});
+
+messagingStore.mlsSidebarItems = vanX.calc(() => {
+  const q = (messagingStore.searchQuery || '').toLowerCase();
+  const groups = messagingStore.mlsGroups || [];
+  const items = groups.map(g => ({
+    id: g.group_id,
+    name: g.name || 'Unnamed Group',
+    time: g.created_at || null,
+    ts: g.created_at ? Date.parse(g.created_at) : 0,
+    isMls: true
+  }));
+  const filtered = q ? items.filter(it => (it.name || '').toLowerCase().includes(q)) : items;
+  filtered.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return filtered;
+});
+
 // filteredConversations deprecated; use sidebarItems for filter/sort/projection
-
-export const deriveMlsDiagnostics = (conversationId) => {
-  const key = conversationId != null ? String(conversationId) : null;
-  const conversation = key ? (messagingStore.conversationsById?.[key] || null) : null;
-  const meta = key ? (messagingStore.mlsMeta?.[key] || {}) : {};
-  const credential = messagingStore.mlsCredential || null;
-  const eventsSource = messagingStore.mlsDiagnosticEvents || [];
-  const events = key
-    ? eventsSource.filter(event => !event.conversationId || event.conversationId === key)
-    : eventsSource;
-
-  const encryptionMode = conversation?.encryptionMode ?? conversation?.encryption_mode ?? null;
-  const history = meta.historySharing ?? conversation?.history_sharing ?? conversation?.history_sharing_enabled ?? null;
-  const epoch = meta.epoch ?? meta.lastSentEpoch ?? conversation?.last_message_epoch ?? conversation?.mls_epoch ?? null;
-  const ciphersuite = meta.ciphersuite ?? conversation?.mlsCiphersuite ?? conversation?.mls_ciphersuite ?? null;
-
-  let credentialStatus = 'unknown';
-  let credentialExpiresAt = null;
-  if (credential?.expiresAt) {
-    const expTs = Date.parse(credential.expiresAt);
-    if (Number.isFinite(expTs)) {
-      credentialExpiresAt = expTs;
-      const now = Date.now();
-      credentialStatus = expTs <= now
-        ? 'expired'
-        : ((expTs - now) <= (7 * 24 * 60 * 60 * 1000) ? 'expiring' : 'valid');
-    }
-  }
-
-  return {
-    conversationId: key,
-    conversation,
-    meta,
-    credential,
-    epoch,
-    ciphersuite,
-    encryptionMode,
-    historySharingEnabled: history == null ? null : Boolean(history),
-    credentialStatus,
-    credentialExpiresAt,
-    lastUpdatedAt: meta.lastUpdatedAt ?? null,
-    events
-  };
-};
 
 export default messagingStore;
 

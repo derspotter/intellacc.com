@@ -79,6 +79,21 @@ exports.getUser = async (req, res) => {
   }
 };
 
+// Get a user by username
+exports.getUserByUsername = async (req, res) => {
+  const username = req.params.username;
+  try {
+    const result = await db.query('SELECT id, username, email, created_at, updated_at FROM users WHERE LOWER(username) = LOWER($1)', [username]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error fetching user' });
+  }
+};
+
 // Login a user
 exports.loginUser = async (req, res) => {
   const { email, password } = req.body;
@@ -96,7 +111,7 @@ exports.loginUser = async (req, res) => {
     }
 
     // Use the centralized JWT utility to generate a token
-    const token = generateToken({ 
+    const token = generateToken({
       userId: user.id,
       role: user.role || 'user'
     });

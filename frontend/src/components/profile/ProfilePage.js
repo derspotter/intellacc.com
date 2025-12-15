@@ -4,6 +4,7 @@ import { Await } from 'vanjs-ui';
 import ProfileCard from './ProfileCard';
 import ProfileEditor from './ProfileEditor';
 import FollowButton from './FollowButton';
+import MessageButton from './MessageButton';
 import api from '../../services/api';
 import auth from '../../services/auth';
 import userStore from '../../store/user';
@@ -36,7 +37,10 @@ export default function ProfilePage({ userId } = {}) {
             : ProfileCard({ 
                 user: isCurrentUser ? null : user, // Pass null for current user to use store data
                 onEdit: isCurrentUser ? () => editMode.val = true : null,
-                followButton: isCurrentUser ? null : FollowButton({ user })
+                followButton: isCurrentUser ? null : div({ class: "profile-actions" }, [
+                  FollowButton({ user }),
+                  MessageButton({ user })
+                ])
               }),
           
         ]),

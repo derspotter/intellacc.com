@@ -10,12 +10,7 @@ const scoringController = require('../controllers/scoringController');
 const leaderboardController = require('../controllers/leaderboardController');
 const notificationController = require('../controllers/notificationController');
 const weeklyAssignmentController = require('../controllers/weeklyAssignmentController');
-const keyManagementController = require('../controllers/keyManagementController');
-const messagingController = require('../controllers/messagingController');
-const mlsController = require('../controllers/mlsController');
-const mlsCredentialController = require('../controllers/mlsCredentialController');
-const mlsMessageController = require('../controllers/mlsMessageController');
-const mlsConversationController = require('../controllers/mlsConversationController');
+const mlsRoutes = require('./mls');
 const authenticateJWT = require("../middleware/auth");
 const rateLimit = require('express-rate-limit');
 const attachmentsController = require('../controllers/attachmentsController');
@@ -36,6 +31,7 @@ router.use('/webauthn', authenticateJWT, require('./webauthn'));
 router.post("/users", userController.createUser);
 router.post("/users/register", userController.createUser); // Alias for registration
 router.get("/users/:id", authenticateJWT, userController.getUser);
+router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
 router.post('/login', userController.loginUser);
 router.get("/me", authenticateJWT, userController.getUserProfile);
 router.patch("/users/profile", authenticateJWT, userController.editUserProfile);
@@ -48,8 +44,8 @@ router.get("/users/:id/following", authenticateJWT, userController.getFollowing)
 
 // Portfolio Routes
 router.get("/users/:id/positions", (req, res, next) => {
-  console.log('🚀 ROUTE HIT: /users/:id/positions for userId:', req.params.id);
-  next();
+    console.log('🚀 ROUTE HIT: /users/:id/positions for userId:', req.params.id);
+    next();
 }, authenticateJWT, userController.getUserPositions);
 
 // Prediction/Events Routes
@@ -124,49 +120,8 @@ router.post("/weekly/run-all", weeklyAssignmentController.runWeeklyProcesses);
 router.get("/weekly/stats", weeklyAssignmentController.getWeeklyStats);
 router.get("/weekly/user/:userId/status", authenticateJWT, weeklyAssignmentController.getUserWeeklyStatus);
 
-// Key Management Routes (for end-to-end encryption)
-router.post("/keys", authenticateJWT, keyManagementController.storePublicKey);
-router.get("/keys/me", authenticateJWT, keyManagementController.getMyPublicKey);
-router.get("/keys/user/:userId", authenticateJWT, keyManagementController.getUserPublicKey);
-router.post("/keys/batch", authenticateJWT, keyManagementController.getMultiplePublicKeys);
-router.get("/keys/users", authenticateJWT, keyManagementController.getUsersWithKeys);
-router.post("/keys/verify", authenticateJWT, keyManagementController.verifyKeyFingerprint);
-router.delete("/keys/me", authenticateJWT, keyManagementController.deleteMyPublicKey);
-router.get("/keys/stats", authenticateJWT, keyManagementController.getKeyStats);
-
-// Messaging Routes (end-to-end encrypted direct messages)
-// Rate limiters for messaging
-const sendMessageLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false });
-const createConversationLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
-const searchConversationsLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
-const markReadLimiter = rateLimit({ windowMs: 60 * 1000, max: 240, standardHeaders: true, legacyHeaders: false });
-
-router.get("/messages/conversations", authenticateJWT, messagingController.getConversations);
-router.post("/messages/conversations", authenticateJWT, createConversationLimiter, messagingController.createConversation);
-router.get("/messages/conversations/search", authenticateJWT, searchConversationsLimiter, messagingController.searchConversations);
-router.get("/messages/conversations/:conversationId", authenticateJWT, messagingController.getConversation);
-router.get("/messages/conversations/:conversationId/messages", authenticateJWT, messagingController.getMessages);
-router.post("/messages/conversations/:conversationId/messages", authenticateJWT, sendMessageLimiter, messagingController.sendMessage);
-router.post("/messages/read", authenticateJWT, markReadLimiter, messagingController.markAsRead);
-router.get("/messages/unread-count", authenticateJWT, messagingController.getUnreadCount);
-router.delete("/messages/:messageId", authenticateJWT, messagingController.deleteMessage);
-
-// MLS endpoints (experimental)
-const mlsLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
-router.get('/mls/key-packages/:userId', authenticateJWT, mlsLimiter, mlsController.listKeyPackages);
-router.post('/mls/key-packages', authenticateJWT, mlsLimiter, mlsController.publishKeyPackages);
-router.post('/mls/commit', authenticateJWT, mlsLimiter, mlsController.postCommitBundle);
-router.post('/mls/message', authenticateJWT, mlsLimiter, mlsController.postApplicationMessage);
-router.post('/mls/history-secret', authenticateJWT, mlsLimiter, mlsController.postHistorySecret);
-router.post('/mls/migrate', authenticateJWT, mlsLimiter, mlsController.migrateConversation);
-router.post('/mls/credentials/request', authenticateJWT, mlsLimiter, mlsCredentialController.createCredentialRequest);
-router.post('/mls/credentials/complete', authenticateJWT, mlsLimiter, mlsCredentialController.completeCredential);
-router.get('/mls/credentials', authenticateJWT, mlsLimiter, mlsCredentialController.listCredentials);
-router.get('/mls/messages/:conversationId', authenticateJWT, mlsLimiter, mlsMessageController.listMessages);
-router.post('/mls/conversations', authenticateJWT, mlsLimiter, mlsConversationController.upsertConversation);
-router.put('/mls/conversations/:conversationId/group-info', authenticateJWT, mlsLimiter, mlsConversationController.updateGroupInfo);
-router.put('/mls/conversations/:conversationId/history-sharing', authenticateJWT, mlsLimiter, mlsConversationController.setHistorySharing);
-router.get('/mls/conversations/:conversationId', authenticateJWT, mlsLimiter, mlsConversationController.getConversation);
+// MLS Routes (Messaging Layer Security - E2EE)
+router.use('/mls', mlsRoutes);
 
 // Attachments (pre-signed URL scaffold)
 router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);
@@ -177,10 +132,10 @@ router.get("/events/:eventId/shares", async (req, res) => {
     try {
         const { eventId } = req.params;
         const { user_id } = req.query;
-        
+
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/shares?user_id=${user_id}`);
         const data = await response.json();
-        
+
         res.json(data);
     } catch (error) {
         console.error('Shares proxy error:', error);
@@ -192,10 +147,10 @@ router.get("/events/:eventId/kelly", async (req, res) => {
     try {
         const { eventId } = req.params;
         const { belief, user_id } = req.query;
-        
+
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/kelly?belief=${belief}&user_id=${user_id}`);
         const data = await response.json();
-        
+
         res.json(data);
     } catch (error) {
         console.error('Kelly proxy error:', error);
@@ -207,7 +162,7 @@ router.post("/events/:eventId/sell", async (req, res) => {
     try {
         const { eventId } = req.params;
         const { user_id, share_type, amount } = req.body;
-        
+
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/sell`, {
             method: 'POST',
             headers: {
@@ -215,9 +170,9 @@ router.post("/events/:eventId/sell", async (req, res) => {
             },
             body: JSON.stringify({ user_id, share_type, amount })
         });
-        
+
         const data = await response.json();
-        
+
         if (response.ok) {
             // Broadcast market update to all connected clients using new_prob from sell response
             if (data.success && data.new_prob !== undefined) {
@@ -236,7 +191,7 @@ router.post("/events/:eventId/sell", async (req, res) => {
                     console.log('📡 Market update broadcast (sell):', eventId, 'new_prob:', data.new_prob);
                 }
             }
-            
+
             res.json(data);
         } else {
             res.status(response.status).json(data);
@@ -251,7 +206,7 @@ router.post("/events/:eventId/update", async (req, res) => {
     try {
         const { eventId } = req.params;
         const { user_id, stake, target_prob } = req.body;
-        
+
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/update`, {
             method: 'POST',
             headers: {
@@ -259,9 +214,9 @@ router.post("/events/:eventId/update", async (req, res) => {
             },
             body: JSON.stringify({ user_id, stake, target_prob })
         });
-        
+
         const data = await response.json();
-        
+
         if (response.ok) {
             // Broadcast market update to all connected clients
             const io = req.app.get('io');
@@ -278,7 +233,7 @@ router.post("/events/:eventId/update", async (req, res) => {
                 });
                 console.log('📡 Market update broadcast:', eventId, 'new_prob:', data.new_prob);
             }
-            
+
             res.json(data);
         } else {
             res.status(response.status).json(data);
