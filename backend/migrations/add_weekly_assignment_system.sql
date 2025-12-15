@@ -78,7 +78,7 @@ SELECT
         ELSE false 
     END as has_prediction,
     p.prediction_value,
-    p.confidence,
+    NULL::NUMERIC AS confidence,
     p.outcome
 FROM users u
 LEFT JOIN events e ON u.weekly_assigned_event_id = e.id

@@ -48,5 +48,19 @@ export function normalizeConversation(conv, currentUserId) {
   const displayName = getOtherUserName(conv, currentUserId);
   const lastTime = conv.last_message_created_at || conv.last_message_at || conv.updated_at || conv.created_at || null;
   const lastTs = lastTime ? Date.parse(lastTime) || 0 : 0;
-  return { ...conv, id, displayName, lastTime, lastTs };
+  const encryptionMode = (conv.encryption_mode || conv.encryptionMode || 'legacy').toLowerCase();
+  const rawEligible = conv.mls_migration_eligible ?? conv.mlsMigrationEligible;
+  const migrationEligible = rawEligible == null ? (encryptionMode !== 'mls') : Boolean(rawEligible);
+  const normalized = {
+    ...conv,
+    id,
+    displayName,
+    lastTime,
+    lastTs,
+    encryptionMode,
+    mlsMigrationEligible: migrationEligible
+  };
+  normalized.encryption_mode = encryptionMode;
+  normalized.mls_migration_eligible = migrationEligible;
+  return normalized;
 }

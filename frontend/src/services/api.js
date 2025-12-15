@@ -7,7 +7,7 @@ const API_BASE = '/api';
 /**
  * Custom API error class
  */
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(status, message, data = {}) {
     super(message);
     this.status = status;
@@ -327,6 +327,56 @@ export const api = {
       
     calculateTimeWeights: () => 
       request('/scoring/time-weights', { method: 'POST' })
+  },
+
+  // Weekly assignment endpoints
+  weekly: {
+    getUserStatus: (userId) =>
+      request(`/weekly/user/${userId}/status`)
+  },
+
+  // MLS / Core Crypto endpoints
+  mls: {
+    publishKeyPackages: (body) =>
+      request('/mls/key-packages', { method: 'POST', body }),
+    sendCommitBundle: (body) =>
+      request('/mls/commit', { method: 'POST', body }),
+    sendMessage: (body) =>
+      request('/mls/message', { method: 'POST', body }),
+    sendHistorySecret: (body) =>
+      request('/mls/history-secret', { method: 'POST', body }),
+    migrateConversation: (body) =>
+      request('/mls/migrate', { method: 'POST', body }),
+    getKeyPackages: (userId, { ciphersuite, limit } = {}) => {
+      const search = new URLSearchParams();
+      if (ciphersuite != null) search.set('ciphersuite', String(ciphersuite));
+      if (limit != null) search.set('limit', String(limit));
+      const suffix = search.size ? `?${search.toString()}` : '';
+      return request(`/mls/key-packages/${userId}${suffix}`);
+    },
+    createCredentialRequest: (body) =>
+      request('/mls/credentials/request', { method: 'POST', body }),
+    completeCredential: (body) =>
+      request('/mls/credentials/complete', { method: 'POST', body }),
+    listCredentials: (status) => {
+      const suffix = status ? `?status=${encodeURIComponent(status)}` : '';
+      return request(`/mls/credentials${suffix}`);
+    },
+    upsertConversation: (body) =>
+      request('/mls/conversations', { method: 'POST', body }),
+    updateGroupInfo: (conversationId, body) =>
+      request(`/mls/conversations/${conversationId}/group-info`, { method: 'PUT', body }),
+    setHistorySharing: (conversationId, body) =>
+      request(`/mls/conversations/${conversationId}/history-sharing`, { method: 'PUT', body }),
+    getConversation: (conversationId) =>
+      request(`/mls/conversations/${conversationId}`),
+    getMessages: (conversationId, { limit, before } = {}) => {
+      const search = new URLSearchParams();
+      if (limit != null) search.set('limit', String(limit));
+      if (before) search.set('before', before);
+      const suffix = search.size ? `?${search.toString()}` : '';
+      return request(`/mls/messages/${conversationId}${suffix}`);
+    }
   },
   
   // Leaderboard endpoints (direct database queries for performance)

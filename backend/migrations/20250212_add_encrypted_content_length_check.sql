@@ -1,6 +1,4 @@
--- Add a length constraint to limit message payload size (base64 length)
-ALTER TABLE messages
-  ADD CONSTRAINT encrypted_content_max_len
-  CHECK (char_length(encrypted_content) <= 24576);
-
-
+-- DEPRECATED MIGRATION
+-- Encrypted content length constraint handled in initial_migration.sql.
+-- Retained as a no-op so schema_migrations entries can remain unchanged.
+-- This file intentionally left blank.

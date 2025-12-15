@@ -549,12 +549,14 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
     return `${(numValue * 100).toFixed(1)}%`;
   };
 
-  const formatRP = (value) => {
+  const formatRP = (value, options = {}) => {
+    const { includeSymbol = true } = options;
     const numValue = typeof value === 'string' ? parseFloat(value) : value;
     if (isNaN(numValue) || numValue === null || numValue === undefined) {
-      return '0.00 RP';
+      return includeSymbol ? '0.00 RP' : '0.00';
     }
-    return `${numValue.toFixed(2)} RP`;
+    const formatted = numValue.toFixed(2);
+    return includeSymbol ? `${formatted} RP` : formatted;
   };
   
   // Setup slider event handlers after all functions are defined
@@ -619,8 +621,8 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
             }, () => formatPercentage(marketState.val.market_prob))
           ]),
           div({ class: 'stat' }, [
-            span({ class: 'stat-label' }, 'Total Staked:'),
-            span({ class: 'stat-value' }, () => formatRP(marketState.val.cumulative_stake))
+            span({ class: 'stat-label' }, 'Total RP Staked:'),
+            span({ class: 'stat-value' }, () => formatRP(marketState.val.cumulative_stake, { includeSymbol: false }))
           ]),
           div({ class: 'stat' }, [
             span({ class: 'stat-label' }, 'Liquidity Parameter:'),

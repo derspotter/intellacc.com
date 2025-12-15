@@ -22,10 +22,23 @@ export default function Button({
     return buttonClass;
   };
 
+  // Support static booleans, getters, or Van states for disabled prop
+  const resolvedDisabled = (() => {
+    if (typeof disabled === 'function') {
+      return () => !!disabled();
+    }
+
+    if (disabled && typeof disabled === 'object' && 'val' in disabled) {
+      return () => !!disabled.val;
+    }
+
+    return !!disabled;
+  })();
+
   const buttonProps = {
     type,
     onclick,
-    disabled,
+    disabled: resolvedDisabled,
     class: typeof className === 'function' ? computeClass : computeClass(), // Use reactive class if function
     style: 'touch-action: manipulation;' // Improve touch response
   };

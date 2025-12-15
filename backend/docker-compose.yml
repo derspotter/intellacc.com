@@ -30,7 +30,7 @@ services:
     working_dir: /usr/src/app
     ports:
       - "${NODE_PORT}:3000"
-    command: ["sh", "-c", "until pg_isready -h db -p 5432; do echo 'Waiting for DB'; sleep 2; done; psql $DATABASE_URL -f migrations/initial_migration.sql && npm run dev"]
+    command: ["./scripts/docker-dev-entrypoint.sh"]
     depends_on:
       - db
     networks:

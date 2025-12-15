@@ -31,7 +31,6 @@ async function dumpDatabaseData() {
                             p.event_id,
                             p.event,
                             p.prediction_value,
-                            p.confidence,
                             p.created_at,
                             p.resolved_at,
                             p.outcome

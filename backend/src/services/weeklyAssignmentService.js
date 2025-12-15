@@ -138,7 +138,7 @@ class WeeklyAssignmentService {
           e.title as event_title,
           e.market_prob,
           p.prediction_value,
-          p.confidence,
+          NULL::NUMERIC AS confidence,
           mu.stake_amount
         FROM users u
         JOIN events e ON u.weekly_assigned_event_id = e.id
@@ -147,7 +147,6 @@ class WeeklyAssignmentService {
         WHERE u.weekly_assignment_week = $1
         AND u.weekly_assignment_completed = false
         AND p.prediction_value != 'pending'
-        AND p.confidence IS NOT NULL
       `, [currentWeek]);
       
       let rewardCount = 0;
@@ -157,23 +156,29 @@ class WeeklyAssignmentService {
       
       for (const user of completedResult.rows) {
         // Calculate Kelly optimal amount for this user's belief
-        const belief = parseFloat(user.confidence) / 100.0; // Convert percentage to decimal
+        const belief = user.confidence !== null ? parseFloat(user.confidence) / 100.0 : null;
         const marketProb = parseFloat(user.market_prob);
         const balance = parseFloat(user.rp_balance);
-        
+
+        if (belief === null || Number.isNaN(belief) || Number.isNaN(marketProb) || Number.isNaN(balance)) {
+          skipCount++;
+          console.log(`⚠️ ${user.username} completed "${user.event_title}" but no confidence available - no reward`);
+          continue;
+        }
+
         // Kelly edge calculation
         const edge = belief > marketProb 
           ? (belief - marketProb) / (1 - marketProb)
           : (marketProb - belief) / marketProb;
-        
+
         // Conservative Kelly (25% of full Kelly)
         const kellyFraction = 0.25;
         const kellyOptimal = edge * balance * kellyFraction;
         const quarterKelly = kellyOptimal / 4.0; // 1/4 of Kelly optimal
-        
+
         // Check if user staked at least 1/4 Kelly optimal
         const userStake = user.stake_amount ? parseFloat(user.stake_amount) : 0;
-        
+
         if (userStake >= quarterKelly && quarterKelly > 0) {
           // User staked enough - award the bonus
           await client.query(`
@@ -389,7 +394,7 @@ class WeeklyAssignmentService {
           e.title as event_title,
           e.closing_date,
           p.prediction_value,
-          p.confidence,
+          NULL::NUMERIC AS confidence,
           p.outcome,
           CASE 
             WHEN p.id IS NOT NULL THEN true 

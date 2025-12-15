@@ -22,8 +22,13 @@ SET total_staked_ledger = COALESCE(
 );
 
 -- Add constraints to ensure data integrity
-ALTER TABLE user_shares 
-ADD CONSTRAINT user_shares_total_staked_non_negative CHECK (total_staked_ledger >= 0),
+ALTER TABLE user_shares
+DROP CONSTRAINT IF EXISTS user_shares_total_staked_non_negative;
+ALTER TABLE user_shares
+ADD CONSTRAINT user_shares_total_staked_non_negative CHECK (total_staked_ledger >= 0);
+ALTER TABLE user_shares
+DROP CONSTRAINT IF EXISTS user_shares_version_positive;
+ALTER TABLE user_shares
 ADD CONSTRAINT user_shares_version_positive CHECK (version > 0);
 
 -- Create a function to convert between decimal and ledger units
