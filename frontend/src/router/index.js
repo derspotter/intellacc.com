@@ -5,6 +5,8 @@ import MessagesPage from '../pages/Messages.js';
 import { currentPageState } from '../store';
 import { isLoggedInState, isAdminState } from '../services/auth';
 import { getStore } from '../store';
+import UnlockModal from '../components/vault/UnlockModal.js';
+import PassphraseSetupModal from '../components/vault/PassphraseSetupModal.js';
 
 // Import all components directly
 import LoginForm from '../components/auth/LoginForm';
@@ -168,15 +170,20 @@ export default function Router() {
   // Render the appropriate page content
   return () => {
     const page = currentPageState.val;
-    
-    // Special case for login and signup (no layout)
+
+    // Special case for login and signup (no layout, no vault modals)
     if (page === 'login' || page === 'signup') {
       return pages[page] ? pages[page]() : pages.notFound();
     }
-    
-    // Wrap other pages in layout
-    return MainLayout({ 
-      children: (pages[page] || pages.notFound)()
-    });
+
+    // Wrap other pages in layout with vault modals
+    return div({ class: 'app-root' }, [
+      MainLayout({
+        children: (pages[page] || pages.notFound)()
+      }),
+      // Vault modals (always rendered, visibility controlled by vaultStore)
+      UnlockModal(),
+      PassphraseSetupModal()
+    ]);
   };
 }

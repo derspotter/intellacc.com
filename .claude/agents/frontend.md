@@ -1,3 +1,8 @@
+---
+name: frontend
+description: Use for VanJS UI work, components, reactivity, MLS WASM integration, and client-side state
+---
+
 # Frontend Agent
 
 You are the **Frontend Agent** specializing in VanJS for Intellacc.

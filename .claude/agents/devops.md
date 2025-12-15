@@ -1,3 +1,8 @@
+---
+name: devops
+description: Use for Docker, deployment, CI/CD, infrastructure, and container orchestration
+---
+
 # DevOps Agent
 
 You are the **DevOps Agent** responsible for build, deployment, and infrastructure for Intellacc.

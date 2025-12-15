@@ -6,6 +6,9 @@ import { updatePageFromHash } from '../router'; // Import updatePageFromHash
 import { getStore } from '../store';
 import socketService from './socket';
 import coreCryptoClient from './mls/coreCryptoClient';
+import vaultStore from '../stores/vaultStore';
+import vaultService from './vaultService';
+import { initIdleAutoLock, stopIdleAutoLock, loadIdleLockConfig } from './idleLock';
 
 // Create reactive state for auth
 export const isLoggedInState = van.state(!!localStorage.getItem('token'));
@@ -52,16 +55,29 @@ export function checkAuth() {
   if (token) {
     tokenState.val = token;
     isLoggedInState.val = true;
-    
+
     // Update user profile after authentication check
-    userStore.actions.fetchUserProfile.call(userStore).then(profile => {
-      if (profile && profile.username) {
-        coreCryptoClient.ensureMlsBootstrap(profile.username).catch(console.error);
+    userStore.actions.fetchUserProfile.call(userStore).then(async (profile) => {
+      if (profile) {
+        // Set vault user context
+        vaultStore.setUserId(profile.id);
+
+        // Check vault status on page load
+        const vaultExists = await vaultService.checkVaultExists(profile.id);
+
+        if (vaultExists) {
+          // Vault exists but locked - show unlock modal
+          vaultStore.setShowUnlockModal(true);
+        } else if (profile.username) {
+          // No vault yet - bootstrap MLS and show setup
+          await coreCryptoClient.ensureMlsBootstrap(profile.username);
+          vaultStore.setShowSetupModal(true);
+        }
       }
-    });
+    }).catch(console.error);
     return true;
   }
-  
+
   isLoggedInState.val = false;
   isAdminState.val = false;
   return false;
@@ -101,8 +117,23 @@ export async function login(email, password) {
     let profile = null;
     try {
       profile = await userStore.actions.fetchUserProfile.call(userStore);
-      if (profile && profile.username) {
-        await coreCryptoClient.ensureMlsBootstrap(profile.username);
+      if (profile) {
+        // Set up vault store with user ID
+        vaultStore.setUserId(profile.id);
+
+        // Check if vault exists for this user
+        const vaultExists = await vaultService.checkVaultExists(profile.id);
+
+        if (vaultExists) {
+          // Vault exists - show unlock modal
+          vaultStore.setShowUnlockModal(true);
+        } else {
+          // No vault - bootstrap MLS first, then show setup modal
+          if (profile.username) {
+            await coreCryptoClient.ensureMlsBootstrap(profile.username);
+          }
+          vaultStore.setShowSetupModal(true);
+        }
       }
     } catch (profileError) {
       console.warn('Could not fetch profile after login:', profileError);
@@ -172,7 +203,17 @@ export async function register(username, email, password) {
 /**
  * Logout the current user
  */
-export function logout() {
+export async function logout() {
+  // Lock vault and wipe crypto keys from memory
+  try {
+    await vaultService.lockKeys();
+  } catch (e) {
+    console.warn('Error locking vault on logout:', e);
+  }
+
+  // Reset vault store
+  vaultStore.reset();
+
   clearToken();
   userProfileState.val = null;
 

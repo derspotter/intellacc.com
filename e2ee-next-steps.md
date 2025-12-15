@@ -166,7 +166,36 @@ Each step is small, testable, and builds on the previous one.
 
 ---
 
-## Step 11: Legacy Code Cleanup & MLS Consolidation ✅ COMPLETE
+## Step 11: Group Robustness & Configuration
+**Goal**: Tune MLS parameters for real-world network conditions (latency, drops).
+
+- [ ] Update `createGroup` to set `MlsGroupCreateConfig`:
+  - `max_past_epochs`: Set to 2-5 (allow late messages)
+  - `sender_ratchet_configuration`:
+    - `out_of_order_tolerance`: Set to 5-10
+    - `maximum_forward_distance`: Set to 100+
+- [ ] Implement `clear_pending_commit()` when server rejects commit
+- [ ] Implement "Fork Detection" logic (compare confirmation tags)
+
+**Test**: Simulate dropped packets/network lag and verify messaging still works.
+
+---
+
+## Step 12: Trust & Validation Logic
+**Goal**: Implement the required application-level checks for SOTA security.
+
+- [ ] Implement `inspect_staged_welcome(welcome)` in CoreCryptoClient
+  - Verify sender identity matches expected inviter
+  - Check member credentials (expirations, signing keys)
+- [ ] Implement `inspect_staged_commit(commit)`
+  - Verify proposals (who is adding/removing whom)
+- [ ] Add `ExternalSendersExtension` support (optional - for public links)
+
+**Test**: Attempt to invite with expired credential, verify rejection.
+
+---
+
+## Step 13: Legacy Code Cleanup & MLS Consolidation ✅ COMPLETE
 **Goal**: Remove deprecated RSA-based E2EE code and consolidate on MLS.
 
 ### Legacy Code to Remove:
@@ -218,7 +247,7 @@ Each step is small, testable, and builds on the previous one.
 
 ## Current Status (2025-12-15)
 
-**Steps 1-11 COMPLETE** - Full E2EE flow with UI and legacy cleanup:
+**Steps 1-14 COMPLETE** - Full E2EE flow with vault persistence:
 - ✅ WASM module loads and initializes
 - ✅ Identity creation with per-user storage (using userId)
 - ✅ KeyPackage upload/fetch
@@ -234,11 +263,61 @@ Each step is small, testable, and builds on the previous one.
 - ✅ All legacy RSA/Signal Protocol code removed
 - ✅ Backend consolidated to MLS routes only
 - ✅ Frontend messaging service is MLS-only wrapper
+- ✅ **Vault with Argon2id + AES-256-GCM encryption**
+- ✅ **Group state persistence across vault lock/unlock (Step 14)**
 
 **Next Steps**:
 1. ~~Add Socket.io events for real-time message delivery~~ ✅ DONE
 2. ~~Build minimal chat UI (Step 9)~~ ✅ DONE (MLS-only)
 3. Handle commit processing for member changes (Step 10)
-4. ~~Clean up legacy RSA code (Step 11)~~ ✅ DONE
-5. Implement "Vault" encrypted storage (Phase 1E)
-6. Add Safety Numbers UI (Phase 1F)
+4. Tune Group Robustness & Configuration (Step 11)
+5. Implement Trust & Validation Logic (Step 12)
+6. ~~Clean up legacy RSA code (Step 13)~~ ✅ DONE
+7. ~~Implement Group Persistence (Step 14) [CRITICAL]~~ ✅ DONE
+8. Add Safety Numbers UI (Phase 1F)
+9. Multi-device support (multiple key packages per user)
+
+---
+
+## Critical Finding: Group State Persistence (2025-12-15)
+
+**The Issue**:
+While `Identity` is correctly restored from the Vault, **Group State is lost** on page reload or vault lock.
+- **Symptom**: "Group not found" error when receiving messages after a reload/unlock.
+- **Root Cause**: We are currently using `openmls_memory_storage` (RAM-only). The OpenMLS Book confirms (lines 1698-1702) that `MlsGroup` state must be continuously written to a `StorageProvider`.
+
+**The 'Wire' / SOTA Solution**:
+We must bridge the ephemeral OpenMLS memory storage with our persistent Encrypted Vault (IndexedDB).
+
+**Chosen Approach: "Hibernate" Memory Storage**
+Instead of writing a complex full `StorageProvider` for IndexedDB (high effort), we will:
+1.  **Serialize**: Add a WASM function to dump the entire `openmls_memory_storage` state (hashmaps of groups, keys, etc.) to a byte vector.
+2.  **Encrypt & Store**: Save this blob into the Vault (alongside the Identity) when it changes or on app pause.
+3.  **Restore**: On Vault unlock, read the blob, deserialize it back into `openmls_memory_storage`, and re-instantiate `MlsGroup` objects.
+
+## Step 14: Group State Hibernation ✅ COMPLETE
+**Goal**: Persist MLS Group state across sessions.
+
+- [x] WASM: Add `export_storage_state()` -> `Vec<u8>`
+- [x] WASM: Add `import_storage_state(Vec<u8>)`
+- [x] CoreCryptoClient: Call export after every group operation (create, join, invite)
+- [x] CoreCryptoClient: Save exported blob to `vaultService`
+- [x] CoreCryptoClient: Restore state on vault unlock via `restoreStateFromVault()`
+
+**Test**: Create group -> Lock Vault -> Unlock Vault -> Verify group works and can encrypt messages. ✅
+
+### Implementation Notes (2025-12-15)
+
+**WASM Changes (`openmls-wasm/src/lib.rs`):**
+- Added `export_storage_state()` - serializes MemoryStorage + group IDs to bytes
+- Added `import_storage_state()` - deserializes and uses `MlsGroup::load()` to restore groups
+- Enabled `test-utils` feature on `openmls_memory_storage` for serialize/deserialize access
+
+**Frontend Changes (`coreCryptoClient.js`):**
+- `exportStateForVault()` now exports `storageState` (full WASM storage blob)
+- `restoreStateFromVault()` now imports storage state and restores groups
+- Added `saveCurrentState()` calls after: `ensureMlsBootstrap` (identity creation), `createGroup`, `joinGroup`, `inviteToGroup`
+- Uses dynamic import to avoid circular dependency with vaultService
+
+**Key Insight:**
+The vault state must be saved after ANY state-changing operation, not just on vault setup. The identity switch from username to userId during Messages navigation was creating new state that wasn't being persisted.

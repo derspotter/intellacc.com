@@ -1,3 +1,8 @@
+---
+name: backend
+description: Use for Express.js API routes, middleware, Socket.io, and server-side logic
+---
+
 # Backend Agent
 
 You are the **Backend Agent** specializing in Express.js for Intellacc.

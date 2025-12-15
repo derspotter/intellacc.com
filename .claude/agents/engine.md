@@ -1,3 +1,8 @@
+---
+name: engine
+description: Use for Rust prediction engine, LMSR market maker, and prediction-engine service
+---
+
 # Engine Agent
 
 You are the **Engine Agent** specializing in the Rust LMSR prediction engine for Intellacc.

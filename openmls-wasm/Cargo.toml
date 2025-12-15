@@ -16,7 +16,7 @@ openmls = { version = "0.7.1", features = ["crypto-subtle", "js"] }
 openmls_rust_crypto = "0.4.1"
 openmls_basic_credential = "0.4.1"
 openmls_traits = "0.4.1"
-openmls_memory_storage = "0.4.1"
+openmls_memory_storage = { version = "0.4.1", features = ["test-utils"] }
 tls_codec = { version = "0.4.2", features = ["derive"] }
 fluvio-wasm-timer = "0.2"
 serde_json = "1.0.145"

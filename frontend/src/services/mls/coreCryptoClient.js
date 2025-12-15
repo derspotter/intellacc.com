@@ -172,6 +172,15 @@ class CoreCryptoClient {
             // Persist state for this user
             await this.saveState();
 
+            // Save to vault if unlocked (new identity needs to be persisted)
+            try {
+                const vaultService = (await import('../vaultService.js')).default;
+                await vaultService.saveCurrentState();
+                console.log('[MLS] New identity saved to vault');
+            } catch (vaultErr) {
+                console.warn('[MLS] Could not save identity to vault:', vaultErr.message);
+            }
+
             // Upload key package to server
             try {
                 await this.uploadKeyPackage();
@@ -348,7 +357,17 @@ class CoreCryptoClient {
 
             const groupData = await response.json();
 
-            // TODO: Persist full group state to IndexedDB 'groups' store
+            // Persist state to IndexedDB
+            await this.saveState();
+
+            // Save to vault if unlocked (dynamic import to avoid circular dependency)
+            try {
+                const vaultService = (await import('../vaultService.js')).default;
+                await vaultService.saveCurrentState();
+                console.log('[MLS] Group state saved to vault');
+            } catch (vaultErr) {
+                console.warn('[MLS] Could not save to vault:', vaultErr.message);
+            }
 
             return groupData;
         } catch (e) {
@@ -449,6 +468,18 @@ class CoreCryptoClient {
 
             if (!membershipRes.ok) throw new Error('Failed to update group membership');
 
+            // Save state after adding member (group state changed)
+            await this.saveState();
+
+            // Save to vault if unlocked
+            try {
+                const vaultService = (await import('../vaultService.js')).default;
+                await vaultService.saveCurrentState();
+                console.log('[MLS] Invite state saved to vault');
+            } catch (vaultErr) {
+                console.warn('[MLS] Could not save to vault:', vaultErr.message);
+            }
+
             return { success: true };
 
         } catch (e) {
@@ -537,6 +568,15 @@ class CoreCryptoClient {
 
         // Regenerate KeyPackage after joining (it was consumed by process_welcome)
         await this.regenerateKeyPackage();
+
+        // Save to vault if unlocked (dynamic import to avoid circular dependency)
+        try {
+            const vaultService = (await import('../vaultService.js')).default;
+            await vaultService.saveCurrentState();
+            console.log('[MLS] Join group state saved to vault');
+        } catch (vaultErr) {
+            console.warn('[MLS] Could not save to vault:', vaultErr.message);
+        }
 
         return groupId;
     }
@@ -913,6 +953,161 @@ class CoreCryptoClient {
             this._socketCleanup();
             this._socketCleanup = null;
         }
+    }
+
+    /**
+     * Export MLS state for vault encryption
+     * Returns a plain object with arrays (for JSON serialization)
+     * Includes identity AND full storage state (groups, keys, etc.)
+     * @returns {Promise<Object|null>} State object or null if no state
+     */
+    async exportStateForVault() {
+        if (!this.client || !this.identityName) {
+            console.warn('[MLS] No state to export for vault');
+            return null;
+        }
+
+        try {
+            const credential = this.client.get_credential_bytes();
+            const bundle = this.client.get_key_package_bundle_bytes();
+            const signatureKey = this.client.get_signature_keypair_bytes();
+
+            // Export full storage state (includes groups, epoch secrets, etc.)
+            const storageState = this.client.export_storage_state();
+
+            return {
+                credential: Array.from(credential),
+                bundle: Array.from(bundle),
+                signatureKey: Array.from(signatureKey),
+                storageState: Array.from(storageState),
+                identityName: this.identityName,
+                exportedAt: Date.now()
+            };
+        } catch (error) {
+            console.error('[MLS] Error exporting state for vault:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Restore MLS state from vault-decrypted data
+     * @param {Object} stateObj - State object from exportStateForVault
+     * @returns {Promise<boolean>} True if restored successfully
+     */
+    async restoreStateFromVault(stateObj) {
+        if (!stateObj || !stateObj.credential || !stateObj.bundle || !stateObj.signatureKey) {
+            console.error('[MLS] Invalid vault state object');
+            return false;
+        }
+
+        if (!this.initialized) await this.initialize();
+
+        try {
+            // Convert arrays back to Uint8Array
+            const credential = new Uint8Array(stateObj.credential);
+            const bundle = new Uint8Array(stateObj.bundle);
+            const signatureKey = new Uint8Array(stateObj.signatureKey);
+
+            // Create new client and restore identity
+            this.client = new MlsClient();
+            this.client.restore_identity(credential, bundle, signatureKey);
+            this.identityName = stateObj.identityName;
+
+            // Restore full storage state (groups, epoch secrets, etc.) if available
+            if (stateObj.storageState && stateObj.storageState.length > 0) {
+                const storageState = new Uint8Array(stateObj.storageState);
+                this.client.import_storage_state(storageState);
+                console.log('[MLS] Full storage state restored from vault');
+            } else {
+                // Fallback: re-sync groups from server (legacy vaults without storage state)
+                console.log('[MLS] No storage state in vault, falling back to server sync');
+                await this.resyncGroupsFromServer();
+            }
+
+            // Set up socket listeners
+            this.setupSocketListeners();
+
+            console.log('[MLS] State restored from vault for:', this.identityName);
+            return true;
+        } catch (error) {
+            console.error('[MLS] Error restoring state from vault:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Re-sync groups from server after vault unlock
+     * Processes any pending invites and logs missing groups
+     */
+    async resyncGroupsFromServer() {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+
+        try {
+            // 1. Check for any pending Welcome messages (new invites)
+            const joinedGroups = await this.checkForInvites();
+            if (joinedGroups.length > 0) {
+                console.log('[MLS] Processed pending invites, joined groups:', joinedGroups);
+            }
+
+            // 2. Fetch list of groups user is a member of from server
+            const response = await fetch('/api/mls/groups', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (!response.ok) {
+                console.warn('[MLS] Could not fetch groups from server');
+                return;
+            }
+
+            const serverGroups = await response.json();
+            console.log('[MLS] Server reports membership in', serverGroups.length, 'groups');
+
+            // 3. Check which groups are missing locally
+            const missingGroups = [];
+            for (const group of serverGroups) {
+                const groupIdHex = group.group_id;
+                const groupIdBytes = new Uint8Array(groupIdHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+
+                if (!this.client.has_group(groupIdBytes)) {
+                    missingGroups.push({
+                        id: groupIdHex,
+                        name: group.name
+                    });
+                }
+            }
+
+            if (missingGroups.length > 0) {
+                console.warn('[MLS] Missing local state for groups:', missingGroups.map(g => g.name).join(', '));
+                console.warn('[MLS] These groups need re-invitation to restore E2EE messaging');
+                // Store missing groups for UI to display
+                this._missingGroups = missingGroups;
+            } else {
+                console.log('[MLS] All groups synced successfully');
+                this._missingGroups = [];
+            }
+        } catch (error) {
+            console.error('[MLS] Error re-syncing groups:', error);
+        }
+    }
+
+    /**
+     * Get list of groups that are missing local state after vault unlock
+     * @returns {Array} List of {id, name} objects for groups needing re-invitation
+     */
+    getMissingGroups() {
+        return this._missingGroups || [];
+    }
+
+    /**
+     * Wipe all in-memory cryptographic material
+     * Called when locking the vault
+     */
+    wipeMemory() {
+        this.cleanupSocketListeners();
+        this.client = null;
+        this.identityName = null;
+        console.log('[MLS] Memory wiped');
     }
 }
 

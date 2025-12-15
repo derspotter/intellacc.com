@@ -1,3 +1,8 @@
+---
+name: orchestrator
+description: Use to coordinate multiple agents for complex cross-domain tasks
+---
+
 # Agent Orchestrator
 
 ## Quick Reference

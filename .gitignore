@@ -54,3 +54,6 @@ recherche/2504.01781v2.pdf
 
 # Documentation PDFs
 *.pdf
+
+# Playwright MCP screenshots
+.playwright-mcp/

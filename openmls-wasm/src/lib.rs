@@ -441,9 +441,9 @@ impl MlsClient {
     pub fn decrypt_message(&mut self, group_id_bytes: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, JsValue> {
         let group = self.groups.get_mut(group_id_bytes)
             .ok_or_else(|| JsValue::from_str("Group not found"))?;
-            
+
         let provider = &self.provider;
-        
+
         // Deserialize directly to MlsMessageIn
         let message_in = MlsMessageIn::tls_deserialize(&mut &ciphertext[..])
             .map_err(|e| JsValue::from_str(&format!("Error deserializing message: {:?}", e)))?;
@@ -462,5 +462,128 @@ impl MlsClient {
             },
             _ => Err(JsValue::from_str("Message was not an application message")),
         }
+    }
+
+    /// Get list of all group IDs currently in memory
+    /// Returns array of group ID byte arrays
+    pub fn get_group_ids(&self) -> js_sys::Array {
+        let array = js_sys::Array::new();
+        for group_id in self.groups.keys() {
+            array.push(&js_sys::Uint8Array::from(&group_id[..]));
+        }
+        array
+    }
+
+    /// Check if a specific group exists in memory
+    pub fn has_group(&self, group_id_bytes: &[u8]) -> bool {
+        self.groups.contains_key(group_id_bytes)
+    }
+
+    /// Clear all groups from memory (used when locking vault)
+    pub fn clear_groups(&mut self) {
+        self.groups.clear();
+        log("[WASM] All groups cleared from memory");
+    }
+
+    /// Export the entire storage state for vault persistence
+    /// Returns a serialized blob that can be stored encrypted
+    pub fn export_storage_state(&self) -> Result<Vec<u8>, JsValue> {
+        let mut buffer = Vec::new();
+
+        // 1. Serialize the provider's storage (contains key material, epoch secrets, etc.)
+        let storage = self.provider.storage();
+        storage.serialize(&mut buffer)
+            .map_err(|e| JsValue::from_str(&format!("Error serializing storage: {:?}", e)))?;
+
+        // 2. Append group IDs count and group IDs
+        let group_ids: Vec<&Vec<u8>> = self.groups.keys().collect();
+        let group_count = group_ids.len() as u64;
+        buffer.extend_from_slice(&group_count.to_be_bytes());
+
+        for gid in group_ids {
+            let len = gid.len() as u64;
+            buffer.extend_from_slice(&len.to_be_bytes());
+            buffer.extend_from_slice(gid);
+        }
+
+        log(&format!("[WASM] Exported storage state: {} bytes, {} groups", buffer.len(), group_count));
+        Ok(buffer)
+    }
+
+    /// Import storage state from a previously exported blob
+    /// This restores the provider's storage and reloads groups
+    pub fn import_storage_state(&mut self, data: Vec<u8>) -> Result<(), JsValue> {
+        use std::io::Cursor;
+
+        let mut cursor = Cursor::new(&data);
+
+        // 1. Deserialize the provider's storage
+        let restored_storage = MemoryStorage::deserialize(&mut cursor)
+            .map_err(|e| JsValue::from_str(&format!("Error deserializing storage: {:?}", e)))?;
+
+        // Replace the provider with one using the restored storage
+        // Note: OpenMlsRustCrypto doesn't allow replacing storage directly,
+        // so we create a new provider and copy the storage contents
+        // For now, we'll use a workaround - directly set up from restored state
+
+        // 2. Read group IDs
+        let pos = cursor.position() as usize;
+        let remaining = &data[pos..];
+
+        if remaining.len() < 8 {
+            return Err(JsValue::from_str("Invalid storage state: missing group count"));
+        }
+
+        let group_count = u64::from_be_bytes(remaining[0..8].try_into().unwrap()) as usize;
+        let mut offset = 8;
+        let mut group_ids = Vec::new();
+
+        for _ in 0..group_count {
+            if offset + 8 > remaining.len() {
+                return Err(JsValue::from_str("Invalid storage state: truncated group data"));
+            }
+            let len = u64::from_be_bytes(remaining[offset..offset+8].try_into().unwrap()) as usize;
+            offset += 8;
+
+            if offset + len > remaining.len() {
+                return Err(JsValue::from_str("Invalid storage state: truncated group ID"));
+            }
+            let gid = remaining[offset..offset+len].to_vec();
+            group_ids.push(gid);
+            offset += len;
+        }
+
+        // 3. Clear current state and restore
+        self.groups.clear();
+
+        // Copy restored storage values to our provider's storage
+        // This is a workaround since we can't replace the provider
+        {
+            let values = restored_storage.values.read().unwrap();
+            for (k, v) in values.iter() {
+                // Write each key-value pair to the provider's storage
+                let _ = self.provider.storage().values.write().unwrap().insert(k.clone(), v.clone());
+            }
+        }
+
+        // 4. Reload groups from storage
+        for gid in group_ids {
+            let group_id = GroupId::from_slice(&gid);
+            match MlsGroup::load(self.provider.storage(), &group_id) {
+                Ok(Some(group)) => {
+                    self.groups.insert(gid.clone(), group);
+                    log(&format!("[WASM] Restored group: {}", hex::encode(&gid)));
+                }
+                Ok(None) => {
+                    log(&format!("[WASM] Warning: Group {} not found in storage", hex::encode(&gid)));
+                }
+                Err(e) => {
+                    log(&format!("[WASM] Error loading group {}: {:?}", hex::encode(&gid), e));
+                }
+            }
+        }
+
+        log(&format!("[WASM] Imported storage state: {} groups restored", self.groups.len()));
+        Ok(())
     }
 }

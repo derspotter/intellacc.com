@@ -5,7 +5,16 @@ export class MlsClient {
   free(): void;
   [Symbol.dispose](): void;
   add_member(group_id_bytes: Uint8Array, key_package_bytes: Uint8Array): Array<any>;
+  /**
+   * Clear all groups from memory (used when locking vault)
+   */
+  clear_groups(): void;
   create_group(group_id_bytes: Uint8Array): Uint8Array;
+  /**
+   * Get list of all group IDs currently in memory
+   * Returns array of group ID byte arrays
+   */
+  get_group_ids(): Array<any>;
   process_commit(group_id_bytes: Uint8Array, commit_bytes: Uint8Array): void;
   create_identity(identity_name: string): string;
   decrypt_message(group_id_bytes: Uint8Array, ciphertext: Uint8Array): Uint8Array;
@@ -13,7 +22,17 @@ export class MlsClient {
   process_welcome(welcome_bytes: Uint8Array, ratchet_tree_bytes?: Uint8Array | null): Uint8Array;
   restore_identity(credential_bytes: Uint8Array, bundle_bytes: Uint8Array, signature_key_bytes: Uint8Array): void;
   static derive_key_argon2id(password: string, salt: Uint8Array): Uint8Array;
+  /**
+   * Export the entire storage state for vault persistence
+   * Returns a serialized blob that can be stored encrypted
+   */
+  export_storage_state(): Uint8Array;
   get_credential_bytes(): Uint8Array;
+  /**
+   * Import storage state from a previously exported blob
+   * This restores the provider's storage and reloads groups
+   */
+  import_storage_state(data: Uint8Array): void;
   get_key_package_bytes(): Uint8Array;
   /**
    * Regenerate a new KeyPackage using the existing credential and signature key
@@ -24,6 +43,10 @@ export class MlsClient {
   get_signature_keypair_bytes(): Uint8Array;
   get_key_package_bundle_bytes(): Uint8Array;
   constructor();
+  /**
+   * Check if a specific group exists in memory
+   */
+  has_group(group_id_bytes: Uint8Array): boolean;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -32,16 +55,21 @@ export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly __wbg_mlsclient_free: (a: number, b: number) => void;
   readonly mlsclient_add_member: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+  readonly mlsclient_clear_groups: (a: number) => void;
   readonly mlsclient_create_group: (a: number, b: number, c: number) => [number, number, number, number];
   readonly mlsclient_create_identity: (a: number, b: number, c: number) => [number, number, number, number];
   readonly mlsclient_decrypt_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
   readonly mlsclient_derive_key_argon2id: (a: number, b: number, c: number, d: number) => [number, number, number, number];
   readonly mlsclient_encrypt_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+  readonly mlsclient_export_storage_state: (a: number) => [number, number, number, number];
   readonly mlsclient_get_credential_bytes: (a: number) => [number, number, number, number];
+  readonly mlsclient_get_group_ids: (a: number) => any;
   readonly mlsclient_get_identity_fingerprint: (a: number) => [number, number, number, number];
   readonly mlsclient_get_key_package_bundle_bytes: (a: number) => [number, number, number, number];
   readonly mlsclient_get_key_package_bytes: (a: number) => [number, number, number, number];
   readonly mlsclient_get_signature_keypair_bytes: (a: number) => [number, number, number, number];
+  readonly mlsclient_has_group: (a: number, b: number, c: number) => number;
+  readonly mlsclient_import_storage_state: (a: number, b: number, c: number) => [number, number];
   readonly mlsclient_new: () => number;
   readonly mlsclient_process_commit: (a: number, b: number, c: number, d: number, e: number) => [number, number];
   readonly mlsclient_process_welcome: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];

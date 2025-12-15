@@ -6,6 +6,7 @@ import messagingService from '../services/messaging.js';
 import { getUserId as authGetUserId } from '../services/auth.js';
 import messagingStore from '../stores/messagingStore.js';
 import coreCryptoClient from '../services/mls/coreCryptoClient.js';
+import vaultStore from '../stores/vaultStore.js';
 
 /**
  * Messages page component for MLS E2EE messaging
@@ -212,11 +213,29 @@ export default function MessagesPage() {
   };
 
   // Initialize MLS on page load (checks store to avoid re-initializing)
-  if (!messagingStore.mlsInitialized) {
+  // Only initialize if vault is unlocked
+  if (!messagingStore.mlsInitialized && !vaultStore.isLocked) {
     initialize();
   }
 
-  return div({ class: "messages-page" }, [
+  // If vault is locked, show locked state
+  return () => {
+    if (vaultStore.isLocked && vaultStore.vaultExists) {
+      return div({ class: "messages-page messages-locked" }, [
+        div({ class: "vault-locked-state" }, [
+          div({ class: "lock-icon-large" }, "\uD83D\uDD12"),
+          h2("Vault Locked"),
+          p("Your encrypted messages are protected by your vault passphrase."),
+          p({ class: "text-muted" }, "Unlock your vault to access your E2EE messages."),
+          button({
+            class: "button button-primary",
+            onclick: () => vaultStore.setShowUnlockModal(true)
+          }, "Unlock Vault")
+        ])
+      ]);
+    }
+
+    return div({ class: "messages-page" }, [
     div({ class: "messages-container" }, [
 
       // Sidebar - MLS Groups List
@@ -417,4 +436,5 @@ export default function MessagesPage() {
       ])
     ]) : null
   ]);
+  };
 }

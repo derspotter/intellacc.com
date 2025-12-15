@@ -168,6 +168,12 @@ export class MlsClient {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Clear all groups from memory (used when locking vault)
+     */
+    clear_groups() {
+        wasm.mlsclient_clear_groups(this.__wbg_ptr);
+    }
+    /**
      * @param {Uint8Array} group_id_bytes
      * @returns {Uint8Array}
      */
@@ -181,6 +187,15 @@ export class MlsClient {
         var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v2;
+    }
+    /**
+     * Get list of all group IDs currently in memory
+     * Returns array of group ID byte arrays
+     * @returns {Array<any>}
+     */
+    get_group_ids() {
+        const ret = wasm.mlsclient_get_group_ids(this.__wbg_ptr);
+        return ret;
     }
     /**
      * @param {Uint8Array} group_id_bytes
@@ -310,6 +325,20 @@ export class MlsClient {
         return v3;
     }
     /**
+     * Export the entire storage state for vault persistence
+     * Returns a serialized blob that can be stored encrypted
+     * @returns {Uint8Array}
+     */
+    export_storage_state() {
+        const ret = wasm.mlsclient_export_storage_state(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * @returns {Uint8Array}
      */
     get_credential_bytes() {
@@ -320,6 +349,19 @@ export class MlsClient {
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
+    }
+    /**
+     * Import storage state from a previously exported blob
+     * This restores the provider's storage and reloads groups
+     * @param {Uint8Array} data
+     */
+    import_storage_state(data) {
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlsclient_import_storage_state(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * @returns {Uint8Array}
@@ -393,6 +435,17 @@ export class MlsClient {
         this.__wbg_ptr = ret >>> 0;
         MlsClientFinalization.register(this, this.__wbg_ptr, this);
         return this;
+    }
+    /**
+     * Check if a specific group exists in memory
+     * @param {Uint8Array} group_id_bytes
+     * @returns {boolean}
+     */
+    has_group(group_id_bytes) {
+        const ptr0 = passArray8ToWasm0(group_id_bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlsclient_has_group(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
     }
 }
 if (Symbol.dispose) MlsClient.prototype[Symbol.dispose] = MlsClient.prototype.free;

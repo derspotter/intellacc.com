@@ -1,4 +1,5 @@
 import van from 'vanjs-core';
+import VaultSettings from '../vault/VaultSettings.js';
 
 const { div, h1, h2, p, button, label, input, span } = van.tags;
 
@@ -39,12 +40,7 @@ export default function SettingsPage() {
       )
     ),
 
-    div({ class: 'setting-item' },
-      h2('Security'),
-      div({ class: 'security-info' },
-        p('Your messages are protected with MLS End-to-End Encryption.'),
-        p({ class: 'text-muted' }, 'Encryption keys are securely stored in your browser.')
-      )
-    )
+    // Vault encryption settings
+    VaultSettings()
   );
 }

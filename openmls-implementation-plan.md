@@ -26,8 +26,9 @@ From the OpenMLS Book:
 - **Ciphersuites**: `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (MTI), ChaCha20-Poly1305, P-256
 - **WASM Support**: Builds for `wasm32-unknown-unknown` with `js` feature for browser APIs
 - **Forward Secrecy**: Keys deleted immediately after use; configurable `max_past_epochs` for late messages
-- **Message Validation**: Comprehensive semantic validation (ValSem002-ValSem403)
+- **Message Validation**: Comprehensive semantic validation (ValSem002-ValSem403) covering framing, proposals, and commits.
 - **Fork Resolution**: Built-in `readd` and `reboot` helpers for group recovery
+- **Updates**: Atomic operations for `self_update()` (Update Proposal) and `leave_group()` (Remove Proposal).
 
 ### What We Must Implement for SOTA
 
@@ -134,21 +135,38 @@ From the OpenMLS Book:
 - [x] MLS-only `messaging.js` service (legacy code removed)
 - [x] MLS-only `Messages.js` UI (legacy mode toggle removed)
 - [ ] Group state persistence (export/import on page load/unload)
+- [ ] `inspect_staged_welcome()` - validate sender/members before joining (Book: "Process is to allow the recipient... to inspect... e.g. sender identity")
 - [ ] Handle `StagedCommit` inspection before merge (credential validation)
 
-### Phase 1E: Encrypted Storage ("The Vault")
+### Phase 1E: Encrypted Storage ("The Vault") - COMPLETE (2025-12-15)
 
 From the Book: "StorageProvider implementations must ensure values deleted through delete_ functions are irrevocably deleted and no copies are kept."
 
 - [x] Argon2id key derivation in WASM
-- [ ] Prompt for encryption passphrase on first login
-- [ ] Derive AES-GCM key from passphrase using WASM `derive_key_argon2id`
-- [ ] Encrypt IndexedDB state with derived key before storing
-- [ ] Decrypt on unlock with correct passphrase
-- [ ] `lockKeys()` - wipe in-memory keys (zeroise buffers)
-- [ ] Auto-lock after idle timeout (configurable, default 15 min)
-- [ ] "Panic Button" - wipe all local crypto state
-- [ ] Ensure key deletion is permanent (no IndexedDB snapshots/copies)
+- [x] Prompt for encryption passphrase on first login (`PassphraseSetupModal.js`)
+- [x] Derive AES-GCM key from passphrase using WASM `derive_key_argon2id`
+- [x] Encrypt IndexedDB state with derived key before storing (`vaultService.js`)
+- [x] Decrypt on unlock with correct passphrase (`UnlockModal.js`)
+- [x] `lockKeys()` - wipe in-memory keys (zeroise buffers) (`vaultService.js`, `coreCryptoClient.wipeMemory()`)
+- [x] Auto-lock after idle timeout (configurable, default 15 min) (`idleLock.js`)
+- [x] "Panic Button" - wipe all local crypto state (`VaultSettings.js`)
+- [x] Ensure key deletion is permanent (no IndexedDB snapshots/copies)
+
+**New Files Created:**
+- `frontend/src/stores/vaultStore.js` - VanX reactive store for vault state
+- `frontend/src/services/vaultService.js` - Core encryption logic (Argon2id + AES-256-GCM)
+- `frontend/src/components/vault/UnlockModal.js` - Passphrase entry modal
+- `frontend/src/components/vault/PassphraseSetupModal.js` - First-time setup modal
+- `frontend/src/components/vault/VaultSettings.js` - Settings UI with panic wipe
+
+**Files Modified:**
+- `frontend/src/services/mls/coreCryptoClient.js` - Added `exportStateForVault()`, `restoreStateFromVault()`, `wipeMemory()`
+- `frontend/src/services/auth.js` - Vault check on login/logout
+- `frontend/src/services/idleLock.js` - Implemented idle detection
+- `frontend/src/pages/Messages.js` - Check vault lock status
+- `frontend/src/components/settings/SettingsPage.js` - Added VaultSettings
+- `frontend/src/router/index.js` - Render vault modals at app level
+- `frontend/src/styles/messages.css` - Vault modal styles
 
 ### Phase 1F: Trust Layer (Safety Numbers / Credential Validation)
 
@@ -241,13 +259,15 @@ From the Book: "Clients can generate an arbitrary number of key packages ahead o
 
 From the Book: "Fork Resolution", "Discarding Commits", "Forward Secrecy Considerations"
 
-- [ ] Handle delivery service message reordering (`out_of_order_tolerance` config)
-- [ ] Handle late messages from past epochs (`max_past_epochs` config)
+- [ ] Handle delivery service message reordering (`out_of_order_tolerance` config in `SenderRatchetConfiguration`)
+- [ ] Handle late messages from past epochs (`max_past_epochs` config in `MlsGroupCreateConfig` - SOTA recommendation: allow small window)
 - [ ] Handle dropped messages (`maximum_forward_distance` config)
-- [ ] Fork detection (compare `confirmation_tag` across members)
-- [ ] Fork resolution via `readd` or `reboot` helpers
+- [ ] Fork detection (compare `confirmation_tag` across members after every commit)
+- [ ] Fork resolution via `readd` (efficient) or `reboot` (heavy) helpers (Book: "Fork Resolution" ch. 10)
 - [ ] Commit rejection handling (`clear_pending_commit()`)
 - [ ] Graceful degradation when WASM fails to load
+- [ ] "Self Update" handling: `self_update_with_new_signer()` for key rotation
+- [ ] External Proposals: Support `ExternalSendersExtension` for non-member adds/removes
 
 ---
 
@@ -279,8 +299,12 @@ From the Book: "Fork Resolution", "Discarding Commits", "Forward Secrecy Conside
 ### Credential Validation (CRITICAL for SOTA)
 ```
 Applications MUST define a maximum total lifetime acceptable for a LeafNode.
-The application maintains "reference identifiers" for members.
+The application maintains "reference identifiers" for members (our UserID).
 When credentials are replaced, AS MUST verify the new credential is a valid successor.
+MUST NOT rely on application_id extension as if it were authenticated.
+Checks should happen in:
+1. `StagedWelcome` (on join) -> `staged_welcome.members()`
+2. `StagedCommit` (on update) -> `staged_commit.remove_proposals()`, etc.
 ```
 
 ### Forward Secrecy Requirements
@@ -344,8 +368,8 @@ curl http://localhost:3000/api/health-check
 | PFS | OpenMLS ratchet tree | None (built-in) ✅ |
 | PCS | OpenMLS Update/Commit | Implement `self_update()` |
 | Authentication | Fingerprint in WASM | Add UI + credential validation |
-| Encryption at Rest | Argon2 in WASM | Implement "Vault" flow |
-| Secure Deletion | IndexedDB | Verify no copies/snapshots |
+| Encryption at Rest | ✅ COMPLETE | Vault with Argon2id + AES-256-GCM |
+| Secure Deletion | ✅ COMPLETE | Memory wipe on lock, panic wipe option |
 | Group Messaging | ✅ WORKING | Full E2EE messaging operational |
 | Legacy Cleanup | ✅ COMPLETE | All RSA/Signal code removed |
 
@@ -354,7 +378,14 @@ curl http://localhost:3000/api/health-check
 2. Using `MlsGroup::new_with_group_id()` for consistent group IDs
 3. Regenerating KeyPackages after `process_welcome()`
 
-**Current Status:** MVP E2EE messaging is operational. Phase 1D complete. Next: Phase 1E (Vault) and Phase 1F (Safety Numbers UI)
+**Phase 1E COMPLETE (2025-12-15):** Encryption at rest implemented with:
+- Argon2id key derivation (memory-hard) from user passphrase
+- AES-256-GCM encryption of MLS state in IndexedDB
+- Auto-lock on idle timeout (configurable)
+- Manual lock and emergency wipe functionality
+- First-time setup and unlock modals
+
+**Current Status:** Phase 1E (Vault) complete. Next: Phase 1F (Safety Numbers UI)
 
 ### Files Removed in Legacy Cleanup (2025-12-15)
 - `frontend/src/services/keyManager.js`
