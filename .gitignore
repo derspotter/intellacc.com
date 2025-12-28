@@ -57,3 +57,9 @@ recherche/2504.01781v2.pdf
 
 # Playwright MCP screenshots
 .playwright-mcp/
+
+# Build artifacts
+/frontend/dist/
+
+# Test output
+/test-results/

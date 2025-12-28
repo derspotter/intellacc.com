@@ -68,9 +68,9 @@ export function checkAuth() {
         if (vaultExists) {
           // Vault exists but locked - show unlock modal
           vaultStore.setShowUnlockModal(true);
-        } else if (profile.username) {
-          // No vault yet - bootstrap MLS and show setup
-          await coreCryptoClient.ensureMlsBootstrap(profile.username);
+        } else if (profile.id) {
+          // No vault yet - bootstrap MLS with userId (not username for consistency)
+          await coreCryptoClient.ensureMlsBootstrap(String(profile.id));
           vaultStore.setShowSetupModal(true);
         }
       }
@@ -128,9 +128,9 @@ export async function login(email, password) {
           // Vault exists - show unlock modal
           vaultStore.setShowUnlockModal(true);
         } else {
-          // No vault - bootstrap MLS first, then show setup modal
-          if (profile.username) {
-            await coreCryptoClient.ensureMlsBootstrap(profile.username);
+          // No vault - bootstrap MLS with userId first, then show setup modal
+          if (profile.id) {
+            await coreCryptoClient.ensureMlsBootstrap(String(profile.id));
           }
           vaultStore.setShowSetupModal(true);
         }

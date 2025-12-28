@@ -30,6 +30,7 @@ router.use('/webauthn', authenticateJWT, require('./webauthn'));
 // User Routes
 router.post("/users", userController.createUser);
 router.post("/users/register", userController.createUser); // Alias for registration
+router.get("/users/search", authenticateJWT, userController.searchUsers); // User search (before :id to avoid conflict)
 router.get("/users/:id", authenticateJWT, userController.getUser);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
 router.post('/login', userController.loginUser);

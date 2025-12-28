@@ -94,6 +94,32 @@ exports.getUserByUsername = async (req, res) => {
   }
 };
 
+// Search users by username or ID
+exports.searchUsers = async (req, res) => {
+  const query = req.query.q || '';
+  const limit = Math.min(parseInt(req.query.limit) || 10, 20);
+
+  if (!query.trim()) {
+    return res.json([]);
+  }
+
+  try {
+    const result = await db.query(`
+      SELECT id, username, bio, created_at
+      FROM users
+      WHERE (LOWER(username) LIKE $1 OR id::text = $2)
+        AND id != $3
+      ORDER BY username
+      LIMIT $4
+    `, [`%${query.toLowerCase()}%`, query, req.user.id, limit]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error searching users:', err);
+    res.status(500).json({ message: 'Error searching users' });
+  }
+};
+
 // Login a user
 exports.loginUser = async (req, res) => {
   const { email, password } = req.body;
