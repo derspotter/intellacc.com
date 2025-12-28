@@ -16,6 +16,10 @@ export default function PassphraseSetupModal() {
     const loading = van.state(false);
     const showPassword = van.state(false);
 
+    // Bridge VanX store to VanJS reactivity
+    const showModal = van.derive(() => vaultStore.showSetupModal);
+    const setupError = van.derive(() => vaultStore.setupError);
+
     // Password strength indicators
     const hasMinLength = van.derive(() => passphrase.val.length >= 8);
     const hasUppercase = van.derive(() => /[A-Z]/.test(passphrase.val));
@@ -62,7 +66,7 @@ export default function PassphraseSetupModal() {
     };
 
     return () => {
-        if (!vaultStore.showSetupModal) return null;
+        if (!showModal.val) return div({ class: 'setup-modal-wrapper' });
 
         return div({ class: 'vault-modal-overlay' },
             div({ class: 'vault-modal vault-modal-setup' },
@@ -128,8 +132,8 @@ export default function PassphraseSetupModal() {
                             ? div({ class: 'field-error' }, 'Passphrases do not match')
                             : null
                     ),
-                    () => vaultStore.setupError
-                        ? div({ class: 'vault-error' }, vaultStore.setupError)
+                    () => setupError.val
+                        ? div({ class: 'vault-error' }, setupError.val)
                         : null,
                     div({ class: 'vault-actions' },
                         button({

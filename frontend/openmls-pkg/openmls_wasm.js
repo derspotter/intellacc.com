@@ -290,6 +290,28 @@ export class MlsClient {
         return v3;
     }
     /**
+     * Retrieve a sent message plaintext by group_id and msg_id
+     * @param {Uint8Array} group_id
+     * @param {string} msg_id
+     * @returns {string | undefined}
+     */
+    get_sent_message(group_id, msg_id) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(msg_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.mlsclient_get_sent_message(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        let v3;
+        if (ret[0] !== 0) {
+            v3 = getStringFromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v3;
+    }
+    /**
      * @param {Uint8Array} credential_bytes
      * @param {Uint8Array} bundle_bytes
      * @param {Uint8Array} signature_key_bytes
@@ -302,6 +324,25 @@ export class MlsClient {
         const ptr2 = passArray8ToWasm0(signature_key_bytes, wasm.__wbindgen_malloc);
         const len2 = WASM_VECTOR_LEN;
         const ret = wasm.mlsclient_restore_identity(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Store a sent message plaintext for later retrieval (own message history)
+     * Key format: group_id || msg_id bytes
+     * @param {Uint8Array} group_id
+     * @param {string} msg_id
+     * @param {string} plaintext
+     */
+    store_sent_message(group_id, msg_id, plaintext) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(msg_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(plaintext, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.mlsclient_store_sent_message(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -323,6 +364,16 @@ export class MlsClient {
         var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v3;
+    }
+    /**
+     * @returns {any}
+     */
+    drain_storage_events() {
+        const ret = wasm.mlsclient_drain_storage_events(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * Export the entire storage state for vault persistence
@@ -351,8 +402,6 @@ export class MlsClient {
         return v1;
     }
     /**
-     * Import storage state from a previously exported blob
-     * This restores the provider's storage and reloads groups
      * @param {Uint8Array} data
      */
     import_storage_state(data) {
@@ -545,6 +594,10 @@ function __wbg_get_imports() {
         const ret = arg0.msCrypto;
         return ret;
     };
+    imports.wbg.__wbg_new_1acc0b6eea89d040 = function() {
+        const ret = new Object();
+        return ret;
+    };
     imports.wbg.__wbg_new_8a6f238a6ece86ea = function() {
         const ret = new Error();
         return ret;
@@ -591,6 +644,12 @@ function __wbg_get_imports() {
         const ret = module.require;
         return ret;
     }, arguments) };
+    imports.wbg.__wbg_set_3f1d0b984ed272ed = function(arg0, arg1, arg2) {
+        arg0[arg1] = arg2;
+    };
+    imports.wbg.__wbg_set_c213c871859d6500 = function(arg0, arg1, arg2) {
+        arg0[arg1 >>> 0] = arg2;
+    };
     imports.wbg.__wbg_stack_0ed75d68575b0f3c = function(arg0, arg1) {
         const ret = arg1.stack;
         const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
@@ -630,6 +689,11 @@ function __wbg_get_imports() {
     imports.wbg.__wbindgen_cast_cb9088102bce6b30 = function(arg0, arg1) {
         // Cast intrinsic for `Ref(Slice(U8)) -> NamedExternref("Uint8Array")`.
         const ret = getArrayU8FromWasm0(arg0, arg1);
+        return ret;
+    };
+    imports.wbg.__wbindgen_cast_d6cd19b81560fd6e = function(arg0) {
+        // Cast intrinsic for `F64 -> Externref`.
+        const ret = arg0;
         return ret;
     };
     imports.wbg.__wbindgen_init_externref_table = function() {

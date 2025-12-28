@@ -41,10 +41,15 @@ router.get('/key-package/:userId', async (req, res) => {
 router.post('/messages/welcome', async (req, res) => {
   try {
     const { groupId, receiverId, data } = req.body;
-    const result = await mlsService.storeWelcomeMessage(groupId, receiverId, data);
+    const senderId = req.user.id;
 
-    // TODO: Emit socket event to receiver
+    // Verify sender is a member of the group (prevents MITM/spoofing)
+    const isMember = await mlsService.isGroupMember(groupId, senderId);
+    if (!isMember) {
+      return res.status(403).json({ error: 'You are not a member of this group' });
+    }
 
+    const result = await mlsService.storeWelcomeMessage(groupId, senderId, receiverId, data);
     res.json(result);
   } catch (err) {
     console.error(err);
@@ -143,11 +148,56 @@ router.post('/groups/:groupId/members', async (req, res) => {
 router.get('/messages/group/:groupId', async (req, res) => {
   try {
     const { afterId } = req.query;
-    const messages = await mlsService.getGroupMessages(req.params.groupId, afterId || 0);
+    // Pass userId to filter out messages from before the user joined
+    // This prevents newly joined members from receiving commits they already processed via Welcome
+    const messages = await mlsService.getGroupMessages(req.params.groupId, afterId || 0, req.user.id);
     res.json(messages);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch group messages' });
+  }
+});
+
+// ============ Direct Messages (DM) Routes ============
+
+// List user's DMs
+router.get('/direct-messages', async (req, res) => {
+  try {
+    const dms = await mlsService.getDirectMessages(req.user.id);
+    res.json(dms);
+  } catch (err) {
+    console.error('Error fetching DMs:', err);
+    res.status(500).json({ error: 'Failed to fetch direct messages' });
+  }
+});
+
+// Get or create DM with a user
+router.post('/direct-messages/:targetUserId', async (req, res) => {
+  try {
+    const creatorId = req.user.id;
+    const targetId = parseInt(req.params.targetUserId);
+
+    if (isNaN(targetId)) {
+      return res.status(400).json({ error: 'Invalid target user ID' });
+    }
+
+    if (creatorId === targetId) {
+      return res.status(400).json({ error: 'Cannot create DM with yourself' });
+    }
+
+    // Check if DM already exists
+    const existingGroupId = await mlsService.findDirectMessage(creatorId, targetId);
+
+    if (existingGroupId) {
+      return res.json({ groupId: existingGroupId, isNew: false });
+    }
+
+    // Create new DM
+    const result = await mlsService.createDirectMessage(creatorId, targetId);
+    res.status(201).json(result);
+  } catch (err) {
+    console.error('Error creating DM:', err);
+    res.status(500).json({ error: 'Failed to create direct message' });
   }
 });
 

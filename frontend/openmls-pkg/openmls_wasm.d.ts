@@ -20,18 +20,24 @@ export class MlsClient {
   decrypt_message(group_id_bytes: Uint8Array, ciphertext: Uint8Array): Uint8Array;
   encrypt_message(group_id_bytes: Uint8Array, message: Uint8Array): Uint8Array;
   process_welcome(welcome_bytes: Uint8Array, ratchet_tree_bytes?: Uint8Array | null): Uint8Array;
+  /**
+   * Retrieve a sent message plaintext by group_id and msg_id
+   */
+  get_sent_message(group_id: Uint8Array, msg_id: string): string | undefined;
   restore_identity(credential_bytes: Uint8Array, bundle_bytes: Uint8Array, signature_key_bytes: Uint8Array): void;
+  /**
+   * Store a sent message plaintext for later retrieval (own message history)
+   * Key format: group_id || msg_id bytes
+   */
+  store_sent_message(group_id: Uint8Array, msg_id: string, plaintext: string): void;
   static derive_key_argon2id(password: string, salt: Uint8Array): Uint8Array;
+  drain_storage_events(): any;
   /**
    * Export the entire storage state for vault persistence
    * Returns a serialized blob that can be stored encrypted
    */
   export_storage_state(): Uint8Array;
   get_credential_bytes(): Uint8Array;
-  /**
-   * Import storage state from a previously exported blob
-   * This restores the provider's storage and reloads groups
-   */
   import_storage_state(data: Uint8Array): void;
   get_key_package_bytes(): Uint8Array;
   /**
@@ -60,6 +66,7 @@ export interface InitOutput {
   readonly mlsclient_create_identity: (a: number, b: number, c: number) => [number, number, number, number];
   readonly mlsclient_decrypt_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
   readonly mlsclient_derive_key_argon2id: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+  readonly mlsclient_drain_storage_events: (a: number) => [number, number, number];
   readonly mlsclient_encrypt_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
   readonly mlsclient_export_storage_state: (a: number) => [number, number, number, number];
   readonly mlsclient_get_credential_bytes: (a: number) => [number, number, number, number];
@@ -67,6 +74,7 @@ export interface InitOutput {
   readonly mlsclient_get_identity_fingerprint: (a: number) => [number, number, number, number];
   readonly mlsclient_get_key_package_bundle_bytes: (a: number) => [number, number, number, number];
   readonly mlsclient_get_key_package_bytes: (a: number) => [number, number, number, number];
+  readonly mlsclient_get_sent_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
   readonly mlsclient_get_signature_keypair_bytes: (a: number) => [number, number, number, number];
   readonly mlsclient_has_group: (a: number, b: number, c: number) => number;
   readonly mlsclient_import_storage_state: (a: number, b: number, c: number) => [number, number];
@@ -75,6 +83,7 @@ export interface InitOutput {
   readonly mlsclient_process_welcome: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
   readonly mlsclient_regenerate_key_package: (a: number) => [number, number];
   readonly mlsclient_restore_identity: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+  readonly mlsclient_store_sent_message: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
   readonly init_logging: () => void;
   readonly __wbindgen_exn_store: (a: number) => void;
   readonly __externref_table_alloc: () => number;

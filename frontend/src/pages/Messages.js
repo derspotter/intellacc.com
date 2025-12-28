@@ -7,11 +7,81 @@ import { getUserId as authGetUserId } from '../services/auth.js';
 import messagingStore from '../stores/messagingStore.js';
 import coreCryptoClient from '../services/mls/coreCryptoClient.js';
 import vaultStore from '../stores/vaultStore.js';
+import { api } from '../services/api.js';
+import { SafetyNumbersButton } from '../components/SafetyNumbers.js';
+import { NewConversationPanel } from '../components/UserSearch.js';
+
+// Simple user cache for displaying sender names
+const userCache = new Map();
+const pendingFetches = new Map();
+
+async function getUserName(userId) {
+  if (!userId) return 'Unknown';
+  const id = String(userId);
+
+  // Check cache first
+  if (userCache.has(id)) {
+    return userCache.get(id);
+  }
+
+  // If already fetching, wait for that request
+  if (pendingFetches.has(id)) {
+    return pendingFetches.get(id);
+  }
+
+  // Fetch user info
+  const fetchPromise = (async () => {
+    try {
+      const user = await api.users.getUser(id);
+      const name = user?.username || `User ${id}`;
+      userCache.set(id, name);
+      return name;
+    } catch (err) {
+      console.warn('[Messages] Could not fetch user:', id, err);
+      const fallback = `User ${id}`;
+      userCache.set(id, fallback);
+      return fallback;
+    } finally {
+      pendingFetches.delete(id);
+    }
+  })();
+
+  pendingFetches.set(id, fetchPromise);
+  return fetchPromise;
+}
+
+/**
+ * Component to display sender name with async lookup
+ * Shows "User {id}" initially, then updates to username when fetched
+ */
+function SenderName(userId) {
+  const id = String(userId);
+
+  // If we already have the name cached, return it directly
+  if (userCache.has(id)) {
+    return span({ class: "message-sender" }, userCache.get(id));
+  }
+
+  // Create reactive state for the name
+  const nameState = van.state(`User ${id}`);
+
+  // Trigger async fetch and update state when ready
+  getUserName(id).then(name => {
+    nameState.val = name;
+  });
+
+  // Return reactive span
+  return span({ class: "message-sender" }, nameState);
+}
 
 /**
  * Messages page component for MLS E2EE messaging
  */
 export default function MessagesPage() {
+  // Local state for invite form toggle (fixes VanJS reactivity issue with VanX store)
+  const showInviteForm = van.state(false);
+  // Local state for showing inline new conversation panel
+  const showNewConvoPanel = van.state(false);
 
   // Initialize MLS messaging
   const initialize = async () => {
@@ -41,6 +111,9 @@ export default function MessagesPage() {
       // Load MLS groups
       await loadMlsGroups();
 
+      // Load DMs
+      await loadDirectMessages();
+
       // Set up real-time MLS handlers
       setupMlsHandlers();
 
@@ -60,6 +133,17 @@ export default function MessagesPage() {
       console.log('[Messages] Loaded MLS groups:', groups.length);
     } catch (err) {
       console.warn('[Messages] Error loading MLS groups:', err);
+    }
+  };
+
+  // Load Direct Messages from backend
+  const loadDirectMessages = async () => {
+    try {
+      const dms = await api.mls.getDirectMessages();
+      messagingStore.setDirectMessages(dms);
+      console.log('[Messages] Loaded DMs:', dms.length);
+    } catch (err) {
+      console.warn('[Messages] Error loading DMs:', err);
     }
   };
 
@@ -175,7 +259,7 @@ export default function MessagesPage() {
       console.log('[Messages] User invited to MLS group:', userId);
 
       messagingStore.setMlsInviteUserId('');
-      messagingStore.setShowMlsInvite(false);
+      showInviteForm.val = false;  // Use local state for reliable UI update
     } catch (err) {
       console.error('[Messages] Invite error:', err);
       messagingStore.setError(err.message || 'Failed to invite user');
@@ -242,80 +326,103 @@ export default function MessagesPage() {
       div({ class: "conversations-sidebar" }, [
         div({ class: "sidebar-header" }, [
           h2("E2EE Messages"),
-          button({
+          () => !showNewConvoPanel.val ? button({
             class: "btn btn-primary btn-sm",
-            onclick: () => messagingStore.setShowNewConversation(!messagingStore.showNewConversation)
-          }, "+ New")
+            onclick: () => { showNewConvoPanel.val = true; }
+          }, "+ New") : null
         ]),
 
         // MLS status indicator
-        div({ class: "mode-toggle" }, [
-          () => messagingStore.mlsInitialized ?
+        () => !showNewConvoPanel.val ? div({ class: "mode-toggle" }, [
+          messagingStore.mlsInitialized ?
             span({ class: "mls-status active" }, "MLS Ready") :
             span({ class: "mls-status" }, "Initializing MLS...")
-        ]),
+        ]) : null,
 
-        // Create group form
-        div({ class: "new-conversation-container" },
-          () => messagingStore.showNewConversation ? div({ class: "new-conversation-form" }, [
-            form({ onsubmit: createMlsGroup }, [
+        // Inline New Conversation Panel OR Conversations List
+        () => {
+          if (showNewConvoPanel.val) {
+            // Show inline new conversation panel
+            return NewConversationPanel({
+              onClose: () => { showNewConvoPanel.val = false; }
+            });
+          }
+
+          // Search
+          return div({ class: "sidebar-content" }, [
+            div({ class: "search-box" }, [
               input({
                 type: "text",
-                placeholder: "Group name...",
-                value: () => messagingStore.newConversationUser,
-                oninput: (e) => messagingStore.setNewConversationUser(e.target.value),
+                placeholder: "Search conversations...",
+                value: () => messagingStore.searchQuery,
+                oninput: (e) => messagingStore.setSearchQuery(e.target.value),
                 class: "form-input"
-              }),
-              button({ type: "submit", class: "btn btn-primary btn-sm" }, "Create Group")
+              })
+            ]),
+
+            // DMs and Groups list
+            div({ class: "conversations-list" }, [
+              () => {
+                if (messagingStore.conversationsLoading) return div({ class: "loading" }, "Loading...");
+
+                const dms = messagingStore.dmSidebarItems || [];
+                const groups = (messagingStore.mlsSidebarItems || []).filter(g => !g.isDm);
+
+                if (dms.length === 0 && groups.length === 0) {
+                  return div({ class: "empty-state" }, [
+                    p("No E2EE conversations yet"),
+                    p({ class: "text-muted" }, "Click \"+ New\" to start a conversation")
+                  ]);
+                }
+
+                return div([
+                  // DMs Section
+                  dms.length > 0 ? div({ class: "section-header" }, "Direct Messages") : null,
+                  dms.length > 0 ? ul({ class: "dm-list" }, [
+                    ...dms.map(item => li({
+                      key: item.id,
+                      'data-group-id': item.id,
+                      class: () => {
+                        const selected = messagingStore.selectedMlsGroupId === item.id;
+                        return `conversation-item dm-item ${selected ? 'selected' : ''}`;
+                      },
+                      onclick: () => selectMlsGroup(item.id)
+                    }, [
+                      div({ class: "conversation-info" }, [
+                        div({ class: "conversation-name" }, [
+                          span({ class: "lock-icon" }, "\uD83D\uDD12 "),
+                          item.name
+                        ])
+                      ])
+                    ]))
+                  ]) : null,
+
+                  // Groups Section
+                  groups.length > 0 ? div({ class: "section-header" }, "Groups") : null,
+                  groups.length > 0 ? ul({ class: "group-list" }, [
+                    ...groups.map(item => li({
+                      key: item.id,
+                      'data-group-id': item.id,
+                      class: () => {
+                        const selected = messagingStore.selectedMlsGroupId === item.id;
+                        return `conversation-item mls-group ${selected ? 'selected' : ''}`;
+                      },
+                      onclick: () => selectMlsGroup(item.id)
+                    }, [
+                      div({ class: "conversation-info" }, [
+                        div({ class: "conversation-name" }, [
+                          span({ class: "lock-icon" }, "\uD83D\uDD12 "),
+                          item.name || 'Unnamed Group'
+                        ]),
+                        div({ class: "group-id text-muted" }, item.id?.substring(0, 8) + '...')
+                      ])
+                    ]))
+                  ]) : null
+                ]);
+              }
             ])
-          ]) : ""
-        ),
-
-        // Search
-        div({ class: "search-box" }, [
-          input({
-            type: "text",
-            placeholder: "Search groups...",
-            value: () => messagingStore.searchQuery,
-            oninput: (e) => messagingStore.setSearchQuery(e.target.value),
-            class: "form-input"
-          })
-        ]),
-
-        // Groups list
-        div({ class: "conversations-list" }, [
-          () => {
-            if (messagingStore.conversationsLoading) return div({ class: "loading" }, "Loading...");
-
-            const groups = messagingStore.mlsSidebarItems || [];
-            if (groups.length === 0) {
-              return div({ class: "empty-state" }, [
-                p("No E2EE groups yet"),
-                p({ class: "text-muted" }, "Create a group to start encrypted messaging")
-              ]);
-            }
-
-            return ul([
-              ...groups.map(item => li({
-                key: item.id,
-                'data-group-id': item.id,
-                class: () => {
-                  const selected = messagingStore.selectedMlsGroupId === item.id;
-                  return `conversation-item mls-group ${selected ? 'selected' : ''}`;
-                },
-                onclick: () => selectMlsGroup(item.id)
-              }, [
-                div({ class: "conversation-info" }, [
-                  div({ class: "conversation-name" }, [
-                    span({ class: "lock-icon" }, "🔒 "),
-                    item.name || 'Unnamed Group'
-                  ]),
-                  div({ class: "group-id text-muted" }, item.id?.substring(0, 8) + '...')
-                ])
-              ]))
-            ]);
-          }
-        ])
+          ]);
+        }
       ]),
 
       // Main chat area
@@ -331,25 +438,37 @@ export default function MessagesPage() {
             ]);
           }
 
-          // MLS Group selected
+          // MLS Group selected (could be DM or Group)
+          const isDm = coreCryptoClient.isDirectMessage(messagingStore.selectedMlsGroupId);
+          const dmInfo = isDm ? messagingStore.directMessages.find(dm => dm.group_id === messagingStore.selectedMlsGroupId) : null;
+          const chatTitle = isDm
+            ? (dmInfo?.other_username || 'Direct Message')
+            : (messagingStore.selectedMlsGroup?.name || 'E2EE Group');
+
           return div({ class: "conversation-view mls-conversation" }, [
             // Chat header
             div({ class: "chat-header" }, [
               div({ class: "chat-title" }, [
-                h3(() => messagingStore.selectedMlsGroup?.name || 'E2EE Group'),
+                h3(chatTitle),
                 div({ class: "encryption-status mls-active" }, [
                   i({ class: "icon-lock" }),
                   span("MLS End-to-End Encrypted")
                 ])
               ]),
-              button({
-                class: "btn btn-sm",
-                onclick: () => messagingStore.setShowMlsInvite(!messagingStore.showMlsInvite)
-              }, "+ Invite")
+              div({ class: "chat-header-actions" }, [
+                SafetyNumbersButton(),
+                // Only show invite button for groups, not DMs
+                isDm ? null : button({
+                  class: "btn btn-sm",
+                  onclick: () => { showInviteForm.val = !showInviteForm.val; }
+                }, "+ Invite")
+              ])
             ]),
 
-            // Invite form
-            () => messagingStore.showMlsInvite ? div({ class: "invite-form" }, [
+            // Invite form - always rendered but hidden via CSS class
+            div({
+              class: () => `invite-form ${showInviteForm.val ? 'visible' : 'hidden'}`
+            }, [
               form({ onsubmit: inviteMlsUser }, [
                 input({
                   type: "text",
@@ -360,7 +479,7 @@ export default function MessagesPage() {
                 }),
                 button({ type: "submit", class: "btn btn-primary btn-sm" }, "Invite")
               ])
-            ]) : null,
+            ]),
 
             // Messages list
             div({ class: "messages-list" },
@@ -380,7 +499,7 @@ export default function MessagesPage() {
                     div({ class: "message-content" }, [
                       div({ class: "message-text" }, msg.plaintext),
                       div({ class: "message-meta" }, [
-                        span({ class: "message-sender" }, `User ${msg.senderId}`),
+                        SenderName(msg.senderId),
                         span({ class: "message-time" }, formatTime(msg.timestamp))
                       ])
                     ])

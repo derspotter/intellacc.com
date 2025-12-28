@@ -35,6 +35,12 @@ const messagingStore = vanX.reactive({
   mlsInviteUserId: '',              // User ID to invite to MLS group
   showMlsInvite: false,             // Show invite form
 
+  // Direct Messages (DM) state
+  directMessages: [],               // List of DMs from backend
+  dmSearchQuery: '',                // User search input
+  dmSearchResults: [],              // Search results for starting DM
+  showDmModal: false,               // Show the DM user search modal
+
   // Typing indicators - use array instead of Set for VanX compatibility
   typingUsers: [],
 
@@ -356,6 +362,27 @@ const messagingStore = vanX.reactive({
     messagingStore.showMlsInvite = show;
   },
 
+  // DM-specific methods
+  setDirectMessages(dms) {
+    messagingStore.directMessages = dms || [];
+  },
+
+  setDmSearchQuery(query) {
+    messagingStore.dmSearchQuery = query;
+  },
+
+  setDmSearchResults(results) {
+    messagingStore.dmSearchResults = results || [];
+  },
+
+  setShowDmModal(show) {
+    messagingStore.showDmModal = show;
+    if (!show) {
+      messagingStore.dmSearchQuery = '';
+      messagingStore.dmSearchResults = [];
+    }
+  },
+
   clearCache() {
     messagingStore.conversations = [];
     messagingStore.conversationsById = {};
@@ -370,6 +397,11 @@ const messagingStore = vanX.reactive({
     messagingStore.selectedMlsGroupId = null;
     messagingStore.mlsMessages = {};
     messagingStore.mlsInitialized = false;
+    // Clear DM state
+    messagingStore.directMessages = [];
+    messagingStore.dmSearchQuery = '';
+    messagingStore.dmSearchResults = [];
+    messagingStore.showDmModal = false;
   }
 });
 
@@ -433,7 +465,25 @@ messagingStore.mlsSidebarItems = vanX.calc(() => {
     name: g.name || 'Unnamed Group',
     time: g.created_at || null,
     ts: g.created_at ? Date.parse(g.created_at) : 0,
-    isMls: true
+    isMls: true,
+    isDm: g.group_id?.startsWith('dm_') || false
+  }));
+  const filtered = q ? items.filter(it => (it.name || '').toLowerCase().includes(q)) : items;
+  filtered.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return filtered;
+});
+
+// Computed: DM sidebar items (DMs have their own display logic - show other user's name)
+messagingStore.dmSidebarItems = vanX.calc(() => {
+  const q = (messagingStore.searchQuery || '').toLowerCase();
+  const dms = messagingStore.directMessages || [];
+  const items = dms.map(dm => ({
+    id: dm.group_id,
+    name: dm.other_username || `User ${dm.other_user_id}`,
+    otherUserId: dm.other_user_id,
+    time: dm.created_at || null,
+    ts: dm.created_at ? Date.parse(dm.created_at) : 0,
+    isDm: true
   }));
   const filtered = q ? items.filter(it => (it.name || '').toLowerCase().includes(q)) : items;
   filtered.sort((a, b) => (b.ts || 0) - (a.ts || 0));

@@ -217,16 +217,17 @@ class VaultService {
         const stateJson = decoder.decode(plainBytes);
         const mlsState = JSON.parse(stateJson);
 
-        // Restore MLS state
-        await coreCryptoClient.restoreStateFromVault(mlsState);
-
-        // Keep key in memory for re-encryption on changes
+        // Keep key in memory FIRST (before restore triggers any saves)
         this.aesKey = aesKey;
 
-        // Update store state
+        // Update store state BEFORE restoring MLS
+        // (restoreStateFromVault may process invites which triggers vault save)
         vaultStore.setLocked(false);
         vaultStore.setShowUnlockModal(false);
         vaultStore.updateActivity();
+
+        // NOW restore MLS state (safe to save to vault)
+        await coreCryptoClient.restoreStateFromVault(mlsState);
 
         // Start idle auto-lock
         loadIdleLockConfig();
@@ -258,13 +259,20 @@ class VaultService {
      * Save current MLS state to vault (call after state changes)
      */
     async saveCurrentState() {
+        console.log('[Vault] saveCurrentState called');
+
         if (vaultStore.isLocked || !this.aesKey) {
-            console.warn('[Vault] Cannot save state while locked');
+            console.warn('[Vault] Cannot save state while locked - isLocked:', vaultStore.isLocked, 'hasKey:', !!this.aesKey);
             return;
         }
 
         const userId = vaultStore.userId;
-        if (!userId) return;
+        if (!userId) {
+            console.warn('[Vault] Cannot save state - no userId');
+            return;
+        }
+
+        console.log('[Vault] Saving state for userId:', userId);
 
         await this.initDB();
 
@@ -282,7 +290,11 @@ class VaultService {
 
         // Export current MLS state
         const mlsState = await coreCryptoClient.exportStateForVault();
-        if (!mlsState) return;
+        if (!mlsState) {
+            console.warn('[Vault] No MLS state to save');
+            return;
+        }
+        console.log('[Vault] Exported MLS state - storageState length:', mlsState.storageState?.length || 0);
 
         // Serialize and encrypt
         const stateJson = JSON.stringify(mlsState);

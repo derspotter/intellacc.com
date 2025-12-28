@@ -1,5 +1,6 @@
 import init, { MlsClient, init_logging } from 'openmls-wasm';
 import { registerSocketEventHandler } from '../socket.js';
+import { api } from '../api.js';
 
 /**
  * Core Crypto Client for OpenMLS integration
@@ -11,11 +12,12 @@ class CoreCryptoClient {
         this.initialized = false;
         this.identityName = null;
         this.dbName = 'openmls_storage';
-        this.dbVersion = 1;
+        this.dbVersion = 2; // Bumped for granular_events store
         this.db = null;
         this.messageHandlers = []; // Callbacks for decrypted messages
         this.welcomeHandlers = []; // Callbacks for new group invites
         this._socketCleanup = null;
+        this.processedMessageIds = new Set(); // Track processed message IDs to prevent duplicates
     }
 
     /**
@@ -52,6 +54,11 @@ class CoreCryptoClient {
                 if (!db.objectStoreNames.contains('state')) {
                     db.createObjectStore('state', { keyPath: 'id' });
                 }
+                // [NEW] Granular Event Store for O(1) writes
+                if (!db.objectStoreNames.contains('granular_events')) {
+                    // key is the hex key from Rust
+                    db.createObjectStore('granular_events');
+                }
             };
         });
     }
@@ -63,9 +70,55 @@ class CoreCryptoClient {
     async saveState() {
         if (!this.client || !this.db || !this.identityName) return;
         try {
+            // --- 1. Granular Write-Behind (New O(1) path) ---
+            try {
+                // Drain dirty events from Rust memory
+                // events = [{ key: "hex...", value: Uint8Array | null, category: "..." }]
+                const events = this.client.drain_storage_events();
+
+                if (events && events.length > 0) {
+                    const tx = this.db.transaction(['granular_events'], 'readwrite');
+                    const store = tx.objectStore('granular_events');
+
+                    // Process all events
+                    // Note: This effectively mirrors the Rust HashMap in IndexedDB
+                    for (const event of events) {
+                        if (event.value === null || event.value === undefined) {
+                            store.delete(event.key);
+                        } else {
+                            // event.value comes as number[] from serde, need Uint8Array
+                            // BUT serde-wasm-bindgen usually handles Uint8Array -> Uint8Array if configured,
+                            // or simple array. Let's ensure it's stored efficiently.
+                            // If it's a raw array, IndexedDB handles it, but Uint8Array is better.
+                            store.put(event.value, event.key);
+                        }
+                    }
+
+                    await new Promise((resolve, reject) => {
+                        tx.oncomplete = () => resolve();
+                        tx.onerror = () => reject(tx.error);
+                    });
+                    console.log(`[MLS] Persisted ${events.length} granular events`);
+                }
+            } catch (e) {
+                console.warn('[MLS] Granular persistence failed:', e);
+            }
+
+            // --- 2. Snapshot Fallback (Legacy/Reliability) ---
+            // We keep this for now because we haven't implemented "Load from Granular" yet.
+            // This ensures we can still restore state on reload.
+
             const credential = this.client.get_credential_bytes();
             const bundle = this.client.get_key_package_bundle_bytes();
             const signatureKey = this.client.get_signature_keypair_bytes();
+
+            // Export full storage state (includes groups, epoch secrets, etc.)
+            let storageState = null;
+            try {
+                storageState = this.client.export_storage_state();
+            } catch (e) {
+                console.warn('Could not export detailed storage state provided by Wasm:', e);
+            }
 
             const transaction = this.db.transaction(['state'], 'readwrite');
             const store = transaction.objectStore('state');
@@ -77,13 +130,14 @@ class CoreCryptoClient {
                     credential,
                     bundle,
                     signatureKey,
+                    storageState, // Persist the full vault state
                     identityName: this.identityName,
                     updatedAt: Date.now()
                 });
                 request.onerror = () => reject(request.error);
                 request.onsuccess = () => resolve();
             });
-            console.log('OpenMLS state saved for:', this.identityName);
+            console.log('OpenMLS state (Identity + Vault) saved for:', this.identityName);
         } catch (error) {
             console.error('Error saving OpenMLS state:', error);
         }
@@ -115,6 +169,22 @@ class CoreCryptoClient {
             if (record && record.credential && record.bundle && record.signatureKey) {
                 this.client = new MlsClient();
                 this.client.restore_identity(record.credential, record.bundle, record.signatureKey);
+
+                // Restore full storage state (groups, epoch secrets, etc.)
+                if (record.storageState) {
+                    try {
+                        // Ensure it's a Uint8Array (IndexedDB might return ArrayBuffer or plain array depending on browser/adapter)
+                        const storageBytes = record.storageState instanceof Uint8Array
+                            ? record.storageState
+                            : new Uint8Array(record.storageState);
+
+                        this.client.import_storage_state(storageBytes);
+                        console.log('Restored OpenMLS storage state (groups/keys)');
+                    } catch (e) {
+                        console.error('Failed to import storage state:', e);
+                    }
+                }
+
                 this.identityName = record.identityName;
                 console.log('OpenMLS state restored for:', this.identityName);
                 return true;
@@ -374,6 +444,53 @@ class CoreCryptoClient {
             console.error('Error creating group:', e);
             throw e;
         }
+    }
+
+    /**
+     * Start a direct message with another user
+     * Creates a DM group or returns existing one
+     * @param {string|number} targetUserId - The user ID to DM
+     * @returns {Promise<Object>} { groupId, isNew, otherUsername }
+     */
+    async startDirectMessage(targetUserId) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
+
+        try {
+            // Get or create DM group on backend
+            const result = await api.mls.createDirectMessage(targetUserId);
+            const { groupId, isNew } = result;
+
+            if (isNew) {
+                // Create group locally in WASM
+                const groupIdBytes = new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                this.client.create_group(groupIdBytes);
+                console.log('[MLS] Created local DM group:', groupId);
+
+                // Persist state
+                await this.saveState();
+
+                // Invite the target user
+                await this.inviteToGroup(groupId, targetUserId);
+                console.log('[MLS] Invited user to DM:', targetUserId);
+            }
+
+            return { groupId, isNew };
+        } catch (e) {
+            console.error('[MLS] Error starting direct message:', e);
+            throw e;
+        }
+    }
+
+    /**
+     * Check if a group is a DM (by checking the group ID format)
+     * DM group IDs have the format: dm_{userA}_{userB}
+     * @param {string} groupId - The group ID to check
+     * @returns {boolean} True if this is a DM group
+     */
+    isDirectMessage(groupId) {
+        return groupId && groupId.startsWith('dm_');
     }
 
     /**
@@ -663,6 +780,18 @@ class CoreCryptoClient {
 
         const result = await response.json();
         console.log('[MLS] Message sent:', result.id);
+
+        // Store plaintext for own message history (can't decrypt own messages in MLS)
+        try {
+            this.client.store_sent_message(groupIdBytes, String(result.id), plaintext);
+            console.log('[MLS] Stored sent message for history:', result.id);
+            // Save state to persist sent message
+            const vaultService = (await import('../vaultService.js')).default;
+            await vaultService.saveCurrentState();
+        } catch (e) {
+            console.warn('[MLS] Failed to store sent message:', e);
+        }
+
         return result;
     }
 
@@ -710,31 +839,64 @@ class CoreCryptoClient {
     /**
      * Handle an incoming encrypted message from the server
      * @param {Object} messageData - Message object from server/socket
-     * @returns {Object} Processed message with plaintext
+     * @returns {Promise<Object>} Processed message with plaintext
      */
-    handleIncomingMessage(messageData) {
+    async handleIncomingMessage(messageData) {
         if (!this.client) throw new Error('Client not initialized');
 
         const { group_id, data, content_type, sender_id, id } = messageData;
 
+        // Skip already processed messages (deduplication)
+        if (id && this.processedMessageIds.has(id)) {
+            console.log('[MLS] Skipping already processed message:', id);
+            return { id, groupId: group_id, senderId: sender_id, type: 'duplicate', skipped: true };
+        }
+
         if (content_type === 'application') {
+            // Check if this is our own message (can't decrypt own messages in MLS)
+            const isOwnMessage = String(sender_id) === String(this.identityName);
+
+            if (isOwnMessage) {
+                // Retrieve from local storage
+                try {
+                    const groupIdBytes = new Uint8Array(group_id.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                    const storedPlaintext = this.client.get_sent_message(groupIdBytes, String(id));
+                    if (storedPlaintext) {
+                        console.log('[MLS] Retrieved own message from storage:', id);
+                        if (id) this.processedMessageIds.add(id);
+                        return { id, groupId: group_id, senderId: sender_id, plaintext: storedPlaintext, type: 'application' };
+                    }
+                    console.warn('[MLS] Own message not found in storage:', id);
+                } catch (e) {
+                    console.warn('[MLS] Error retrieving own message:', e);
+                }
+                // If not found, we can't recover it - return without plaintext
+                if (id) this.processedMessageIds.add(id);
+                return { id, groupId: group_id, senderId: sender_id, plaintext: '[Message unavailable]', type: 'application' };
+            }
+
+            // Not our message - decrypt normally
             const plaintext = this.decryptMessage(group_id, data);
+            if (id) this.processedMessageIds.add(id);
             return { id, groupId: group_id, senderId: sender_id, plaintext, type: 'application' };
         } else if (content_type === 'commit') {
-            this.processCommit(group_id, data);
+            await this.processCommit(group_id, data);
+            if (id) this.processedMessageIds.add(id);
             return { id, groupId: group_id, senderId: sender_id, type: 'commit' };
         } else {
             console.warn('[MLS] Unknown message content_type:', content_type);
+            if (id) this.processedMessageIds.add(id);
             return { id, groupId: group_id, type: 'unknown' };
         }
     }
 
     /**
      * Process a commit message (for member changes, key updates)
+     * Commits advance the epoch and may change group membership
      * @param {string} groupId - Group ID (hex)
      * @param {Object|string} commitData - Commit message data
      */
-    processCommit(groupId, commitData) {
+    async processCommit(groupId, commitData) {
         if (!this.client) throw new Error('Client not initialized');
 
         const groupIdBytes = new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
@@ -752,6 +914,18 @@ class CoreCryptoClient {
 
         this.client.process_commit(groupIdBytes, commitBytes);
         console.log('[MLS] Processed commit for group:', groupId);
+
+        // Save state after processing commit (epoch advanced, keys rotated)
+        await this.saveState();
+
+        // Persist to vault if unlocked
+        try {
+            const vaultService = (await import('../vaultService.js')).default;
+            await vaultService.saveCurrentState();
+            console.log('[MLS] Commit state saved to vault');
+        } catch (vaultErr) {
+            console.warn('[MLS] Could not save commit state to vault:', vaultErr.message);
+        }
     }
 
     /**
@@ -782,7 +956,7 @@ class CoreCryptoClient {
         const processed = [];
         for (const msg of messages) {
             try {
-                const result = this.handleIncomingMessage(msg);
+                const result = await this.handleIncomingMessage(msg);
                 processed.push(result);
             } catch (e) {
                 console.error('[MLS] Failed to process message:', msg.id, e);
@@ -962,6 +1136,8 @@ class CoreCryptoClient {
      * @returns {Promise<Object|null>} State object or null if no state
      */
     async exportStateForVault() {
+        console.log('[MLS] exportStateForVault called, client:', !!this.client, 'identity:', this.identityName);
+
         if (!this.client || !this.identityName) {
             console.warn('[MLS] No state to export for vault');
             return null;
@@ -974,6 +1150,12 @@ class CoreCryptoClient {
 
             // Export full storage state (includes groups, epoch secrets, etc.)
             const storageState = this.client.export_storage_state();
+            console.log('[MLS] exportStateForVault: storageState bytes:', storageState.length);
+
+            // Log the group count from the exported storage state
+            // The format is: [MemoryStorage bytes][8-byte group count][group IDs...]
+            // We need to find where the group count is - it's after MemoryStorage
+            // This is a simplified check - just log the state size
 
             return {
                 credential: Array.from(credential),
@@ -1018,14 +1200,25 @@ class CoreCryptoClient {
                 const storageState = new Uint8Array(stateObj.storageState);
                 this.client.import_storage_state(storageState);
                 console.log('[MLS] Full storage state restored from vault');
-            } else {
-                // Fallback: re-sync groups from server (legacy vaults without storage state)
-                console.log('[MLS] No storage state in vault, falling back to server sync');
-                await this.resyncGroupsFromServer();
             }
 
             // Set up socket listeners
             this.setupSocketListeners();
+
+            // ALWAYS check for pending Welcome messages (new group invites)
+            // This must happen AFTER vault restore to merge new groups with existing state
+            const joinedGroups = await this.checkForInvites();
+            if (joinedGroups.length > 0) {
+                console.log('[MLS] Processed pending invites after vault restore:', joinedGroups);
+                // Save updated state with new groups to vault
+                try {
+                    const vaultService = (await import('../vaultService.js')).default;
+                    await vaultService.saveCurrentState();
+                    console.log('[MLS] New group state saved to vault');
+                } catch (vaultErr) {
+                    console.warn('[MLS] Could not save new group state to vault:', vaultErr.message);
+                }
+            }
 
             console.log('[MLS] State restored from vault for:', this.identityName);
             return true;
@@ -1097,6 +1290,52 @@ class CoreCryptoClient {
      */
     getMissingGroups() {
         return this._missingGroups || [];
+    }
+
+    /**
+     * Get the identity fingerprint (Safety Number) for the current user
+     * This is a SHA-256 hash of the MLS credential, displayed as hex
+     * Users can compare fingerprints out-of-band to verify identity
+     * @returns {string|null} 64-character hex fingerprint or null if not initialized
+     */
+    getIdentityFingerprint() {
+        if (!this.client) return null;
+        try {
+            return this.client.get_identity_fingerprint();
+        } catch (e) {
+            console.error('[MLS] Error getting fingerprint:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Format a fingerprint for display (groups of 4 hex chars)
+     * @param {string} fingerprint - 64-char hex string
+     * @returns {string} Formatted fingerprint like "ABCD 1234 5678 ..."
+     */
+    formatFingerprint(fingerprint) {
+        if (!fingerprint) return '';
+        // Split into groups of 4 characters for readability
+        return fingerprint.toUpperCase().match(/.{1,4}/g)?.join(' ') || fingerprint;
+    }
+
+    /**
+     * Generate a numeric safety number (like Signal) for easier verbal comparison
+     * @param {string} fingerprint - 64-char hex string
+     * @returns {string} 60-digit number in groups of 5
+     */
+    fingerprintToNumeric(fingerprint) {
+        if (!fingerprint) return '';
+        // Convert hex to decimal digits (take first 60 chars, convert each hex pair to 2-digit number)
+        const digits = [];
+        for (let i = 0; i < Math.min(fingerprint.length, 60); i += 2) {
+            const hexPair = fingerprint.substring(i, i + 2);
+            const num = parseInt(hexPair, 16) % 100;
+            digits.push(num.toString().padStart(2, '0'));
+        }
+        // Group into sets of 5 digits
+        const numStr = digits.join('');
+        return numStr.match(/.{1,5}/g)?.join(' ') || numStr;
     }
 
     /**

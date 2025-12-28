@@ -146,28 +146,31 @@ export const api = {
   
   // Users endpoints
   users: {
-    getProfile: () => 
+    getProfile: () =>
       request('/me'),
-      
-    updateProfile: (bio) => 
+
+    updateProfile: (bio) =>
       request('/users/profile', { method: 'PATCH', body: { bio } }),
-      
-    getUser: (id) => 
+
+    getUser: (id) =>
       request(`/users/${id}`),
-      
-    getUserByUsername: (username) => 
+
+    getUserByUsername: (username) =>
       request(`/users/username/${username}`),
-      
-    follow: (id) => 
+
+    search: (query) =>
+      request(`/users/search?q=${encodeURIComponent(query)}`),
+
+    follow: (id) =>
       request(`/users/${id}/follow`, { method: 'POST' }),
-      
-    unfollow: (id) => 
+
+    unfollow: (id) =>
       request(`/users/${id}/follow`, { method: 'DELETE' }),
-      
-    getFollowers: (id) => 
+
+    getFollowers: (id) =>
       request(`/users/${id}/followers`),
-      
-    getFollowing: (id) => 
+
+    getFollowing: (id) =>
       request(`/users/${id}/following`)
   },
   
@@ -376,7 +379,12 @@ export const api = {
       if (before) search.set('before', before);
       const suffix = search.size ? `?${search.toString()}` : '';
       return request(`/mls/messages/${conversationId}${suffix}`);
-    }
+    },
+    // Direct Messages (DM)
+    getDirectMessages: () =>
+      request('/mls/direct-messages'),
+    createDirectMessage: (targetUserId) =>
+      request(`/mls/direct-messages/${targetUserId}`, { method: 'POST' })
   },
   
   // Leaderboard endpoints (direct database queries for performance)

@@ -15,6 +15,11 @@ export default function UnlockModal() {
     const loading = van.state(false);
     const showPassword = van.state(false);
 
+    // Create a derived state that tracks the store value
+    // This bridges VanX reactivity to VanJS
+    const showModal = van.derive(() => vaultStore.showUnlockModal);
+    const errorMsg = van.derive(() => vaultStore.unlockError);
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (loading.val || !passphrase.val) return;
@@ -37,8 +42,9 @@ export default function UnlockModal() {
         showPassword.val = !showPassword.val;
     };
 
+    // Use van.derive for conditional rendering
     return () => {
-        if (!vaultStore.showUnlockModal) return null;
+        if (!showModal.val) return div({ class: 'unlock-modal-wrapper' });
 
         return div({ class: 'vault-modal-overlay' },
             div({ class: 'vault-modal' },
@@ -71,8 +77,8 @@ export default function UnlockModal() {
                             }, () => showPassword.val ? '\uD83D\uDC41\uFE0F' : '\uD83D\uDC41')
                         )
                     ),
-                    () => vaultStore.unlockError
-                        ? div({ class: 'vault-error' }, vaultStore.unlockError)
+                    () => errorMsg.val
+                        ? div({ class: 'vault-error' }, errorMsg.val)
                         : null,
                     div({ class: 'vault-actions' },
                         button({
