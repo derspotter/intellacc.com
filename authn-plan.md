@@ -351,18 +351,148 @@ CREATE INDEX idx_message_queue_recipients_device ON message_queue_recipients(rec
 
 ### Phase 5: Relay Queue + Edge Cases
 
-1. **Relay queue implementation:**
-   - Server stores ciphertext until delivered (ACKed) by all recipient devices in the recipient’s
-     linked device set at send time.
-   - Server deletes after all ACKs or after TTL expiration.
+**Goal:** Server is a relay, not a long-term message store. Messages deleted after delivery or TTL.
 
-2. **Offline devices:**
-   - Choose a retention TTL (e.g., 30–90 days).
-   - If a device is revoked, pending queued items for it can be deleted.
+**Schema:**
 
-3. **Security settings:**
-   - Require re-authentication for sensitive actions (add/remove passkeys, device linking, revoke device).
-   - Option to require passkey for login (disable password login).
+```sql
+-- Relay queue for store-and-forward messaging
+CREATE TABLE mls_relay_queue (
+  id BIGSERIAL PRIMARY KEY,
+  group_id TEXT NOT NULL,
+  sender_device_id INT NOT NULL REFERENCES user_devices(id) ON DELETE CASCADE,
+  message_type TEXT NOT NULL,  -- 'application', 'commit', 'welcome'
+  data BYTEA NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW(),
+  expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '30 days'
+);
+
+CREATE TABLE mls_relay_recipients (
+  queue_id BIGINT NOT NULL REFERENCES mls_relay_queue(id) ON DELETE CASCADE,
+  recipient_device_id INT NOT NULL REFERENCES user_devices(id) ON DELETE CASCADE,
+  acked_at TIMESTAMP,
+  PRIMARY KEY (queue_id, recipient_device_id)
+);
+
+CREATE INDEX idx_relay_pending ON mls_relay_recipients(recipient_device_id) WHERE acked_at IS NULL;
+CREATE INDEX idx_relay_expires ON mls_relay_queue(expires_at);
+```
+
+**Backend Routes:**
+
+```
+POST /api/mls/messages/group     -- Store in relay queue
+POST /api/mls/messages/welcome   -- Store in relay queue
+GET  /api/mls/queue/pending      -- Get unacked messages for device
+POST /api/mls/queue/ack          -- ACK messages, delete if all devices acked
+```
+
+**Backend Service (mlsService.js):**
+
+```javascript
+async storeRelayMessage(groupId, senderDeviceId, messageType, data) {
+  // 1. INSERT INTO mls_relay_queue
+  // 2. Get recipient devices (all linked devices of group members)
+  // 3. INSERT INTO mls_relay_recipients for each device
+  // 4. Emit socket event to each recipient device
+  // 5. Return message
+}
+
+async getPendingMessages(deviceId) {
+  // SELECT from mls_relay_queue
+  // JOIN mls_relay_recipients WHERE recipient_device_id = deviceId AND acked_at IS NULL
+  // ORDER BY created_at ASC
+}
+
+async ackMessages(deviceId, messageIds) {
+  // 1. UPDATE mls_relay_recipients SET acked_at = NOW()
+  //    WHERE recipient_device_id = deviceId AND queue_id IN (messageIds)
+  // 2. DELETE messages where ALL recipient devices have acked:
+  //    DELETE FROM mls_relay_queue WHERE id IN (
+  //      SELECT queue_id FROM mls_relay_recipients
+  //      GROUP BY queue_id HAVING bool_and(acked_at IS NOT NULL)
+  //    )
+}
+
+async cleanupExpired() {
+  // DELETE FROM mls_relay_queue WHERE expires_at < NOW()
+  // Run on startup or via cron
+}
+```
+
+**Frontend (coreCryptoClient.js):**
+
+```javascript
+// Unified sync - call on connect and on socket events
+async syncMessages() {
+  const pending = await api.mls.getPendingMessages();
+  if (pending.length === 0) return [];
+
+  const processed = [];
+  for (const msg of pending) {
+    try {
+      if (msg.message_type === 'welcome') {
+        await this.processWelcome(msg);
+      } else {
+        await this.handleIncomingMessage(msg);
+      }
+      processed.push(msg.id);
+    } catch (e) {
+      console.error('[MLS] Failed to process:', msg.id, e);
+    }
+  }
+
+  if (processed.length > 0) {
+    await api.mls.ackMessages(processed);
+  }
+  return processed;
+}
+
+// Simplified socket handlers
+setupSocketListeners() {
+  registerSocketEventHandler('mls-message', () => this.syncMessages());
+  registerSocketEventHandler('mls-welcome', () => this.syncMessages());
+}
+```
+
+**Message Flow:**
+
+```text
+SEND:
+  User types message
+  → coreCryptoClient.sendMessage()
+  → WASM encrypts → POST /api/mls/messages/group
+  → storeRelayMessage() inserts into queue + recipients
+  → Socket emits 'mls-message' to each recipient device
+
+RECEIVE:
+  Socket event 'mls-message' received (or page load)
+  → syncMessages() triggered
+  → GET /api/mls/queue/pending
+  → Process each message (decrypt or process welcome)
+  → POST /api/mls/queue/ack with processed IDs
+  → Server deletes messages where all recipients acked
+```
+
+**Cleanup Policies:**
+
+1. **ACK-based deletion:** Delete message when all recipient devices have ACKed
+2. **TTL expiration:** Delete after 30 days if not delivered (configurable)
+3. **Device revocation:** Delete pending messages when device is revoked
+4. **Startup cleanup:** Run `cleanupExpired()` on server startup
+
+**Security Settings:**
+
+1. Require re-authentication for sensitive actions (add/remove passkeys, device linking, revoke device)
+2. Option to require passkey for login (disable password login)
+
+**Files to modify:**
+
+- `backend/migrations/YYYYMMDD_add_relay_queue.sql` (new)
+- `backend/src/services/mlsService.js`
+- `backend/src/routes/mls.js`
+- `frontend/src/services/api.js`
+- `frontend/src/services/mls/coreCryptoClient.js`
 
 ## User Flows
 
