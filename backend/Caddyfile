@@ -3,9 +3,14 @@
 }
 
 localhost {
-    # Serve frontend files
+    # Serve frontend files with pre-compressed files (.br, .gz)
     root * /usr/src/app/frontend
-    file_server
+    file_server {
+        precompressed br gzip
+    }
+
+    # Enable compression for dynamic content
+    encode gzip
 
     # Reverse proxy API requests to the backend
     @api path /api/*

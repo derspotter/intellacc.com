@@ -4,10 +4,21 @@ import PasskeyButton from './PasskeyButton';
 const { div, h1, form, label, input, button, p, a } = van.tags;
 import auth from '../../services/auth';
 
+// Preload WASM module in background while user types credentials
+let wasmPreloaded = false;
+function preloadWasm() {
+  if (wasmPreloaded) return;
+  wasmPreloaded = true;
+  // Dynamic import starts loading the WASM module
+  import('openmls-wasm').catch(() => {});
+}
+
 /**
  * Login form component with improved input handling
  */
 const LoginForm = () => {
+  // Start preloading WASM as soon as login form is rendered
+  preloadWasm();
   // Use separate state for each field
   const email = van.state('');
   const password = van.state('');

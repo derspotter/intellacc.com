@@ -11,17 +11,16 @@ import { api } from '../services/api.js';
 import { SafetyNumbersButton } from '../components/SafetyNumbers.js';
 import { NewConversationPanel } from '../components/UserSearch.js';
 
-// Simple user cache for displaying sender names
-const userCache = new Map();
+// Pending fetch promises (not sensitive data, just coordination)
 const pendingFetches = new Map();
 
 async function getUserName(userId) {
   if (!userId) return 'Unknown';
   const id = String(userId);
 
-  // Check cache first
-  if (userCache.has(id)) {
-    return userCache.get(id);
+  // Check store cache first (cleared on vault lock for security)
+  if (messagingStore.userNameCache[id]) {
+    return messagingStore.userNameCache[id];
   }
 
   // If already fetching, wait for that request
@@ -34,12 +33,12 @@ async function getUserName(userId) {
     try {
       const user = await api.users.getUser(id);
       const name = user?.username || `User ${id}`;
-      userCache.set(id, name);
+      messagingStore.userNameCache[id] = name;
       return name;
     } catch (err) {
       console.warn('[Messages] Could not fetch user:', id, err);
       const fallback = `User ${id}`;
-      userCache.set(id, fallback);
+      messagingStore.userNameCache[id] = fallback;
       return fallback;
     } finally {
       pendingFetches.delete(id);
@@ -58,8 +57,8 @@ function SenderName(userId) {
   const id = String(userId);
 
   // If we already have the name cached, return it directly
-  if (userCache.has(id)) {
-    return span({ class: "message-sender" }, userCache.get(id));
+  if (messagingStore.userNameCache[id]) {
+    return span({ class: "message-sender" }, messagingStore.userNameCache[id]);
   }
 
   // Create reactive state for the name

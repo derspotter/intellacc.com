@@ -9,18 +9,61 @@ const mlsService = {
   },
 
   async upsertKeyPackage(userId, deviceId, packageData, hash, notBefore, notAfter, isLastResort = false) {
-    const query = `
-      INSERT INTO mls_key_packages (user_id, device_id, package_data, hash, not_before, not_after, is_last_resort, last_updated_at)
-      VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6), $7, NOW())
-      ON CONFLICT (user_id, device_id, is_last_resort)
-      DO UPDATE SET package_data = $3, hash = $4, not_before = to_timestamp($5), not_after = to_timestamp($6), last_updated_at = NOW()
-      RETURNING *;
-    `;
-    const { rows } = await db.query(query, [userId, deviceId, packageData, hash, notBefore, notAfter, isLastResort]);
-    return rows[0];
+    if (isLastResort) {
+      // Last-resort: UPSERT - only one per (user_id, device_id)
+      const query = `
+        INSERT INTO mls_key_packages (user_id, device_id, package_data, hash, not_before, not_after, is_last_resort, last_updated_at)
+        VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6), true, NOW())
+        ON CONFLICT (user_id, device_id) WHERE is_last_resort = true
+        DO UPDATE SET package_data = $3, hash = $4, not_before = to_timestamp($5), not_after = to_timestamp($6), last_updated_at = NOW()
+        RETURNING *;
+      `;
+      const { rows } = await db.query(query, [userId, deviceId, packageData, hash, notBefore, notAfter]);
+      return rows[0];
+    } else {
+      // Regular: INSERT with ON CONFLICT DO NOTHING (ignore duplicates by hash)
+      const query = `
+        INSERT INTO mls_key_packages (user_id, device_id, package_data, hash, not_before, not_after, is_last_resort, last_updated_at)
+        VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6), false, NOW())
+        ON CONFLICT (hash) DO NOTHING
+        RETURNING *;
+      `;
+      const { rows } = await db.query(query, [userId, deviceId, packageData, hash, notBefore, notAfter]);
+      return rows[0];
+    }
   },
 
-  async getKeyPackage(userId, deviceId = null) {
+  // Bulk insert multiple key packages
+  async insertKeyPackages(userId, deviceId, keyPackages) {
+    const client = await db.getPool().connect();
+    try {
+      await client.query('BEGIN');
+      const results = [];
+      for (const kp of keyPackages) {
+        const query = `
+          INSERT INTO mls_key_packages (user_id, device_id, package_data, hash, not_before, not_after, is_last_resort, last_updated_at)
+          VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6), $7, NOW())
+          ON CONFLICT (hash) DO NOTHING
+          RETURNING *;
+        `;
+        const { rows } = await client.query(query, [
+          userId, deviceId, kp.packageData, kp.hash, kp.notBefore, kp.notAfter, kp.isLastResort || false
+        ]);
+        if (rows[0]) results.push(rows[0]);
+      }
+      await client.query('COMMIT');
+      return results;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  },
+
+  // Get and optionally consume a key package
+  // consume=true will delete non-last-resort key packages after fetching
+  async getKeyPackage(userId, deviceId = null, consume = true) {
     const params = [userId];
     let deviceClause = '';
     if (deviceId) {
@@ -38,7 +81,39 @@ const mlsService = {
       LIMIT 1;
     `;
     const { rows } = await db.query(query, params);
-    return rows[0];
+    const keyPackage = rows[0];
+
+    // Consume (delete) non-last-resort key packages after fetching
+    if (consume && keyPackage && !keyPackage.is_last_resort) {
+      await db.query('DELETE FROM mls_key_packages WHERE id = $1', [keyPackage.id]);
+    }
+
+    return keyPackage;
+  },
+
+  // Get key package count for a user/device (for monitoring pool size)
+  async getKeyPackageCount(userId, deviceId = null) {
+    const params = [userId];
+    let deviceClause = '';
+    if (deviceId) {
+      params.push(deviceId);
+      deviceClause = 'AND device_id = $2';
+    }
+    const query = `
+      SELECT
+        COUNT(*) FILTER (WHERE is_last_resort = false) as regular_count,
+        COUNT(*) FILTER (WHERE is_last_resort = true) as last_resort_count
+      FROM mls_key_packages
+      WHERE user_id = $1
+        ${deviceClause}
+        AND (not_before IS NULL OR not_before <= NOW())
+        AND (not_after IS NULL OR not_after > NOW());
+    `;
+    const { rows } = await db.query(query, params);
+    return {
+      regular: parseInt(rows[0]?.regular_count || 0, 10),
+      lastResort: parseInt(rows[0]?.last_resort_count || 0, 10)
+    };
   },
 
   async getKeyPackages(userId) {

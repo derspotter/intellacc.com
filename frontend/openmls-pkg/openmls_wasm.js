@@ -801,6 +801,20 @@ export class MlsClient {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Generate multiple key packages at once (for pooling)
+     * Returns a JsValue containing { key_packages: [{ key_package_bytes, lifetime, hash, is_last_resort }] }
+     * Per MLS best practices, clients should maintain a pool of pre-uploaded key packages
+     * @param {number} count
+     * @returns {any}
+     */
+    generate_key_packages(count) {
+        const ret = wasm.mlsclient_generate_key_packages(this.__wbg_ptr, count);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * @returns {Uint8Array}
      */
     get_key_package_bytes() {
@@ -1030,16 +1044,16 @@ export class MlsClient {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * @returns {Uint8Array}
+     * Generate a last-resort key package and return it with lifetime info
+     * Returns a JsValue containing { key_package_bytes, lifetime, hash }
+     * @returns {any}
      */
     generate_last_resort_key_package() {
         const ret = wasm.mlsclient_generate_last_resort_key_package(this.__wbg_ptr);
-        if (ret[3]) {
-            throw takeFromExternrefTable0(ret[2]);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
         }
-        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v1;
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * @param {Uint8Array} group_id_bytes

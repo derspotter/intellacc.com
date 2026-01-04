@@ -20,7 +20,8 @@ export const mlsclient_encrypt_message: (a: number, b: number, c: number, d: num
 export const mlsclient_export_group_info: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const mlsclient_export_storage_state: (a: number) => [number, number, number, number];
 export const mlsclient_generate_external_psk: (a: number, b: number, c: number) => [number, number, number];
-export const mlsclient_generate_last_resort_key_package: (a: number) => [number, number, number, number];
+export const mlsclient_generate_key_packages: (a: number, b: number) => [number, number, number];
+export const mlsclient_generate_last_resort_key_package: (a: number) => [number, number, number];
 export const mlsclient_get_credential_bytes: (a: number) => [number, number, number, number];
 export const mlsclient_get_group_confirmation_tag: (a: number, b: number, c: number) => [number, number, number, number];
 export const mlsclient_get_group_epoch: (a: number, b: number, c: number) => [bigint, number, number];

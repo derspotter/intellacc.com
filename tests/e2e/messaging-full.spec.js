@@ -5,6 +5,49 @@ const USER1 = { email: 'user1@example.com', password: 'password123', name: 'test
 const USER2 = { email: 'user2@example.com', password: 'password123', name: 'testuser2' };
 
 /**
+ * Reset server-side state for test users via shell script
+ */
+async function resetServerState() {
+    const { exec } = require('child_process');
+    return new Promise((resolve, reject) => {
+        exec('./tests/e2e/reset-test-users.sh', (error, stdout, stderr) => {
+            if (error) {
+                console.warn('Reset script warning:', stderr);
+            }
+            console.log('Server state reset:', stdout.includes('Reset complete'));
+            resolve();
+        });
+    });
+}
+
+/**
+ * Clear all browser storage (IndexedDB, localStorage, sessionStorage)
+ */
+async function clearBrowserStorage(page) {
+    await page.goto('http://localhost:5173/#login');
+    await page.waitForTimeout(500);
+
+    await page.evaluate(async () => {
+        localStorage.clear();
+        sessionStorage.clear();
+
+        const databases = await indexedDB.databases();
+        const deletePromises = databases.map(db => {
+            return new Promise((resolve) => {
+                if (!db.name) return resolve();
+                const req = indexedDB.deleteDatabase(db.name);
+                req.onsuccess = () => resolve();
+                req.onerror = () => resolve();
+                req.onblocked = () => resolve();
+            });
+        });
+        await Promise.all(deletePromises);
+    });
+
+    await page.waitForTimeout(500);
+}
+
+/**
  * Helper to log in a user
  */
 async function loginUser(page, user) {
@@ -19,7 +62,17 @@ async function loginUser(page, user) {
 
 test.describe('E2E Messaging', () => {
 
+  test.beforeAll(async () => {
+    // Reset server state once before all tests in this file
+    await resetServerState();
+  });
+
   test('Two users can exchange encrypted messages and history is persisted', async ({ browser }) => {
+    // Clear browser storage for both contexts before starting
+    const tempContext = await browser.newContext();
+    const tempPage = await tempContext.newPage();
+    await clearBrowserStorage(tempPage);
+    await tempContext.close();
     // --- 1. Setup Contexts (Two separate browsers/devices) ---
     const contextAlice = await browser.newContext();
     const pageAlice = await contextAlice.newPage();

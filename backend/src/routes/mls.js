@@ -7,7 +7,7 @@ const authenticateJWT = require('../middleware/auth');
 // Middleware to ensure user is authenticated
 router.use(authenticateJWT);
 
-// Upload Key Package
+// Upload Key Package (single)
 router.post('/key-package', async (req, res) => {
   try {
     const { deviceId, packageData, hash, notBefore, notAfter, isLastResort } = req.body;
@@ -25,6 +25,40 @@ router.post('/key-package', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to upload key package' });
+  }
+});
+
+// Upload Key Packages (bulk)
+router.post('/key-packages', async (req, res) => {
+  try {
+    const { deviceId, keyPackages } = req.body;
+    const userId = req.user.id;
+
+    if (!Array.isArray(keyPackages) || keyPackages.length === 0) {
+      return res.status(400).json({ error: 'keyPackages array required' });
+    }
+    if (keyPackages.length > 100) {
+      return res.status(400).json({ error: 'Maximum 100 key packages per request' });
+    }
+
+    const result = await mlsService.insertKeyPackages(userId, deviceId, keyPackages);
+    res.json({ inserted: result.length, keyPackages: result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to upload key packages' });
+  }
+});
+
+// Get Key Package count (for monitoring pool size)
+router.get('/key-packages/count', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const deviceId = req.query.deviceId || null;
+    const counts = await mlsService.getKeyPackageCount(userId, deviceId);
+    res.json(counts);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to get key package count' });
   }
 });
 

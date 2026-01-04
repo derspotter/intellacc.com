@@ -357,6 +357,19 @@ const predictionsStore = {
       } finally {
         this.state.loading.val = false;
       }
+    },
+
+    reset() {
+      this.state.predictions.val = [];
+      this.state.assignedPredictions.val = [];
+      this.state.events.val = [];
+      this.state.bettingStats.val = { completed_bets: 0, total_assigned: 0, remaining_bets: 5 };
+      this.state.loading.val = false;
+      this.state.loadingEvents.val = false;
+      this.state.loadingAssigned.val = false;
+      this.state.error.val = null;
+      this.state.userPredictions.val = [];
+      this.state.initialFetchDone.val = false;
     }
   }
 };

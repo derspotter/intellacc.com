@@ -2,6 +2,8 @@
 import van from 'vanjs-core';
 import { api } from './api';
 import userStore from '../store/user';
+import postsStore from '../store/posts';
+import predictionsStore from '../store/predictions';
 import { updatePageFromHash } from '../router';
 import { getStore } from '../store';
 import socketService from './socket';
@@ -59,11 +61,13 @@ export async function onLoginSuccess(password = null) {
           // Set up vault store with user ID
           vaultStore.setUserId(profile.id);
 
-          // Bootstrap MLS identity (required before vault setup)
-          await coreCryptoClient.ensureMlsBootstrap(String(profile.id));
-
           // Initialize authenticated socket connection
           socketService.initializeSocket();
+
+          // Start MLS bootstrap in background (don't block login)
+          coreCryptoClient.ensureMlsBootstrap(String(profile.id)).catch(e =>
+            console.warn('[MLS] Background bootstrap failed:', e.message || e)
+          );
 
         // Privacy-Preserving Auth Flow:
         // We cannot check if a vault exists without the password (to derive the key/hash).
@@ -79,7 +83,7 @@ export async function onLoginSuccess(password = null) {
                 console.log('Vault unlocked automatically');
                 unlocked = true;
             } catch (e) {
-                console.log('Vault unlock failed; evaluating next steps...');
+                console.log('[Vault] No existing vault found or unlock failed; will create new vault');
             }
         }
 
@@ -119,33 +123,19 @@ export async function onLoginSuccess(password = null) {
              console.log('Passkey login without vault unlock. Vault remains locked.');
         }
 
-        // 3. Finalize MLS Setup
-        try {
-            // Re-upload Key Package with the now-confirmed Device ID
-            // (ensureMlsBootstrap might have used 'default' or a temp ID)
-            await coreCryptoClient.ensureKeyPackagesFresh();
-            
-            // Start listening for messages
-            if (coreCryptoClient.setupSocketListeners) {
-                coreCryptoClient.setupSocketListeners();
-            }
-        } catch (e) {
-            console.warn('MLS finalization failed:', e);
-        }
+        // MLS finalization (key packages, socket listeners) happens
+        // in background after ensureMlsBootstrap completes
       }
     } catch (profileError) {
       console.warn('Error during post-login vault setup:', profileError);
     }
 
-    // Fetch posts after login
-    try {
-      const postsStore = await getStore('posts');
-      if (postsStore && postsStore.actions && postsStore.actions.fetchPosts) {
-        await postsStore.actions.fetchPosts.call(postsStore);
+    // Fetch posts in background (don't block navigation)
+    getStore('posts').then(postsStore => {
+      if (postsStore?.actions?.fetchPosts) {
+        postsStore.actions.fetchPosts.call(postsStore);
       }
-    } catch (postsError) {
-      console.warn('Could not fetch posts after login:', postsError);
-    }
+    }).catch(() => {});
     
     // Navigate to home page after login
     window.location.hash = 'home';
@@ -223,21 +213,29 @@ export async function register(username, email, password) {
 
 /**
  * Logout the current user
+ * Clears all sensitive data from memory and navigates to login
  */
 export async function logout() {
-  // Lock vault and wipe crypto keys from memory
+  // Lock vault and wipe crypto keys + decrypted messages from memory
   try {
     await vaultService.lockKeys();
   } catch (e) {
     console.warn('Error locking vault on logout:', e);
   }
 
-  // Reset vault store
+  // Reset all stores
   vaultStore.reset();
+  userStore.actions.reset.call(userStore);
+  postsStore.actions.reset.call(postsStore);
+  predictionsStore.actions.reset.call(predictionsStore);
 
+  // Clear auth state
   clearToken();
-  try { socketService.disconnect(); } catch {}
   userProfileState.val = null;
+  isAdminState.val = false;
+
+  // Disconnect socket
+  try { socketService.disconnect(); } catch {}
 
   // Navigate to login page
   window.location.hash = 'login';

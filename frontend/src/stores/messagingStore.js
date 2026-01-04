@@ -52,7 +52,10 @@ const messagingStore = vanX.reactive({
 
   // Search
   searchQuery: '',
-  
+
+  // User name cache (for displaying sender names)
+  userNameCache: {},
+
   // Calculated fields will be added after store creation
   
   // Store methods for managing state
@@ -401,6 +404,7 @@ const messagingStore = vanX.reactive({
   },
 
   clearCache() {
+    // SECURITY: Clear all potentially sensitive data from memory
     messagingStore.conversations = [];
     messagingStore.conversationsById = {};
     messagingStore.conversationIds = [];
@@ -408,7 +412,7 @@ const messagingStore = vanX.reactive({
     messagingStore.selectedConversationId = null;
     messagingStore.typingUsers = [];
     messagingStore.error = '';
-    // Clear MLS state too
+    // Clear MLS state (decrypted messages!)
     messagingStore.mlsGroups = [];
     messagingStore.mlsGroupsById = {};
     messagingStore.selectedMlsGroupId = null;
@@ -419,6 +423,10 @@ const messagingStore = vanX.reactive({
     messagingStore.dmSearchQuery = '';
     messagingStore.dmSearchResults = [];
     messagingStore.showDmModal = false;
+    // Clear user cache
+    messagingStore.userNameCache = {};
+    messagingStore.currentUserId = null;
+    console.log('[MessagingStore] Cache cleared - all sensitive data wiped');
   }
 });
 

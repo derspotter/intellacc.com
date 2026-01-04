@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
+import viteCompression from 'vite-plugin-compression';
 import path from 'path';
 
 export default defineConfig({
@@ -10,7 +11,21 @@ export default defineConfig({
   },
   plugins: [
     wasm(),
-    topLevelAwait()
+    topLevelAwait(),
+    // Brotli compression (best compression, slower)
+    viteCompression({
+      algorithm: 'brotliCompress',
+      ext: '.br',
+      threshold: 1024, // Only compress files > 1KB
+      filter: /\.(js|css|html|wasm)$/i,
+    }),
+    // Gzip fallback for older clients
+    viteCompression({
+      algorithm: 'gzip',
+      ext: '.gz',
+      threshold: 1024,
+      filter: /\.(js|css|html|wasm)$/i,
+    }),
   ],
   resolve: {
     alias: {

@@ -473,6 +473,19 @@ const postsStore = {
       } finally {
         this.state.loading.val = false;
       }
+    },
+
+    reset() {
+      this.state.posts.val = [];
+      this.state.loading.val = false;
+      this.state.error.val = null;
+      this.state.comments.val = {};
+      this.state.commentLoading.val = {};
+      this.state.commentListVisible.val = {};
+      this.state.commentFormVisible.val = {};
+      this.state.allCommentsExpanded.val = {};
+      this.state.initialFetchAttempted.val = false;
+      this.state.editingPostId.val = null;
     }
   } // End actions
 };

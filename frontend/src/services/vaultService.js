@@ -8,15 +8,17 @@
 import init, { MlsClient } from 'openmls-wasm';
 import vaultStore from '../stores/vaultStore.js';
 import coreCryptoClient from './mls/coreCryptoClient.js';
+import messagingStore from '../stores/messagingStore.js';
 import { initIdleAutoLock, stopIdleAutoLock, loadIdleLockConfig } from './idleLock.js';
 import { api } from './api.js';
 
 let wasmInitialized = false;
 
 const KEYSTORE_DB_NAME = 'intellacc_keystore';
-const KEYSTORE_DB_VERSION = 6; // Bump for Split-Key Schema
+const KEYSTORE_DB_VERSION = 7; // Bump for Granular MLS Storage
 const KEYSTORE_STORE_NAME = 'device_keystore';
 const MESSAGES_STORE_NAME = 'encrypted_messages';
+const MLS_GRANULAR_STORE_NAME = 'mls_granular_storage';
 
 class VaultService {
     constructor() {
@@ -30,6 +32,14 @@ class VaultService {
 
     getDeviceId() {
         return this.deviceId;
+    }
+
+    /**
+     * Check if the vault is currently unlocked (has a compositeKey)
+     * @returns {boolean} True if vault is unlocked
+     */
+    isUnlocked() {
+        return this.compositeKey !== null;
     }
 
     didCreateMasterKey() {
@@ -71,8 +81,14 @@ class VaultService {
                 if (!db.objectStoreNames.contains(MESSAGES_STORE_NAME)) {
                     const store = db.createObjectStore(MESSAGES_STORE_NAME, { keyPath: 'id', autoIncrement: true });
                     store.createIndex('groupId', 'groupId', { unique: false });
-                    store.createIndex('deviceId', 'deviceId', { unique: false }); 
+                    store.createIndex('deviceId', 'deviceId', { unique: false });
                     store.createIndex('timestamp', 'timestamp', { unique: false });
+                }
+                // V7: Granular MLS storage - each entity stored separately
+                if (!db.objectStoreNames.contains(MLS_GRANULAR_STORE_NAME)) {
+                    const store = db.createObjectStore(MLS_GRANULAR_STORE_NAME, { keyPath: 'id' });
+                    store.createIndex('deviceId', 'deviceId', { unique: false });
+                    store.createIndex('category', 'category', { unique: false });
                 }
             };
         });
@@ -296,6 +312,11 @@ class VaultService {
         loadIdleLockConfig();
         initIdleAutoLock();
         console.log('[Keystore] Setup complete (Split-Key Mode)');
+
+        // Now that deviceId is set, upload key packages in background
+        coreCryptoClient.ensureKeyPackagesFresh().catch(e =>
+            console.warn('[MLS] Key package upload failed:', e.message || e)
+        );
     }
 
     async saveCurrentState() {
@@ -384,6 +405,168 @@ class VaultService {
             } catch (e) { return null; }
         }));
         return messages.filter(m => m !== null).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    }
+
+    /**
+     * Persist granular MLS storage events to IndexedDB
+     * Each event is encrypted individually with CompositeKey
+     * @param {Array} events - Array of StorageEvent objects from WASM drain_storage_events()
+     * @returns {Promise<number>} Number of events persisted
+     */
+    async persistGranularEvents(events) {
+        if (!this.compositeKey || !this.deviceId) {
+            console.warn('[Vault] persistGranularEvents skipped (vault locked)');
+            return 0;
+        }
+        if (!events || events.length === 0) return 0;
+
+        await this.initDB();
+
+        // Phase 1: Encrypt all events BEFORE starting the transaction
+        // (IndexedDB transactions auto-commit when awaiting async operations)
+        const preparedRecords = [];
+        const deletions = [];
+
+        for (const event of events) {
+            const recordId = `${this.deviceId}:${event.category}:${event.key}`;
+
+            if (event.value === null || event.value === undefined) {
+                deletions.push(recordId);
+            } else {
+                const valueBytes = new Uint8Array(event.value);
+                const iv = window.crypto.getRandomValues(new Uint8Array(12));
+                const encrypted = await window.crypto.subtle.encrypt(
+                    { name: 'AES-GCM', iv },
+                    this.compositeKey,
+                    valueBytes
+                );
+
+                preparedRecords.push({
+                    id: recordId,
+                    deviceId: this.deviceId,
+                    category: event.category,
+                    key: event.key,
+                    encryptedValue: {
+                        iv: Array.from(iv),
+                        ciphertext: Array.from(new Uint8Array(encrypted))
+                    },
+                    updatedAt: Date.now()
+                });
+            }
+        }
+
+        // Phase 2: Write all records synchronously in a single transaction
+        return new Promise((resolve, reject) => {
+            try {
+                const tx = this.db.transaction([MLS_GRANULAR_STORE_NAME], 'readwrite');
+                const store = tx.objectStore(MLS_GRANULAR_STORE_NAME);
+
+                // Perform all deletions
+                for (const recordId of deletions) {
+                    store.delete(recordId);
+                }
+
+                // Perform all writes
+                for (const record of preparedRecords) {
+                    store.put(record);
+                }
+
+                const processed = deletions.length + preparedRecords.length;
+
+                tx.oncomplete = () => {
+                    if (processed > 0) {
+                        console.log(`[Vault] Persisted ${processed} granular events`);
+                    }
+                    resolve(processed);
+                };
+                tx.onerror = () => reject(tx.error);
+            } catch (e) {
+                reject(e);
+            }
+        });
+    }
+
+    /**
+     * Load all granular MLS storage events for current device
+     * Decrypts and returns events in format suitable for WASM import_granular_events()
+     * @returns {Promise<Array>} Array of StorageEvent objects
+     */
+    async loadGranularEvents() {
+        if (!this.compositeKey || !this.deviceId) {
+            console.warn('[Vault] loadGranularEvents skipped (vault locked)');
+            return [];
+        }
+
+        await this.initDB();
+
+        return new Promise(async (resolve, reject) => {
+            try {
+                const tx = this.db.transaction([MLS_GRANULAR_STORE_NAME], 'readonly');
+                const store = tx.objectStore(MLS_GRANULAR_STORE_NAME);
+                const index = store.index('deviceId');
+                const req = index.getAll(this.deviceId);
+
+                req.onsuccess = async () => {
+                    const records = req.result || [];
+                    const events = [];
+
+                    for (const record of records) {
+                        try {
+                            const iv = new Uint8Array(record.encryptedValue.iv);
+                            const ciphertext = new Uint8Array(record.encryptedValue.ciphertext);
+                            const decrypted = await window.crypto.subtle.decrypt(
+                                { name: 'AES-GCM', iv },
+                                this.compositeKey,
+                                ciphertext
+                            );
+
+                            events.push({
+                                key: record.key,
+                                value: Array.from(new Uint8Array(decrypted)),
+                                category: record.category
+                            });
+                        } catch (e) {
+                            console.warn('[Vault] Failed to decrypt granular event:', record.id, e);
+                        }
+                    }
+
+                    console.log(`[Vault] Loaded ${events.length} granular events`);
+                    resolve(events);
+                };
+                req.onerror = () => reject(req.error);
+            } catch (e) {
+                reject(e);
+            }
+        });
+    }
+
+    /**
+     * Clear all granular events for current device
+     * Called on logout or device reset
+     */
+    async clearGranularEvents() {
+        if (!this.deviceId) return;
+
+        await this.initDB();
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction([MLS_GRANULAR_STORE_NAME], 'readwrite');
+            const store = tx.objectStore(MLS_GRANULAR_STORE_NAME);
+            const index = store.index('deviceId');
+            const req = index.getAllKeys(this.deviceId);
+
+            req.onsuccess = () => {
+                const keys = req.result || [];
+                for (const key of keys) {
+                    store.delete(key);
+                }
+            };
+            tx.oncomplete = () => {
+                console.log('[Vault] Cleared granular events');
+                resolve();
+            };
+            tx.onerror = () => reject(tx.error);
+        });
     }
 
     async deriveWrappingKey(password, salt) {
@@ -504,14 +687,18 @@ class VaultService {
 
     async lockKeys() {
         stopIdleAutoLock();
-        coreCryptoClient.wipeMemory();
+
+        // SECURITY: Wipe ALL decrypted data from memory
+        coreCryptoClient.wipeMemory();      // MLS crypto keys
+        messagingStore.clearCache();         // Decrypted messages, groups, DMs
+
         this.masterKey = null;
         this.localKey = null;
         this.compositeKey = null;
         this.deviceKey = null; // Alias
         this.clearDeviceId();
         vaultStore.setLocked(true);
-        console.log('[Keystore] Locked');
+        console.log('[Keystore] Locked - all sensitive data wiped');
     }
     
     // PRF placeholders

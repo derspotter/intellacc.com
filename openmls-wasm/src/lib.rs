@@ -19,6 +19,7 @@ use std::sync::RwLock;
 use openmls::group::{MlsGroupCreateConfig, MlsGroupJoinConfig, StagedWelcome, GroupId, StagedCommit};
 use openmls::credentials::{Credential, CredentialType, BasicCredential};
 use openmls::extensions::{Extension, ExtensionType, Extensions, ExternalSender};
+use openmls::prelude::Capabilities;
 use openmls::key_packages::{KeyPackage, KeyPackageIn, KeyPackageBundle, Lifetime};
 use openmls::treesync::LeafNodeParameters;
 use openmls::treesync::LeafNodeSource;
@@ -162,6 +163,21 @@ struct ProposalSummary {
     aad_hex: String,
     proposal_type: String,
     sender_type: String,
+}
+
+/// Single key package with its metadata - used for batch generation
+#[derive(serde::Serialize)]
+struct KeyPackageInfo {
+    key_package_bytes: Vec<u8>,
+    hash: String,
+    lifetime: LifetimeInfo,
+    is_last_resort: bool,
+}
+
+/// Result from generating multiple key packages
+#[derive(serde::Serialize)]
+struct GeneratedKeyPackages {
+    key_packages: Vec<KeyPackageInfo>,
 }
 
 fn lifetime_info_from(lifetime: &Lifetime) -> LifetimeInfo {
@@ -309,7 +325,7 @@ pub struct MlsClient {
     pub staged_commits: HashMap<Vec<u8>, StagedCommit>,
 
     #[wasm_bindgen(skip)]
-    pub staged_welcomes: HashMap<String, PendingStagedWelcome>,
+    staged_welcomes: HashMap<String, PendingStagedWelcome>,
 }
 
 #[wasm_bindgen]
@@ -878,7 +894,9 @@ impl MlsClient {
         Ok(())
     }
 
-    pub fn generate_last_resort_key_package(&mut self) -> Result<Vec<u8>, JsValue> {
+    /// Generate a last-resort key package and return it with lifetime info
+    /// Returns a JsValue containing { key_package_bytes, lifetime, hash }
+    pub fn generate_last_resort_key_package(&mut self) -> Result<JsValue, JsValue> {
         let provider = &self.provider;
 
         let signature_keypair = self.signature_keypair.as_ref()
@@ -892,9 +910,20 @@ impl MlsClient {
             signature_key: signature_keypair.to_public_vec().into(),
         };
 
+        // Build capabilities that include LastResort extension type
+        // Per RFC 9420, the leaf node must advertise support for any extension types
+        // used in the key package. mark_as_last_resort() adds LastResort to key_package_extensions.
+        let capabilities = Capabilities::new(
+            None, // versions - use defaults
+            None, // ciphersuites - use defaults
+            Some(&[ExtensionType::LastResort]), // extensions - advertise LastResort support
+            None, // proposals - use defaults
+            None, // credentials - use defaults
+        );
+
         let key_package_bundle = KeyPackage::builder()
             .key_package_lifetime(Lifetime::new(KEY_PACKAGE_LIFETIME_SECONDS))
-            .key_package_extensions(Extensions::default())
+            .leaf_node_capabilities(capabilities)
             .mark_as_last_resort()
             .build(
                 Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519,
@@ -907,14 +936,100 @@ impl MlsClient {
         let key_package_ref = key_package_bundle.key_package();
         let hash = key_package_ref.hash_ref(provider.crypto())
             .map_err(|e| JsValue::from_str(&format!("Error hashing key package: {:?}", e)))?;
+        let hash_hex = hex::encode(hash.as_slice());
 
-        log(&format!("[WASM] generate_last_resort_key_package: Writing KeyPackage Hash: {}", hex::encode(hash.as_slice())));
+        log(&format!("[WASM] generate_last_resort_key_package: Writing KeyPackage Hash: {}", &hash_hex));
 
         provider.storage().write_key_package(&hash, &key_package_bundle)
             .map_err(|e| JsValue::from_str(&format!("Error saving last-resort key package bundle: {:?}", e)))?;
 
-        key_package_ref.tls_serialize_detached()
-            .map_err(|e| JsValue::from_str(&format!("Error serializing last-resort key package: {:?}", e)))
+        let key_package_bytes = key_package_ref.tls_serialize_detached()
+            .map_err(|e| JsValue::from_str(&format!("Error serializing last-resort key package: {:?}", e)))?;
+
+        // Return the key package bytes along with lifetime info (we know it since we set it)
+        let lifetime = key_package_ref.life_time();
+        let result = KeyPackageInfo {
+            key_package_bytes,
+            hash: hash_hex,
+            lifetime: lifetime_info_from(lifetime),
+            is_last_resort: true,
+        };
+
+        serde_wasm_bindgen::to_value(&result)
+            .map_err(|e| JsValue::from_str(&format!("Error serializing result: {:?}", e)))
+    }
+
+    /// Generate multiple key packages at once (for pooling)
+    /// Returns a JsValue containing { key_packages: [{ key_package_bytes, lifetime, hash, is_last_resort }] }
+    /// Per MLS best practices, clients should maintain a pool of pre-uploaded key packages
+    pub fn generate_key_packages(&mut self, count: u32) -> Result<JsValue, JsValue> {
+        if count == 0 || count > 100 {
+            return Err(JsValue::from_str("Count must be between 1 and 100"));
+        }
+
+        let provider = &self.provider;
+
+        let signature_keypair = self.signature_keypair.as_ref()
+            .ok_or_else(|| JsValue::from_str("No signature keypair available"))?;
+
+        let credential = self.credential.as_ref()
+            .ok_or_else(|| JsValue::from_str("No credential available"))?;
+
+        let mut key_packages = Vec::with_capacity(count as usize);
+
+        for i in 0..count {
+            let credential_with_key = CredentialWithKey {
+                credential: credential.clone(),
+                signature_key: signature_keypair.to_public_vec().into(),
+            };
+
+            let key_package_bundle = KeyPackage::builder()
+                .key_package_lifetime(Lifetime::new(KEY_PACKAGE_LIFETIME_SECONDS))
+                .key_package_extensions(Extensions::default())
+                .build(
+                    Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519,
+                    provider,
+                    signature_keypair,
+                    credential_with_key,
+                )
+                .map_err(|e| JsValue::from_str(&format!("Error creating key package {}: {:?}", i, e)))?;
+
+            let key_package_ref = key_package_bundle.key_package();
+            let hash = key_package_ref.hash_ref(provider.crypto())
+                .map_err(|e| JsValue::from_str(&format!("Error hashing key package {}: {:?}", i, e)))?;
+            let hash_hex = hex::encode(hash.as_slice());
+
+            provider.storage().write_key_package(&hash, &key_package_bundle)
+                .map_err(|e| JsValue::from_str(&format!("Error saving key package {}: {:?}", i, e)))?;
+
+            let key_package_bytes = key_package_ref.tls_serialize_detached()
+                .map_err(|e| JsValue::from_str(&format!("Error serializing key package {}: {:?}", i, e)))?;
+
+            let lifetime = key_package_ref.life_time();
+            key_packages.push(KeyPackageInfo {
+                key_package_bytes,
+                hash: hash_hex,
+                lifetime: lifetime_info_from(lifetime),
+                is_last_resort: false,
+            });
+        }
+
+        log(&format!("[WASM] Generated {} key packages", count));
+
+        // Keep the first one as the "current" key package if we don't have one
+        if self.key_package.is_none() {
+            if let Some(first) = key_packages.first() {
+                if let Ok(kp_in) = KeyPackageIn::tls_deserialize(&mut &first.key_package_bytes[..]) {
+                    if let Ok(kp) = kp_in.validate(provider.crypto(), ProtocolVersion::Mls10) {
+                        self.key_package = Some(kp);
+                    }
+                }
+            }
+        }
+
+        let result = GeneratedKeyPackages { key_packages };
+        serde_wasm_bindgen::to_value(&result)
+            .map_err(|e| JsValue::from_str(&format!("Error serializing result: {:?}", e)))
     }
 
     // ... SOTA Security Features ...

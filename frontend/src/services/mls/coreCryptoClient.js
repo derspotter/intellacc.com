@@ -5,6 +5,10 @@ import { api } from '../api.js';
 const KEY_PACKAGE_RENEWAL_WINDOW_SECONDS = 60 * 60 * 24 * 7;
 const MAX_LEAF_NODE_LIFETIME_RANGE_SECONDS = (60 * 60 * 24 * 28 * 3) + (60 * 60);
 
+// Key package pool settings
+const KEY_PACKAGE_POOL_TARGET = 10; // Target number of key packages to maintain
+const KEY_PACKAGE_POOL_MIN = 3;     // Threshold below which we refill
+
 /**
  * Core Crypto Client for OpenMLS integration
  * Handles WASM initialization and wraps the Rust MlsClient
@@ -152,18 +156,31 @@ class CoreCryptoClient {
     // initDB removed - we rely on VaultService/Memory only
 
     /**
-     * Save client state (No-op: Persistence is handled by VaultService)
+     * Save client state - drains granular events and persists them encrypted
+     * This is efficient: only changed entities are persisted, not the full state
      */
     async saveState() {
-        // We do not save to unencrypted IndexedDB anymore.
-        // State is exported via exportStateForVault and saved encrypted by VaultService.
-        // We ensure granular events are drained from WASM memory to avoid buildup, but we drop them.
+        if (!this.client) return;
+
         try {
-            if (this.client) {
-                this.client.drain_storage_events(); 
+            // Check if vault is unlocked BEFORE draining events
+            // drain_storage_events() is destructive - events are removed from WASM
+            // If we drain when vault is locked, events are lost forever
+            const vaultService = (await import('../vaultService.js')).default;
+            if (!vaultService.isUnlocked()) {
+                // Don't drain events yet - let them accumulate until vault unlocks
+                return;
+            }
+
+            // Drain events from WASM (sync operation)
+            const events = this.client.drain_storage_events();
+
+            if (events && events.length > 0) {
+                // Persist to encrypted IndexedDB (async)
+                await vaultService.persistGranularEvents(events);
             }
         } catch (e) {
-            console.warn('[MLS] Failed to drain events:', e);
+            console.warn('[MLS] Failed to persist granular events:', e);
         }
     }
 
@@ -188,6 +205,13 @@ class CoreCryptoClient {
         if (this.client && this.identityName === username) {
             console.log('MLS Client already initialized for:', username);
             this.setupSocketListeners();
+            // Only refresh key packages if deviceId is available (otherwise wait for vault setup)
+            const vaultService = (await import('../vaultService.js')).default;
+            if (vaultService.getDeviceId()) {
+                this.ensureKeyPackagesFresh().catch(e =>
+                    console.warn('[MLS] Key package refresh failed:', e.message || e)
+                );
+            }
             return;
         }
 
@@ -201,12 +225,7 @@ class CoreCryptoClient {
 
         // Try to load existing state for this specific user
         if (await this.loadState(username)) {
-            // Successfully loaded - ensure key packages are fresh and uploaded
-            try {
-                await this.ensureKeyPackagesFresh();
-            } catch (uploadError) {
-                console.warn('Failed to upload key package:', uploadError);
-            }
+            // Successfully loaded - key packages will be uploaded after vault setup
             this.setupSocketListeners();
             return;
         }
@@ -235,15 +254,16 @@ class CoreCryptoClient {
                 console.warn('[MLS] Could not save identity to vault:', vaultErr.message);
             }
 
-            // Upload key package to server
-            try {
-                await this.ensureKeyPackagesFresh();
-            } catch (uploadError) {
-                console.warn('Failed to upload key package:', uploadError);
-                // Continue even if upload fails - can retry later
-            }
+            // Setup socket listeners for new identity
+            this.setupSocketListeners();
 
-            // Note: Socket listeners should be set up explicitly after device registration
+            // Only upload key packages if deviceId is available (otherwise wait for vault setup)
+            const vaultSvc = (await import('../vaultService.js')).default;
+            if (vaultSvc.getDeviceId()) {
+                this.ensureKeyPackagesFresh().catch(e =>
+                    console.warn('[MLS] Key package upload failed:', e.message || e)
+                );
+            }
         } catch (error) {
             console.error('Error bootstrapping MLS client:', error);
             throw error;
@@ -327,15 +347,30 @@ class CoreCryptoClient {
             return null;
         }
 
-        const { keyPackageBytes: providedBytes = null, isLastResort = false } = options;
+        const {
+            keyPackageBytes: providedBytes = null,
+            isLastResort = false,
+            precomputedLifetime = null,
+            precomputedHash = null
+        } = options;
         const keyPackageBytes = providedBytes || this.getKeyPackageBytes();
         const keyPackageHex = Array.from(keyPackageBytes)
             .map(b => b.toString(16).padStart(2, '0'))
             .join('');
-        const hash = await this.computeHash(keyPackageBytes);
-        const lifetimeInfo = providedBytes
-            ? this.getKeyPackageLifetimeInfoFromBytes(keyPackageBytes)
-            : this.getKeyPackageLifetimeInfo();
+        // Use pre-computed values if available, otherwise compute them
+        const hash = precomputedHash || await this.computeHash(keyPackageBytes);
+        let lifetimeInfo = precomputedLifetime || null;
+        if (!lifetimeInfo) {
+            try {
+                lifetimeInfo = providedBytes
+                    ? this.getKeyPackageLifetimeInfoFromBytes(keyPackageBytes)
+                    : this.getKeyPackageLifetimeInfo();
+            } catch (e) {
+                // Last-resort key packages may have extensions that can't be parsed
+                // WASM errors are JsValue strings, not Error objects
+                console.warn('[MLS] Could not extract lifetime from key package:', e.message || e);
+            }
+        }
 
         // Format for postgres bytea: \x prefix
         const packageData = '\\x' + keyPackageHex;
@@ -387,22 +422,141 @@ class CoreCryptoClient {
         if (!regenerated) {
             await this.ensureLastResortKeyPackage();
         }
+
+        // Check and refill key package pool in background (don't block login)
+        this.ensureKeyPackagePool().catch(e =>
+            console.warn('[MLS] Background pool refill failed:', e.message || e)
+        );
     }
 
     async ensureLastResortKeyPackage() {
         if (!this.client) throw new Error('Client not initialized');
         try {
-            const lastResortBytes = this.client.generate_last_resort_key_package();
+            // generate_last_resort_key_package now returns { key_package_bytes, lifetime, hash, is_last_resort }
+            const result = this.client.generate_last_resort_key_package();
             await this.saveState();
-            try {
-                const vaultService = (await import('../vaultService.js')).default;
-                await vaultService.saveCurrentState();
-            } catch (e) {
-                console.warn('[MLS] Failed to persist last-resort key package:', e);
-            }
-            await this.uploadKeyPackage({ keyPackageBytes: lastResortBytes, isLastResort: true });
+            // Pass the pre-computed lifetime and hash to avoid re-parsing
+            await this.uploadKeyPackage({
+                keyPackageBytes: new Uint8Array(result.key_package_bytes),
+                isLastResort: true,
+                precomputedLifetime: result.lifetime,
+                precomputedHash: result.hash
+            });
         } catch (e) {
-            console.warn('[MLS] Failed to generate last-resort key package:', e);
+            console.warn('[MLS] Failed to generate last-resort key package:', e.message || e);
+        }
+    }
+
+    /**
+     * Upload multiple key packages to the server (bulk)
+     * @param {Array} keyPackages - Array of {key_package_bytes, lifetime, hash}
+     * @returns {Promise<Object>} Server response with inserted count
+     */
+    async uploadKeyPackages(keyPackages) {
+        if (!this.client) throw new Error('Client not initialized');
+        if (!keyPackages || keyPackages.length === 0) return { inserted: 0 };
+
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+        if (!deviceId) {
+            console.warn('[MLS] Skipping bulk key package upload (device ID not set)');
+            return null;
+        }
+
+        // Format key packages for the API
+        const formattedPackages = keyPackages.map(kp => {
+            const bytes = new Uint8Array(kp.key_package_bytes);
+            const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+            return {
+                packageData: '\\x' + hex,
+                hash: kp.hash,
+                notBefore: kp.lifetime?.not_before ?? null,
+                notAfter: kp.lifetime?.not_after ?? null,
+                isLastResort: false
+            };
+        });
+
+        const response = await fetch('/api/mls/key-packages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                deviceId,
+                keyPackages: formattedPackages
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Failed to upload key packages');
+        }
+
+        const result = await response.json();
+        console.log(`[MLS] Bulk uploaded ${result.inserted} key packages`);
+        return result;
+    }
+
+    /**
+     * Get the current key package count from the server
+     * @returns {Promise<{regular: number, lastResort: number}>}
+     */
+    async getKeyPackageCount() {
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+
+        const url = deviceId
+            ? `/api/mls/key-packages/count?deviceId=${encodeURIComponent(deviceId)}`
+            : '/api/mls/key-packages/count';
+
+        const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Failed to get key package count');
+        }
+
+        return response.json();
+    }
+
+    /**
+     * Ensure the key package pool is adequately filled
+     * Generates and uploads new key packages if below threshold
+     */
+    async ensureKeyPackagePool() {
+        if (!this.client) throw new Error('Client not initialized');
+
+        try {
+            const counts = await this.getKeyPackageCount();
+            console.log(`[MLS] Key package pool: ${counts.regular} regular, ${counts.lastResort} last-resort`);
+
+            if (counts.regular >= KEY_PACKAGE_POOL_MIN) {
+                console.log('[MLS] Key package pool is sufficient');
+                return;
+            }
+
+            // Calculate how many to generate
+            const needed = KEY_PACKAGE_POOL_TARGET - counts.regular;
+            console.log(`[MLS] Generating ${needed} new key packages to refill pool`);
+
+            // Generate new key packages using WASM
+            const result = this.client.generate_key_packages(needed);
+            await this.saveState();
+
+            // Upload in bulk
+            await this.uploadKeyPackages(result.key_packages);
+            console.log(`[MLS] Key package pool refilled with ${result.key_packages.length} packages`);
+        } catch (e) {
+            console.warn('[MLS] Failed to ensure key package pool:', e.message || e);
         }
     }
 
@@ -528,17 +682,8 @@ class CoreCryptoClient {
 
             const groupData = await response.json();
 
-            // Persist state to IndexedDB
+            // Persist state (granular events)
             await this.saveState();
-
-            // Save to vault if unlocked (dynamic import to avoid circular dependency)
-            try {
-                const vaultService = (await import('../vaultService.js')).default;
-                await vaultService.saveCurrentState();
-                console.log('[MLS] Group state saved to vault');
-            } catch (vaultErr) {
-                console.warn('[MLS] Could not save to vault:', vaultErr.message);
-            }
 
             try {
                 await this.syncGroupMembers(groupId);
@@ -707,12 +852,6 @@ class CoreCryptoClient {
         }
 
         await this.saveState();
-
-        try {
-            await vaultService.saveCurrentState();
-        } catch (vaultErr) {
-            console.warn('[MLS] Could not save external commit state to vault:', vaultErr.message);
-        }
 
         try {
             await this.syncGroupMembers(finalGroupId);
@@ -1008,10 +1147,6 @@ class CoreCryptoClient {
                     // Save state after EACH member add to persist the new epoch
                     await this.saveState();
                     try {
-                        const vaultService = (await import('../vaultService.js')).default;
-                        await vaultService.saveCurrentState();
-                    } catch (e) {}
-                    try {
                         await this.syncGroupMembers(groupId);
                     } catch (syncErr) {
                         console.warn('[MLS] Failed to sync group members:', syncErr);
@@ -1173,14 +1308,6 @@ class CoreCryptoClient {
         // Regenerate KeyPackage (it was consumed)
         await this.regenerateKeyPackage();
 
-        // Save to vault
-        try {
-            const vaultService = (await import('../vaultService.js')).default;
-            await vaultService.saveCurrentState();
-        } catch (e) {
-            console.warn('[MLS] Could not save to vault:', e.message);
-        }
-
         // Sync members
         try {
             await this.syncGroupMembers(groupId);
@@ -1284,17 +1411,8 @@ class CoreCryptoClient {
         this.client.regenerate_key_package();
         console.log('[MLS] KeyPackage regenerated');
 
-        // Save updated state (drains events)
+        // Save updated state (granular events)
         await this.saveState();
-
-        // CRITICAL: Save to vault so new private key is persisted
-        try {
-            const vaultService = (await import('../vaultService.js')).default;
-            await vaultService.saveCurrentState();
-            console.log('[MLS] New KeyPackage state saved to vault');
-        } catch (e) {
-            console.warn('[MLS] Failed to save new KeyPackage to vault:', e);
-        }
 
         // Upload new KeyPackage to server
         try {
@@ -1380,12 +1498,12 @@ class CoreCryptoClient {
         try {
             this.client.store_sent_message(groupIdBytes, String(messageId), plaintext);
             console.log('[MLS] Stored sent message for history:', messageId);
-            
-            // Save state to persist sent message
+
+            // Save state to persist sent message (granular)
+            await this.saveState();
+
+            // Persist message history to vault
             const vaultService = (await import('../vaultService.js')).default;
-            await vaultService.saveCurrentState();
-            
-            // Persist message history
             await vaultService.persistMessage({
                 id: messageId,
                 groupId: groupIdValue,
@@ -2220,15 +2338,6 @@ class CoreCryptoClient {
             console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
         }
 
-        // Persist to vault if unlocked
-        try {
-            const vaultService = (await import('../vaultService.js')).default;
-            await vaultService.saveCurrentState();
-            console.log('[MLS] Commit state saved to vault');
-        } catch (vaultErr) {
-            console.warn('[MLS] Could not save commit state to vault:', vaultErr.message);
-        }
-
         try {
             await this.syncGroupMembers(groupId);
         } catch (syncErr) {
@@ -2395,12 +2504,6 @@ class CoreCryptoClient {
 
         await this.saveState();
 
-        try {
-            await vaultService.saveCurrentState();
-        } catch (vaultErr) {
-            console.warn('[MLS] Could not save commit state to vault:', vaultErr.message);
-        }
-
         return { commitBytes, welcomeBytes, groupInfoBytes, failedRecipients };
     }
 
@@ -2527,10 +2630,9 @@ class CoreCryptoClient {
     }
 
     /**
-     * Export MLS state for vault encryption
-     * Returns a plain object with arrays (for JSON serialization)
-     * Includes identity AND full storage state (groups, keys, etc.)
-     * @returns {Promise<Object|null>} State object or null if no state
+     * Export MLS identity for vault encryption (identity only, no storage state)
+     * Storage state is persisted via granular events for efficiency
+     * @returns {Promise<Object|null>} Identity object or null if no state
      */
     async exportStateForVault() {
         console.log('[MLS] exportStateForVault called, client:', !!this.client, 'identity:', this.identityName);
@@ -2545,20 +2647,14 @@ class CoreCryptoClient {
             const bundle = this.client.get_key_package_bundle_bytes();
             const signatureKey = this.client.get_signature_keypair_bytes();
 
-            // Export full storage state (includes groups, epoch secrets, etc.)
-            const storageState = this.client.export_storage_state();
-            console.log('[MLS] exportStateForVault: storageState bytes:', storageState.length);
-
-            // Log the group count from the exported storage state
-            // The format is: [MemoryStorage bytes][8-byte group count][group IDs...]
-            // We need to find where the group count is - it's after MemoryStorage
-            // This is a simplified check - just log the state size
+            // NOTE: storageState is NO LONGER included here
+            // All storage (groups, keys, epoch secrets) is persisted via granular events
+            // This makes exports small (~1KB) and saves efficient
 
             return {
                 credential: Array.from(credential),
                 bundle: Array.from(bundle),
                 signatureKey: Array.from(signatureKey),
-                storageState: Array.from(storageState),
                 identityName: this.identityName,
                 exportedAt: Date.now()
             };
@@ -2592,11 +2688,19 @@ class CoreCryptoClient {
             this.client.restore_identity(credential, bundle, signatureKey);
             this.identityName = stateObj.identityName;
 
-            // Restore full storage state (groups, epoch secrets, etc.) if available
-            if (stateObj.storageState && stateObj.storageState.length > 0) {
-                const storageState = new Uint8Array(stateObj.storageState);
-                this.client.import_storage_state(storageState);
-                console.log('[MLS] Full storage state restored from vault');
+            // Load and apply granular events (all storage state comes from here)
+            // This is efficient: only changed entities are stored individually
+            try {
+                const vaultService = (await import('../vaultService.js')).default;
+                const granularEvents = await vaultService.loadGranularEvents();
+                if (granularEvents && granularEvents.length > 0) {
+                    this.client.import_granular_events(granularEvents);
+                    console.log('[MLS] Granular storage restored:', granularEvents.length, 'events');
+                } else {
+                    console.log('[MLS] No granular events found (fresh identity)');
+                }
+            } catch (granularErr) {
+                console.warn('[MLS] Could not load granular events:', granularErr.message);
             }
 
             // Set up socket listeners
@@ -2607,14 +2711,8 @@ class CoreCryptoClient {
             const processedIds = await this.syncMessages();
             if (processedIds.length > 0) {
                 console.log('[MLS] Processed pending invites after vault restore:', processedIds.length);
-                // Save updated state with new groups to vault
-                try {
-                    const vaultService = (await import('../vaultService.js')).default;
-                    await vaultService.saveCurrentState();
-                    console.log('[MLS] New group state saved to vault');
-                } catch (vaultErr) {
-                    console.warn('[MLS] Could not save new group state to vault:', vaultErr.message);
-                }
+                // Save updated state with new groups (uses granular persistence)
+                await this.saveState();
             }
 
             console.log('[MLS] State restored from vault for:', this.identityName);
@@ -2746,6 +2844,7 @@ class CoreCryptoClient {
         this.confirmationTags.clear();
         this.remoteConfirmationTags.clear();
         this.sentConfirmationTags.clear();
+        this.messageHandlers = [];  // Clear callback references
         console.log('[MLS] Memory wiped');
     }
 
@@ -2985,4 +3084,11 @@ class CoreCryptoClient {
     }
 }
 
-export default new CoreCryptoClient();
+const coreCryptoClient = new CoreCryptoClient();
+
+// Expose to window for E2E testing
+if (typeof window !== 'undefined') {
+    window.coreCryptoClient = coreCryptoClient;
+}
+
+export default coreCryptoClient;

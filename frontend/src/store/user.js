@@ -97,13 +97,20 @@ const userStore = {
     
     async fetchFollowing() {
       if (!isLoggedInState.val || !this.state.profile.val) return;
-      
+
       try {
         const following = await api.users.getFollowing(this.state.profile.val.id);
         this.state.following.val = Array.isArray(following) ? following : [];
       } catch (error) {
         this.state.following.val = []; // Empty array on error
       }
+    },
+
+    reset() {
+      this.state.profile.val = null;
+      this.state.followers.val = [];
+      this.state.following.val = [];
+      this.state.loading.val = false;
     }
   }
 };

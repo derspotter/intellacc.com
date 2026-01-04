@@ -87,6 +87,12 @@ export class MlsClient {
   accept_staged_welcome(staging_id: string): Uint8Array;
   discard_staged_commit(group_id_bytes: Uint8Array): void;
   generate_external_psk(psk_id_bytes: Uint8Array): any;
+  /**
+   * Generate multiple key packages at once (for pooling)
+   * Returns a JsValue containing { key_packages: [{ key_package_bytes, lifetime, hash, is_last_resort }] }
+   * Per MLS best practices, clients should maintain a pool of pre-uploaded key packages
+   */
+  generate_key_packages(count: number): any;
   get_key_package_bytes(): Uint8Array;
   /**
    * Reject a staged welcome (discard without joining)
@@ -115,7 +121,11 @@ export class MlsClient {
   get_signature_keypair_bytes(): Uint8Array;
   get_key_package_bundle_bytes(): Uint8Array;
   key_package_lifetime_from_bytes(key_package_bytes: Uint8Array): any;
-  generate_last_resort_key_package(): Uint8Array;
+  /**
+   * Generate a last-resort key package and return it with lifetime info
+   * Returns a JsValue containing { key_package_bytes, lifetime, hash }
+   */
+  generate_last_resort_key_package(): any;
   create_group_with_external_senders(group_id_bytes: Uint8Array, sender_identities: Array<any>, sender_signature_keys: Array<any>): Uint8Array;
   constructor();
   /**
@@ -147,7 +157,8 @@ export interface InitOutput {
   readonly mlsclient_export_group_info: (a: number, b: number, c: number, d: number) => [number, number, number, number];
   readonly mlsclient_export_storage_state: (a: number) => [number, number, number, number];
   readonly mlsclient_generate_external_psk: (a: number, b: number, c: number) => [number, number, number];
-  readonly mlsclient_generate_last_resort_key_package: (a: number) => [number, number, number, number];
+  readonly mlsclient_generate_key_packages: (a: number, b: number) => [number, number, number];
+  readonly mlsclient_generate_last_resort_key_package: (a: number) => [number, number, number];
   readonly mlsclient_get_credential_bytes: (a: number) => [number, number, number, number];
   readonly mlsclient_get_group_confirmation_tag: (a: number, b: number, c: number) => [number, number, number, number];
   readonly mlsclient_get_group_epoch: (a: number, b: number, c: number) => [bigint, number, number];
