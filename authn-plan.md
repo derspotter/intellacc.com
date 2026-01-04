@@ -615,3 +615,96 @@ RECEIVE:
 - https://github.com/w3c/webauthn/wiki/Explainer:-PRF-extension (WebAuthn PRF Extension)
 - https://simplewebauthn.dev/ (SimpleWebAuthn)
 - https://wireapp.github.io/core-crypto/ARCHITECTURE.html (Wire CoreCrypto device model)
+
+---
+
+## Implementation Status (Completed)
+
+All phases of the plan have been implemented as of December 29, 2025.
+
+### Summary of Changes
+
+1.  **Single Password Architecture (Phase 1):**
+    -   Replaced the separate vault passphrase with a device-local keystore unlocked by the login password.
+    -   Implemented automatic vault unlocking upon successful login.
+    -   Added "Change Password" functionality that re-wraps the device key without losing data.
+    -   Removed legacy unlock/setup modals.
+
+2.  **WebAuthn & Passkeys (Phase 2):**
+    -   Added backend support for WebAuthn registration and authentication (`@simplewebauthn/server`).
+    -   Added frontend service and UI components (`PasskeyManager`, `PasskeyButton`).
+    -   Users can now log in using FaceID, TouchID, or security keys.
+
+3.  **Device Management (Phase 3):**
+    -   Implemented a device registry (`user_devices` table).
+    -   Every browser session with a vault is now a registered "device".
+    -   Added `DeviceManager` UI in settings to view and revoke devices.
+    -   Implemented a "Link Device" flow using ephemeral tokens to authorize new devices.
+
+4.  **PRF Integration (Phase 4):**
+    -   Integrated WebAuthn PRF extension to securely derive encryption keys from the authenticator.
+    -   Logging in with a supported Passkey now **automatically unlocks the vault** without requiring a password.
+    -   Added logic to wrap the device key with the PRF output during passkey registration.
+
+5.  **Relay Queue (Phase 5):**
+    -   Replaced direct socket messaging with a store-and-forward Relay Queue (`mls_relay_queue`).
+    -   Messages are stored encrypted until delivered to specific target devices.
+    -   Implemented `syncMessages` in the frontend to poll, process, and ACK messages.
+    -   Ensures reliable delivery even if a device is temporarily offline.
+
+---
+
+## Testing Guide
+
+### Prerequisites
+-   Ensure the application is running in the Docker environment.
+-   Use a browser that supports WebAuthn (Chrome, Edge, Safari).
+-   For "Cross-Device" testing, you can use an Incognito window or a different browser profile to simulate a second device.
+
+### Test Scenario 1: New User Setup & Single Password
+1.  **Register:** Go to `/` and click "Sign Up". Create a new account.
+2.  **Verify Setup:** Upon redirection to the Home page:
+    -   Check Settings (`/settings`).
+    -   Verify "Encryption Vault" says "Vault is unlocked".
+    -   Verify "Linked Devices" shows "Primary Device (This Device)".
+3.  **Relogin:** Log out and log back in with the password.
+    -   Verify the vault unlocks automatically (no modals).
+
+### Test Scenario 2: Adding a Passkey (with PRF)
+1.  **Add Passkey:** Go to Settings -> Passkeys.
+2.  **Register:** Click "Add Passkey", name it (e.g., "My Laptop"), and complete the browser prompt.
+3.  **Verify PRF:** Open the browser console and look for `[Vault] PRF wrapping established`.
+4.  **Login:** Log out. Click "Sign in with Passkey".
+    -   Select the passkey you just created.
+5.  **Verify Unlock:** After login, ensure the vault is **already unlocked** without typing a password. Console should show `[Vault] Unlocked with PRF`.
+
+### Test Scenario 3: Device Linking
+1.  **Prepare Device A (Primary):** Log in on your main browser. Go to Settings -> Linked Devices.
+2.  **Prepare Device B (New):** Open an Incognito window. Go to `/login`.
+    -   *Note: Currently, the UI requires you to be logged in to see the link page, but logically a new device implies a fresh login.*
+    -   Log in with **Password** on Device B.
+    -   Go to Settings -> Linked Devices.
+    -   Click "Show Linking Token". Copy the token.
+3.  **Approve on Device A:**
+    -   In the "Approve a Device" section, paste the token.
+    -   Click "Approve".
+4.  **Verify:**
+    -   Device B should alert "Device linked successfully!".
+    -   Both devices should show each other in the list.
+
+### Test Scenario 4: Secure Messaging (Relay Queue)
+1.  **Setup:** Ensure you have two linked devices (Device A and Device B) for the same user, OR two different users who are in a group/DM.
+2.  **Send:** On Device A, send a message in a conversation.
+3.  **Receive:**
+    -   Check Device B. The message should appear.
+    -   Reload Device B (simulate offline). The message should persist/load from history.
+4.  **Console Check:**
+    -   Look for logs: `[MLS] Syncing 1 messages from relay queue` and `[MLS] Acked 1 messages`.
+
+### Test Scenario 5: Password Change
+1.  **Change:** Go to Settings -> Encryption Vault.
+2.  **Execute:** Click "Change Account Password". Enter old and new passwords.
+3.  **Verify:**
+    -   Success message should appear.
+    -   Log out and log in with the **new** password.
+    -   The vault should still unlock successfully (verifying the key was correctly re-wrapped).

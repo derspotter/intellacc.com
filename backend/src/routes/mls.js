@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const db = require('../db');
 const mlsService = require('../services/mlsService');
 const authenticateJWT = require('../middleware/auth');
 
@@ -9,13 +10,17 @@ router.use(authenticateJWT);
 // Upload Key Package
 router.post('/key-package', async (req, res) => {
   try {
-    const { deviceId, packageData, hash } = req.body;
+    const { deviceId, packageData, hash, notBefore, notAfter, isLastResort } = req.body;
     const userId = req.user.id;
-
-    // packageData is expected to be a hex string (starting with \x) or Buffer-compatible format.
-    // Postgres 'bytea' accepts hex format like '\xDEADBEEF'.
-
-    const result = await mlsService.upsertKeyPackage(userId, deviceId, packageData, hash);
+    const result = await mlsService.upsertKeyPackage(
+      userId,
+      deviceId,
+      packageData,
+      hash,
+      notBefore,
+      notAfter,
+      !!isLastResort
+    );
     res.json(result);
   } catch (err) {
     console.error(err);
@@ -23,76 +28,143 @@ router.post('/key-package', async (req, res) => {
   }
 });
 
-// Get Key Package for a user
+// Fetch another user's Key Package(s) (for inviting them to groups)
 router.get('/key-package/:userId', async (req, res) => {
   try {
-    const result = await mlsService.getKeyPackage(req.params.userId);
-    if (!result) {
-      return res.status(404).json({ error: 'Key package not found' });
+    const targetUserId = parseInt(req.params.userId);
+    const returnAll = req.query.all === 'true';
+    const deviceId = req.query.deviceId;
+
+    if (isNaN(targetUserId)) {
+      return res.status(400).json({ error: 'Invalid user ID' });
     }
-    res.json(result);
+
+    if (deviceId) {
+        const keyPackage = await mlsService.getKeyPackage(targetUserId, deviceId);
+        if (!keyPackage) return res.status(404).json({ error: 'Key package not found for device' });
+        return res.json(keyPackage);
+    }
+
+    if (returnAll) {
+        const keyPackages = await mlsService.getKeyPackages(targetUserId);
+        return res.json(keyPackages);
+    }
+
+    const keyPackage = await mlsService.getKeyPackage(targetUserId);
+    if (!keyPackage) {
+      return res.status(404).json({ error: 'Key package not found for user' });
+    }
+    res.json(keyPackage);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch key package' });
   }
 });
 
-// Send Welcome Message
-router.post('/messages/welcome', async (req, res) => {
-  try {
-    const { groupId, receiverId, data } = req.body;
-    const senderId = req.user.id;
-
-    // Verify sender is a member of the group (prevents MITM/spoofing)
-    const isMember = await mlsService.isGroupMember(groupId, senderId);
-    if (!isMember) {
-      return res.status(403).json({ error: 'You are not a member of this group' });
-    }
-
-    const result = await mlsService.storeWelcomeMessage(groupId, senderId, receiverId, data);
-    res.json(result);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to send welcome message' });
-  }
-});
-
-// Get Welcome Messages
+// Get pending welcome messages for current user
 router.get('/messages/welcome', async (req, res) => {
   try {
     const userId = req.user.id;
-    const messages = await mlsService.getWelcomeMessages(userId);
-    res.json(messages);
+    const welcomes = await mlsService.getPendingWelcomes(userId);
+    res.json(welcomes);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch welcome messages' });
   }
 });
 
-// Delete Welcome Message (after processing)
-router.delete('/messages/welcome/:id', async (req, res) => {
+// Relay Queue Routes
+router.get('/queue/pending', async (req, res) => {
+    try {
+        const devicePublicId = req.headers['x-device-id'];
+        if (!devicePublicId) return res.status(400).json({ error: 'x-device-id header required' });
+
+        const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, req.user.id]);
+        if (deviceRes.rows.length === 0) return res.status(404).json({ error: 'Device not found' });
+
+        const messages = await mlsService.getPendingMessages(deviceRes.rows[0].id);
+        res.json(messages);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch pending messages' });
+    }
+});
+
+router.post('/queue/ack', async (req, res) => {
+    try {
+        const devicePublicId = req.headers['x-device-id'];
+        const { messageIds } = req.body;
+        if (!devicePublicId) return res.status(400).json({ error: 'x-device-id header required' });
+
+        const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, req.user.id]);
+        if (deviceRes.rows.length === 0) return res.status(404).json({ error: 'Device not found' });
+
+        await mlsService.ackMessages(deviceRes.rows[0].id, messageIds);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to ack messages' });
+    }
+});
+
+// Send Welcome Message
+router.post('/messages/welcome', async (req, res) => {
   try {
-    await mlsService.deleteWelcomeMessage(req.params.id);
-    res.json({ success: true });
+    const { groupId, receiverId, data, groupInfo } = req.body;
+    const devicePublicId = req.headers['x-device-id'];
+    const senderId = req.user.id;
+
+    console.log('[MLS Welcome] senderId:', senderId, 'devicePublicId:', devicePublicId, 'groupId:', groupId, 'receiverId:', receiverId);
+
+    if (!devicePublicId) {
+      console.log('[MLS Welcome] Missing x-device-id header');
+      return res.status(400).json({ error: 'x-device-id header required' });
+    }
+
+    const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, senderId]);
+    console.log('[MLS Welcome] Device lookup result:', deviceRes.rows);
+
+    if (deviceRes.rows.length === 0) {
+      console.log('[MLS Welcome] Device not found for user');
+      return res.status(404).json({ error: 'Sender device not registered' });
+    }
+
+    const result = await mlsService.storeWelcomeMessage(groupId, deviceRes.rows[0].id, senderId, receiverId, data, groupInfo);
+    console.log('[MLS Welcome] Stored successfully:', result);
+    res.json(result);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to delete welcome message' });
+    console.error('[MLS Welcome] Error:', err);
+    res.status(500).json({ error: 'Failed to send welcome message' });
   }
 });
 
 // Send Group Message (Commit/Application)
 router.post('/messages/group', async (req, res) => {
   try {
-    const { groupId, epoch, contentType, data } = req.body;
+    const { groupId, messageType, data, excludeUserIds, epoch } = req.body;
+    const devicePublicId = req.headers['x-device-id'];
     const senderId = req.user.id;
 
-    const result = await mlsService.storeGroupMessage(groupId, senderId, epoch, contentType, data);
+    const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, senderId]);
+    if (deviceRes.rows.length === 0) return res.status(404).json({ error: 'Sender device not registered' });
 
-    // TODO: Emit socket event to group members
-
+    const result = await mlsService.storeGroupMessage(
+      groupId,
+      deviceRes.rows[0].id,
+      senderId,
+      messageType || 'application',
+      data,
+      { excludeUserIds, epoch }
+    );
     res.json(result);
   } catch (err) {
     console.error(err);
+    if (err.message === 'Commit already pending for epoch') {
+      return res.status(409).json({ error: err.message });
+    }
+    if (err.message === 'Commit epoch required') {
+      return res.status(400).json({ error: err.message });
+    }
     res.status(500).json({ error: 'Failed to send group message' });
   }
 });
@@ -128,6 +200,62 @@ router.post('/groups', async (req, res) => {
   }
 });
 
+// Publish GroupInfo for external commits
+router.post('/groups/:groupId/group-info', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { groupInfo, epoch, isPublic } = req.body;
+
+    if (!groupInfo) {
+      return res.status(400).json({ error: 'groupInfo required' });
+    }
+
+    let groupInfoData = groupInfo;
+    if (Array.isArray(groupInfo)) {
+      groupInfoData = Buffer.from(groupInfo);
+    }
+
+    const result = await mlsService.publishGroupInfo(
+      groupId,
+      req.user.id,
+      groupInfoData,
+      epoch,
+      isPublic
+    );
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    if (err.message === 'Sender is not a member of the group') {
+      return res.status(403).json({ error: err.message });
+    }
+    if (err.message === 'Group not found') {
+      return res.status(404).json({ error: err.message });
+    }
+    res.status(500).json({ error: 'Failed to publish group info' });
+  }
+});
+
+router.get('/groups/:groupId/group-info', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const result = await mlsService.getGroupInfo(groupId, req.user.id);
+    res.json({
+      groupInfo: result.group_info,
+      epoch: result.group_info_epoch,
+      isPublic: result.is_public
+    });
+  } catch (err) {
+    console.error(err);
+    if (err.message === 'Group not found') {
+      return res.status(404).json({ error: err.message });
+    }
+    if (err.message === 'Group info not accessible') {
+      return res.status(403).json({ error: err.message });
+    }
+    res.status(500).json({ error: 'Failed to fetch group info' });
+  }
+});
+
 // Add Member to Group
 router.post('/groups/:groupId/members', async (req, res) => {
   try {
@@ -144,13 +272,44 @@ router.post('/groups/:groupId/members', async (req, res) => {
   }
 });
 
-// Get Group Messages
+// Sync Group Members from MLS state
+router.post('/groups/:groupId/members/sync', async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { memberIds } = req.body;
+
+    if (!Array.isArray(memberIds) || memberIds.length === 0) {
+      return res.status(400).json({ error: 'memberIds array required' });
+    }
+
+    const normalizedIds = memberIds
+      .map(id => Number(id))
+      .filter(Number.isFinite);
+
+    if (normalizedIds.length === 0) {
+      return res.status(400).json({ error: 'memberIds must be numeric' });
+    }
+
+    if (!normalizedIds.includes(req.user.id)) {
+      return res.status(403).json({ error: 'User not in member list' });
+    }
+
+    const result = await mlsService.syncGroupMembers(groupId, normalizedIds);
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    if (err.message === 'Group not found') {
+      return res.status(404).json({ error: err.message });
+    }
+    res.status(500).json({ error: 'Failed to sync group members' });
+  }
+});
+
+// Get Group Messages from relay queue
 router.get('/messages/group/:groupId', async (req, res) => {
   try {
     const { afterId } = req.query;
-    // Pass userId to filter out messages from before the user joined
-    // This prevents newly joined members from receiving commits they already processed via Welcome
-    const messages = await mlsService.getGroupMessages(req.params.groupId, afterId || 0, req.user.id);
+    const messages = await mlsService.getGroupMessages(req.params.groupId, afterId || 0);
     res.json(messages);
   } catch (err) {
     console.error(err);

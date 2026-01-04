@@ -4,6 +4,7 @@ const { div } = van.tags;
 import Sidebar from './Sidebar';
 import MobileHeader from '../mobile/MobileHeader';
 import BottomNav from '../mobile/BottomNav';
+import UnlockKeystoreModal from '../vault/UnlockKeystoreModal';
 import { isMobile } from '../../utils/deviceDetection';
 
 /**
@@ -34,6 +35,9 @@ export default function MainLayout({ children }) {
     ]),
     
     // Bottom navigation (only on mobile)
-    BottomNav()
+    BottomNav(),
+
+    // Global Modals
+    UnlockKeystoreModal()
   ]);
 }

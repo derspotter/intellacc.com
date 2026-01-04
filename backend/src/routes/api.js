@@ -24,16 +24,22 @@ router.get("/health-check", (req, res) => {
     res.status(200).json({ status: 'ok', message: 'Server is healthy' });
 });
 
-// WebAuthn routes (authenticated)
-router.use('/webauthn', authenticateJWT, require('./webauthn'));
+// WebAuthn routes (Auth logic handled inside to allow public login routes)
+router.use('/webauthn', require('./webauthn'));
+
+// Device management routes
+router.use('/devices', require('./device'));
 
 // User Routes
 router.post("/users", userController.createUser);
 router.post("/users/register", userController.createUser); // Alias for registration
 router.get("/users/search", authenticateJWT, userController.searchUsers); // User search (before :id to avoid conflict)
+router.get('/users/master-key', authenticateJWT, userController.getMasterKey);
+router.post('/users/master-key', authenticateJWT, userController.setMasterKey);
 router.get("/users/:id", authenticateJWT, userController.getUser);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
 router.post('/login', userController.loginUser);
+router.post('/users/change-password', authenticateJWT, userController.changePassword);
 router.get("/me", authenticateJWT, userController.getUserProfile);
 router.patch("/users/profile", authenticateJWT, userController.editUserProfile);
 

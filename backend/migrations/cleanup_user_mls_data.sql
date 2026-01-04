@@ -70,8 +70,7 @@ $$ LANGUAGE plpgsql;
 -- FRONTEND (run in browser console):
 -- ============================================
 --
--- indexedDB.deleteDatabase('intellacc_vault');
--- indexedDB.deleteDatabase('openmls_storage');
+-- indexedDB.deleteDatabase('intellacc_keystore');
 -- location.reload();
 --
 -- ============================================

@@ -1,5 +1,6 @@
 // src/components/auth/LoginForm.js
 import van from 'vanjs-core';
+import PasskeyButton from './PasskeyButton';
 const { div, h1, form, label, input, button, p, a } = van.tags;
 import auth from '../../services/auth';
 
@@ -80,6 +81,14 @@ const LoginForm = () => {
             class: "btn-primary"
           }, () => submitting.val ? "Signing in..." : "Sign In"),
           
+          div({ style: 'width: 100%; margin-top: 1rem;' },
+            PasskeyButton({ 
+                email, 
+                onSuccess: () => window.location.hash = '#',
+                onError: (err) => error.val = err.message || 'Passkey login failed'
+            })
+          ),
+
           p({ class: "register-link" }, [
             "Don't have an account? ",
             a({ 

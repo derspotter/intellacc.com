@@ -34,6 +34,7 @@ const messagingStore = vanX.reactive({
   showCreateMlsGroup: false,        // Show create MLS group form
   mlsInviteUserId: '',              // User ID to invite to MLS group
   showMlsInvite: false,             // Show invite form
+  pendingWelcomes: [],              // Pending MLS welcome invites
 
   // Direct Messages (DM) state
   directMessages: [],               // List of DMs from backend
@@ -162,6 +163,22 @@ const messagingStore = vanX.reactive({
     const meta = { ...(messagingStore.messagesMeta || {}) };
     meta[String(conversationId)] = { lastFetchedTs: now };
     messagingStore.messagesMeta = meta;
+  },
+
+  setPendingWelcomes(list) {
+    messagingStore.pendingWelcomes = Array.isArray(list) ? list : [];
+  },
+
+  addPendingWelcome(invite) {
+    if (!invite || invite.id == null) return;
+    const existing = messagingStore.pendingWelcomes.find(item => item.id === invite.id);
+    if (existing) return;
+    messagingStore.pendingWelcomes = [...messagingStore.pendingWelcomes, invite];
+  },
+
+  removePendingWelcome(inviteId) {
+    if (inviteId == null) return;
+    messagingStore.pendingWelcomes = messagingStore.pendingWelcomes.filter(item => item.id !== inviteId);
   },
   
   addMessage(conversationId, message) {

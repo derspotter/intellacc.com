@@ -398,3 +398,73 @@ CREATE INDEX IF NOT EXISTS idx_conversations_participants ON conversations(parti
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_receiver_unread ON messages(receiver_id, read_at) WHERE read_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_message_delivery_message ON message_delivery(message_id);
+
+-- WebAuthn credentials for logging into an account
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  credential_id BYTEA NOT NULL UNIQUE,
+  public_key BYTEA NOT NULL,
+  counter INTEGER NOT NULL DEFAULT 0,
+  transports TEXT[],
+  supports_prf BOOLEAN DEFAULT FALSE,
+  name TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  last_used_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_webauthn_user_id ON webauthn_credentials(user_id);
+CREATE INDEX IF NOT EXISTS idx_webauthn_credential_id ON webauthn_credentials(credential_id);
+
+-- Linked devices (messaging-capable clients)
+CREATE TABLE IF NOT EXISTS user_devices (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_public_id UUID NOT NULL UNIQUE,
+  name TEXT,
+  is_primary BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  last_seen_at TIMESTAMP DEFAULT NOW(),
+  revoked_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id);
+
+-- Device linking tokens (ephemeral)
+CREATE TABLE IF NOT EXISTS device_linking_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    device_public_id UUID NOT NULL,
+    device_name TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    expires_at TIMESTAMP NOT NULL,
+    approved_at TIMESTAMP,
+    approved_by_device_id INTEGER REFERENCES user_devices(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_linking_token ON device_linking_tokens(token);
+
+-- Relay queue for store-and-forward messaging
+CREATE TABLE IF NOT EXISTS mls_relay_queue (
+  id BIGSERIAL PRIMARY KEY,
+  group_id TEXT NOT NULL,
+  sender_device_id INT NOT NULL REFERENCES user_devices(id) ON DELETE CASCADE,
+  message_type TEXT NOT NULL,
+  data BYTEA NOT NULL,
+  group_info BYTEA,
+  epoch BIGINT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '30 days'
+);
+
+CREATE TABLE IF NOT EXISTS mls_relay_recipients (
+  queue_id BIGINT NOT NULL REFERENCES mls_relay_queue(id) ON DELETE CASCADE,
+  recipient_device_id INT NOT NULL REFERENCES user_devices(id) ON DELETE CASCADE,
+  acked_at TIMESTAMP,
+  PRIMARY KEY (queue_id, recipient_device_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_relay_pending ON mls_relay_recipients(recipient_device_id) WHERE acked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_relay_expires ON mls_relay_queue(expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mls_commit_epoch ON mls_relay_queue (group_id, epoch) WHERE message_type = 'commit';

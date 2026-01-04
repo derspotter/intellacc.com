@@ -1,6 +1,6 @@
 import van from 'vanjs-core';
 import api from '../services/api';
-import auth from '../services/auth';
+import { isLoggedInState } from '../services/tokenService';
 
 const userStore = {
   state: {
@@ -12,7 +12,7 @@ const userStore = {
   
   actions: {
     async fetchUserProfile() {
-      if (!auth.isLoggedInState.val) return null;
+      if (!isLoggedInState.val) return null;
       
       this.state.loading.val = true;
       
@@ -57,7 +57,7 @@ const userStore = {
     },
     
     async updateUserProfile(bio) {
-      if (!auth.isLoggedInState.val) {
+      if (!isLoggedInState.val) {
         return false;
       }
       try {
@@ -85,7 +85,7 @@ const userStore = {
     },
     
     async fetchFollowers() {
-      if (!auth.isLoggedInState.val || !this.state.profile.val) return;
+      if (!isLoggedInState.val || !this.state.profile.val) return;
       
       try {
         const followers = await api.users.getFollowers(this.state.profile.val.id);
@@ -96,7 +96,7 @@ const userStore = {
     },
     
     async fetchFollowing() {
-      if (!auth.isLoggedInState.val || !this.state.profile.val) return;
+      if (!isLoggedInState.val || !this.state.profile.val) return;
       
       try {
         const following = await api.users.getFollowing(this.state.profile.val.id);

@@ -19,6 +19,7 @@ const vaultStore = vanX.reactive({
     // Modal visibility
     showUnlockModal: false,      // Show passphrase entry modal
     showSetupModal: false,       // Show first-time setup modal
+    showMigrationModal: false,   // Show password migration modal (unlock failed but vaults exist)
 
     // Error state
     unlockError: '',             // Error message from failed unlock attempt
@@ -58,6 +59,10 @@ const vaultStore = vanX.reactive({
         }
     },
 
+    setShowMigrationModal(show) {
+        vaultStore.showMigrationModal = show;
+    },
+
     setUnlockError(error) {
         vaultStore.unlockError = error;
     },
@@ -91,6 +96,7 @@ const vaultStore = vanX.reactive({
         vaultStore.vaultExists = false;
         vaultStore.showUnlockModal = false;
         vaultStore.showSetupModal = false;
+        vaultStore.showMigrationModal = false;
         vaultStore.unlockError = '';
         vaultStore.setupError = '';
         vaultStore.userId = null;

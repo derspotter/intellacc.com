@@ -2,6 +2,9 @@ import init, { MlsClient, init_logging } from 'openmls-wasm';
 import { registerSocketEventHandler } from '../socket.js';
 import { api } from '../api.js';
 
+const KEY_PACKAGE_RENEWAL_WINDOW_SECONDS = 60 * 60 * 24 * 7;
+const MAX_LEAF_NODE_LIFETIME_RANGE_SECONDS = (60 * 60 * 24 * 28 * 3) + (60 * 60);
+
 /**
  * Core Crypto Client for OpenMLS integration
  * Handles WASM initialization and wraps the Rust MlsClient
@@ -11,13 +14,19 @@ class CoreCryptoClient {
         this.client = null;
         this.initialized = false;
         this.identityName = null;
-        this.dbName = 'openmls_storage';
-        this.dbVersion = 2; // Bumped for granular_events store
-        this.db = null;
         this.messageHandlers = []; // Callbacks for decrypted messages
         this.welcomeHandlers = []; // Callbacks for new group invites
+        this.welcomeRequestHandlers = []; // Callbacks for welcome approval/inspection
+        this.pendingWelcomes = new Map(); // messageId -> pending welcome payload
+        this.confirmationTags = new Map(); // groupId -> Map(epoch -> tagHex)
+        this.remoteConfirmationTags = new Map(); // groupId -> Map(epoch -> Set(tagHex))
+        this.sentConfirmationTags = new Map(); // groupId -> Set(epoch)
+        this.forkHandlers = []; // Callbacks for fork detection events
+        this.commitRejectionHandlers = []; // Callbacks for commit/proposal rejection events
         this._socketCleanup = null;
         this.processedMessageIds = new Set(); // Track processed message IDs to prevent duplicates
+        this.processingMessageIds = new Set();
+        this.syncPromise = null;
     }
 
     /**
@@ -29,7 +38,6 @@ class CoreCryptoClient {
         try {
             await init();
             init_logging();
-            await this.initDB();
             this.initialized = true;
             console.log('OpenMLS WASM module initialized');
         } catch (error) {
@@ -38,160 +46,134 @@ class CoreCryptoClient {
         }
     }
 
-    /**
-     * Initialize IndexedDB
-     */
-    async initDB() {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, this.dbVersion);
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-                this.db = request.result;
-                resolve();
-            };
-            request.onupgradeneeded = (event) => {
-                const db = event.target.result;
-                if (!db.objectStoreNames.contains('state')) {
-                    db.createObjectStore('state', { keyPath: 'id' });
-                }
-                // [NEW] Granular Event Store for O(1) writes
-                if (!db.objectStoreNames.contains('granular_events')) {
-                    // key is the hex key from Rust
-                    db.createObjectStore('granular_events');
-                }
-            };
-        });
+    groupIdToBytes(groupId) {
+        if (groupId instanceof Uint8Array) return groupId;
+        if (ArrayBuffer.isView(groupId)) return new Uint8Array(groupId.buffer, groupId.byteOffset, groupId.byteLength);
+        if (typeof groupId !== 'string') throw new Error('Invalid group ID');
+
+        if (groupId.startsWith('dm_')) {
+            return new TextEncoder().encode(groupId);
+        }
+
+        if (!/^[0-9a-f]+$/i.test(groupId) || groupId.length % 2 !== 0) {
+            throw new Error('Invalid group ID format');
+        }
+
+        return new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
     }
 
+    groupIdFromBytes(groupIdBytes) {
+        if (!groupIdBytes) return '';
+        try {
+            const text = new TextDecoder().decode(groupIdBytes);
+            if (/^dm_\d+_\d+$/.test(text)) {
+                return text;
+            }
+        } catch (e) {}
+        return Array.from(groupIdBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    groupIdFromHex(groupIdHex) {
+        if (!groupIdHex) return '';
+        return this.groupIdFromBytes(this.hexToBytes(groupIdHex));
+    }
+
+    bytesToHex(bytes) {
+        return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    hexToBytes(hex) {
+        let normalized = hex;
+        if (normalized.startsWith('\\x')) normalized = normalized.slice(2);
+        return new Uint8Array(normalized.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+    }
+
+    getDmParticipantIds(groupId) {
+        if (!this.isDirectMessage(groupId)) return [];
+        const parts = groupId.split('_');
+        if (parts.length < 3) return [];
+        return [parts[1], parts[2]].filter(Boolean);
+    }
+
+    isNumericIdentity(identity) {
+        return typeof identity === 'string' && /^\\d+$/.test(identity);
+    }
+
+    buildAadPayload(groupId, epoch, type) {
+        return {
+            v: 1,
+            groupId,
+            epoch,
+            type,
+            ts: new Date().toISOString()
+        };
+    }
+
+    encodeAad(payload) {
+        return new TextEncoder().encode(JSON.stringify(payload));
+    }
+
+    parseAad(aadBytes) {
+        if (!aadBytes || aadBytes.length === 0) return null;
+        try {
+            const text = new TextDecoder().decode(aadBytes);
+            return JSON.parse(text);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    validateAad(aadBytes, expected) {
+        const payload = this.parseAad(aadBytes);
+        if (!payload) return { valid: false, reason: 'AAD missing or unparsable' };
+        if (payload.groupId !== expected.groupId) {
+            return { valid: false, reason: 'AAD groupId mismatch' };
+        }
+        if (payload.epoch !== expected.epoch) {
+            return { valid: false, reason: 'AAD epoch mismatch' };
+        }
+        if (payload.type !== expected.type) {
+            return { valid: false, reason: 'AAD type mismatch' };
+        }
+        return { valid: true, reason: null };
+    }
+
+    setGroupAad(groupId, type, epochOverride) {
+        if (!this.client) throw new Error('Client not initialized');
+        const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupId);
+        const epoch = typeof epochOverride === 'number' ? epochOverride : this.getGroupEpoch(groupIdValue);
+        const payload = this.buildAadPayload(groupIdValue, epoch, type);
+        const aadBytes = this.encodeAad(payload);
+        const groupIdBytes = this.groupIdToBytes(groupIdValue);
+        this.client.set_group_aad(groupIdBytes, aadBytes);
+        return payload;
+    }
+
+    // initDB removed - we rely on VaultService/Memory only
+
     /**
-     * Save client state to IndexedDB for current user
-     * Uses per-user storage keys to support multiple identities
+     * Save client state (No-op: Persistence is handled by VaultService)
      */
     async saveState() {
-        if (!this.client || !this.db || !this.identityName) return;
+        // We do not save to unencrypted IndexedDB anymore.
+        // State is exported via exportStateForVault and saved encrypted by VaultService.
+        // We ensure granular events are drained from WASM memory to avoid buildup, but we drop them.
         try {
-            // --- 1. Granular Write-Behind (New O(1) path) ---
-            try {
-                // Drain dirty events from Rust memory
-                // events = [{ key: "hex...", value: Uint8Array | null, category: "..." }]
-                const events = this.client.drain_storage_events();
-
-                if (events && events.length > 0) {
-                    const tx = this.db.transaction(['granular_events'], 'readwrite');
-                    const store = tx.objectStore('granular_events');
-
-                    // Process all events
-                    // Note: This effectively mirrors the Rust HashMap in IndexedDB
-                    for (const event of events) {
-                        if (event.value === null || event.value === undefined) {
-                            store.delete(event.key);
-                        } else {
-                            // event.value comes as number[] from serde, need Uint8Array
-                            // BUT serde-wasm-bindgen usually handles Uint8Array -> Uint8Array if configured,
-                            // or simple array. Let's ensure it's stored efficiently.
-                            // If it's a raw array, IndexedDB handles it, but Uint8Array is better.
-                            store.put(event.value, event.key);
-                        }
-                    }
-
-                    await new Promise((resolve, reject) => {
-                        tx.oncomplete = () => resolve();
-                        tx.onerror = () => reject(tx.error);
-                    });
-                    console.log(`[MLS] Persisted ${events.length} granular events`);
-                }
-            } catch (e) {
-                console.warn('[MLS] Granular persistence failed:', e);
+            if (this.client) {
+                this.client.drain_storage_events(); 
             }
-
-            // --- 2. Snapshot Fallback (Legacy/Reliability) ---
-            // We keep this for now because we haven't implemented "Load from Granular" yet.
-            // This ensures we can still restore state on reload.
-
-            const credential = this.client.get_credential_bytes();
-            const bundle = this.client.get_key_package_bundle_bytes();
-            const signatureKey = this.client.get_signature_keypair_bytes();
-
-            // Export full storage state (includes groups, epoch secrets, etc.)
-            let storageState = null;
-            try {
-                storageState = this.client.export_storage_state();
-            } catch (e) {
-                console.warn('Could not export detailed storage state provided by Wasm:', e);
-            }
-
-            const transaction = this.db.transaction(['state'], 'readwrite');
-            const store = transaction.objectStore('state');
-
-            // Store with per-user key: identity_${username}
-            await new Promise((resolve, reject) => {
-                const request = store.put({
-                    id: `identity_${this.identityName}`,
-                    credential,
-                    bundle,
-                    signatureKey,
-                    storageState, // Persist the full vault state
-                    identityName: this.identityName,
-                    updatedAt: Date.now()
-                });
-                request.onerror = () => reject(request.error);
-                request.onsuccess = () => resolve();
-            });
-            console.log('OpenMLS state (Identity + Vault) saved for:', this.identityName);
-        } catch (error) {
-            console.error('Error saving OpenMLS state:', error);
+        } catch (e) {
+            console.warn('[MLS] Failed to drain events:', e);
         }
     }
 
     /**
-     * Load client state from IndexedDB for a specific user
-     * @param {string} username - The username to load state for
-     * @returns {boolean} True if state was loaded successfully
+     * Load client state (No-op: Restoration is handled by VaultService)
+     * @returns {boolean} Always false (force fresh start or vault restore)
      */
     async loadState(username) {
-        if (!this.db) return false;
-        if (!username) {
-            console.warn('loadState called without username');
-            return false;
-        }
-
-        try {
-            const transaction = this.db.transaction(['state'], 'readonly');
-            const store = transaction.objectStore('state');
-
-            // Load using per-user key: identity_${username}
-            const record = await new Promise((resolve, reject) => {
-                const request = store.get(`identity_${username}`);
-                request.onerror = () => reject(request.error);
-                request.onsuccess = () => resolve(request.result);
-            });
-
-            if (record && record.credential && record.bundle && record.signatureKey) {
-                this.client = new MlsClient();
-                this.client.restore_identity(record.credential, record.bundle, record.signatureKey);
-
-                // Restore full storage state (groups, epoch secrets, etc.)
-                if (record.storageState) {
-                    try {
-                        // Ensure it's a Uint8Array (IndexedDB might return ArrayBuffer or plain array depending on browser/adapter)
-                        const storageBytes = record.storageState instanceof Uint8Array
-                            ? record.storageState
-                            : new Uint8Array(record.storageState);
-
-                        this.client.import_storage_state(storageBytes);
-                        console.log('Restored OpenMLS storage state (groups/keys)');
-                    } catch (e) {
-                        console.error('Failed to import storage state:', e);
-                    }
-                }
-
-                this.identityName = record.identityName;
-                console.log('OpenMLS state restored for:', this.identityName);
-                return true;
-            }
-        } catch (error) {
-            console.error('Error loading OpenMLS state:', error);
-        }
+        // We rely on restoreStateFromVault.
+        // Returning false ensures ensureMlsBootstrap creates a new identity if no vault is present.
         return false;
     }
 
@@ -219,9 +201,9 @@ class CoreCryptoClient {
 
         // Try to load existing state for this specific user
         if (await this.loadState(username)) {
-            // Successfully loaded - upload key package to ensure server has it
+            // Successfully loaded - ensure key packages are fresh and uploaded
             try {
-                await this.uploadKeyPackage();
+                await this.ensureKeyPackagesFresh();
             } catch (uploadError) {
                 console.warn('Failed to upload key package:', uploadError);
             }
@@ -245,22 +227,23 @@ class CoreCryptoClient {
             // Save to vault if unlocked (new identity needs to be persisted)
             try {
                 const vaultService = (await import('../vaultService.js')).default;
-                await vaultService.saveCurrentState();
-                console.log('[MLS] New identity saved to vault');
+                const saved = await vaultService.saveCurrentState();
+                if (saved) {
+                    console.log('[MLS] New identity saved to vault');
+                }
             } catch (vaultErr) {
                 console.warn('[MLS] Could not save identity to vault:', vaultErr.message);
             }
 
             // Upload key package to server
             try {
-                await this.uploadKeyPackage();
+                await this.ensureKeyPackagesFresh();
             } catch (uploadError) {
                 console.warn('Failed to upload key package:', uploadError);
                 // Continue even if upload fails - can retry later
             }
 
-            // Set up real-time socket listeners
-            this.setupSocketListeners();
+            // Note: Socket listeners should be set up explicitly after device registration
         } catch (error) {
             console.error('Error bootstrapping MLS client:', error);
             throw error;
@@ -287,6 +270,34 @@ class CoreCryptoClient {
             .join('');
     }
 
+    getKeyPackageLifetimeInfo() {
+        if (!this.client) throw new Error('Client not initialized');
+        return this.client.get_key_package_lifetime();
+    }
+
+    getKeyPackageLifetimeInfoFromBytes(keyPackageBytes) {
+        if (!this.client) throw new Error('Client not initialized');
+        return this.client.key_package_lifetime_from_bytes(keyPackageBytes);
+    }
+
+    keyPackageExpiresSoon(lifetimeInfo) {
+        if (!lifetimeInfo || typeof lifetimeInfo.not_after !== 'number') {
+            return true;
+        }
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        return nowSeconds >= (lifetimeInfo.not_after - KEY_PACKAGE_RENEWAL_WINDOW_SECONDS);
+    }
+
+    keyPackageLifetimeAcceptable(lifetimeInfo) {
+        if (!lifetimeInfo || typeof lifetimeInfo.range_seconds !== 'number') {
+            return false;
+        }
+        if (lifetimeInfo.has_acceptable_range === false) {
+            return false;
+        }
+        return lifetimeInfo.range_seconds <= MAX_LEAF_NODE_LIFETIME_RANGE_SECONDS;
+    }
+
     /**
      * Compute SHA-256 hash of data and return as hex string
      * @param {Uint8Array} data - Data to hash
@@ -300,19 +311,31 @@ class CoreCryptoClient {
 
     /**
      * Upload the key package to the server
-     * @param {string} deviceId - Device identifier (defaults to 'default')
      * @returns {Promise<Object>} Server response
      */
-    async uploadKeyPackage(deviceId = 'default') {
+    async uploadKeyPackage(options = {}) {
         if (!this.client) throw new Error('Client not initialized');
 
         // Get token directly from localStorage to avoid circular import with auth.js
         const token = localStorage.getItem('token');
         if (!token) throw new Error('Not authenticated');
 
-        const keyPackageBytes = this.getKeyPackageBytes();
-        const keyPackageHex = this.getKeyPackageHex();
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+        if (!deviceId) {
+            console.warn('[MLS] Skipping key package upload (device ID not set)');
+            return null;
+        }
+
+        const { keyPackageBytes: providedBytes = null, isLastResort = false } = options;
+        const keyPackageBytes = providedBytes || this.getKeyPackageBytes();
+        const keyPackageHex = Array.from(keyPackageBytes)
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
         const hash = await this.computeHash(keyPackageBytes);
+        const lifetimeInfo = providedBytes
+            ? this.getKeyPackageLifetimeInfoFromBytes(keyPackageBytes)
+            : this.getKeyPackageLifetimeInfo();
 
         // Format for postgres bytea: \x prefix
         const packageData = '\\x' + keyPackageHex;
@@ -326,7 +349,10 @@ class CoreCryptoClient {
             body: JSON.stringify({
                 deviceId,
                 packageData,
-                hash
+                hash,
+                notBefore: lifetimeInfo?.not_before ?? null,
+                notAfter: lifetimeInfo?.not_after ?? null,
+                isLastResort
             })
         });
 
@@ -340,49 +366,100 @@ class CoreCryptoClient {
         return result;
     }
 
+    async ensureKeyPackagesFresh() {
+        if (!this.client) throw new Error('Client not initialized');
+
+        let lifetimeInfo = null;
+        try {
+            lifetimeInfo = this.getKeyPackageLifetimeInfo();
+        } catch (e) {
+            console.warn('[MLS] Failed to read key package lifetime:', e);
+        }
+
+        let regenerated = false;
+        if (!lifetimeInfo || !this.keyPackageLifetimeAcceptable(lifetimeInfo) || this.keyPackageExpiresSoon(lifetimeInfo)) {
+            await this.regenerateKeyPackage();
+            regenerated = true;
+        } else {
+            await this.uploadKeyPackage();
+        }
+
+        if (!regenerated) {
+            await this.ensureLastResortKeyPackage();
+        }
+    }
+
+    async ensureLastResortKeyPackage() {
+        if (!this.client) throw new Error('Client not initialized');
+        try {
+            const lastResortBytes = this.client.generate_last_resort_key_package();
+            await this.saveState();
+            try {
+                const vaultService = (await import('../vaultService.js')).default;
+                await vaultService.saveCurrentState();
+            } catch (e) {
+                console.warn('[MLS] Failed to persist last-resort key package:', e);
+            }
+            await this.uploadKeyPackage({ keyPackageBytes: lastResortBytes, isLastResort: true });
+        } catch (e) {
+            console.warn('[MLS] Failed to generate last-resort key package:', e);
+        }
+    }
+
     /**
-     * Fetch a key package for another user
+     * Fetch key packages for another user
      * @param {string|number} userId - The user ID to fetch
-     * @returns {Promise<Uint8Array>} The key package bytes
+     * @param {boolean} fetchAll - Whether to fetch all device keys
+     * @param {string|null} deviceId - Specific device ID to fetch
+     * @returns {Promise<Uint8Array[]>} Array of key package bytes
      */
-    async fetchKeyPackage(userId) {
+    async fetchKeyPackages(userId, fetchAll = false, deviceId = null) {
         if (!this.initialized) await this.initialize();
 
-        // Get token directly
         const token = localStorage.getItem('token');
         if (!token) throw new Error('Not authenticated');
 
-        const response = await fetch(`/api/mls/key-package/${userId}`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
+        let url = `/api/mls/key-package/${userId}`;
+        const params = new URLSearchParams();
+        if (deviceId) params.set('deviceId', deviceId);
+        else if (fetchAll) params.set('all', 'true');
+        
+        if (params.size > 0) url += `?${params.toString()}`;
+
+        const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${token}` }
         });
 
         if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.error || 'Failed to fetch key package');
+            throw new Error('Failed to fetch key packages');
         }
 
         const data = await response.json();
+        const packages = Array.isArray(data) ? data : [data];
 
-        if (!data.package_data) {
-            throw new Error('Invalid key package response');
-        }
+        const keyPackageBytes = packages.map(pkg => {
+            if (!pkg.package_data) return null;
+            
+            // Handle Postgres bytea format
+            if (pkg.package_data && pkg.package_data.type === 'Buffer' && Array.isArray(pkg.package_data.data)) {
+                return new Uint8Array(pkg.package_data.data);
+            } else if (typeof pkg.package_data === 'string') {
+                let hex = pkg.package_data;
+                if (hex.startsWith('\\x')) hex = hex.substring(2);
+                return new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+            }
+            return null;
+        }).filter(Boolean);
 
-        // Handle Postgres bytea format which might be returned as a Buffer object or hex string
-        let bytes;
-        if (data.package_data && data.package_data.type === 'Buffer' && Array.isArray(data.package_data.data)) {
-            bytes = new Uint8Array(data.package_data.data);
-        } else if (typeof data.package_data === 'string') {
-            let hex = data.package_data;
-            if (hex.startsWith('\\x')) hex = hex.substring(2);
-            bytes = new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-        } else {
-            throw new Error('Unknown key package data format');
-        }
-
-        return bytes;
+        return keyPackageBytes.filter(bytes => {
+            try {
+                const lifetimeInfo = this.getKeyPackageLifetimeInfoFromBytes(bytes);
+                return this.keyPackageLifetimeAcceptable(lifetimeInfo);
+            } catch (e) {
+                console.warn('[MLS] Skipping key package with invalid lifetime:', e);
+                return false;
+            }
+        });
     }
 
     /**
@@ -390,7 +467,7 @@ class CoreCryptoClient {
      * @param {string} name - Human readable group name
      * @returns {Promise<Object>} Created group metadata
      */
-    async createGroup(name) {
+    async createGroup(name, options = {}) {
         if (!this.initialized) await this.initialize();
         if (!this.client && this.identityName) await this.loadState(this.identityName);
         if (!this.client) throw new Error('Client not initialized (Identity not found)');
@@ -401,9 +478,33 @@ class CoreCryptoClient {
         const groupId = Array.from(groupIdBytes).map(b => b.toString(16).padStart(2, '0')).join('');
 
         try {
-            // Call WASM to create the group state
-            // WASM expects raw bytes, not hex string
-            const groupState = this.client.create_group(groupIdBytes);
+            const externalSenders = Array.isArray(options.externalSenders) ? options.externalSenders : [];
+            let groupState;
+
+            if (externalSenders.length > 0 && this.client.create_group_with_external_senders) {
+                const identities = [];
+                const signatureKeys = [];
+                for (const sender of externalSenders) {
+                    if (!sender || typeof sender.identity !== 'string' || !sender.signatureKey) {
+                        throw new Error('External sender requires { identity, signatureKey }');
+                    }
+                    identities.push(sender.identity);
+                    if (sender.signatureKey instanceof Uint8Array) {
+                        signatureKeys.push(sender.signatureKey);
+                    } else if (typeof sender.signatureKey === 'string') {
+                        signatureKeys.push(this.hexToBytes(sender.signatureKey));
+                    } else if (Array.isArray(sender.signatureKey)) {
+                        signatureKeys.push(new Uint8Array(sender.signatureKey));
+                    } else {
+                        throw new Error('External sender signatureKey must be Uint8Array, hex string, or byte array');
+                    }
+                }
+                groupState = this.client.create_group_with_external_senders(groupIdBytes, identities, signatureKeys);
+            } else {
+                // Call WASM to create the group state
+                // WASM expects raw bytes, not hex string
+                groupState = this.client.create_group(groupIdBytes);
+            }
             console.log('MLS Group Created Locally:', groupId);
 
             // Persist group metadata in backend
@@ -439,11 +540,268 @@ class CoreCryptoClient {
                 console.warn('[MLS] Could not save to vault:', vaultErr.message);
             }
 
+            try {
+                await this.syncGroupMembers(groupId);
+            } catch (syncErr) {
+                console.warn('[MLS] Failed to sync group members:', syncErr);
+            }
+
             return groupData;
         } catch (e) {
             console.error('Error creating group:', e);
             throw e;
         }
+    }
+
+    exportGroupInfo(groupId, { includeRatchetTree = true } = {}) {
+        if (!this.client) throw new Error('Client not initialized');
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        const infoBytes = this.client.export_group_info(groupIdBytes, includeRatchetTree);
+        return infoBytes instanceof Uint8Array ? infoBytes : new Uint8Array(infoBytes);
+    }
+
+    inspectGroupInfo(groupInfoBytes) {
+        if (!this.client) throw new Error('Client not initialized');
+        const summary = this.client.inspect_group_info(groupInfoBytes);
+        return {
+            groupIdHex: summary.group_id_hex,
+            groupId: this.groupIdFromHex(summary.group_id_hex),
+            epoch: typeof summary.epoch === 'bigint' ? Number(summary.epoch) : summary.epoch,
+            ciphersuite: summary.ciphersuite,
+            hasRatchetTree: summary.has_ratchet_tree,
+            hasExternalPub: summary.has_external_pub
+        };
+    }
+
+    async publishGroupInfo(groupId, { includeRatchetTree = true, isPublic = false } = {}) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
+
+        const groupInfoBytes = this.exportGroupInfo(groupId, { includeRatchetTree });
+        const infoMeta = this.inspectGroupInfo(groupInfoBytes);
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const response = await fetch(`/api/mls/groups/${encodeURIComponent(groupId)}/group-info`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                groupInfo: '\\x' + this.bytesToHex(groupInfoBytes),
+                epoch: infoMeta.epoch,
+                isPublic: !!isPublic
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Failed to publish group info');
+        }
+
+        return await response.json();
+    }
+
+    async fetchGroupInfo(groupId) {
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const response = await fetch(`/api/mls/groups/${encodeURIComponent(groupId)}/group-info`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Failed to fetch group info');
+        }
+
+        const payload = await response.json();
+        if (!payload?.groupInfo) {
+            throw new Error('Group info not available');
+        }
+
+        let groupInfoBytes;
+        if (payload.groupInfo.type === 'Buffer' && Array.isArray(payload.groupInfo.data)) {
+            groupInfoBytes = new Uint8Array(payload.groupInfo.data);
+        } else if (typeof payload.groupInfo === 'string' && payload.groupInfo.startsWith('\\x')) {
+            groupInfoBytes = this.hexToBytes(payload.groupInfo);
+        } else if (payload.groupInfo instanceof Uint8Array) {
+            groupInfoBytes = payload.groupInfo;
+        } else if (Array.isArray(payload.groupInfo)) {
+            groupInfoBytes = new Uint8Array(payload.groupInfo);
+        } else {
+            throw new Error('Unsupported group info format');
+        }
+
+        return {
+            groupInfoBytes,
+            epoch: payload.epoch
+        };
+    }
+
+    async joinGroupByExternalCommit({ groupInfoBytes, ratchetTreeBytes = null, pskIds = [] }) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
+
+        const infoMeta = this.inspectGroupInfo(groupInfoBytes);
+        const groupId = infoMeta.groupId;
+        const aadPayload = this.buildAadPayload(groupId, infoMeta.epoch, 'commit');
+        const aadBytes = this.encodeAad(aadPayload);
+
+        const pskArray = Array.isArray(pskIds) ? pskIds : [pskIds];
+        const pskIdArray = pskArray.map(psk => {
+            if (psk instanceof Uint8Array) return psk;
+            if (typeof psk === 'string') return this.hexToBytes(psk);
+            if (Array.isArray(psk)) return new Uint8Array(psk);
+            throw new Error('PSK ID must be Uint8Array, hex string, or byte array');
+        });
+
+        const result = this.client.join_by_external_commit(
+            groupInfoBytes,
+            ratchetTreeBytes,
+            pskIdArray,
+            aadBytes
+        );
+
+        const commitBytes = new Uint8Array(result.commit || []);
+        const commitEpoch = typeof result.epoch === 'bigint' ? Number(result.epoch) : result.epoch;
+        const finalGroupId = this.groupIdFromHex(result.group_id_hex || infoMeta.groupIdHex);
+
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+        if (!deviceId) {
+            throw new Error('Device ID not available. Unlock or set up your keystore first.');
+        }
+
+        const commitResponse = await fetch('/api/mls/messages/group', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'x-device-id': deviceId
+            },
+            body: JSON.stringify({
+                groupId: finalGroupId,
+                epoch: commitEpoch ?? infoMeta.epoch,
+                messageType: 'commit',
+                data: '\\x' + this.bytesToHex(commitBytes)
+            })
+        });
+
+        if (!commitResponse.ok) {
+            const error = await commitResponse.json().catch(() => ({}));
+            try {
+                this.removeGroup(finalGroupId);
+            } catch (removeErr) {
+                console.warn('[MLS] Failed to remove external commit group after rejection:', removeErr);
+            }
+            throw new Error(error.error || 'Failed to send external commit');
+        }
+
+        await this.saveState();
+
+        try {
+            await vaultService.saveCurrentState();
+        } catch (vaultErr) {
+            console.warn('[MLS] Could not save external commit state to vault:', vaultErr.message);
+        }
+
+        try {
+            await this.syncGroupMembers(finalGroupId);
+        } catch (syncErr) {
+            console.warn('[MLS] Failed to sync group members after external commit:', syncErr);
+        }
+
+        // Broadcast confirmation tag for fork detection
+        try {
+            const currentEpoch = this.getGroupEpoch(finalGroupId);
+            await this.broadcastConfirmationTag(finalGroupId, currentEpoch);
+        } catch (tagErr) {
+            console.warn('[MLS] Failed to broadcast confirmation tag after external commit:', tagErr);
+        }
+
+        return {
+            groupId: finalGroupId,
+            commitEpoch: commitEpoch ?? infoMeta.epoch
+        };
+    }
+
+    createExternalPsk(pskIdHex = '') {
+        if (!this.client) throw new Error('Client not initialized');
+        const pskIdBytes = pskIdHex ? this.hexToBytes(pskIdHex) : new Uint8Array();
+        const bundle = this.client.generate_external_psk(pskIdBytes);
+        const pskIdSerialized = new Uint8Array(bundle.psk_id_serialized || []);
+        return {
+            pskId: this.bytesToHex(new Uint8Array(bundle.psk_id || [])),
+            pskNonce: this.bytesToHex(new Uint8Array(bundle.psk_nonce || [])),
+            pskIdSerialized,
+            secret: new Uint8Array(bundle.secret || [])
+        };
+    }
+
+    storeExternalPsk(pskIdSerialized, secretBytes) {
+        if (!this.client) throw new Error('Client not initialized');
+        const pskIdBytes = pskIdSerialized instanceof Uint8Array
+            ? pskIdSerialized
+            : this.hexToBytes(pskIdSerialized);
+        const secret = secretBytes instanceof Uint8Array
+            ? secretBytes
+            : this.hexToBytes(secretBytes);
+        this.client.store_external_psk(pskIdBytes, secret);
+    }
+
+    async proposeExternalPsk(groupId, pskIdSerialized) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
+
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+        if (!deviceId) {
+            throw new Error('Device ID not available. Unlock or set up your keystore first.');
+        }
+
+        const pskIdBytes = pskIdSerialized instanceof Uint8Array
+            ? pskIdSerialized
+            : this.hexToBytes(pskIdSerialized);
+
+        this.setGroupAad(groupId, 'proposal');
+        const proposalBytes = this.client.propose_external_psk(groupIdBytes, pskIdBytes);
+        const proposalHex = this.bytesToHex(proposalBytes);
+
+        const response = await fetch('/api/mls/messages/group', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'x-device-id': deviceId
+            },
+            body: JSON.stringify({
+                groupId,
+                messageType: 'proposal',
+                data: '\\x' + proposalHex
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Failed to send PSK proposal');
+        }
+
+        await this.saveState();
+        return await response.json();
     }
 
     /**
@@ -464,7 +822,7 @@ class CoreCryptoClient {
 
             if (isNew) {
                 // Create group locally in WASM
-                const groupIdBytes = new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                const groupIdBytes = this.groupIdToBytes(groupId);
                 this.client.create_group(groupIdBytes);
                 console.log('[MLS] Created local DM group:', groupId);
 
@@ -493,111 +851,182 @@ class CoreCryptoClient {
         return groupId && groupId.startsWith('dm_');
     }
 
+    getGroupEpoch(groupId) {
+        if (!this.client) throw new Error('Client not initialized');
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        const epoch = this.client.get_group_epoch(groupIdBytes);
+        if (typeof epoch === 'bigint') {
+            return Number(epoch);
+        }
+        return epoch;
+    }
+
+    getGroupMemberIdentities(groupId) {
+        if (!this.client) throw new Error('Client not initialized');
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        const identities = this.client.get_group_member_identities(groupIdBytes);
+        return Array.from(identities || []).filter(Boolean);
+    }
+
+    getGroupMembers(groupId) {
+        if (!this.client) throw new Error('Client not initialized');
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        return this.client.get_group_members(groupIdBytes) || [];
+    }
+
+    async syncGroupMembers(groupId) {
+        const identities = this.getGroupMemberIdentities(groupId);
+        const memberIds = identities
+            .filter(id => this.isNumericIdentity(id))
+            .map(id => Number(id));
+
+        if (memberIds.length === 0) return;
+
+        await api.mls.syncGroupMembers(groupId, memberIds);
+    }
+
     /**
-     * Invite a user to a group
+     * Invite a user (all their devices or a specific one) to a group
      * @param {string} groupId - The Group ID
      * @param {string|number} userId - The User ID to invite
+     * @param {string|null} targetDeviceId - Optional specific device ID to invite
      * @returns {Promise<Object>} Success status
      */
-    async inviteToGroup(groupId, userId) {
+    async inviteToGroup(groupId, userId, targetDeviceId = null) {
         if (!this.initialized) await this.initialize();
         if (!this.client && this.identityName) await this.loadState(this.identityName);
         if (!this.client) throw new Error('Client not initialized');
 
         try {
-            // 1. Fetch User's Key Package
-            const keyPackageBytes = await this.fetchKeyPackage(userId);
-            console.log(`Fetched key package for user ${userId}, bytes: ${keyPackageBytes.length}`);
+            // 1. Fetch Key Packages (all or specific)
+            const keyPackages = await this.fetchKeyPackages(userId, true, targetDeviceId);
+            console.log(`Fetched ${keyPackages.length} key packages for user ${userId} (targetDevice: ${targetDeviceId || 'all'})`);
 
-            // 2. Convert groupId to bytes for WASM
-            const groupIdBytes = new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-
-            // 3. Add member in WASM (creates Proposal + Commit + Welcome)
-            // Returns [welcome, commit] tuple
-            const result = this.client.add_member(groupIdBytes, keyPackageBytes);
-            console.log('Add member result:', result);
-
-            if (!result || !Array.isArray(result) || result.length < 2) {
-                throw new Error('Failed to generate commit/welcome from add_member');
+            if (keyPackages.length === 0) {
+                throw new Error('No key packages found for user');
             }
 
-            const welcomeBytes = result[0]; // First element is Welcome
-            const commitBytes = result[1];  // Second element is Commit
-
+            const token = localStorage.getItem('token');
+            const { default: vaultService } = await import('../vaultService.js');
+            const deviceId = vaultService.getDeviceId();
+            if (!deviceId) {
+                throw new Error('Device ID not available. Unlock or set up your keystore first.');
+            }
+            
             // Helper to convert to hex
             const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
+            const groupIdBytes = this.groupIdToBytes(groupId);
 
-            // 3. Upload Welcome Message (for the new user)
-            const token = localStorage.getItem('token');
-            const welcomeRes = await fetch('/api/mls/messages/welcome', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    groupId,
-                    receiverId: userId,
-                    data: '\\x' + toHex(welcomeBytes) // Postgres bytea
-                })
-            });
+            // 2. Iterate and add each device
+            let addedCount = 0;
+            for (const keyPackageBytes of keyPackages) {
+                try {
+                    const rollbackState = await this.exportStateForVault();
+                    this.setGroupAad(groupId, 'commit');
+                    // 3. Add member in WASM (creates Proposal + Commit + Welcome)
+                    const result = this.client.add_member(groupIdBytes, keyPackageBytes);
+                    
+                    if (!result || !Array.isArray(result) || result.length < 2) {
+                        console.warn('Failed to generate commit/welcome for a device, skipping');
+                        continue;
+                    }
 
-            if (!welcomeRes.ok) throw new Error('Failed to send welcome message');
+                    const welcomeBytes = result[0];
+                    const commitBytes = result[1];
+                    const groupInfoBytes = result.length > 2 ? result[2] : null;
+                    const epoch = this.getGroupEpoch(groupId);
 
-            // 4. Upload Commit Message (for existing members)
-            // ContentType 'commit' = 1 (or similar? Need to check spec or enum. Assuming 'commit' string or map to integer if backend expects int)
-            // Backend `storeGroupMessage` takes `content_type` as string in current schema? 
-            // In SQL `content_type` is likely text unless I defined ENUM.
-            // Let's assume 'commit' string for now.
-            // Epoch: We need to know the *next* epoch? Or current?
-            // Usually the commit *advances* the epoch.
-            // Does `add_member` return the new epoch?
-            // Simplification: Send it with current epoch + 1 or let backend/client handle ordering.
-            // For now, I will use a placeholder epoch 0 or get it from group state if possible.
-            // But WASM manages state.
-            // I'll leave epoch as 0 for MVP or see if I can get it.
+                    // 4. Upload Commit Message (existing members only)
+                    // OpenMLS Book: commit goes to existing members; welcome goes to new members.
+                    const commitResponse = await fetch('/api/mls/messages/group', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`,
+                            'x-device-id': deviceId
+                        },
+                        body: JSON.stringify({
+                            groupId,
+                            epoch,
+                            messageType: 'commit',
+                            data: '\\x' + toHex(commitBytes),
+                            excludeUserIds: [userId]
+                        })
+                    });
 
-            const groupMessageRes = await fetch('/api/mls/messages/group', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    groupId,
-                    epoch: 0, // TODO: Get actual epoch from WASM state
-                    contentType: 'commit',
-                    data: '\\x' + toHex(commitBytes)
-                })
-            });
+                    if (!commitResponse.ok) {
+                        const error = await commitResponse.json().catch(() => ({}));
+                        try {
+                            this.client.clear_pending_commit(groupIdBytes);
+                        } catch (clearErr) {
+                            console.warn('[MLS] Failed to clear pending commit after rejection:', clearErr);
+                        }
+                        // Roll back local state if the delivery service rejected the commit
+                        if (rollbackState) {
+                            await this.restoreStateFromVault(rollbackState);
+                        }
+                        throw new Error(error.error || 'Failed to send commit message');
+                    }
 
-            if (!groupMessageRes.ok) throw new Error('Failed to send group commit');
+                    try {
+                        this.client.merge_pending_commit(groupIdBytes);
+                    } catch (mergeErr) {
+                        console.warn('[MLS] Failed to merge pending commit:', mergeErr);
+                        throw mergeErr;
+                    }
 
-            // 5. Update Group Membership in Backend (Relational DB)
-            const membershipRes = await fetch(`/api/mls/groups/${groupId}/members`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ userId })
-            });
+                    try {
+                        const currentEpoch = this.getGroupEpoch(groupId);
+                        await this.broadcastConfirmationTag(groupId, currentEpoch);
+                    } catch (tagErr) {
+                        console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
+                    }
 
-            if (!membershipRes.ok) throw new Error('Failed to update group membership');
+                    // 5. Upload Welcome Message (new members only, after commit accepted)
+                    const welcomeResponse = await fetch('/api/mls/messages/welcome', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`,
+                            'x-device-id': deviceId
+                        },
+                        body: JSON.stringify({
+                            groupId,
+                            receiverId: userId,
+                            data: '\\x' + toHex(welcomeBytes),
+                            groupInfo: groupInfoBytes ? ('\\x' + toHex(groupInfoBytes)) : null
+                        })
+                    });
 
-            // Save state after adding member (group state changed)
-            await this.saveState();
+                    if (!welcomeResponse.ok) {
+                        const error = await welcomeResponse.json().catch(() => ({}));
+                        throw new Error(error.error || 'Failed to send welcome message');
+                    }
 
-            // Save to vault if unlocked
-            try {
-                const vaultService = (await import('../vaultService.js')).default;
-                await vaultService.saveCurrentState();
-                console.log('[MLS] Invite state saved to vault');
-            } catch (vaultErr) {
-                console.warn('[MLS] Could not save to vault:', vaultErr.message);
+                    addedCount++;
+                    
+                    // Save state after EACH member add to persist the new epoch
+                    await this.saveState();
+                    try {
+                        const vaultService = (await import('../vaultService.js')).default;
+                        await vaultService.saveCurrentState();
+                    } catch (e) {}
+                    try {
+                        await this.syncGroupMembers(groupId);
+                    } catch (syncErr) {
+                        console.warn('[MLS] Failed to sync group members:', syncErr);
+                    }
+
+                } catch (e) {
+                    console.warn(`Failed to add a device for user ${userId}:`, e);
+                    // Continue to try other devices
+                }
             }
 
-            return { success: true };
+            if (addedCount > 0) {
+                return { success: true, devicesAdded: addedCount };
+            }
+            throw new Error('Failed to add any devices for user');
 
         } catch (e) {
             console.error('Error inviting user:', e);
@@ -605,98 +1034,243 @@ class CoreCryptoClient {
         }
     }
 
-    /**
-     * Check for pending invites (Welcome messages)
-     * @returns {Promise<Array>} List of new group IDs joined
-     */
-    async checkForInvites() {
+    async recoverForkByReadding(groupId, ownLeafIndices, keyPackageBytesList) {
         if (!this.initialized) await this.initialize();
-        const token = localStorage.getItem('token');
-        if (!token) return [];
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
 
-        try {
-            const res = await fetch('/api/mls/messages/welcome', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (!res.ok) throw new Error('Failed to fetch invites');
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        const indices = Array.isArray(ownLeafIndices) ? ownLeafIndices : [ownLeafIndices];
+        const keyPackages = Array.isArray(keyPackageBytesList) ? keyPackageBytesList : [keyPackageBytesList];
 
-            const messages = await res.json();
-            console.log(`Found ${messages.length} pending invites`);
+        this.setGroupAad(groupId, 'commit');
 
-            const joinedGroups = [];
-            for (const msg of messages) {
-                try {
-                    console.log('Processing invite:', msg.id);
-                    // msg.data might be buffer (array generic) or hex string
-                    let welcomeBytes;
-                    if (msg.data && msg.data.type === 'Buffer') {
-                        welcomeBytes = new Uint8Array(msg.data.data);
-                    } else if (typeof msg.data === 'string' && msg.data.startsWith('\\x')) {
-                        // Postgres hex format \xDEADBEEF
-                        const hex = msg.data.substring(2);
-                        if (hex.length === 0) welcomeBytes = new Uint8Array(0);
-                        else {
-                            const match = hex.match(/.{1,2}/g);
-                            welcomeBytes = new Uint8Array(match ? match.map(byte => parseInt(byte, 16)) : []);
-                        }
-                    } else {
-                        // Assuming raw array or hex string
-                        welcomeBytes = new Uint8Array(typeof msg.data === 'string' ?
-                            msg.data.match(/.{1,2}/g).map(byte => parseInt(byte, 16)) : msg.data);
-                    }
+        const result = this.client.recover_fork_by_readding(groupIdBytes, indices, keyPackages);
+        return {
+            groupId: groupId,
+            commitBytes: new Uint8Array(result.commit || []),
+            welcomeBytes: result.welcome ? new Uint8Array(result.welcome) : null,
+            groupInfoBytes: result.group_info ? new Uint8Array(result.group_info) : null
+        };
+    }
 
-                    const groupId = await this.joinGroup(welcomeBytes);
-                    joinedGroups.push(groupId);
+    async rebootGroup(groupId, newGroupId, keyPackageBytesList) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
 
-                    // Delete processed welcome
-                    await fetch(`/api/mls/messages/welcome/${msg.id}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    });
-                } catch (e) {
-                    console.error('Failed to process invite:', msg.id, e);
-                }
-            }
-            return joinedGroups;
-        } catch (e) {
-            console.error('Error in checkForInvites:', e);
-            return [];
-        }
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        const newGroupIdBytes = this.groupIdToBytes(newGroupId);
+        const keyPackages = Array.isArray(keyPackageBytesList) ? keyPackageBytesList : [keyPackageBytesList];
+        const aadPayload = this.buildAadPayload(newGroupId, 0, 'commit');
+        const aadBytes = this.encodeAad(aadPayload);
+
+        const result = this.client.reboot_group(groupIdBytes, newGroupIdBytes, keyPackages, aadBytes);
+        return {
+            groupId: newGroupId,
+            commitBytes: new Uint8Array(result.commit || []),
+            welcomeBytes: result.welcome ? new Uint8Array(result.welcome) : null,
+            groupInfoBytes: result.group_info ? new Uint8Array(result.group_info) : null
+        };
+    }
+
+    removeGroup(groupId) {
+        if (!this.client) throw new Error('Client not initialized');
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        this.client.remove_group(groupIdBytes);
     }
 
     /**
      * Join a group from a Welcome message
+     * Routes through two-phase validation for security
      * @param {Uint8Array} welcomeBytes
+     * @param {Uint8Array|null} ratchetTreeBytes - Optional ratchet tree
      * @returns {Promise<string>} Group ID (hex)
      */
-    async joinGroup(welcomeBytes) {
+    async joinGroup(welcomeBytes, ratchetTreeBytes = null) {
         if (!this.initialized) await this.initialize();
         if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
 
-        // process_welcome returns group_id bytes
-        // signature: process_welcome(welcome_bytes, ratchet_tree_bytes?)
-        const groupIdBytes = this.client.process_welcome(welcomeBytes, undefined);
+        // Route through two-phase validation flow
+        const staged = await this.stageWelcome(welcomeBytes, ratchetTreeBytes);
+        const validation = this.validateStagedWelcomeMembers(staged.stagingId);
 
+        if (!validation.valid) {
+            this.rejectStagedWelcome(staged.stagingId);
+            throw new Error(`Welcome validation failed: ${validation.issues.join(', ')}`);
+        }
+
+        // Accept and join via the validated path
+        const groupId = await this.acceptStagedWelcome(staged.stagingId);
+        console.log('[MLS] Joined group via two-phase validation:', groupId);
+
+        return groupId;
+    }
+
+    // ===== TWO-PHASE JOIN (with credential validation) =====
+
+    /**
+     * Stage a welcome for inspection before joining (two-phase join)
+     * Per OpenMLS Book (p.17-21): Validate credentials before accepting
+     * @param {Uint8Array} welcomeBytes - The welcome message bytes
+     * @param {Uint8Array|null} ratchetTreeBytes - Optional ratchet tree
+     * @returns {Promise<Object>} Staging info with stagingId and member details
+     */
+    async stageWelcome(welcomeBytes, ratchetTreeBytes = null) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
+
+        // Stage the welcome in WASM
+        const stagingId = this.client.stage_welcome(welcomeBytes, ratchetTreeBytes);
+
+        // Get the inspection info
+        const info = this.client.get_staged_welcome_info(stagingId);
+        const groupId = this.groupIdFromHex(info.group_id_hex);
+
+        console.log('[MLS] Welcome staged for inspection:', stagingId);
+        console.log('[MLS] Group members:', info.members?.length || 0);
+
+        return {
+            stagingId,
+            groupId,
+            ciphersuite: info.ciphersuite,
+            epoch: info.epoch,
+            sender: info.sender,
+            members: info.members
+        };
+    }
+
+    /**
+     * Get info about a staged welcome
+     * @param {string} stagingId - The staging ID from stageWelcome
+     * @returns {Object} Welcome info with sender and members
+     */
+    getStagedWelcomeInfo(stagingId) {
+        if (!this.client) throw new Error('Client not initialized');
+        return this.client.get_staged_welcome_info(stagingId);
+    }
+
+    /**
+     * Accept a staged welcome and join the group
+     * Call this after inspecting and approving the welcome
+     * @param {string} stagingId - The staging ID from stageWelcome
+     * @returns {Promise<string>} Group ID (hex)
+     */
+    async acceptStagedWelcome(stagingId) {
+        if (!this.client) throw new Error('Client not initialized');
+
+        // Accept and join in WASM
+        const groupIdBytes = this.client.accept_staged_welcome(stagingId);
+        const groupId = this.groupIdFromBytes(groupIdBytes);
+
+        console.log('[MLS] Accepted staged welcome, joined group:', groupId);
+
+        // Save state
         await this.saveState();
 
-        const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
-        const groupId = toHex(groupIdBytes);
-        console.log('Joined group:', groupId);
-
-        // Regenerate KeyPackage after joining (it was consumed by process_welcome)
+        // Regenerate KeyPackage (it was consumed)
         await this.regenerateKeyPackage();
 
-        // Save to vault if unlocked (dynamic import to avoid circular dependency)
+        // Save to vault
         try {
             const vaultService = (await import('../vaultService.js')).default;
             await vaultService.saveCurrentState();
-            console.log('[MLS] Join group state saved to vault');
-        } catch (vaultErr) {
-            console.warn('[MLS] Could not save to vault:', vaultErr.message);
+        } catch (e) {
+            console.warn('[MLS] Could not save to vault:', e.message);
+        }
+
+        // Sync members
+        try {
+            await this.syncGroupMembers(groupId);
+        } catch (e) {
+            console.warn('[MLS] Failed to sync group members:', e);
+        }
+
+        try {
+            const currentEpoch = this.getGroupEpoch(groupId);
+            await this.broadcastConfirmationTag(groupId, currentEpoch);
+        } catch (tagErr) {
+            console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
         }
 
         return groupId;
     }
+
+    /**
+     * Reject a staged welcome (discard without joining)
+     * @param {string} stagingId - The staging ID from stageWelcome
+     */
+    rejectStagedWelcome(stagingId) {
+        if (!this.client) throw new Error('Client not initialized');
+        this.client.reject_staged_welcome(stagingId);
+        console.log('[MLS] Rejected staged welcome:', stagingId);
+    }
+
+    /**
+     * List all pending staged welcomes
+     * @returns {string[]} Array of staging IDs
+     */
+    listStagedWelcomes() {
+        if (!this.client) return [];
+        return Array.from(this.client.list_staged_welcomes() || []);
+    }
+
+    /**
+     * Validate members of a staged welcome against a policy
+     * @param {string} stagingId - The staging ID
+     * @param {Function} validator - Function(member) => boolean, return false to reject
+     * @returns {Object} { valid: boolean, invalidMembers: [] }
+     */
+    validateStagedWelcomeMembers(stagingId, validator) {
+        const info = this.getStagedWelcomeInfo(stagingId);
+        const groupId = this.groupIdFromHex(info.group_id_hex);
+        console.log('[MLS] validateStagedWelcomeMembers:', { groupId, members: info.members, sender: info.sender });
+        const invalidMembers = [];
+        const issues = [];
+        const defaultValidator = (member) => {
+            console.log('[MLS] Validating member:', JSON.stringify(member));
+            if (!member || !member.is_basic_credential) {
+                console.log('[MLS] Member rejected: missing or not basic credential');
+                return false;
+            }
+            if (member.lifetime && !this.keyPackageLifetimeAcceptable(member.lifetime)) {
+                return false;
+            }
+            if (this.isDirectMessage(groupId)) {
+                const allowed = new Set(this.getDmParticipantIds(groupId));
+                // Convert identity to string for comparison (getDmParticipantIds returns strings)
+                return allowed.has(String(member.identity));
+            }
+            return this.isNumericIdentity(member.identity);
+        };
+        const validateMember = typeof validator === 'function' ? validator : defaultValidator;
+
+        for (const member of info.members || []) {
+            if (!validateMember(member)) {
+                invalidMembers.push(member);
+                issues.push(`Invalid member credential: ${member.identity || 'unknown'}`);
+            }
+        }
+
+        if (info.sender && !validateMember({
+            identity: info.sender.identity,
+            is_basic_credential: info.sender.is_basic_credential,
+            lifetime: info.sender.lifetime
+        })) {
+            issues.push(`Invalid sender credential: ${info.sender.identity || 'unknown'}`);
+        }
+
+        return {
+            valid: invalidMembers.length === 0 && issues.length === 0,
+            invalidMembers,
+            issues,
+            groupId
+        };
+    }
+
+    // ===== END TWO-PHASE JOIN =====
 
     /**
      * Regenerate KeyPackage after it's been consumed (e.g., by joining a group)
@@ -710,8 +1284,17 @@ class CoreCryptoClient {
         this.client.regenerate_key_package();
         console.log('[MLS] KeyPackage regenerated');
 
-        // Save updated state
+        // Save updated state (drains events)
         await this.saveState();
+
+        // CRITICAL: Save to vault so new private key is persisted
+        try {
+            const vaultService = (await import('../vaultService.js')).default;
+            await vaultService.saveCurrentState();
+            console.log('[MLS] New KeyPackage state saved to vault');
+        } catch (e) {
+            console.warn('[MLS] Failed to save new KeyPackage to vault:', e);
+        }
 
         // Upload new KeyPackage to server
         try {
@@ -719,6 +1302,12 @@ class CoreCryptoClient {
             console.log('[MLS] New KeyPackage uploaded to server');
         } catch (e) {
             console.warn('[MLS] Failed to upload new KeyPackage:', e);
+        }
+
+        try {
+            await this.ensureLastResortKeyPackage();
+        } catch (e) {
+            console.warn('[MLS] Failed to refresh last-resort key package:', e);
         }
     }
 
@@ -734,17 +1323,15 @@ class CoreCryptoClient {
         if (!this.client && this.identityName) await this.loadState(this.identityName);
         if (!this.client) throw new Error('Client not initialized');
 
-        // Convert groupId to bytes if it's a hex string
-        let groupIdBytes;
-        if (typeof groupId === 'string') {
-            groupIdBytes = new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-        } else {
-            groupIdBytes = groupId;
-        }
+        // Convert groupId to bytes for MLS operations
+        const groupIdBytes = this.groupIdToBytes(groupId);
 
         // Convert plaintext to bytes
         const encoder = new TextEncoder();
         const plaintextBytes = encoder.encode(plaintext);
+
+        // Bind AAD metadata for this application message
+        this.setGroupAad(groupId, 'application');
 
         // Encrypt the message using WASM
         const ciphertextBytes = this.client.encrypt_message(groupIdBytes, plaintextBytes);
@@ -753,46 +1340,482 @@ class CoreCryptoClient {
         // Convert to hex for PostgreSQL bytea storage
         const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
         const ciphertextHex = '\\x' + toHex(ciphertextBytes);
-        const groupIdHex = typeof groupId === 'string' ? groupId : toHex(groupId);
+        const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupIdBytes);
 
         // Send to server
         const token = localStorage.getItem('token');
         if (!token) throw new Error('Not authenticated');
 
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+        if (!deviceId) {
+            throw new Error('Device ID not available. Unlock or set up your keystore first.');
+        }
+
         const response = await fetch('/api/mls/messages/group', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
+                'Authorization': `Bearer ${token}`,
+                'x-device-id': deviceId
             },
             body: JSON.stringify({
-                groupId: groupIdHex,
-                epoch: 0,
-                contentType: 'application',
+                groupId: groupIdValue,
+                messageType: 'application',
                 data: ciphertextHex
             })
         });
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
+            console.error('[MLS] Send message failed:', response.status, error);
             throw new Error(error.error || 'Failed to send message');
         }
 
         const result = await response.json();
-        console.log('[MLS] Message sent:', result.id);
+        const messageId = result.queueId || result.id; // Handle both just in case
+        console.log('[MLS] Message sent:', messageId);
 
         // Store plaintext for own message history (can't decrypt own messages in MLS)
         try {
-            this.client.store_sent_message(groupIdBytes, String(result.id), plaintext);
-            console.log('[MLS] Stored sent message for history:', result.id);
+            this.client.store_sent_message(groupIdBytes, String(messageId), plaintext);
+            console.log('[MLS] Stored sent message for history:', messageId);
+            
             // Save state to persist sent message
             const vaultService = (await import('../vaultService.js')).default;
             await vaultService.saveCurrentState();
+            
+            // Persist message history
+            await vaultService.persistMessage({
+                id: messageId,
+                groupId: groupIdValue,
+                senderId: this.identityName || localStorage.getItem('userId'), // We are the sender
+                plaintext,
+                type: 'application',
+                timestamp: new Date().toISOString()
+            });
+            
         } catch (e) {
             console.warn('[MLS] Failed to store sent message:', e);
         }
 
-        return result;
+        return { ...result, id: messageId };
+    }
+
+    /**
+     * Send an internal MLS system message (not stored in user history)
+     * @param {Uint8Array|string} groupId - The group ID
+     * @param {Object|string} payload - JSON payload or plaintext string
+     * @returns {Promise<Object>} Server response with message ID
+     */
+    async sendSystemMessage(groupId, payload) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
+
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupIdBytes);
+
+        const plaintext = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        const encoder = new TextEncoder();
+        const plaintextBytes = encoder.encode(plaintext);
+
+        // Bind AAD metadata for this application message
+        this.setGroupAad(groupIdValue, 'application');
+
+        const ciphertextBytes = this.client.encrypt_message(groupIdBytes, plaintextBytes);
+        const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
+        const ciphertextHex = '\\x' + toHex(ciphertextBytes);
+
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+        if (!deviceId) {
+            throw new Error('Device ID not available. Unlock or set up your keystore first.');
+        }
+
+        const response = await fetch('/api/mls/messages/group', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'x-device-id': deviceId
+            },
+            body: JSON.stringify({
+                groupId: groupIdValue,
+                messageType: 'application',
+                data: ciphertextHex
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            console.error('[MLS] System message send failed:', response.status, error);
+            throw new Error(error.error || 'Failed to send system message');
+        }
+
+        return await response.json();
+    }
+
+    /**
+     * Perform key rotation (self-update) for Post-Compromise Security
+     * Per OpenMLS Book (p.36-38 "Updating own leaf node")
+     * This generates fresh HPKE encryption keys and broadcasts a commit to the group.
+     * Should be called periodically or after suspected compromise.
+     * @param {Uint8Array|string} groupId - The group ID
+     * @returns {Promise<Object>} Server response
+     */
+    async selfUpdate(groupId) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
+
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupIdBytes);
+
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+        if (!deviceId) {
+            throw new Error('Device ID not available. Unlock or set up your keystore first.');
+        }
+
+        // Helper to convert to hex
+        const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
+
+        // Capture state for rollback
+        const rollbackState = await this.exportStateForVault();
+
+        this.setGroupAad(groupIdValue, 'commit');
+
+        // Call WASM self_update - returns [commit, optional_welcome, optional_group_info]
+        const result = this.client.self_update(groupIdBytes);
+
+        if (!result || result.length < 1) {
+            throw new Error('self_update returned invalid result');
+        }
+
+        const commitBytes = result[0];
+        const welcomeBytes = result[1]; // May be null
+        const epoch = this.getGroupEpoch(groupId);
+
+        // Send commit to server
+        const commitResponse = await fetch('/api/mls/messages/group', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'x-device-id': deviceId
+            },
+            body: JSON.stringify({
+                groupId: groupIdValue,
+                epoch,
+                messageType: 'commit',
+                data: '\\x' + toHex(commitBytes)
+            })
+        });
+
+        if (!commitResponse.ok) {
+            const error = await commitResponse.json().catch(() => ({}));
+            // Clear pending commit on failure
+            try {
+                this.client.clear_pending_commit(groupIdBytes);
+            } catch (clearErr) {
+                console.warn('[MLS] Failed to clear pending commit:', clearErr);
+            }
+            // Rollback
+            if (rollbackState) {
+                await this.restoreStateFromVault(rollbackState);
+            }
+            throw new Error(error.error || 'Failed to send self-update commit');
+        }
+
+        // Merge the pending commit locally
+        try {
+            this.client.merge_pending_commit(groupIdBytes);
+        } catch (mergeErr) {
+            console.warn('[MLS] Failed to merge pending commit:', mergeErr);
+            throw mergeErr;
+        }
+
+        // Save updated state
+        await this.saveState();
+        console.log('[MLS] Self-update complete - keys rotated for PCS');
+
+        try {
+            const currentEpoch = this.getGroupEpoch(groupIdValue);
+            await this.broadcastConfirmationTag(groupIdValue, currentEpoch);
+        } catch (tagErr) {
+            console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
+        }
+
+        return await commitResponse.json();
+    }
+
+    /**
+     * Remove a member from a group
+     * Per OpenMLS Book (p.31-32 "Removing members from a group")
+     * @param {Uint8Array|string} groupId - The group ID
+     * @param {number} leafIndex - The leaf index of the member to remove
+     * @returns {Promise<Object>} Server response
+     */
+    async removeMember(groupId, leafIndex) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
+
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupIdBytes);
+
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+        if (!deviceId) {
+            throw new Error('Device ID not available. Unlock or set up your keystore first.');
+        }
+
+        // Helper to convert to hex
+        const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
+
+        // Capture state for rollback
+        const rollbackState = await this.exportStateForVault();
+
+        this.setGroupAad(groupIdValue, 'commit');
+
+        // Call WASM remove_member - returns [commit, optional_welcome, optional_group_info]
+        const result = this.client.remove_member(groupIdBytes, leafIndex);
+
+        if (!result || result.length < 1) {
+            throw new Error('remove_member returned invalid result');
+        }
+
+        const commitBytes = result[0];
+        const epoch = this.getGroupEpoch(groupId);
+
+        // Send commit to server
+        const commitResponse = await fetch('/api/mls/messages/group', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'x-device-id': deviceId
+            },
+            body: JSON.stringify({
+                groupId: groupIdValue,
+                epoch,
+                messageType: 'commit',
+                data: '\\x' + toHex(commitBytes)
+            })
+        });
+
+        if (!commitResponse.ok) {
+            const error = await commitResponse.json().catch(() => ({}));
+            try {
+                this.client.clear_pending_commit(groupIdBytes);
+            } catch (clearErr) {
+                console.warn('[MLS] Failed to clear pending commit:', clearErr);
+            }
+            if (rollbackState) {
+                await this.restoreStateFromVault(rollbackState);
+            }
+            throw new Error(error.error || 'Failed to send remove-member commit');
+        }
+
+        // Merge the pending commit locally
+        try {
+            this.client.merge_pending_commit(groupIdBytes);
+        } catch (mergeErr) {
+            console.warn('[MLS] Failed to merge pending commit:', mergeErr);
+            throw mergeErr;
+        }
+
+        // Sync server-side membership
+        await this.syncGroupMembers(groupIdValue);
+
+        // Save updated state
+        await this.saveState();
+        console.log(`[MLS] Member at leaf index ${leafIndex} removed from group`);
+
+        try {
+            const currentEpoch = this.getGroupEpoch(groupIdValue);
+            await this.broadcastConfirmationTag(groupIdValue, currentEpoch);
+        } catch (tagErr) {
+            console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
+        }
+
+        return await commitResponse.json();
+    }
+
+    /**
+     * Leave a group voluntarily
+     * Per OpenMLS Book (p.40 "Leaving a group")
+     * Creates a self-remove proposal that another member must commit.
+     * @param {Uint8Array|string} groupId - The group ID
+     * @returns {Promise<Object>} Server response
+     */
+    async leaveGroup(groupId) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
+
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupIdBytes);
+
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+        if (!deviceId) {
+            throw new Error('Device ID not available. Unlock or set up your keystore first.');
+        }
+
+        // Helper to convert to hex
+        const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
+
+        // Call WASM leave_group - returns proposal bytes (NOT a commit)
+        this.setGroupAad(groupIdValue, 'proposal');
+        const proposalBytes = this.client.leave_group(groupIdBytes);
+
+        // Send proposal to server (messageType = 'proposal' or relay as-is)
+        // Note: This is a proposal, not a commit. Another member must commit it.
+        const response = await fetch('/api/mls/messages/group', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'x-device-id': deviceId
+            },
+            body: JSON.stringify({
+                groupId: groupIdValue,
+                messageType: 'proposal',
+                data: '\\x' + toHex(proposalBytes)
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || 'Failed to send leave-group proposal');
+        }
+
+        console.log('[MLS] Leave-group proposal sent. Awaiting commit by another member.');
+
+        // Note: We don't mark the group as inactive yet - that happens when we process
+        // the commit that includes our removal proposal.
+        await this.saveState();
+
+        return await response.json();
+    }
+
+    /**
+     * Get own leaf index in a group
+     * Useful for UI to prevent users from trying to remove themselves via removeMember
+     * @param {Uint8Array|string} groupId - The group ID
+     * @returns {number} The leaf index
+     */
+    getOwnLeafIndex(groupId) {
+        if (!this.client) throw new Error('Client not initialized');
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        return this.client.get_own_leaf_index(groupIdBytes);
+    }
+
+    getGroupConfirmationTag(groupId) {
+        if (!this.client) throw new Error('Client not initialized');
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        const tagBytes = this.client.get_group_confirmation_tag(groupIdBytes);
+        return this.bytesToHex(tagBytes);
+    }
+
+    recordLocalConfirmationTag(groupId, epoch, tagHex) {
+        if (!groupId || typeof epoch !== 'number' || !tagHex) return;
+        if (!this.confirmationTags.has(groupId)) {
+            this.confirmationTags.set(groupId, new Map());
+        }
+        const epochMap = this.confirmationTags.get(groupId);
+        epochMap.set(epoch, tagHex);
+
+        const remoteEpochMap = this.remoteConfirmationTags.get(groupId);
+        const remoteTags = remoteEpochMap?.get(epoch);
+        if (remoteTags) {
+            for (const remoteTag of remoteTags) {
+                if (remoteTag !== tagHex) {
+                    this.emitForkDetected({
+                        groupId,
+                        epoch,
+                        localTag: tagHex,
+                        remoteTag,
+                        reason: 'confirmation_tag_mismatch'
+                    });
+                    break;
+                }
+            }
+        }
+    }
+
+    recordRemoteConfirmationTag(groupId, epoch, tagHex, senderId) {
+        if (!groupId || typeof epoch !== 'number' || !tagHex) return;
+        if (!this.remoteConfirmationTags.has(groupId)) {
+            this.remoteConfirmationTags.set(groupId, new Map());
+        }
+        const epochMap = this.remoteConfirmationTags.get(groupId);
+        if (!epochMap.has(epoch)) {
+            epochMap.set(epoch, new Set());
+        }
+        const tagSet = epochMap.get(epoch);
+        tagSet.add(tagHex);
+
+        if (tagSet.size > 1) {
+            this.emitForkDetected({
+                groupId,
+                epoch,
+                localTag: this.confirmationTags.get(groupId)?.get(epoch) || null,
+                remoteTag: tagHex,
+                reason: 'remote_tag_mismatch',
+                senderId
+            });
+        }
+
+        const localTag = this.confirmationTags.get(groupId)?.get(epoch);
+        if (localTag && localTag !== tagHex) {
+            this.emitForkDetected({
+                groupId,
+                epoch,
+                localTag,
+                remoteTag: tagHex,
+                reason: 'confirmation_tag_mismatch',
+                senderId
+            });
+        }
+    }
+
+    async broadcastConfirmationTag(groupId, epoch) {
+        if (!this.client || typeof epoch !== 'number') return;
+        const epochSet = this.sentConfirmationTags.get(groupId) || new Set();
+        if (epochSet.has(epoch)) return;
+
+        const tagHex = this.getGroupConfirmationTag(groupId);
+        this.recordLocalConfirmationTag(groupId, epoch, tagHex);
+        epochSet.add(epoch);
+        this.sentConfirmationTags.set(groupId, epochSet);
+
+        await this.sendSystemMessage(groupId, {
+            __mls_type: 'confirmation_tag',
+            epoch,
+            tag_hex: tagHex
+        });
+    }
+
+    async handleConfirmationTagMessage(groupId, payload, senderId) {
+        if (!payload || typeof payload.epoch !== 'number' || !payload.tag_hex) {
+            return;
+        }
+        this.recordRemoteConfirmationTag(groupId, payload.epoch, payload.tag_hex, senderId);
     }
 
     /**
@@ -805,13 +1828,7 @@ class CoreCryptoClient {
     decryptMessage(groupId, ciphertext) {
         if (!this.client) throw new Error('Client not initialized');
 
-        // Convert groupId to bytes if it's a hex string
-        let groupIdBytes;
-        if (typeof groupId === 'string') {
-            groupIdBytes = new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-        } else {
-            groupIdBytes = groupId;
-        }
+        const groupIdBytes = this.groupIdToBytes(groupId);
 
         // Convert ciphertext to bytes if needed
         let ciphertextBytes;
@@ -825,15 +1842,198 @@ class CoreCryptoClient {
             ciphertextBytes = ciphertext;
         }
 
-        // Decrypt using WASM
-        const plaintextBytes = this.client.decrypt_message(groupIdBytes, ciphertextBytes);
+        const result = this.client.decrypt_message_with_aad(groupIdBytes, ciphertextBytes);
+        const plaintextBytes = new Uint8Array(result.plaintext || []);
+        const aadHex = result.aad_hex || '';
+        const aadBytes = aadHex ? this.hexToBytes(aadHex) : new Uint8Array();
+        const epoch = typeof result.epoch === 'bigint' ? Number(result.epoch) : result.epoch;
 
-        // Convert bytes back to string
         const decoder = new TextDecoder();
         const plaintext = decoder.decode(plaintextBytes);
         console.log(`[MLS] Decrypted message: ${ciphertextBytes.length} bytes -> "${plaintext}"`);
 
-        return plaintext;
+        return {
+            plaintext,
+            aadBytes,
+            aadHex,
+            epoch
+        };
+    }
+
+    /**
+     * Unified message sync - polls relay queue and processes all pending messages
+     */
+    async syncMessages() {
+        if (this.syncPromise) return this.syncPromise;
+        this.syncPromise = this._syncMessagesInternal();
+        try {
+            return await this.syncPromise;
+        } finally {
+            this.syncPromise = null;
+        }
+    }
+
+    async _syncMessagesInternal() {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) return [];
+
+        // Import vaultService dynamically to avoid circular deps
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+        if (!deviceId) {
+            console.log('[MLS] Device ID not available yet, skipping sync');
+            return [];
+        }
+
+        try {
+            const pending = await api.mls.getPendingMessages();
+            if (!pending || pending.length === 0) return [];
+
+            console.log(`[MLS] Syncing ${pending.length} messages from relay queue`);
+
+            const processedIds = [];
+            for (const msg of pending) {
+                const messageId = msg.id;
+                if (messageId && this.pendingWelcomes.has(messageId)) {
+                    continue;
+                }
+                if (messageId && (this.processedMessageIds.has(messageId) || this.processingMessageIds.has(messageId))) {
+                    continue;
+                }
+                if (messageId) this.processingMessageIds.add(messageId);
+
+                try {
+                    if (msg.message_type === 'welcome') {
+                        // msg.data is from Postgres bytea
+                        let welcomeBytes;
+                        if (msg.data && msg.data.type === 'Buffer') {
+                            welcomeBytes = new Uint8Array(msg.data.data);
+                        } else if (typeof msg.data === 'string' && msg.data.startsWith('\\x')) {
+                            const hex = msg.data.substring(2);
+                            welcomeBytes = new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+                        } else {
+                            welcomeBytes = new Uint8Array(msg.data);
+                        }
+
+                        let groupInfoBytes = null;
+                        if (msg.group_info) {
+                            if (msg.group_info.type === 'Buffer' && Array.isArray(msg.group_info.data)) {
+                                groupInfoBytes = new Uint8Array(msg.group_info.data);
+                            } else if (typeof msg.group_info === 'string' && msg.group_info.startsWith('\\x')) {
+                                const hex = msg.group_info.substring(2);
+                                groupInfoBytes = new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+                            } else if (msg.group_info instanceof Uint8Array) {
+                                groupInfoBytes = msg.group_info;
+                            } else if (Array.isArray(msg.group_info)) {
+                                groupInfoBytes = new Uint8Array(msg.group_info);
+                            }
+                        }
+
+                        const staged = await this.stageWelcome(welcomeBytes, null);
+                        const validation = this.validateStagedWelcomeMembers(staged.stagingId);
+
+                        if (!validation.valid) {
+                            console.warn('[MLS] Staged welcome failed validation:', validation.issues);
+                            this.rejectStagedWelcome(staged.stagingId);
+                            if (messageId) this.processedMessageIds.add(messageId);
+                            continue;
+                        }
+
+                        let welcomeOutcome = 'accepted';
+                        if (this.welcomeRequestHandlers.length > 0 && messageId) {
+                            const pendingWelcome = {
+                                id: messageId,
+                                stagingId: staged.stagingId,
+                                groupId: staged.groupId,
+                                senderUserId: msg.sender_user_id,
+                                senderDeviceId: msg.sender_device_id,
+                                welcomeBytes,
+                                groupInfoBytes,
+                                members: staged.members,
+                                sender: staged.sender
+                            };
+                            this.pendingWelcomes.set(messageId, pendingWelcome);
+
+                            const pendingSummary = {
+                                id: messageId,
+                                stagingId: staged.stagingId,
+                                groupId: staged.groupId,
+                                senderUserId: msg.sender_user_id,
+                                senderDeviceId: msg.sender_device_id,
+                                welcomeHex: this.bytesToHex(welcomeBytes),
+                                groupInfoHex: groupInfoBytes ? this.bytesToHex(groupInfoBytes) : null,
+                                members: staged.members,
+                                sender: staged.sender,
+                                validation
+                            };
+
+                            let decision;
+                            for (const handler of this.welcomeRequestHandlers) {
+                                const result = await handler(pendingSummary);
+                                if (typeof result === 'boolean') {
+                                    decision = result;
+                                    break;
+                                }
+                            }
+
+                            if (decision === true) {
+                                welcomeOutcome = 'accepted';
+                            } else if (decision === false) {
+                                welcomeOutcome = 'rejected';
+                            } else {
+                                welcomeOutcome = 'pending';
+                            }
+                        }
+
+                        if (welcomeOutcome === 'accepted') {
+                            const groupId = await this.acceptStagedWelcome(staged.stagingId);
+                            this.pendingWelcomes.delete(messageId);
+                            this.welcomeHandlers.forEach(h => h({ groupId, groupInfoBytes }));
+                            if (messageId) this.processedMessageIds.add(messageId);
+                        } else if (welcomeOutcome === 'rejected') {
+                            this.rejectStagedWelcome(staged.stagingId);
+                            this.pendingWelcomes.delete(messageId);
+                            if (messageId) this.processedMessageIds.add(messageId);
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        const result = await this.handleIncomingMessage({
+                            id: msg.id,
+                            group_id: msg.group_id,
+                            data: msg.data,
+                            content_type: msg.message_type,
+                            sender_id: msg.sender_device_id,
+                            sender_user_id: msg.sender_user_id
+                            // Actually handleIncomingMessage uses sender_id to check if it's own message.
+                            // We might need to pass sender identity or deviceId.
+                        });
+
+                        if (!result.skipped) {
+                            this.messageHandlers.forEach(h => h(result));
+                        }
+                    }
+                    if (messageId) {
+                        processedIds.push(messageId);
+                    }
+                } catch (e) {
+                    console.error('[MLS] Failed to process queued message:', msg.id, e);
+                } finally {
+                    if (messageId) this.processingMessageIds.delete(messageId);
+                }
+            }
+
+            if (processedIds.length > 0) {
+                await api.mls.ackMessages(processedIds);
+                console.log(`[MLS] Acked ${processedIds.length} messages`);
+            }
+
+            return processedIds;
+        } catch (e) {
+            console.error('[MLS] Error during message sync:', e);
+            return [];
+        }
     }
 
     /**
@@ -844,49 +2044,108 @@ class CoreCryptoClient {
     async handleIncomingMessage(messageData) {
         if (!this.client) throw new Error('Client not initialized');
 
-        const { group_id, data, content_type, sender_id, id } = messageData;
+        const { group_id, data, content_type, sender_id, sender_user_id, id } = messageData;
+        const senderUserId = sender_user_id || sender_id;
 
         // Skip already processed messages (deduplication)
         if (id && this.processedMessageIds.has(id)) {
-            console.log('[MLS] Skipping already processed message:', id);
             return { id, groupId: group_id, senderId: sender_id, type: 'duplicate', skipped: true };
         }
 
         if (content_type === 'application') {
-            // Check if this is our own message (can't decrypt own messages in MLS)
-            const isOwnMessage = String(sender_id) === String(this.identityName);
+            // Note: sender_id is now senderDeviceId. 
+            // To check if it's own message, we compare with our own deviceId.
+            const vaultService = (await import('../vaultService.js')).default;
+            const myDeviceId = vaultService.getDeviceId();
 
-            if (isOwnMessage) {
-                // Retrieve from local storage
-                try {
-                    const groupIdBytes = new Uint8Array(group_id.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-                    const storedPlaintext = this.client.get_sent_message(groupIdBytes, String(id));
-                    if (storedPlaintext) {
-                        console.log('[MLS] Retrieved own message from storage:', id);
-                        if (id) this.processedMessageIds.add(id);
-                        return { id, groupId: group_id, senderId: sender_id, plaintext: storedPlaintext, type: 'application' };
-                    }
-                    console.warn('[MLS] Own message not found in storage:', id);
-                } catch (e) {
-                    console.warn('[MLS] Error retrieving own message:', e);
+            // We need to resolve deviceId to identityName if UI expects it, 
+            // or just use deviceId for now.
+
+            // For now, let's assume we can't easily check identityName without more info.
+            // But we CAN check if it's our own device.
+            // (We might need sender identity in the relay queue too if UI needs it).
+
+            // Decrypt normally (WASM will fail if it's our own and not stored in history)
+            let plaintext;
+            let epoch = null;
+            try {
+                const decrypted = this.decryptMessage(group_id, data);
+                plaintext = decrypted.plaintext;
+                epoch = decrypted.epoch;
+                const aadCheck = this.validateAad(decrypted.aadBytes, {
+                    groupId: group_id,
+                    epoch: decrypted.epoch,
+                    type: 'application'
+                });
+                if (!aadCheck.valid) {
+                    console.warn('[MLS] Application AAD validation failed:', aadCheck.reason);
+                    if (id) this.processedMessageIds.add(id);
+                    return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'invalid_aad', skipped: true };
                 }
-                // If not found, we can't recover it - return without plaintext
-                if (id) this.processedMessageIds.add(id);
-                return { id, groupId: group_id, senderId: sender_id, plaintext: '[Message unavailable]', type: 'application' };
+            } catch (e) {
+                // If decryption fails, it might be our own message from another device,
+                // or a message we already have. 
+                // In MLS, you can't decrypt messages you sent.
+                plaintext = '[Encrypted Message]';
+                if (sender_id && sender_id !== myDeviceId) {
+                    this.emitForkDetected({
+                        groupId: group_id,
+                        epoch: null,
+                        reason: 'decrypt_failed',
+                        senderDeviceId: sender_id
+                    });
+                }
             }
 
-            // Not our message - decrypt normally
-            const plaintext = this.decryptMessage(group_id, data);
             if (id) this.processedMessageIds.add(id);
-            return { id, groupId: group_id, senderId: sender_id, plaintext, type: 'application' };
+
+            if (plaintext && plaintext !== '[Encrypted Message]') {
+                let payload = null;
+                try {
+                    payload = JSON.parse(plaintext);
+                } catch (e) {}
+                if (payload && payload.__mls_type === 'confirmation_tag') {
+                    await this.handleConfirmationTagMessage(group_id, payload, senderUserId);
+                    return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
+                }
+            }
+            
+            const messageObj = {
+                id,
+                groupId: group_id,
+                senderId: senderUserId,
+                senderDeviceId: sender_id,
+                plaintext,
+                type: 'application',
+                timestamp: new Date().toISOString()
+            };
+            
+            // Persist to encrypted local storage
+            if (plaintext && plaintext !== '[Encrypted Message]') {
+                const vaultService = (await import('../vaultService.js')).default;
+                await vaultService.persistMessage(messageObj);
+            }
+            
+            return messageObj;
+        } else if (content_type === 'proposal') {
+            const proposalResult = await this.processProposal(group_id, data);
+            if (id) this.processedMessageIds.add(id);
+            return {
+                id,
+                groupId: group_id,
+                senderId: senderUserId,
+                senderDeviceId: sender_id,
+                type: 'proposal',
+                accepted: proposalResult.accepted,
+                summary: proposalResult.summary || null
+            };
         } else if (content_type === 'commit') {
             await this.processCommit(group_id, data);
             if (id) this.processedMessageIds.add(id);
-            return { id, groupId: group_id, senderId: sender_id, type: 'commit' };
+            return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'commit' };
         } else {
-            console.warn('[MLS] Unknown message content_type:', content_type);
             if (id) this.processedMessageIds.add(id);
-            return { id, groupId: group_id, type: 'unknown' };
+            return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'unknown' };
         }
     }
 
@@ -899,7 +2158,7 @@ class CoreCryptoClient {
     async processCommit(groupId, commitData) {
         if (!this.client) throw new Error('Client not initialized');
 
-        const groupIdBytes = new Uint8Array(groupId.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+        const groupIdBytes = this.groupIdToBytes(groupId);
 
         let commitBytes;
         if (typeof commitData === 'string') {
@@ -912,11 +2171,54 @@ class CoreCryptoClient {
             commitBytes = commitData;
         }
 
-        this.client.process_commit(groupIdBytes, commitBytes);
+        const summary = this.client.process_commit(groupIdBytes, commitBytes);
+        const commitEpoch = typeof summary?.epoch === 'bigint' ? Number(summary.epoch) : summary?.epoch;
+        const aadBytes = summary?.aad_hex ? this.hexToBytes(summary.aad_hex) : new Uint8Array();
+        const aadCheck = this.validateAad(aadBytes, {
+            groupId,
+            epoch: commitEpoch,
+            type: 'commit'
+        });
+        if (!aadCheck.valid) {
+            try {
+                this.client.discard_staged_commit(groupIdBytes);
+            } catch (discardErr) {
+                console.warn('[MLS] Failed to discard staged commit:', discardErr);
+            }
+            console.warn('[MLS] Commit rejected due to AAD mismatch:', aadCheck.reason);
+            this.emitCommitRejected({ groupId, reason: aadCheck.reason, type: 'commit', epoch: commitEpoch });
+            return { accepted: false };
+        }
+        const policyAccepted = await this.validateStagedCommit(groupId, summary);
+        if (!policyAccepted) {
+            try {
+                this.client.discard_staged_commit(groupIdBytes);
+            } catch (discardErr) {
+                console.warn('[MLS] Failed to discard staged commit:', discardErr);
+            }
+            console.warn('[MLS] Commit rejected by app policy for group:', groupId);
+            this.emitCommitRejected({ groupId, reason: 'policy_violation', type: 'commit', epoch: commitEpoch });
+            return { accepted: false };
+        }
+
+        try {
+            this.client.merge_staged_commit(groupIdBytes);
+        } catch (mergeErr) {
+            console.warn('[MLS] Failed to merge staged commit:', mergeErr);
+            throw mergeErr;
+        }
+
         console.log('[MLS] Processed commit for group:', groupId);
 
         // Save state after processing commit (epoch advanced, keys rotated)
         await this.saveState();
+
+        try {
+            const currentEpoch = this.getGroupEpoch(groupId);
+            await this.broadcastConfirmationTag(groupId, currentEpoch);
+        } catch (tagErr) {
+            console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
+        }
 
         // Persist to vault if unlocked
         try {
@@ -926,156 +2228,273 @@ class CoreCryptoClient {
         } catch (vaultErr) {
             console.warn('[MLS] Could not save commit state to vault:', vaultErr.message);
         }
+
+        try {
+            await this.syncGroupMembers(groupId);
+        } catch (syncErr) {
+            console.warn('[MLS] Failed to sync group members:', syncErr);
+        }
+
+        return { accepted: true };
     }
 
-    /**
-     * Fetch and process new messages for a group
-     * @param {string} groupId - Group ID (hex)
-     * @param {number} afterId - Fetch messages after this ID
-     * @returns {Promise<Array>} Array of processed messages with plaintext
-     */
-    async fetchAndDecryptMessages(groupId, afterId = 0) {
+    async processProposal(groupId, proposalData) {
+        if (!this.client) throw new Error('Client not initialized');
+
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        let proposalBytes;
+        if (typeof proposalData === 'string') {
+            let hex = proposalData;
+            if (hex.startsWith('\\x')) hex = hex.substring(2);
+            proposalBytes = new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+        } else if (proposalData?.type === 'Buffer' && Array.isArray(proposalData.data)) {
+            proposalBytes = new Uint8Array(proposalData.data);
+        } else {
+            proposalBytes = proposalData;
+        }
+
+        const summary = this.client.process_proposal(groupIdBytes, proposalBytes);
+        const proposalEpoch = typeof summary?.epoch === 'bigint' ? Number(summary.epoch) : summary?.epoch;
+        const aadBytes = summary?.aad_hex ? this.hexToBytes(summary.aad_hex) : new Uint8Array();
+        const aadCheck = this.validateAad(aadBytes, {
+            groupId,
+            epoch: proposalEpoch,
+            type: 'proposal'
+        });
+        if (!aadCheck.valid) {
+            try {
+                this.client.clear_pending_proposals(groupIdBytes);
+            } catch (clearErr) {
+                console.warn('[MLS] Failed to clear pending proposals:', clearErr);
+            }
+            console.warn('[MLS] Proposal rejected due to AAD mismatch:', aadCheck.reason);
+            this.emitCommitRejected({ groupId, reason: aadCheck.reason, type: 'proposal', epoch: proposalEpoch });
+            return { accepted: false };
+        }
+
+        const policyAccepted = await this.validateStagedCommit(groupId, summary);
+        if (!policyAccepted) {
+            try {
+                this.client.clear_pending_proposals(groupIdBytes);
+            } catch (clearErr) {
+                console.warn('[MLS] Failed to clear pending proposals:', clearErr);
+            }
+            console.warn('[MLS] Proposal rejected by app policy for group:', groupId);
+            this.emitCommitRejected({ groupId, reason: 'policy_violation', type: 'proposal', epoch: proposalEpoch });
+            return { accepted: false };
+        }
+
+        await this.saveState();
+        return { accepted: true, summary };
+    }
+
+    clearPendingProposals(groupId) {
+        if (!this.client) throw new Error('Client not initialized');
+        const groupIdBytes = this.groupIdToBytes(groupId);
+        this.client.clear_pending_proposals(groupIdBytes);
+    }
+
+    async commitPendingProposals(groupId, { welcomeRecipients = [] } = {}) {
         if (!this.initialized) await this.initialize();
         if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
 
+        const groupIdBytes = this.groupIdToBytes(groupId);
         const token = localStorage.getItem('token');
         if (!token) throw new Error('Not authenticated');
 
-        const response = await fetch(`/api/mls/messages/group/${groupId}?afterId=${afterId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.error || 'Failed to fetch messages');
+        const { default: vaultService } = await import('../vaultService.js');
+        const deviceId = vaultService.getDeviceId();
+        if (!deviceId) {
+            throw new Error('Device ID not available. Unlock or set up your keystore first.');
         }
 
-        const messages = await response.json();
-        console.log(`[MLS] Fetched ${messages.length} messages for group ${groupId}`);
+        // Capture rollback state before committing
+        const rollbackState = await this.exportStateForVault();
 
-        const processed = [];
-        for (const msg of messages) {
+        this.setGroupAad(groupId, 'commit');
+        const result = this.client.commit_pending_proposals(groupIdBytes);
+        const commitBytes = new Uint8Array(result[0] || []);
+        const welcomeBytes = result[1] ? new Uint8Array(result[1]) : null;
+        const groupInfoBytes = result[2] ? new Uint8Array(result[2]) : null;
+        const epoch = this.getGroupEpoch(groupId);
+
+        const commitResponse = await fetch('/api/mls/messages/group', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'x-device-id': deviceId
+            },
+            body: JSON.stringify({
+                groupId,
+                epoch,
+                messageType: 'commit',
+                data: '\\x' + this.bytesToHex(commitBytes)
+            })
+        });
+
+        if (!commitResponse.ok) {
+            const error = await commitResponse.json().catch(() => ({}));
             try {
-                const result = await this.handleIncomingMessage(msg);
-                processed.push(result);
-            } catch (e) {
-                console.error('[MLS] Failed to process message:', msg.id, e);
+                this.client.clear_pending_commit(groupIdBytes);
+            } catch (clearErr) {
+                console.warn('[MLS] Failed to clear pending commit:', clearErr);
+            }
+            // Restore state on failure
+            if (rollbackState) {
+                await this.restoreStateFromVault(rollbackState);
+            }
+            throw new Error(error.error || 'Failed to send commit for pending proposals');
+        }
+
+        try {
+            this.client.merge_pending_commit(groupIdBytes);
+        } catch (mergeErr) {
+            console.warn('[MLS] Failed to merge pending commit:', mergeErr);
+            throw mergeErr;
+        }
+
+        // Broadcast confirmation tag for fork detection
+        try {
+            const currentEpoch = this.getGroupEpoch(groupId);
+            await this.broadcastConfirmationTag(groupId, currentEpoch);
+        } catch (tagErr) {
+            console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
+        }
+
+        // Send welcomes with error tracking
+        const failedRecipients = [];
+        if (welcomeBytes && welcomeRecipients.length > 0) {
+            for (const receiverId of welcomeRecipients) {
+                try {
+                    const welcomeResponse = await fetch('/api/mls/messages/welcome', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`,
+                            'x-device-id': deviceId
+                        },
+                        body: JSON.stringify({
+                            groupId,
+                            receiverId,
+                            data: '\\x' + this.bytesToHex(welcomeBytes),
+                            groupInfo: groupInfoBytes ? ('\\x' + this.bytesToHex(groupInfoBytes)) : null
+                        })
+                    });
+                    if (!welcomeResponse.ok) {
+                        console.warn(`[MLS] Failed to send welcome to ${receiverId}`);
+                        failedRecipients.push(receiverId);
+                    }
+                } catch (welcomeErr) {
+                    console.warn(`[MLS] Error sending welcome to ${receiverId}:`, welcomeErr);
+                    failedRecipients.push(receiverId);
+                }
             }
         }
 
-        return processed;
+        await this.saveState();
+
+        try {
+            await vaultService.saveCurrentState();
+        } catch (vaultErr) {
+            console.warn('[MLS] Could not save commit state to vault:', vaultErr.message);
+        }
+
+        return { commitBytes, welcomeBytes, groupInfoBytes, failedRecipients };
     }
 
-    /**
-     * Export the current IndexedDB state for backup
-     * @returns {Promise<Object|null>} The exported state object or null if no state exists
-     */
-    async exportState() {
-        if (!this.db) await this.initDB();
+    async validateStagedCommit(groupId, summary) {
+        if (!summary) return true;
 
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['state'], 'readonly');
-            const store = transaction.objectStore('state');
-            const request = store.get('current_identity');
+        const adds = Array.isArray(summary.adds) ? summary.adds : [];
+        const updates = Array.isArray(summary.updates) ? summary.updates : [];
+        const removes = Array.isArray(summary.removes) ? summary.removes : [];
 
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-                const record = request.result;
-                if (record) {
-                    // Convert Uint8Arrays to regular arrays for JSON serialization
-                    const exported = {
-                        id: record.id,
-                        credential: Array.from(record.credential),
-                        bundle: Array.from(record.bundle),
-                        signatureKey: Array.from(record.signatureKey),
-                        identityName: record.identityName,
-                        updatedAt: record.updatedAt
-                    };
-                    console.log('State exported for:', record.identityName);
-                    resolve(exported);
-                } else {
-                    resolve(null);
-                }
-            };
+        const lifetimeViolations = [...adds, ...updates].some(entry => {
+            if (!entry || !entry.lifetime) return false;
+            return !this.keyPackageLifetimeAcceptable(entry.lifetime);
         });
-    }
+        if (lifetimeViolations) {
+            console.warn('[MLS] Commit contains leaf nodes with unacceptable lifetime range; rejecting.');
+            return false;
+        }
 
-    /**
-     * Import a previously exported state into IndexedDB
-     * @param {Object} exportedState - The state object from exportState()
-     * @returns {Promise<void>}
-     */
-    async importState(exportedState) {
-        if (!exportedState) throw new Error('No state to import');
-        if (!this.db) await this.initDB();
+        const missingAddLifetime = adds.some(entry => entry && !entry.lifetime);
+        if (missingAddLifetime) {
+            console.warn('[MLS] Commit add proposal missing lifetime; rejecting.');
+            return false;
+        }
 
-        // Convert arrays back to Uint8Arrays
-        const record = {
-            id: exportedState.id,
-            credential: new Uint8Array(exportedState.credential),
-            bundle: new Uint8Array(exportedState.bundle),
-            signatureKey: new Uint8Array(exportedState.signatureKey),
-            identityName: exportedState.identityName,
-            updatedAt: exportedState.updatedAt
-        };
+        const invalidCredential = [...adds, ...updates]
+            .some(entry => entry && entry.is_basic === false);
 
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['state'], 'readwrite');
-            const store = transaction.objectStore('state');
-            const request = store.put(record);
+        if (invalidCredential) {
+            console.warn('[MLS] Commit contains non-basic credentials; rejecting.');
+            return false;
+        }
 
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-                console.log('State imported for:', record.identityName);
-                resolve();
-            };
-        });
-    }
+        const currentIdentities = new Set(this.getGroupMemberIdentities(groupId));
+        const addIdentities = adds.map(entry => entry?.identity).filter(Boolean);
+        const updateIdentities = updates.map(entry => entry?.identity).filter(Boolean);
+        const removeIdentities = removes.map(entry => entry?.identity?.identity).filter(Boolean);
+        const missingRemoveIdentity = removes.some(entry => entry && entry.identity == null);
 
-    /**
-     * Clear all stored state (for switching users)
-     * @returns {Promise<void>}
-     */
-    async clearState() {
-        if (!this.db) await this.initDB();
+        if (missingRemoveIdentity) {
+            console.warn('[MLS] Commit remove proposal missing identity; rejecting.');
+            return false;
+        }
 
-        return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['state'], 'readwrite');
-            const store = transaction.objectStore('state');
-            const request = store.clear();
+        const allIdentities = [...addIdentities, ...updateIdentities, ...removeIdentities];
 
-            request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-                this.client = null;
-                this.identityName = null;
-                console.log('State cleared');
-                resolve();
-            };
-        });
-    }
+        if (this.isDirectMessage(groupId)) {
+            const allowed = new Set(this.getDmParticipantIds(groupId));
+            if (allowed.size === 0) return false;
+            if (adds.length > 1) return false;
 
-    /**
-     * Register a handler for decrypted messages
-     * @param {Function} handler - Callback(message) where message = { id, groupId, senderId, plaintext, type }
-     * @returns {Function} Unregister function
-     */
-    onMessage(handler) {
-        this.messageHandlers.push(handler);
-        return () => {
-            this.messageHandlers = this.messageHandlers.filter(h => h !== handler);
-        };
-    }
+            // Convert identities to strings for comparison (getDmParticipantIds returns strings)
+            if (allIdentities.some(identity => !allowed.has(String(identity)))) {
+                console.warn('[MLS] DM commit contains unexpected identity; rejecting.');
+                return false;
+            }
 
-    /**
-     * Register a handler for new group invites
-     * @param {Function} handler - Callback({ groupId })
-     * @returns {Function} Unregister function
-     */
-    onWelcome(handler) {
-        this.welcomeHandlers.push(handler);
-        return () => {
-            this.welcomeHandlers = this.welcomeHandlers.filter(h => h !== handler);
-        };
+            if (addIdentities.some(identity => currentIdentities.has(identity))) {
+                console.warn('[MLS] DM commit re-adds existing member; rejecting.');
+                return false;
+            }
+
+            if (updateIdentities.some(identity => !currentIdentities.has(identity))) {
+                console.warn('[MLS] DM commit updates unknown member; rejecting.');
+                return false;
+            }
+
+            if (removeIdentities.some(identity => !currentIdentities.has(identity))) {
+                console.warn('[MLS] DM commit removes unknown member; rejecting.');
+                return false;
+            }
+        } else {
+            if (allIdentities.some(identity => !this.isNumericIdentity(identity))) {
+                console.warn('[MLS] Commit add identity not numeric; rejecting.');
+                return false;
+            }
+
+            if (addIdentities.some(identity => currentIdentities.has(identity))) {
+                console.warn('[MLS] Commit adds existing member; rejecting.');
+                return false;
+            }
+
+            if (updateIdentities.some(identity => !currentIdentities.has(identity))) {
+                console.warn('[MLS] Commit updates unknown member; rejecting.');
+                return false;
+            }
+
+            if (removeIdentities.some(identity => !currentIdentities.has(identity))) {
+                console.warn('[MLS] Commit removes unknown member; rejecting.');
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -1084,39 +2503,17 @@ class CoreCryptoClient {
     setupSocketListeners() {
         if (this._socketCleanup) return; // Already set up
 
-        const cleanupWelcome = registerSocketEventHandler('mls-welcome', async (data) => {
-            console.log('[MLS] Real-time welcome received:', data);
-            try {
-                // Fetch and process the welcome
-                const joinedGroups = await this.checkForInvites();
-                // Notify handlers
-                for (const groupId of joinedGroups) {
-                    this.welcomeHandlers.forEach(h => h({ groupId }));
-                }
-            } catch (e) {
-                console.error('[MLS] Error processing welcome:', e);
-            }
-        });
-
-        const cleanupMessage = registerSocketEventHandler('mls-message', async (data) => {
-            console.log('[MLS] Real-time message received:', data);
-            try {
-                // Fetch and decrypt the message
-                const messages = await this.fetchAndDecryptMessages(data.groupId, data.id - 1);
-                // Notify handlers
-                for (const msg of messages) {
-                    this.messageHandlers.forEach(h => h(msg));
-                }
-            } catch (e) {
-                console.error('[MLS] Error processing message:', e);
-            }
-        });
+        const cleanupWelcome = registerSocketEventHandler('mls-welcome', () => this.syncMessages());
+        const cleanupMessage = registerSocketEventHandler('mls-message', () => this.syncMessages());
 
         this._socketCleanup = () => {
             cleanupWelcome();
             cleanupMessage();
         };
-        console.log('[MLS] Socket listeners set up');
+
+        // Initial sync
+        this.syncMessages();
+        console.log('[MLS] Socket listeners and initial sync set up');
     }
 
     /**
@@ -1207,9 +2604,9 @@ class CoreCryptoClient {
 
             // ALWAYS check for pending Welcome messages (new group invites)
             // This must happen AFTER vault restore to merge new groups with existing state
-            const joinedGroups = await this.checkForInvites();
-            if (joinedGroups.length > 0) {
-                console.log('[MLS] Processed pending invites after vault restore:', joinedGroups);
+            const processedIds = await this.syncMessages();
+            if (processedIds.length > 0) {
+                console.log('[MLS] Processed pending invites after vault restore:', processedIds.length);
                 // Save updated state with new groups to vault
                 try {
                     const vaultService = (await import('../vaultService.js')).default;
@@ -1238,9 +2635,9 @@ class CoreCryptoClient {
 
         try {
             // 1. Check for any pending Welcome messages (new invites)
-            const joinedGroups = await this.checkForInvites();
-            if (joinedGroups.length > 0) {
-                console.log('[MLS] Processed pending invites, joined groups:', joinedGroups);
+            const processedIds = await this.syncMessages();
+            if (processedIds.length > 0) {
+                console.log('[MLS] Processed pending invites, processed IDs:', processedIds.length);
             }
 
             // 2. Fetch list of groups user is a member of from server
@@ -1260,7 +2657,7 @@ class CoreCryptoClient {
             const missingGroups = [];
             for (const group of serverGroups) {
                 const groupIdHex = group.group_id;
-                const groupIdBytes = new Uint8Array(groupIdHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                const groupIdBytes = this.groupIdToBytes(groupIdHex);
 
                 if (!this.client.has_group(groupIdBytes)) {
                     missingGroups.push({
@@ -1346,7 +2743,245 @@ class CoreCryptoClient {
         this.cleanupSocketListeners();
         this.client = null;
         this.identityName = null;
+        this.confirmationTags.clear();
+        this.remoteConfirmationTags.clear();
+        this.sentConfirmationTags.clear();
         console.log('[MLS] Memory wiped');
+    }
+
+    /**
+     * Clear all stored state (for switching users)
+     * @returns {Promise<void>}
+     */
+    async clearState() {
+        this.wipeMemory();
+
+        // Clean up legacy openmls_storage DB if it exists (one-time migration)
+        try {
+            indexedDB.deleteDatabase('openmls_storage');
+        } catch (e) {
+            // Ignore errors - DB may not exist
+        }
+    }
+
+    /**
+     * Register a callback for incoming MLS messages
+     * @param {Function} callback - Function to call with decrypted message
+     * @returns {Function} Unsubscribe function
+     */
+    onMessage(callback) {
+        if (typeof callback !== 'function') {
+            throw new Error('onMessage requires a function callback');
+        }
+        this.messageHandlers.push(callback);
+        // Return unsubscribe function
+        return () => {
+            const index = this.messageHandlers.indexOf(callback);
+            if (index > -1) {
+                this.messageHandlers.splice(index, 1);
+            }
+        };
+    }
+
+    /**
+     * Register a callback for incoming welcome messages (group invites)
+     * @param {Function} callback - Function to call when invited to a group
+     * @returns {Function} Unsubscribe function
+     */
+    onWelcome(callback) {
+        if (typeof callback !== 'function') {
+            throw new Error('onWelcome requires a function callback');
+        }
+        this.welcomeHandlers.push(callback);
+        return () => {
+            const index = this.welcomeHandlers.indexOf(callback);
+            if (index > -1) {
+                this.welcomeHandlers.splice(index, 1);
+            }
+        };
+    }
+
+    /**
+     * Register a callback for pending welcome requests (approval/inspection)
+     * @param {Function} callback - Function invoked with pending welcome summary
+     * @returns {Function} Unsubscribe function
+     */
+    onWelcomeRequest(callback) {
+        if (typeof callback !== 'function') {
+            throw new Error('onWelcomeRequest requires a function callback');
+        }
+        this.welcomeRequestHandlers.push(callback);
+        return () => {
+            const index = this.welcomeRequestHandlers.indexOf(callback);
+            if (index > -1) {
+                this.welcomeRequestHandlers.splice(index, 1);
+            }
+        };
+    }
+
+    onForkDetected(callback) {
+        if (typeof callback !== 'function') {
+            throw new Error('onForkDetected requires a function callback');
+        }
+        this.forkHandlers.push(callback);
+        return () => {
+            const index = this.forkHandlers.indexOf(callback);
+            if (index > -1) {
+                this.forkHandlers.splice(index, 1);
+            }
+        };
+    }
+
+    emitForkDetected(details) {
+        if (!details) return;
+        this.forkHandlers.forEach(handler => {
+            try {
+                handler(details);
+            } catch (e) {
+                console.warn('[MLS] Fork handler error:', e);
+            }
+        });
+    }
+
+    /**
+     * Register a callback for commit/proposal rejection events
+     * @param {Function} callback - Function to call when a commit/proposal is rejected
+     * @returns {Function} Unsubscribe function
+     */
+    onCommitRejected(callback) {
+        if (typeof callback !== 'function') {
+            throw new Error('onCommitRejected requires a function callback');
+        }
+        this.commitRejectionHandlers.push(callback);
+        return () => {
+            const index = this.commitRejectionHandlers.indexOf(callback);
+            if (index > -1) {
+                this.commitRejectionHandlers.splice(index, 1);
+            }
+        };
+    }
+
+    /**
+     * Emit a commit/proposal rejection event
+     * @param {Object} details - { groupId, reason, type: 'commit'|'proposal', epoch? }
+     */
+    emitCommitRejected(details) {
+        if (!details) return;
+        this.commitRejectionHandlers.forEach(handler => {
+            try {
+                handler(details);
+            } catch (e) {
+                console.warn('[MLS] Commit rejection handler error:', e);
+            }
+        });
+    }
+
+    async acceptWelcome(pending) {
+        if (!pending) throw new Error('Pending welcome required');
+        const pendingId = typeof pending === 'object' ? pending.id : pending;
+        if (!pendingId) throw new Error('Pending welcome id missing');
+
+        let record = this.pendingWelcomes.get(pendingId);
+        if (!record && typeof pending === 'object' && pending.welcomeHex) {
+            record = {
+                id: pendingId,
+                groupId: pending.groupId,
+                senderUserId: pending.senderUserId,
+                senderDeviceId: pending.senderDeviceId,
+                welcomeBytes: this.hexToBytes(pending.welcomeHex),
+                groupInfoBytes: pending.groupInfoHex ? this.hexToBytes(pending.groupInfoHex) : null,
+                stagingId: pending.stagingId,
+                members: pending.members,
+                sender: pending.sender
+            };
+        }
+
+        if (!record || !record.welcomeBytes) {
+            throw new Error('Pending welcome not found');
+        }
+
+        let stagingId = record.stagingId;
+        if (!stagingId) {
+            const staged = await this.stageWelcome(record.welcomeBytes, null);
+            stagingId = staged.stagingId;
+        }
+
+        const validation = this.validateStagedWelcomeMembers(stagingId);
+        if (!validation.valid) {
+            this.rejectStagedWelcome(stagingId);
+            throw new Error(`Welcome validation failed: ${validation.issues.join(', ')}`);
+        }
+
+        const groupId = await this.acceptStagedWelcome(stagingId);
+        this.pendingWelcomes.delete(pendingId);
+        await api.mls.ackMessages([pendingId]);
+        this.processedMessageIds.add(pendingId);
+        this.welcomeHandlers.forEach(h => h({ groupId, groupInfoBytes: record.groupInfoBytes }));
+        return groupId;
+    }
+
+    async rejectWelcome(pending) {
+        if (!pending) throw new Error('Pending welcome required');
+        const pendingId = typeof pending === 'object' ? pending.id : pending;
+        if (!pendingId) throw new Error('Pending welcome id missing');
+        const record = this.pendingWelcomes.get(pendingId) || pending;
+        if (record?.stagingId) {
+            this.rejectStagedWelcome(record.stagingId);
+        }
+        this.pendingWelcomes.delete(pendingId);
+        await api.mls.ackMessages([pendingId]);
+        this.processedMessageIds.add(pendingId);
+    }
+
+    /**
+     * Fetch and decrypt messages for a specific group
+     * @param {string} groupId - The MLS group ID
+     * @returns {Promise<Array>} Array of decrypted messages
+     */
+    async fetchAndDecryptMessages(groupId) {
+        if (!this.initialized) await this.initialize();
+        if (!this.client) return [];
+
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+
+        try {
+            const response = await fetch(`/api/mls/messages/group/${encodeURIComponent(groupId)}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch messages: ${response.status}`);
+            }
+
+            const messages = await response.json();
+            const decrypted = [];
+
+            for (const msg of messages) {
+                try {
+                    const result = await this.handleIncomingMessage({
+                        id: msg.id,
+                        group_id: groupId,
+                        data: msg.data,
+                        content_type: msg.message_type,
+                        sender_id: msg.sender_user_id
+                    });
+                    if (result && !result.skipped) {
+                        decrypted.push(result);
+                    }
+                } catch (e) {
+                    console.warn('[MLS] Failed to decrypt message:', msg.id, e);
+                }
+            }
+
+            return decrypted;
+        } catch (err) {
+            console.error('[MLS] Error fetching messages:', err);
+            return [];
+        }
     }
 }
 

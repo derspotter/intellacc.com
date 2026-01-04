@@ -1,49 +1,60 @@
 const { test, expect } = require('@playwright/test');
 
-test('persists OpenMLS state to IndexedDB', async ({ page }) => {
+test('persists OpenMLS state to Encrypted Keystore', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
   const result = await page.evaluate(async () => {
+    const vaultService = (await import('/src/services/vaultService.js')).default;
     const core = (await import('/src/services/mls/coreCryptoClient.js')).default;
 
-    await core.initialize();
-    await core.clearState();
-    await core.ensureMlsBootstrap('e2e-user');
+    // Simulate login flow
+    const userId = 999;
+    const password = 'test-password-123';
+    
+    // Set userId in store
+    const vaultStore = (await import('/src/stores/vaultStore.js')).default;
+    vaultStore.setUserId(userId);
 
+    // Bootstrap MLS (creates identity in memory)
+    await core.initialize();
+    await core.ensureMlsBootstrap(String(userId));
+
+    // Setup Keystore (encrypts and saves state)
+    // Note: We need to wipe first to ensure clean test state
+    await vaultService.panicWipe();
+    vaultStore.setUserId(userId); // Re-set after wipe
+    
+    await vaultService.setupKeystoreWithPassword(password);
+    const deviceId = vaultService.getDeviceId();
+
+    // Check IndexedDB
     const record = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('openmls_storage', 1);
+      const request = indexedDB.open('intellacc_keystore', 2);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const db = request.result;
-        const tx = db.transaction(['state'], 'readonly');
-        const store = tx.objectStore('state');
-        const getRequest = store.get('identity_e2e-user');
+        if (!db.objectStoreNames.contains('device_keystore')) {
+            resolve(null);
+            return;
+        }
+        const tx = db.transaction(['device_keystore'], 'readonly');
+        const store = tx.objectStore('device_keystore');
+        const getRequest = store.get(`device_keystore_${deviceId}`);
         getRequest.onerror = () => reject(getRequest.error);
         getRequest.onsuccess = () => resolve(getRequest.result);
       };
     });
 
-    const storageState = record && record.storageState;
-    const storageBytes = storageState instanceof Uint8Array
-      ? storageState.byteLength
-      : storageState && storageState.byteLength
-        ? storageState.byteLength
-        : Array.isArray(storageState)
-          ? storageState.length
-          : 0;
-
+    const encryptedState = record && record.encryptedDeviceState;
+    
     return {
       hasRecord: !!record,
-      hasCredential: !!(record && record.credential),
-      hasBundle: !!(record && record.bundle),
-      hasSignatureKey: !!(record && record.signatureKey),
-      storageBytes
+      hasEncryptedState: !!(encryptedState && encryptedState.ciphertext),
+      version: record ? record.version : 0
     };
   });
 
   expect(result.hasRecord).toBeTruthy();
-  expect(result.hasCredential).toBeTruthy();
-  expect(result.hasBundle).toBeTruthy();
-  expect(result.hasSignatureKey).toBeTruthy();
-  expect(result.storageBytes).toBeGreaterThan(0);
+  expect(result.hasEncryptedState).toBeTruthy();
+  expect(result.version).toBe(2);
 });

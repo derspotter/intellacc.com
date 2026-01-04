@@ -2,60 +2,37 @@
 import van from 'vanjs-core';
 import { api } from './api';
 import userStore from '../store/user';
-import { updatePageFromHash } from '../router'; // Import updatePageFromHash
+import { updatePageFromHash } from '../router';
 import { getStore } from '../store';
 import socketService from './socket';
 import coreCryptoClient from './mls/coreCryptoClient';
 import vaultStore from '../stores/vaultStore';
 import vaultService from './vaultService';
 import { initIdleAutoLock, stopIdleAutoLock, loadIdleLockConfig } from './idleLock';
+import { 
+  getToken, 
+  saveToken, 
+  clearToken, 
+  getTokenData, 
+  isTokenExpired, 
+  getUserId,
+  isLoggedInState,
+  tokenState
+} from './tokenService';
 
-// Create reactive state for auth
-export const isLoggedInState = van.state(!!localStorage.getItem('token'));
-export const tokenState = van.state(localStorage.getItem('token') || '');
+// Re-export token states for components that expect them from auth.js
+export { isLoggedInState, tokenState, getToken, saveToken, clearToken, getTokenData, isTokenExpired, getUserId };
+
 export const userProfileState = van.state(null);
 export const isAdminState = van.state(false);
-
-/**
- * Get the current authentication token
- * @returns {string|null} JWT token or null
- */
-export function getToken() {
-  return tokenState.val;
-}
-
-/**
- * Save token to localStorage and update state
- * @param {string} token - JWT token
- */
-export function saveToken(token) {
-  localStorage.setItem('token', token);
-  tokenState.val = token;
-  isLoggedInState.val = true;
-}
-
-/**
- * Clear token from localStorage and update state
- */
-export function clearToken() {
-  localStorage.removeItem('token');
-  tokenState.val = '';
-  isLoggedInState.val = false;
-  isAdminState.val = false;
-  // Disconnect any active socket session to drop room membership
-  try { socketService.disconnect(); } catch {}
-}
 
 /**
  * Check if current user is logged in
  * @returns {boolean} Whether user is logged in
  */
 export function checkAuth() {
-  const token = localStorage.getItem('token');
+  const token = getToken();
   if (token) {
-    tokenState.val = token;
-    isLoggedInState.val = true;
-
     // Update user profile after authentication check
     userStore.actions.fetchUserProfile.call(userStore).then(async (profile) => {
       if (profile) {
@@ -63,24 +40,116 @@ export function checkAuth() {
         vaultStore.setUserId(profile.id);
 
         // Check vault status on page load
-        const vaultExists = await vaultService.checkVaultExists(profile.id);
-
-        if (vaultExists) {
-          // Vault exists but locked - show unlock modal
-          vaultStore.setShowUnlockModal(true);
-        } else if (profile.id) {
-          // No vault yet - bootstrap MLS with userId (not username for consistency)
-          await coreCryptoClient.ensureMlsBootstrap(String(profile.id));
-          vaultStore.setShowSetupModal(true);
-        }
+        await vaultService.checkVaultExists(profile.id);
       }
     }).catch(console.error);
     return true;
   }
 
-  isLoggedInState.val = false;
-  isAdminState.val = false;
   return false;
+}
+
+// Export for PasskeyButton
+export async function onLoginSuccess(password = null) {
+    // Fetch user profile after login
+    let profile = null;
+    try {
+      profile = await userStore.actions.fetchUserProfile.call(userStore);
+        if (profile) {
+          // Set up vault store with user ID
+          vaultStore.setUserId(profile.id);
+
+          // Bootstrap MLS identity (required before vault setup)
+          await coreCryptoClient.ensureMlsBootstrap(String(profile.id));
+
+          // Initialize authenticated socket connection
+          socketService.initializeSocket();
+
+        // Privacy-Preserving Auth Flow:
+        // We cannot check if a vault exists without the password (to derive the key/hash).
+        // Since we have verified the password via login, we try to unlock.
+        // If unlock fails (returns false/throws), it means no vault exists for this user/password combo.
+        // So we proceed to setup a new one.
+        
+        let unlocked = false;
+        if (password) {
+            try {
+                // Try to find and unlock a vault for this user
+                await vaultService.unlockWithPassword(password);
+                console.log('Vault unlocked automatically');
+                unlocked = true;
+            } catch (e) {
+                console.log('Vault unlock failed; evaluating next steps...');
+            }
+        }
+
+        if (!unlocked && password) {
+            // Check if there are ANY vaults (from previous sessions/password)
+            const hasVaults = await vaultService.hasLockedVaults();
+            if (vaultService.didCreateMasterKey && vaultService.didCreateMasterKey()) {
+                // Brand new account: ignore unrelated vaults on this device
+                try {
+                    await vaultService.setupKeystoreWithPassword(password);
+                } catch (e) {
+                    console.error('Vault setup failed:', e);
+                }
+            } else if (hasVaults) {
+                // Vaults exist but unlock failed with correct password.
+                // This means the vaults belong to a different user (different userId in encrypted state).
+                // Since password is correct (verified via login), we can safely set up a new keystore.
+                // The old vaults will be overwritten - they don't belong to this user anyway.
+                console.log('Unlock failed but vaults exist (different user). Setting up fresh keystore...');
+                try {
+                    await vaultService.setupKeystoreWithPassword(password);
+                } catch (e) {
+                    console.error('Vault setup failed:', e);
+                    // Fall back to migration modal if setup fails
+                    vaultStore.setVaultExists(true);
+                    vaultStore.setShowMigrationModal(true);
+                }
+            } else {
+                // First time setup on this device
+                try {
+                    await vaultService.setupKeystoreWithPassword(password);
+                } catch (e) {
+                    console.error('Vault setup failed:', e);
+                }
+            }
+        } else if (!unlocked && !password) {
+             console.log('Passkey login without vault unlock. Vault remains locked.');
+        }
+
+        // 3. Finalize MLS Setup
+        try {
+            // Re-upload Key Package with the now-confirmed Device ID
+            // (ensureMlsBootstrap might have used 'default' or a temp ID)
+            await coreCryptoClient.ensureKeyPackagesFresh();
+            
+            // Start listening for messages
+            if (coreCryptoClient.setupSocketListeners) {
+                coreCryptoClient.setupSocketListeners();
+            }
+        } catch (e) {
+            console.warn('MLS finalization failed:', e);
+        }
+      }
+    } catch (profileError) {
+      console.warn('Error during post-login vault setup:', profileError);
+    }
+
+    // Fetch posts after login
+    try {
+      const postsStore = await getStore('posts');
+      if (postsStore && postsStore.actions && postsStore.actions.fetchPosts) {
+        await postsStore.actions.fetchPosts.call(postsStore);
+      }
+    } catch (postsError) {
+      console.warn('Could not fetch posts after login:', postsError);
+    }
+    
+    // Navigate to home page after login
+    window.location.hash = 'home';
+    updatePageFromHash();
 }
 
 /**
@@ -113,50 +182,7 @@ export async function login(email, password) {
     // Save token and update state
     saveToken(response.token);
     
-    // Fetch user profile after login
-    let profile = null;
-    try {
-      profile = await userStore.actions.fetchUserProfile.call(userStore);
-      if (profile) {
-        // Set up vault store with user ID
-        vaultStore.setUserId(profile.id);
-
-        // Check if vault exists for this user
-        const vaultExists = await vaultService.checkVaultExists(profile.id);
-
-        if (vaultExists) {
-          // Vault exists - show unlock modal
-          vaultStore.setShowUnlockModal(true);
-        } else {
-          // No vault - bootstrap MLS with userId first, then show setup modal
-          if (profile.id) {
-            await coreCryptoClient.ensureMlsBootstrap(String(profile.id));
-          }
-          vaultStore.setShowSetupModal(true);
-        }
-      }
-    } catch (profileError) {
-      console.warn('Could not fetch profile after login:', profileError);
-      // Continue with login success even if profile fetch fails
-    }
-
-    // Fetch posts after login
-    try {
-      const postsStore = await getStore('posts'); // Get the posts store instance
-      // Ensure store is loaded before calling action
-      if (postsStore && postsStore.actions && postsStore.actions.fetchPosts) {
-        await postsStore.actions.fetchPosts.call(postsStore);
-      } else {
-        console.error("Posts store or fetchPosts action not available after login.");
-      }
-    } catch (postsError) {
-      console.warn('Could not fetch posts after login:', postsError);
-    }
-    
-    // Navigate to home page after login
-    window.location.hash = 'home';
-    // Explicitly call updatePageFromHash to ensure page state and data are loaded
-    updatePageFromHash();
+    await onLoginSuccess(password);
     
     return { success: true };
   } catch (error) {
@@ -177,8 +203,6 @@ export async function login(email, password) {
  */
 export async function register(username, email, password) {
   try {
-    console.log('Registration attempt with:', { username, email });
-    
     if (!username || !email || !password) {
       return { 
         success: false, 
@@ -187,9 +211,6 @@ export async function register(username, email, password) {
     }
     
     const user = await api.auth.register(username, email, password);
-    console.log('Registration response:', user);
-    
-    // Login after successful registration
     return login(email, password);
   } catch (error) {
     console.error('Registration error:', error);
@@ -215,81 +236,11 @@ export async function logout() {
   vaultStore.reset();
 
   clearToken();
+  try { socketService.disconnect(); } catch {}
   userProfileState.val = null;
 
   // Navigate to login page
   window.location.hash = 'login';
-}
-
-// fetchUserProfile has been moved to userStore.actions.fetchUserProfile
-
-/**
- * Get JWT payload data
- * @returns {Object|null} Decoded JWT payload or null
- */
-export function getTokenData() {
-  const token = getToken();
-  if (!token) return null;
-  
-  try {
-    // Decode the payload part of the JWT (second segment)
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload;
-  } catch (e) {
-    console.error('Error decoding token:', e);
-    return null;
-  }
-}
-
-/**
- * Check if token is expired
- * @returns {boolean} Whether token is expired
- */
-export function isTokenExpired() {
-  const payload = getTokenData();
-  if (!payload || !payload.exp) return true;
-  
-  // exp is in seconds, Date.now() is in milliseconds
-  return payload.exp * 1000 < Date.now();
-}
-
-/**
- * Efficiently get user ID with localStorage caching and JWT validation
- * Uses localStorage for performance but validates against JWT token for reliability
- * @returns {string|null} User ID or null if not authenticated
- */
-export function getUserId() {
-  const token = getToken();
-  if (!token) {
-    // No token, clean up any orphaned cache
-    localStorage.removeItem('userId');
-    return null;
-  }
-  
-  // Check cached value first for performance
-  const cachedUserId = localStorage.getItem('userId');
-  
-  try {
-    // Validate cache against current token
-    const tokenData = JSON.parse(atob(token.split('.')[1]));
-    const tokenUserId = String(tokenData.userId);
-    
-    // If cache doesn't match token, update cache
-    if (cachedUserId !== tokenUserId) {
-      localStorage.setItem('userId', tokenUserId);
-      return tokenUserId;
-    }
-    
-    // Cache is valid, return fast cached value
-    return cachedUserId;
-  } catch (e) {
-    // Invalid token, clean up
-    console.error('Invalid token, clearing auth data:', e);
-    localStorage.removeItem('userId');
-    localStorage.removeItem('token');
-    clearToken(); // Also update reactive state
-    return null;
-  }
 }
 
 export default {
@@ -304,7 +255,6 @@ export default {
   login,
   register,
   logout,
-  // fetchUserProfile is now provided by userStore.actions.fetchUserProfile
   getTokenData,
   isTokenExpired,
   getUserId

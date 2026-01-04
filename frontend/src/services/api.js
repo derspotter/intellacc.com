@@ -1,5 +1,5 @@
 // src/services/api.js
-import { getToken, clearToken } from './auth';
+import { getToken, clearToken } from './tokenService';
 
 // Base API URL
 const API_BASE = '/api';
@@ -38,6 +38,12 @@ async function request(endpoint, options = {}) {
   // Add authentication if token exists
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  // Add Device ID if available (read directly from localStorage to avoid circular dependency)
+  const deviceId = typeof localStorage !== 'undefined' ? localStorage.getItem('device_id') : null;
+  if (deviceId) {
+    headers['x-device-id'] = deviceId;
   }
   
   // Configure request
@@ -160,6 +166,17 @@ export const api = {
 
     search: (query) =>
       request(`/users/search?q=${encodeURIComponent(query)}`),
+
+    changePassword: (oldPassword, newPassword) =>
+      request('/users/change-password', { method: 'POST', body: { oldPassword, newPassword } }),
+
+    getMasterKey: (deviceIds) =>
+      request('/users/master-key', { 
+          headers: deviceIds ? { 'x-device-ids': deviceIds.join(',') } : {} 
+      }),
+
+    setMasterKey: (wrapped_key, salt, iv) =>
+      request('/users/master-key', { method: 'POST', body: { wrapped_key, salt, iv } }),
 
     follow: (id) =>
       request(`/users/${id}/follow`, { method: 'POST' }),
@@ -384,7 +401,14 @@ export const api = {
     getDirectMessages: () =>
       request('/mls/direct-messages'),
     createDirectMessage: (targetUserId) =>
-      request(`/mls/direct-messages/${targetUserId}`, { method: 'POST' })
+      request(`/mls/direct-messages/${targetUserId}`, { method: 'POST' }),
+    getPendingMessages: () =>
+      request('/mls/queue/pending'),
+    ackMessages: (messageIds) =>
+      request('/mls/queue/ack', { method: 'POST', body: { messageIds } })
+    ,
+    syncGroupMembers: (groupId, memberIds) =>
+      request(`/mls/groups/${encodeURIComponent(groupId)}/members/sync`, { method: 'POST', body: { memberIds } })
   },
   
   // Leaderboard endpoints (direct database queries for performance)
@@ -504,12 +528,22 @@ export const api = {
 
    // WebAuthn endpoints
   webauthn: {
-    registerStart: () => request('/webauthn/register/start', { method: 'POST' }),
-    registerFinish: (attestationResponse) => request('/webauthn/register/finish', { method: 'POST', body: attestationResponse }),
-    authStart: () => request('/webauthn/auth/start', { method: 'POST' }),
-    authFinish: (assertionResponse) => request('/webauthn/auth/finish', { method: 'POST', body: assertionResponse }),
-    health: () => request('/webauthn/health'),
+    registerStart: () => request('/webauthn/register/options', { method: 'POST' }),
+    registerFinish: (attestationResponse) => request('/webauthn/register/verify', { method: 'POST', body: attestationResponse }),
+    authStart: (body) => request('/webauthn/login/options', { method: 'POST', body }),
+    authFinish: (assertionResponse) => request('/webauthn/login/verify', { method: 'POST', body: assertionResponse }),
     credentials: () => request('/webauthn/credentials'),
+    deleteCredential: (id) => request(`/webauthn/credentials/${id}`, { method: 'DELETE' })
+  },
+
+  // Device management
+  devices: {
+    list: () => request('/devices'),
+    register: (device_public_id, name) => request('/devices/register', { method: 'POST', body: { device_public_id, name } }),
+    revoke: (id) => request(`/devices/${id}`, { method: 'DELETE' }),
+    startLinking: (device_public_id, name) => request('/devices/link/start', { method: 'POST', body: { device_public_id, name } }),
+    approveLinking: (token, approving_device_id) => request('/devices/link/approve', { method: 'POST', body: { token, approving_device_id } }),
+    getLinkingStatus: (token) => request(`/devices/link/status?token=${token}`)
   }
 };
  

@@ -1,5 +1,7 @@
 import van from 'vanjs-core';
 import VaultSettings from '../vault/VaultSettings.js';
+import PasskeyManager from './PasskeyManager.js';
+import DeviceManager from './DeviceManager.js';
 
 const { div, h1, h2, p, button, label, input, span } = van.tags;
 
@@ -39,6 +41,12 @@ export default function SettingsPage() {
         ' Dark Mode'
       )
     ),
+
+    // Passkey Management
+    PasskeyManager(),
+
+    // Device Management
+    DeviceManager(),
 
     // Vault encryption settings
     VaultSettings()

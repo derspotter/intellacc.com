@@ -1,6 +1,6 @@
 import van from 'vanjs-core';
 import api from '../services/api';
-import { getTokenData, isLoggedInState } from '../services/auth';
+import { getTokenData, isLoggedInState } from '../services/tokenService';
 import { registerSocketEventHandler } from '../services/socket';
 
 const predictionsStore = {

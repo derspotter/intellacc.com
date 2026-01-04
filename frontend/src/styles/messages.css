@@ -1234,6 +1234,38 @@ body.dark-mode .safety-warning {
   padding: 0;
 }
 
+.invite-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.invite-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 193, 7, 0.08);
+}
+
+.invite-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.invite-title {
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.invite-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .group-list {
   list-style: none;
   margin: 0;

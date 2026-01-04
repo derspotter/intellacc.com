@@ -59,9 +59,9 @@ class MessagingService {
             await coreCryptoClient.ensureMlsBootstrap(String(userData.userId));
             console.log('[MLS] MLS initialized for userId:', userData.userId);
 
-            const joinedGroups = await coreCryptoClient.checkForInvites();
-            if (joinedGroups.length > 0) {
-                console.log('[MLS] Joined groups from pending invites:', joinedGroups);
+            const processedIds = await coreCryptoClient.syncMessages();
+            if (processedIds.length > 0) {
+                console.log('[MLS] Processed pending invites/messages:', processedIds.length);
             }
 
             return true;

@@ -2,6 +2,8 @@
 @import url('./src/styles/leaderboard.css');
 /* Import messaging styles */
 @import url('./src/styles/messages.css');
+/* Import modal styles */
+@import url('./src/styles/modal.css');
 
 /* CSS Custom Properties */
 :root {

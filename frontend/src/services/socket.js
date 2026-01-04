@@ -1,7 +1,7 @@
 // src/services/socket.js
 import van from 'vanjs-core';
 import io from 'socket.io-client';
-import { getToken, getTokenData } from './auth';
+import { getToken, getTokenData } from './tokenService';
 import store from '../store';
 
 // Create reactive state for socket
@@ -63,6 +63,20 @@ let socket = null;
  * Initialize Socket.IO connection
  */
 export function initializeSocket() {
+  const token = getToken();
+  if (!token) {
+    console.debug('No auth token, skipping socket connection');
+    return socket;
+  }
+
+  if (socket) {
+    socket.auth = { token };
+    if (!socket.connected) {
+      socket.connect();
+    }
+    return socket;
+  }
+
   // Check if we're in development mode
   const isDevelopment = 
     window.location.hostname === 'localhost' || 

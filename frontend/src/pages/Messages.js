@@ -105,17 +105,17 @@ export default function MessagesPage() {
       messagingStore.setMlsInitialized(true);
       console.log('[Messages] MLS initialized for userId:', userId);
 
+      // Set up real-time MLS handlers before pulling pending welcomes
+      setupMlsHandlers();
+
       // Check for pending invites
-      await coreCryptoClient.checkForInvites();
+      await coreCryptoClient.syncMessages();
 
       // Load MLS groups
       await loadMlsGroups();
 
       // Load DMs
       await loadDirectMessages();
-
-      // Set up real-time MLS handlers
-      setupMlsHandlers();
 
     } catch (err) {
       console.error('[Messages] Initialization error:', err);
@@ -164,8 +164,42 @@ export default function MessagesPage() {
 
     coreCryptoClient.onWelcome(async ({ groupId }) => {
       console.log('[Messages] Joined new MLS group:', groupId);
-      await loadMlsGroups();
+      await Promise.all([loadMlsGroups(), loadDirectMessages()]);
     });
+
+    coreCryptoClient.onWelcomeRequest((invite) => {
+      console.log('[Messages] Pending MLS welcome:', invite);
+      messagingStore.addPendingWelcome(invite);
+    });
+  };
+
+  const formatInviteLabel = (invite) => {
+    if (!invite) return 'Unknown Invite';
+    if (invite.groupId && invite.groupId.startsWith('dm_')) return 'Direct Message';
+    if (invite.groupId) return `Group ${invite.groupId.substring(0, 8)}...`;
+    return 'Group Invite';
+  };
+
+  const acceptPendingWelcome = async (invite) => {
+    try {
+      const groupId = await coreCryptoClient.acceptWelcome(invite);
+      messagingStore.removePendingWelcome(invite.id);
+      await Promise.all([loadMlsGroups(), loadDirectMessages()]);
+      if (groupId) messagingStore.selectMlsGroup(groupId);
+    } catch (err) {
+      console.error('[Messages] Failed to accept welcome:', err);
+      messagingStore.setError(err.message || 'Failed to accept invite');
+    }
+  };
+
+  const rejectPendingWelcome = async (invite) => {
+    try {
+      await coreCryptoClient.rejectWelcome(invite);
+      messagingStore.removePendingWelcome(invite.id);
+    } catch (err) {
+      console.error('[Messages] Failed to reject welcome:', err);
+      messagingStore.setError(err.message || 'Failed to reject invite');
+    }
   };
 
   // Select an MLS group and load its messages
@@ -174,17 +208,24 @@ export default function MessagesPage() {
     messagingStore.setMessagesLoading(true);
 
     try {
-      const messages = await coreCryptoClient.fetchAndDecryptMessages(groupId);
-      const formatted = messages
-        .filter(m => m.type === 'application' && m.plaintext)
-        .map(m => ({
-          id: m.id,
-          senderId: m.senderId,
-          plaintext: m.plaintext,
-          timestamp: new Date().toISOString(),
-          type: 'received'
-        }));
-      messagingStore.setMlsMessages(groupId, formatted);
+      // 1. Load local history from encrypted vault
+      const vaultService = (await import('../services/vaultService.js')).default;
+      const history = await vaultService.getMessages(groupId);
+      
+      const formattedHistory = history.map(m => ({
+        id: m.id,
+        senderId: m.senderId,
+        plaintext: m.plaintext,
+        timestamp: m.timestamp,
+        type: String(m.senderId) === String(messagingStore.currentUserId) ? 'sent' : 'received'
+      }));
+      
+      messagingStore.setMlsMessages(groupId, formattedHistory);
+
+      // 2. Fetch any pending messages from relay queue
+      // Note: syncMessages logic handles this via socket events, but we can trigger a sync just in case
+      // coreCryptoClient.syncMessages() is global, not per group.
+      
     } catch (err) {
       console.warn('[Messages] Error loading MLS messages:', err);
     } finally {
@@ -308,13 +349,13 @@ export default function MessagesPage() {
       return div({ class: "messages-page messages-locked" }, [
         div({ class: "vault-locked-state" }, [
           div({ class: "lock-icon-large" }, "\uD83D\uDD12"),
-          h2("Vault Locked"),
-          p("Your encrypted messages are protected by your vault passphrase."),
-          p({ class: "text-muted" }, "Unlock your vault to access your E2EE messages."),
+          h2("Messages Locked"),
+          p("Your encrypted messages are protected by your login password."),
+          p({ class: "text-muted" }, "Unlock your local keystore to access your E2EE messages."),
           button({
             class: "button button-primary",
             onclick: () => vaultStore.setShowUnlockModal(true)
-          }, "Unlock Vault")
+          }, "Unlock Messaging")
         ])
       ]);
     }
@@ -367,15 +408,41 @@ export default function MessagesPage() {
 
                 const dms = messagingStore.dmSidebarItems || [];
                 const groups = (messagingStore.mlsSidebarItems || []).filter(g => !g.isDm);
+                const pendingWelcomes = messagingStore.pendingWelcomes || [];
 
-                if (dms.length === 0 && groups.length === 0) {
+                if (dms.length === 0 && groups.length === 0 && pendingWelcomes.length === 0) {
                   return div({ class: "empty-state" }, [
                     p("No E2EE conversations yet"),
-                    p({ class: "text-muted" }, "Click \"+ New\" to start a conversation")
+                    p({ class: "text-muted" }, "Click \"+ New\" to start a conversation"),
+                    div({ style: "margin-top: 15px; font-size: 0.9em;" }, [
+                        span("Missing history? "),
+                        button({ 
+                            class: "btn-link",
+                            onclick: () => window.location.hash = 'settings'
+                        }, "Link this device")
+                    ])
                   ]);
                 }
 
                 return div([
+                  // Pending Invites Section
+                  pendingWelcomes.length > 0 ? div({ class: "section-header" }, "Pending Invites") : null,
+                  pendingWelcomes.length > 0 ? ul({ class: "invite-list" }, [
+                    ...pendingWelcomes.map(invite => li({
+                      key: invite.id,
+                      class: "invite-item"
+                    }, [
+                      div({ class: "invite-info" }, [
+                        div({ class: "invite-title" }, formatInviteLabel(invite)),
+                        div({ class: "invite-meta text-muted" }, `From user ${invite.senderUserId ?? 'unknown'}`)
+                      ]),
+                      div({ class: "invite-actions" }, [
+                        button({ class: "btn btn-sm btn-primary", onclick: () => acceptPendingWelcome(invite) }, "Accept"),
+                        button({ class: "btn btn-sm", onclick: () => rejectPendingWelcome(invite) }, "Reject")
+                      ])
+                    ]))
+                  ]) : null,
+
                   // DMs Section
                   dms.length > 0 ? div({ class: "section-header" }, "Direct Messages") : null,
                   dms.length > 0 ? ul({ class: "dm-list" }, [

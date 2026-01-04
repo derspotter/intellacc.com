@@ -50,6 +50,10 @@ AGENT.md
 /openmls-wasm/target/
 /openmls-wasm/pkg/
 /openmls-wasm/Cargo.lock
+/.cargo/
+
+# AI assistant configs
+.gemini/
 recherche/2504.01781v2.pdf
 
 # Documentation PDFs

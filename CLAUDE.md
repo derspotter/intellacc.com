@@ -34,6 +34,10 @@ Intellacc is a prediction and social platform where users can:
 - **Frontend**: VanJS-based SPA with Vite dev server (port 5173)
 - **Backend**: Express.js API with Socket.io for real-time features (port 3000)
 - **Database**: PostgreSQL with direct SQL queries
+  - Container: `intellacc_db`
+  - User: `intellacc_user`
+  - Database: `intellaccdb`
+  - Connect: `docker exec -it intellacc_db psql -U intellacc_user -d intellaccdb`
 - **Prediction Engine**: Rust-based service (port 3001) - LMSR market maker
 - **E2EE**: OpenMLS WASM for end-to-end encrypted messaging
 - **Reverse Proxy**: Caddy for production (ports 80/443)
@@ -102,6 +106,19 @@ docker compose up -d
 
 # Stop services
 docker compose down
+```
+
+## E2E Testing
+```bash
+# Reset server-side state for test users (user1@example.com, user2@example.com)
+./tests/e2e/reset-test-users.sh
+
+# Run E2E messaging test
+npx playwright test tests/e2e/messaging-full.spec.js
+
+# Test users (IDs 24, 25):
+# - user1@example.com / password123
+# - user2@example.com / password123
 ```
 
 ## Mobile Implementation (Phase 1 Complete)

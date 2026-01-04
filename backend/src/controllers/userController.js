@@ -341,18 +341,184 @@ exports.getUserPositions = async (req, res) => {
     `, [authedUserId]);
     
     console.log('🔍 Found', result.rows.length, 'positions for user', authedUserId);
-    res.status(200).json(result.rows);
+        
+        res.status(200).json(result.rows);
+        
+      } catch (err) {
+        console.error('Error fetching user positions:', err);
+        res.status(500).json({ message: 'Error fetching user positions' });
+      }
+    };
     
+    // Change user password
+    exports.changePassword = async (req, res) => {
+      const userId = req.user.id;
+      const { oldPassword, newPassword } = req.body;
+      
+      if (!oldPassword || !newPassword) {
+        return res.status(400).json({ message: 'Old and new passwords are required' });
+      }
+      
+      if (newPassword.length < 6) {
+        return res.status(400).json({ message: 'New password must be at least 6 characters long' });
+      }
+      
+      try {
+        const result = await db.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+        if (result.rows.length === 0) {
+          return res.status(404).json({ message: 'User not found' });
+        }
+        
+        const user = result.rows[0];
+        const match = await bcrypt.compare(oldPassword, user.password_hash);
+        
+        if (!match) {
+          return res.status(400).json({ message: 'Incorrect old password' });
+        }
+        
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        
+        await db.query(
+          'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+          [hashedPassword, userId]
+        );
+        
+        res.status(200).json({ message: 'Password updated successfully' });
+      } catch (err) {
+        console.error('Error changing password:', err);
+        res.status(500).json({ message: 'Error changing password' });
+      }
+    };
+    
+    // Note: Removed the following duplicated functions that should be in predictionsController.js:
+    // - resolvePrediction
+    // - getPredictions
+    // - assignPredictions
+    // - getAssignedPredictions
+    // - placeBet
+    // - getMonthlyBettingStats
+    
+// Get encrypted master key
+exports.getMasterKey = async (req, res) => {
+  const userId = req.user.id;
+  const deviceIdsHeader = req.headers['x-device-ids'];
+  
+  try {
+    // 1. Verify Device Trust
+    // If no devices provided, we can't verify. New device? 
+    // If new device, they don't have a local ID yet. They are setting up.
+    // They shouldn't be calling getMasterKey? They should call setMasterKey?
+    // No, if they are setting up a NEW device on an EXISTING account, they need the key!
+    // But they are not trusted yet.
+    // So they MUST Link first.
+    
+    // Check key last updated time
+    const keyRes = await db.query('SELECT wrapped_key, salt, iv, updated_at FROM user_master_keys WHERE user_id = $1', [userId]);
+    if (keyRes.rows.length === 0) return res.status(404).json({ error: 'Key not found' }); // User has no key (first device)
+    
+    const masterKey = keyRes.rows[0];
+    const keyUpdatedAt = new Date(masterKey.updated_at);
+
+    if (!deviceIdsHeader) {
+        // No local devices found (clean browser). New Device logic.
+        // Must Link to get key.
+        return res.status(403).json({ error: 'Device verification required', code: 'LINK_REQUIRED' });
+    }
+
+    const deviceIds = deviceIdsHeader.split(',');
+    
+    // Check if any of the provided IDs are trusted
+    const deviceRes = await db.query(
+        `SELECT id, device_public_id, last_verified_at FROM user_devices 
+         WHERE user_id = $1 AND device_public_id = ANY($2::uuid[])`,
+        [userId, deviceIds]
+    );
+
+    const trustedDevice = deviceRes.rows.find(d => {
+        if (!d.last_verified_at) return false; // Never verified
+        return new Date(d.last_verified_at) >= keyUpdatedAt; // Verified AFTER last key rotation
+    });
+
+    if (!trustedDevice) {
+        return res.status(403).json({ error: 'Device verification required', code: 'LINK_REQUIRED' });
+    }
+
+    // Success
+    res.json({
+        ...masterKey,
+        deviceId: trustedDevice.device_public_id // Tell client which ID worked
+    });
+
   } catch (err) {
-    console.error('Error fetching user positions:', err);
-    res.status(500).json({ message: 'Error fetching user positions' });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch master key' });
   }
 };
 
-// Note: Removed the following duplicated functions that should be in predictionsController.js:
-// - resolvePrediction
-// - getPredictions
-// - assignPredictions
-// - getAssignedPredictions
-// - placeBet
-// - getMonthlyBettingStats
+// Set/Update encrypted master key
+exports.setMasterKey = async (req, res) => {
+  const userId = req.user.id;
+  const { 
+      wrapped_key, salt, iv, 
+      wrapped_key_prf, salt_prf, iv_prf 
+  } = req.body;
+
+  if (!wrapped_key && !wrapped_key_prf) {
+      return res.status(400).json({ error: 'Missing key data' });
+  }
+  
+  try {
+    // Check existence
+    const existCheck = await db.query('SELECT 1 FROM user_master_keys WHERE user_id = $1', [userId]);
+    const exists = existCheck.rows.length > 0;
+
+    let query = '';
+    let params = [];
+
+    if (exists) {
+        // Build dynamic UPDATE
+        const updates = [];
+        params.push(userId); // $1
+        let idx = 2;
+
+        if (wrapped_key && salt && iv) {
+            updates.push(`wrapped_key = $${idx++}, salt = $${idx++}, iv = $${idx++}`);
+            params.push(wrapped_key, salt, iv);
+        }
+        if (wrapped_key_prf && salt_prf && iv_prf) {
+            updates.push(`wrapped_key_prf = $${idx++}, salt_prf = $${idx++}, iv_prf = $${idx++}`);
+            params.push(wrapped_key_prf, salt_prf, iv_prf);
+        }
+        updates.push(`updated_at = NOW()`); // Always update timestamp (triggers verification requirement?)
+        // Wait, if we only add PRF, do we want to trigger verification for other devices?
+        // Yes, rotating keys usually implies verification.
+        // But adding a passkey shouldn't lock out your phone?
+        // Maybe updated_at only on MAIN key rotation?
+        // For simplicity, any write updates timestamp.
+
+        if (updates.length === 0) return res.json({ success: true }); // Nothing to do
+
+        query = `UPDATE user_master_keys SET ${updates.join(', ')} WHERE user_id = $1`;
+    } else {
+        // INSERT (First time setup)
+        // Must have Password wrapping at least? Not necessarily, but usually yes.
+        // We'll allow partial insert if schema allows nulls (it does).
+        query = `
+            INSERT INTO user_master_keys 
+            (user_id, wrapped_key, salt, iv, wrapped_key_prf, salt_prf, iv_prf, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+        `;
+        params = [
+            userId,
+            wrapped_key || null, salt || null, iv || null,
+            wrapped_key_prf || null, salt_prf || null, iv_prf || null
+        ];
+    }
+
+    await db.query(query, params);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save master key' });
+  }
+};

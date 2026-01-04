@@ -1,0 +1,203 @@
+const { test, expect } = require('@playwright/test');
+
+// Test data
+const USER1 = { email: 'user1@example.com', password: 'password123', name: 'testuser1' };
+const USER2 = { email: 'user2@example.com', password: 'password123', name: 'testuser2' };
+
+/**
+ * Helper to log in a user
+ */
+async function loginUser(page, user) {
+  await page.goto('/#login');
+  await page.fill('#email', user.email);
+  await page.fill('#password', user.password);
+  await page.click('button[type="submit"]');
+  await expect(page.locator('.home-page')).toBeVisible({ timeout: 10000 });
+  // Allow time for MLS initialization and key upload
+  await page.waitForTimeout(3000);
+}
+
+test.describe('E2E Messaging', () => {
+
+  test('Two users can exchange encrypted messages and history is persisted', async ({ browser }) => {
+    // --- 1. Setup Contexts (Two separate browsers/devices) ---
+    const contextAlice = await browser.newContext();
+    const pageAlice = await contextAlice.newPage();
+
+    const contextBob = await browser.newContext();
+    const pageBob = await contextBob.newPage();
+
+    // --- 2. Login Both Users ---
+    console.log('Logging in Alice...');
+    await loginUser(pageAlice, USER1);
+
+    console.log('Logging in Bob...');
+    await loginUser(pageBob, USER2);
+
+    // --- 3. Alice starts DM with Bob ---
+    console.log('Alice starting DM...');
+
+    // Capture console logs early
+    const aliceConsoleLogs = [];
+    pageAlice.on('console', msg => aliceConsoleLogs.push(`${msg.type()}: ${msg.text()}`));
+
+    await pageAlice.goto('/#messages');
+    await pageAlice.waitForTimeout(2000);
+
+    // Debug: Check MLS state after navigating to messages
+    const mlsInitState = await pageAlice.evaluate(() => {
+      const store = window.messagingStore;
+      return {
+        mlsGroups: store?.mlsGroups?.length,
+        currentUserId: store?.currentUserId,
+        mlsInitialized: window.coreCryptoClient?.initialized
+      };
+    });
+    console.log('MLS state after messages page load:', mlsInitState);
+    console.log('Console logs so far:', aliceConsoleLogs.filter(l => l.includes('MLS') || l.includes('error') || l.includes('Error')));
+
+    // Click new message button
+    const newBtn = pageAlice.locator('button:has-text("+ New"), button:has-text("New")');
+    await newBtn.click();
+
+    // Search for Bob
+    const searchInput = pageAlice.locator('input[placeholder*="Search"], input[placeholder*="search"]');
+    await searchInput.fill(USER2.name);
+
+    // Wait for result and select
+    const userRow = pageAlice.locator('.user-row, .user-item, [data-user]').filter({ hasText: USER2.name });
+    await expect(userRow).toBeVisible({ timeout: 10000 });
+    await userRow.click();
+
+    // Start DM
+    const startDmBtn = pageAlice.locator('button:has-text("Start DM"), button:has-text("Start"), button:has-text("Message")');
+    await startDmBtn.click();
+
+    // Wait for DM creation and check state
+    await pageAlice.waitForTimeout(3000);
+
+    // Debug: Check MLS state after starting DM
+    const mlsAfterDm = await pageAlice.evaluate(() => {
+      const store = window.messagingStore;
+      return {
+        selectedMlsGroupId: store?.selectedMlsGroupId,
+        mlsGroups: store?.mlsGroups?.length,
+        currentUserId: store?.currentUserId,
+        mlsInitialized: window.coreCryptoClient?.initialized
+      };
+    });
+    console.log('MLS state after starting DM:', mlsAfterDm);
+    console.log('Console logs after DM:', aliceConsoleLogs.filter(l => l.includes('MLS') || l.includes('error') || l.includes('Error') || l.includes('DM')).slice(-15));
+
+    // Check if chat opened
+    await expect(pageAlice.locator('.chat-title').first()).toContainText(USER2.name, { timeout: 10000 });
+
+    // --- 4. Alice sends message ---
+    console.log('Alice sending message...');
+    const msgFromAlice = `Hello Bob ${Date.now()}`;
+
+    // Debug: Check MLS state before sending
+    const mlsState = await pageAlice.evaluate(() => {
+      const store = window.messagingStore;
+      return {
+        selectedMlsGroupId: store?.selectedMlsGroupId,
+        newMessage: store?.newMessage,
+        mlsGroups: store?.mlsGroups?.length,
+        currentUserId: store?.currentUserId
+      };
+    });
+    console.log('MLS state before send:', mlsState);
+
+    // Type text using pressSequentially to ensure input events fire
+    const textarea = pageAlice.locator('.message-textarea');
+    await textarea.click();
+    await textarea.pressSequentially(msgFromAlice, { delay: 10 });
+
+    // Debug: Check state after typing
+    const stateAfterType = await pageAlice.evaluate(() => ({
+      newMessage: window.messagingStore?.newMessage,
+      selectedMlsGroupId: window.messagingStore?.selectedMlsGroupId
+    }));
+    console.log('State after typing:', stateAfterType);
+
+    // Click send button instead of Enter (more explicit)
+    await pageAlice.locator('.send-button').click();
+
+    // Capture any console errors
+    const consoleLogs = [];
+    pageAlice.on('console', msg => consoleLogs.push(`${msg.type()}: ${msg.text()}`));
+
+    // Verify Alice sees her own message (wait a bit for encryption/send)
+    await pageAlice.waitForTimeout(3000);
+    console.log('Browser console logs:', consoleLogs.slice(-10));
+
+    // Debug: take screenshot
+    await pageAlice.screenshot({ path: 'test-results/alice-after-send.png' });
+    // Check what's visible in the chat area
+    const chatContent = await pageAlice.locator('.chat-messages, .messages-list, .message-list').innerHTML().catch(() => 'not found');
+    console.log('Chat content:', chatContent.substring(0, 500));
+    await expect(pageAlice.locator('.message-item.sent .message-text')).toContainText(msgFromAlice, { timeout: 15000 });
+
+    // --- 5. Bob receives message ---
+    console.log('Bob checking for message...');
+    await pageBob.goto('/#messages');
+    await pageBob.waitForTimeout(2000);
+
+    // Bob should see the DM in sidebar (via sync)
+    const convItem = pageBob.locator('.conversation-item, .chat-item, .dm-item').filter({ hasText: USER1.name });
+    await expect(convItem).toBeVisible({ timeout: 15000 });
+    await convItem.click();
+
+    // Verify Bob sees Alice's message
+    await expect(pageBob.locator('.message-item.received .message-text')).toContainText(msgFromAlice, { timeout: 15000 });
+
+    // --- 6. Bob replies ---
+    console.log('Bob replying...');
+    const msgFromBob = `Hello Alice ${Date.now()}`;
+    await pageBob.locator('.message-textarea').fill(msgFromBob);
+    await pageBob.locator('.send-button').click();
+    await pageBob.waitForTimeout(2000);
+    await expect(pageBob.locator('.message-item.sent .message-text')).toContainText(msgFromBob, { timeout: 15000 });
+
+    // --- 7. Alice receives reply ---
+    console.log('Alice checking for reply...');
+    await pageAlice.waitForTimeout(3000);
+    await expect(pageAlice.locator('.message-item.received .message-text')).toContainText(msgFromBob, { timeout: 15000 });
+
+    // --- 8. Persistence Test (Alice Logout/Login) ---
+    console.log('Testing persistence...');
+
+    // Alice Logs Out (clear token but keep IndexedDB)
+    await pageAlice.evaluate(() => {
+        localStorage.removeItem('token');
+        location.hash = '#login';
+    });
+    await pageAlice.waitForURL('**/#login');
+
+    // Alice Logs In Again
+    await pageAlice.fill('#email', USER1.email);
+    await pageAlice.fill('#password', USER1.password);
+    await pageAlice.click('button[type="submit"]');
+    await expect(pageAlice.locator('.home-page')).toBeVisible({ timeout: 10000 });
+    await pageAlice.waitForTimeout(3000);
+
+    // Check Messages
+    await pageAlice.goto('/#messages');
+    await pageAlice.waitForTimeout(2000);
+
+    const convItemAlice = pageAlice.locator('.conversation-item, .chat-item, .dm-item').filter({ hasText: USER2.name });
+    await expect(convItemAlice).toBeVisible({ timeout: 10000 });
+    await convItemAlice.click();
+
+    // History should be there (decrypted from local vault)
+    await expect(pageAlice.locator('.message-text').filter({ hasText: msgFromAlice })).toBeVisible({ timeout: 10000 });
+    await expect(pageAlice.locator('.message-text').filter({ hasText: msgFromBob })).toBeVisible({ timeout: 10000 });
+
+    console.log('Test Complete: Messaging and Persistence verified.');
+
+    // Cleanup
+    await contextAlice.close();
+    await contextBob.close();
+  });
+
+});
