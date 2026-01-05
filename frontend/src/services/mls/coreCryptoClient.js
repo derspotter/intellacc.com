@@ -31,6 +31,8 @@ class CoreCryptoClient {
         this.processedMessageIds = new Set(); // Track processed message IDs to prevent duplicates
         this.processingMessageIds = new Set();
         this.syncPromise = null;
+        this.bootstrapPromise = null; // Lock for concurrent bootstrap calls
+        this.bootstrapUser = null;    // Track which user is being bootstrapped
     }
 
     /**
@@ -196,22 +198,40 @@ class CoreCryptoClient {
 
     /**
      * Ensure the client is bootstrapped with an identity
+     * Uses a lock to prevent concurrent bootstrap calls from corrupting WASM state
      * @param {string} username - The username to create an identity for
      */
     async ensureMlsBootstrap(username) {
+        // If bootstrap is already in progress for this user, wait for it
+        if (this.bootstrapPromise && this.bootstrapUser === username) {
+            console.log('[MLS] Bootstrap already in progress, waiting...');
+            return this.bootstrapPromise;
+        }
+
+        // Start bootstrap and store promise
+        this.bootstrapUser = username;
+        this.bootstrapPromise = this._doMlsBootstrap(username);
+
+        try {
+            await this.bootstrapPromise;
+        } finally {
+            // Clear the lock when done (success or failure)
+            this.bootstrapPromise = null;
+            this.bootstrapUser = null;
+        }
+    }
+
+    /**
+     * Internal bootstrap implementation (called by ensureMlsBootstrap with lock)
+     */
+    async _doMlsBootstrap(username) {
         if (!this.initialized) await this.initialize();
 
         // If client exists for the correct user, we're done
         if (this.client && this.identityName === username) {
             console.log('MLS Client already initialized for:', username);
             this.setupSocketListeners();
-            // Only refresh key packages if deviceId is available (otherwise wait for vault setup)
-            const vaultService = (await import('../vaultService.js')).default;
-            if (vaultService.getDeviceId()) {
-                this.ensureKeyPackagesFresh().catch(e =>
-                    console.warn('[MLS] Key package refresh failed:', e.message || e)
-                );
-            }
+            // Key packages are handled by the caller (setupKeystoreWithPassword) after vault setup
             return;
         }
 
@@ -219,6 +239,12 @@ class CoreCryptoClient {
         if (this.client && this.identityName !== username) {
             console.log('Switching MLS identity from', this.identityName, 'to', username);
             this.cleanupSocketListeners();
+            // Explicitly free WASM memory before creating new client
+            try {
+                this.client.free();
+            } catch (e) {
+                // Ignore errors if already freed
+            }
             this.client = null;
             this.identityName = null;
         }
@@ -256,14 +282,7 @@ class CoreCryptoClient {
 
             // Setup socket listeners for new identity
             this.setupSocketListeners();
-
-            // Only upload key packages if deviceId is available (otherwise wait for vault setup)
-            const vaultSvc = (await import('../vaultService.js')).default;
-            if (vaultSvc.getDeviceId()) {
-                this.ensureKeyPackagesFresh().catch(e =>
-                    console.warn('[MLS] Key package upload failed:', e.message || e)
-                );
-            }
+            // Key packages are handled by the caller (setupKeystoreWithPassword) after vault setup
         } catch (error) {
             console.error('Error bootstrapping MLS client:', error);
             throw error;
@@ -2839,12 +2858,23 @@ class CoreCryptoClient {
      */
     wipeMemory() {
         this.cleanupSocketListeners();
+        // Explicitly free WASM memory before dropping reference
+        if (this.client) {
+            try {
+                this.client.free();
+            } catch (e) {
+                // Ignore errors if already freed
+            }
+        }
         this.client = null;
         this.identityName = null;
         this.confirmationTags.clear();
         this.remoteConfirmationTags.clear();
         this.sentConfirmationTags.clear();
         this.messageHandlers = [];  // Clear callback references
+        // Clear bootstrap lock in case logout happens during bootstrap
+        this.bootstrapPromise = null;
+        this.bootstrapUser = null;
         console.log('[MLS] Memory wiped');
     }
 

@@ -64,7 +64,8 @@ export async function onLoginSuccess(password = null) {
           // Initialize authenticated socket connection
           socketService.initializeSocket();
 
-          // Start MLS bootstrap in background (don't block login)
+          // Start MLS bootstrap early (in background) so it's ready when vault needs it
+          // The lock in ensureMlsBootstrap prevents race conditions if called again
           coreCryptoClient.ensureMlsBootstrap(String(profile.id)).catch(e =>
             console.warn('[MLS] Background bootstrap failed:', e.message || e)
           );
@@ -123,8 +124,7 @@ export async function onLoginSuccess(password = null) {
              console.log('Passkey login without vault unlock. Vault remains locked.');
         }
 
-        // MLS finalization (key packages, socket listeners) happens
-        // in background after ensureMlsBootstrap completes
+        // MLS key packages are uploaded after keystore setup completes
       }
     } catch (profileError) {
       console.warn('Error during post-login vault setup:', profileError);
