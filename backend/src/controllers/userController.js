@@ -262,6 +262,32 @@ exports.unfollowUser = async (req, res) => {
   }
 };
 
+// Check if current user follows a specific user
+exports.getFollowingStatus = async (req, res) => {
+  const currentUserId = req.user?.id ?? req.user?.userId;
+  const targetUserId = parseInt(req.params.id, 10);
+
+  if (!currentUserId) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  if (isNaN(targetUserId)) {
+    return res.status(400).json({ message: "Invalid user ID format" });
+  }
+
+  try {
+    const result = await db.query(
+      'SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2',
+      [currentUserId, targetUserId]
+    );
+
+    res.status(200).json({ isFollowing: result.rows.length > 0 });
+  } catch (err) {
+    console.error("Error checking follow status:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 // Get followers of a user
 exports.getFollowers = async (req, res) => {
   const userIdParam = req.params.id;

@@ -46,6 +46,7 @@ router.patch("/users/profile", authenticateJWT, userController.editUserProfile);
 // Follow System Routes
 router.post("/users/:id/follow", authenticateJWT, userController.followUser);
 router.delete("/users/:id/follow", authenticateJWT, userController.unfollowUser);
+router.get("/users/:id/following-status", authenticateJWT, userController.getFollowingStatus);
 router.get("/users/:id/followers", authenticateJWT, userController.getFollowers);
 router.get("/users/:id/following", authenticateJWT, userController.getFollowing);
 

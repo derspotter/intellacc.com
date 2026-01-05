@@ -8,7 +8,21 @@ const mlsService = {
     console.log('[MLS] Socket.IO instance set');
   },
 
+  // Ensure device exists in user_devices table (required for message routing)
+  async ensureDeviceRegistered(userId, deviceId) {
+    const query = `
+      INSERT INTO user_devices (user_id, device_public_id, name, is_primary)
+      VALUES ($1, $2, 'MLS Device', false)
+      ON CONFLICT (device_public_id) DO UPDATE SET last_seen_at = NOW()
+      RETURNING *;
+    `;
+    const { rows } = await db.query(query, [userId, deviceId]);
+    return rows[0];
+  },
+
   async upsertKeyPackage(userId, deviceId, packageData, hash, notBefore, notAfter, isLastResort = false) {
+    // Ensure device is registered before uploading key package
+    await this.ensureDeviceRegistered(userId, deviceId);
     if (isLastResort) {
       // Last-resort: UPSERT - only one per (user_id, device_id)
       const query = `
@@ -35,6 +49,9 @@ const mlsService = {
 
   // Bulk insert multiple key packages
   async insertKeyPackages(userId, deviceId, keyPackages) {
+    // Ensure device is registered before uploading key packages
+    await this.ensureDeviceRegistered(userId, deviceId);
+
     const client = await db.getPool().connect();
     try {
       await client.query('BEGIN');
@@ -265,6 +282,8 @@ const mlsService = {
   },
 
   async getPendingMessages(deviceId) {
+    // Return welcome messages immediately, but hold back application/commit messages
+    // until the welcome for that group has been acked by this device
     const query = `
       SELECT q.id, q.group_id, q.sender_device_id, q.message_type, q.data, q.group_info, q.created_at,
              sender_ud.user_id AS sender_user_id
@@ -272,6 +291,20 @@ const mlsService = {
       JOIN mls_relay_recipients r ON q.id = r.queue_id
       JOIN user_devices sender_ud ON q.sender_device_id = sender_ud.id
       WHERE r.recipient_device_id = $1 AND r.acked_at IS NULL
+        AND (
+          -- Always return welcome messages
+          q.message_type = 'welcome'
+          OR
+          -- For non-welcome messages, only return if no pending welcome for this group
+          NOT EXISTS (
+            SELECT 1 FROM mls_relay_queue w
+            JOIN mls_relay_recipients wr ON w.id = wr.queue_id
+            WHERE w.group_id = q.group_id
+              AND w.message_type = 'welcome'
+              AND wr.recipient_device_id = $1
+              AND wr.acked_at IS NULL
+          )
+        )
       ORDER BY q.created_at ASC;
     `;
     const { rows } = await db.query(query, [deviceId]);
@@ -284,6 +317,13 @@ const mlsService = {
     const client = await db.getPool().connect();
     try {
         await client.query('BEGIN');
+
+        // Check if any of the acked messages are welcomes - we'll need to notify about held-back messages
+        const welcomeRes = await client.query(
+            'SELECT q.group_id, ud.user_id FROM mls_relay_queue q JOIN user_devices ud ON ud.id = $1 WHERE q.id = ANY($2) AND q.message_type = \'welcome\'',
+            [deviceId, messageIds]
+        );
+        const ackedWelcomes = welcomeRes.rows;
 
         // Check what recipients exist before update
         const beforeRes = await client.query(
@@ -310,7 +350,43 @@ const mlsService = {
                 SELECT queue_id FROM mls_relay_recipients WHERE queue_id = ANY($1) AND acked_at IS NULL
             )
         `, [messageIds]);
+
+        // Add user as member of the group when they ack a welcome (they've now accepted the invite)
+        for (const welcome of ackedWelcomes) {
+            console.log(`[MLS Ack] Welcome acked for group ${welcome.group_id}, adding user ${welcome.user_id} as member`);
+            await client.query(
+                'INSERT INTO mls_group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT (group_id, user_id) DO NOTHING',
+                [welcome.group_id, welcome.user_id]
+            );
+
+            // Add this device as recipient to any queued application messages for this group
+            // (messages sent while user wasn't a member yet)
+            // NOTE: Only application messages - commits are for existing members, new members join via welcome
+            const queuedMsgsRes = await client.query(
+                `SELECT q.id FROM mls_relay_queue q
+                 WHERE q.group_id = $1 AND q.message_type = 'application'
+                   AND NOT EXISTS (SELECT 1 FROM mls_relay_recipients r WHERE r.queue_id = q.id AND r.recipient_device_id = $2)`,
+                [welcome.group_id, deviceId]
+            );
+            for (const msg of queuedMsgsRes.rows) {
+                await client.query(
+                    'INSERT INTO mls_relay_recipients (queue_id, recipient_device_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                    [msg.id, deviceId]
+                );
+            }
+            if (queuedMsgsRes.rows.length > 0) {
+                console.log(`[MLS Ack] Added ${queuedMsgsRes.rows.length} held-back messages as recipient for device ${deviceId}`);
+            }
+        }
+
         await client.query('COMMIT');
+
+        // After commit: notify clients about held-back messages that are now available
+        if (io && ackedWelcomes.length > 0) {
+            for (const welcome of ackedWelcomes) {
+                io.to(`mls:${welcome.user_id}`).emit('mls-message', { groupId: welcome.group_id });
+            }
+        }
     } catch (e) {
         await client.query('ROLLBACK');
         throw e;
@@ -481,10 +557,10 @@ const mlsService = {
         [groupId, minId, maxId, creatorId]
       );
 
-      // Add both users as members
+      // Only add creator as member - invitee is added when they ack the welcome
       await client.query(
-        'INSERT INTO mls_group_members (group_id, user_id) VALUES ($1, $2), ($1, $3)',
-        [groupId, minId, maxId]
+        'INSERT INTO mls_group_members (group_id, user_id) VALUES ($1, $2)',
+        [groupId, creatorId]
       );
 
       await client.query('COMMIT');
@@ -498,12 +574,15 @@ const mlsService = {
   },
 
   async getDirectMessages(userId) {
+    // Only return DMs where the user has joined (is in mls_group_members)
+    // This excludes DMs where user was invited but hasn't accepted the welcome yet
     const query = `
       SELECT dm.group_id, dm.created_at,
              CASE WHEN dm.user_a_id = $1 THEN dm.user_b_id ELSE dm.user_a_id END as other_user_id,
              u.username as other_username
       FROM mls_direct_messages dm
       JOIN users u ON u.id = CASE WHEN dm.user_a_id = $1 THEN dm.user_b_id ELSE dm.user_a_id END
+      JOIN mls_group_members gm ON gm.group_id = dm.group_id AND gm.user_id = $1
       WHERE dm.user_a_id = $1 OR dm.user_b_id = $1
       ORDER BY dm.created_at DESC;
     `;

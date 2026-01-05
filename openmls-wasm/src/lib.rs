@@ -31,16 +31,31 @@ use openmls::messages::proposals::{PreSharedKeyProposal, Proposal};
 
 use openmls::framing::{ProcessedMessageContent, MlsMessageIn, MlsMessageBodyIn, MlsMessageBodyOut, ProtocolMessage, Sender};
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(feature = "logging", target_arch = "wasm32"))]
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console)]
     fn log(s: &str);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "logging", not(target_arch = "wasm32")))]
 fn log(s: &str) {
     println!("{}", s);
+}
+
+#[cfg(feature = "logging")]
+macro_rules! wasm_log {
+    ($msg:expr) => {{
+        log($msg);
+    }};
+    ($fmt:expr, $($arg:tt)*) => {{
+        log(&format!($fmt, $($arg)*));
+    }};
+}
+
+#[cfg(not(feature = "logging"))]
+macro_rules! wasm_log {
+    ($($arg:tt)*) => { () };
 }
 
 const KEY_PACKAGE_LIFETIME_SECONDS: u64 = 60 * 60 * 24 * 28 * 3;
@@ -50,8 +65,9 @@ const DEFAULT_EXTERNAL_PSK_ID_LEN: usize = 16;
 
 #[wasm_bindgen]
 pub fn init_logging() {
+    #[cfg(feature = "panic-hook")]
     console_error_panic_hook::set_once();
-    log("OpenMLS WASM initialized");
+    wasm_log!("OpenMLS WASM initialized");
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -443,7 +459,7 @@ impl MlsClient {
 
         // Store using the MLS group ID to ensure consistency
         let mls_group_id = group.group_id().as_slice().to_vec();
-        log(&format!("[WASM] create_group: MLS group ID = {}", hex::encode(&mls_group_id)));
+        wasm_log!(&format!("[WASM] create_group: MLS group ID = {}", hex::encode(&mls_group_id)));
 
         self.groups.insert(mls_group_id.clone(), group);
 
@@ -510,7 +526,7 @@ impl MlsClient {
         .map_err(|e| JsValue::from_str(&format!("Error creating group: {:?}", e)))?;
 
         let mls_group_id = group.group_id().as_slice().to_vec();
-        log(&format!("[WASM] create_group_with_external_senders: MLS group ID = {}", hex::encode(&mls_group_id)));
+        wasm_log!(&format!("[WASM] create_group_with_external_senders: MLS group ID = {}", hex::encode(&mls_group_id)));
         self.groups.insert(mls_group_id.clone(), group);
 
         Ok(mls_group_id)
@@ -744,7 +760,7 @@ impl MlsClient {
         let hash = key_package_ref.hash_ref(provider.crypto())
              .map_err(|e| JsValue::from_str(&format!("Error hashing key package: {:?}", e)))?;
              
-        log(&format!("[WASM] Writing KeyPackage Hash: {}", hex::encode(hash.as_slice())));
+        wasm_log!(&format!("[WASM] Writing KeyPackage Hash: {}", hex::encode(hash.as_slice())));
         
         provider.storage().write_key_package(&hash, &key_package_bundle)
             .map_err(|e| JsValue::from_str(&format!("Error saving key package bundle: {:?}", e)))?;
@@ -755,7 +771,7 @@ impl MlsClient {
         self.signature_keypair = Some(signature_keypair);
         self.key_package = Some(key_package);
         
-        log(&format!("Identity created for: {}", identity_name));
+        wasm_log!(&format!("Identity created for: {}", identity_name));
         
         Ok("Identity created".to_string())
     }
@@ -838,7 +854,7 @@ impl MlsClient {
         let hash = key_package.hash_ref(self.provider.crypto())
              .map_err(|e| JsValue::from_str(&format!("Error hashing key package: {:?}", e)))?;
 
-        log(&format!("[WASM] restore_identity: Writing KeyPackage Hash: {}", hex::encode(hash.as_slice())));
+        wasm_log!(&format!("[WASM] restore_identity: Writing KeyPackage Hash: {}", hex::encode(hash.as_slice())));
 
         self.provider.storage().write_key_package(&hash, &bundle)
             .map_err(|e| JsValue::from_str(&format!("Error saving key package bundle: {:?}", e)))?;
@@ -882,14 +898,14 @@ impl MlsClient {
         let hash = key_package_ref.hash_ref(provider.crypto())
              .map_err(|e| JsValue::from_str(&format!("Error hashing key package: {:?}", e)))?;
 
-        log(&format!("[WASM] regenerate_key_package: Writing new KeyPackage Hash: {}", hex::encode(hash.as_slice())));
+        wasm_log!(&format!("[WASM] regenerate_key_package: Writing new KeyPackage Hash: {}", hex::encode(hash.as_slice())));
 
         provider.storage().write_key_package(&hash, &key_package_bundle)
             .map_err(|e| JsValue::from_str(&format!("Error saving key package bundle: {:?}", e)))?;
 
         self.key_package = Some(key_package_ref.clone());
 
-        log("[WASM] KeyPackage regenerated successfully");
+        wasm_log!("[WASM] KeyPackage regenerated successfully");
 
         Ok(())
     }
@@ -938,7 +954,7 @@ impl MlsClient {
             .map_err(|e| JsValue::from_str(&format!("Error hashing key package: {:?}", e)))?;
         let hash_hex = hex::encode(hash.as_slice());
 
-        log(&format!("[WASM] generate_last_resort_key_package: Writing KeyPackage Hash: {}", &hash_hex));
+        wasm_log!(&format!("[WASM] generate_last_resort_key_package: Writing KeyPackage Hash: {}", &hash_hex));
 
         provider.storage().write_key_package(&hash, &key_package_bundle)
             .map_err(|e| JsValue::from_str(&format!("Error saving last-resort key package bundle: {:?}", e)))?;
@@ -1014,7 +1030,7 @@ impl MlsClient {
             });
         }
 
-        log(&format!("[WASM] Generated {} key packages", count));
+        wasm_log!(&format!("[WASM] Generated {} key packages", count));
 
         // Keep the first one as the "current" key package if we don't have one
         if self.key_package.is_none() {
@@ -1091,7 +1107,7 @@ impl MlsClient {
         let welcome_bytes = welcome_msg.tls_serialize_detached()
             .map_err(|e| JsValue::from_str(&format!("Error serializing welcome: {:?}", e)))?;
 
-        log(&format!("[WASM] add_member: Welcome MlsMessage serialized to {} bytes", welcome_bytes.len()));
+        wasm_log!(&format!("[WASM] add_member: Welcome MlsMessage serialized to {} bytes", welcome_bytes.len()));
 
         let array = js_sys::Array::new();
         array.push(&js_sys::Uint8Array::from(&welcome_bytes[..]));
@@ -1332,7 +1348,7 @@ impl MlsClient {
             array.push(&js_sys::Uint8Array::from(&group_info_bytes[..]));
         }
 
-        log(&format!("[WASM] self_update: key rotation commit created for group, new epoch pending"));
+        wasm_log!(&format!("[WASM] self_update: key rotation commit created for group, new epoch pending"));
         Ok(array)
     }
 
@@ -1379,7 +1395,7 @@ impl MlsClient {
             array.push(&js_sys::Uint8Array::from(&group_info_bytes[..]));
         }
 
-        log(&format!("[WASM] remove_member: removed leaf index {} from group", leaf_index));
+        wasm_log!(&format!("[WASM] remove_member: removed leaf index {} from group", leaf_index));
         Ok(array)
     }
 
@@ -1402,7 +1418,7 @@ impl MlsClient {
         let proposal_bytes = proposal_message.tls_serialize_detached()
             .map_err(|e| JsValue::from_str(&format!("Error serializing leave proposal: {:?}", e)))?;
 
-        log(&format!("[WASM] leave_group: self-remove proposal created, awaiting commit by another member"));
+        wasm_log!(&format!("[WASM] leave_group: self-remove proposal created, awaiting commit by another member"));
         Ok(proposal_bytes)
     }
 
@@ -1517,7 +1533,7 @@ impl MlsClient {
             info,
         });
 
-        log(&format!("[WASM] Welcome staged with ID: {}", staging_id));
+        wasm_log!(&format!("[WASM] Welcome staged with ID: {}", staging_id));
         Ok(staging_id)
     }
 
@@ -1546,14 +1562,14 @@ impl MlsClient {
         let group_id = group.group_id().as_slice().to_vec();
         self.groups.insert(group_id.clone(), group);
 
-        log(&format!("[WASM] Accepted staged welcome, joined group: {}", hex::encode(&group_id)));
+        wasm_log!(&format!("[WASM] Accepted staged welcome, joined group: {}", hex::encode(&group_id)));
         Ok(group_id)
     }
 
     /// Reject a staged welcome (discard without joining)
     pub fn reject_staged_welcome(&mut self, staging_id: &str) -> Result<(), JsValue> {
         if self.staged_welcomes.remove(staging_id).is_some() {
-            log(&format!("[WASM] Rejected staged welcome: {}", staging_id));
+            wasm_log!(&format!("[WASM] Rejected staged welcome: {}", staging_id));
             Ok(())
         } else {
             Err(JsValue::from_str("Staged welcome not found"))
@@ -1601,9 +1617,12 @@ impl MlsClient {
             .number_of_resumption_psks(RESUMPTION_PSK_WINDOW)
             .build();
 
-        log(&format!("[WASM] Processing Welcome with secrets count: {}", welcome.secrets().len()));
-        for (i, secret) in welcome.secrets().iter().enumerate() {
-            log(&format!("[WASM] Welcome secret #{} expects KeyPackage Hash: {:?}", i, secret.new_member()));
+        #[cfg(feature = "logging")]
+        {
+            wasm_log!(&format!("[WASM] Processing Welcome with secrets count: {}", welcome.secrets().len()));
+            for (i, secret) in welcome.secrets().iter().enumerate() {
+                wasm_log!(&format!("[WASM] Welcome secret #{} expects KeyPackage Hash: {:?}", i, secret.new_member()));
+            }
         }
 
         let staged_welcome = StagedWelcome::new_from_welcome(
@@ -2027,7 +2046,7 @@ impl MlsClient {
     pub fn clear_groups(&mut self) {
         self.groups.clear();
         self.staged_commits.clear();
-        log("[WASM] All groups cleared from memory");
+        wasm_log!("[WASM] All groups cleared from memory");
     }
 
     /// Export the entire storage state for vault persistence
@@ -2035,16 +2054,19 @@ impl MlsClient {
     pub fn export_storage_state(&self) -> Result<Vec<u8>, JsValue> {
         let storage = self.provider.storage();
 
-        // Debug: log what's in storage before export
-        let groups_count = storage.groups.read().unwrap().len();
-        let context_count = storage.context.read().unwrap().len();
-        let trees_count = storage.trees.read().unwrap().len();
-        let epoch_secrets_count = storage.epoch_secrets.read().unwrap().len();
-        let sent_msgs_count = storage.sent_messages.read().unwrap().len();
-        let own_leaf_nodes_count = storage.own_leaf_nodes.read().unwrap().len();
-        let own_leaf_index_count = storage.own_leaf_index.read().unwrap().len();
-        log(&format!("[WASM] export_storage_state: groups={}, context={}, trees={}, epoch_secrets={}, sent_messages={}, own_leaf_nodes={}, own_leaf_index={}",
-            groups_count, context_count, trees_count, epoch_secrets_count, sent_msgs_count, own_leaf_nodes_count, own_leaf_index_count));
+        #[cfg(feature = "logging")]
+        {
+            // Debug: log what's in storage before export
+            let groups_count = storage.groups.read().unwrap().len();
+            let context_count = storage.context.read().unwrap().len();
+            let trees_count = storage.trees.read().unwrap().len();
+            let epoch_secrets_count = storage.epoch_secrets.read().unwrap().len();
+            let sent_msgs_count = storage.sent_messages.read().unwrap().len();
+            let own_leaf_nodes_count = storage.own_leaf_nodes.read().unwrap().len();
+            let own_leaf_index_count = storage.own_leaf_index.read().unwrap().len();
+            wasm_log!(&format!("[WASM] export_storage_state: groups={}, context={}, trees={}, epoch_secrets={}, sent_messages={}, own_leaf_nodes={}, own_leaf_index={}",
+                groups_count, context_count, trees_count, epoch_secrets_count, sent_msgs_count, own_leaf_nodes_count, own_leaf_index_count));
+        }
 
         // Use bincode for fast binary serialization (handles Vec<u8> keys natively)
         let storage_bytes = bincode::serialize(storage)
@@ -2083,50 +2105,53 @@ impl MlsClient {
         let restored: GranularStorage = bincode::deserialize(storage_bytes)
              .map_err(|e| JsValue::from_str(&format!("Error deserializing: {:?}", e)))?;
 
-        // Debug: log what was restored
-        let groups_count = restored.groups.read().unwrap().len();
-        let context_count = restored.context.read().unwrap().len();
-        let trees_count = restored.trees.read().unwrap().len();
-        let epoch_secrets_count = restored.epoch_secrets.read().unwrap().len();
-        let sent_msgs_count = restored.sent_messages.read().unwrap().len();
-        let own_leaf_nodes_count = restored.own_leaf_nodes.read().unwrap().len();
-        let own_leaf_index_count = restored.own_leaf_index.read().unwrap().len();
-        log(&format!("[WASM] import_storage_state: restored groups={}, context={}, trees={}, epoch_secrets={}, sent_messages={}, own_leaf_nodes={}, own_leaf_index={}",
-            groups_count, context_count, trees_count, epoch_secrets_count, sent_msgs_count, own_leaf_nodes_count, own_leaf_index_count));
+        #[cfg(feature = "logging")]
+        {
+            // Debug: log what was restored
+            let groups_count = restored.groups.read().unwrap().len();
+            let context_count = restored.context.read().unwrap().len();
+            let trees_count = restored.trees.read().unwrap().len();
+            let epoch_secrets_count = restored.epoch_secrets.read().unwrap().len();
+            let sent_msgs_count = restored.sent_messages.read().unwrap().len();
+            let own_leaf_nodes_count = restored.own_leaf_nodes.read().unwrap().len();
+            let own_leaf_index_count = restored.own_leaf_index.read().unwrap().len();
+            wasm_log!(&format!("[WASM] import_storage_state: restored groups={}, context={}, trees={}, epoch_secrets={}, sent_messages={}, own_leaf_nodes={}, own_leaf_index={}",
+                groups_count, context_count, trees_count, epoch_secrets_count, sent_msgs_count, own_leaf_nodes_count, own_leaf_index_count));
 
-        // Debug: log the actual keys in ALL relevant HashMaps
-        log("[WASM] === Storage HashMap Keys Debug ===");
-        for key in restored.groups.read().unwrap().keys() {
-            log(&format!("[WASM] groups key: {} (len={})", hex::encode(key), key.len()));
+            // Debug: log the actual keys in ALL relevant HashMaps
+            wasm_log!("[WASM] === Storage HashMap Keys Debug ===");
+            for key in restored.groups.read().unwrap().keys() {
+                wasm_log!(&format!("[WASM] groups key: {} (len={})", hex::encode(key), key.len()));
+            }
+            for key in restored.context.read().unwrap().keys() {
+                wasm_log!(&format!("[WASM] context key: {} (len={})", hex::encode(key), key.len()));
+            }
+            for key in restored.trees.read().unwrap().keys() {
+                wasm_log!(&format!("[WASM] trees key: {} (len={})", hex::encode(key), key.len()));
+            }
+            for key in restored.epoch_secrets.read().unwrap().keys() {
+                wasm_log!(&format!("[WASM] epoch_secrets key: {} (len={})", hex::encode(key), key.len()));
+            }
+            for key in restored.mls_join_configs.read().unwrap().keys() {
+                wasm_log!(&format!("[WASM] mls_join_configs key: {} (len={})", hex::encode(key), key.len()));
+            }
+            for key in restored.message_secrets.read().unwrap().keys() {
+                wasm_log!(&format!("[WASM] message_secrets key: {} (len={})", hex::encode(key), key.len()));
+            }
+            for key in restored.interim_transcript_hashes.read().unwrap().keys() {
+                wasm_log!(&format!("[WASM] interim_transcript_hashes key: {} (len={})", hex::encode(key), key.len()));
+            }
+            for key in restored.confirmation_tags.read().unwrap().keys() {
+                wasm_log!(&format!("[WASM] confirmation_tags key: {} (len={})", hex::encode(key), key.len()));
+            }
+            for key in restored.own_leaf_nodes.read().unwrap().keys() {
+                wasm_log!(&format!("[WASM] own_leaf_nodes key: {} (len={})", hex::encode(key), key.len()));
+            }
+            for key in restored.own_leaf_index.read().unwrap().keys() {
+                wasm_log!(&format!("[WASM] own_leaf_index key: {} (len={})", hex::encode(key), key.len()));
+            }
+            wasm_log!("[WASM] === End Storage HashMap Keys Debug ===");
         }
-        for key in restored.context.read().unwrap().keys() {
-            log(&format!("[WASM] context key: {} (len={})", hex::encode(key), key.len()));
-        }
-        for key in restored.trees.read().unwrap().keys() {
-            log(&format!("[WASM] trees key: {} (len={})", hex::encode(key), key.len()));
-        }
-        for key in restored.epoch_secrets.read().unwrap().keys() {
-            log(&format!("[WASM] epoch_secrets key: {} (len={})", hex::encode(key), key.len()));
-        }
-        for key in restored.mls_join_configs.read().unwrap().keys() {
-            log(&format!("[WASM] mls_join_configs key: {} (len={})", hex::encode(key), key.len()));
-        }
-        for key in restored.message_secrets.read().unwrap().keys() {
-            log(&format!("[WASM] message_secrets key: {} (len={})", hex::encode(key), key.len()));
-        }
-        for key in restored.interim_transcript_hashes.read().unwrap().keys() {
-            log(&format!("[WASM] interim_transcript_hashes key: {} (len={})", hex::encode(key), key.len()));
-        }
-        for key in restored.confirmation_tags.read().unwrap().keys() {
-            log(&format!("[WASM] confirmation_tags key: {} (len={})", hex::encode(key), key.len()));
-        }
-        for key in restored.own_leaf_nodes.read().unwrap().keys() {
-            log(&format!("[WASM] own_leaf_nodes key: {} (len={})", hex::encode(key), key.len()));
-        }
-        for key in restored.own_leaf_index.read().unwrap().keys() {
-            log(&format!("[WASM] own_leaf_index key: {} (len={})", hex::encode(key), key.len()));
-        }
-        log("[WASM] === End Storage HashMap Keys Debug ===");
 
         // Copy to provider
         let target = self.provider.storage();
@@ -2154,9 +2179,9 @@ impl MlsClient {
         if pos + 8 <= data.len() {
              let g_count = u64::from_be_bytes(data[pos..pos+8].try_into().unwrap()) as usize;
              pos += 8;
-             log(&format!("[WASM] import_storage_state: restoring {} groups", g_count));
+             wasm_log!(&format!("[WASM] import_storage_state: restoring {} groups", g_count));
              self.groups.clear();
-             for i in 0..g_count {
+             for _i in 0..g_count {
                  if pos + 8 > data.len() { break; }
                  let len = u64::from_be_bytes(data[pos..pos+8].try_into().unwrap()) as usize;
                  pos += 8;
@@ -2167,26 +2192,27 @@ impl MlsClient {
                  let group_id = GroupId::from_slice(&gid);
                  // Debug: show what key MlsGroup::load will look for
                  let lookup_key = server_ser(&group_id).unwrap_or_default();
-                 log(&format!("[WASM] Attempting to load group {}: raw={} lookup_key={} (len={})",
-                     i, hex::encode(&gid), hex::encode(&lookup_key), lookup_key.len()));
+                 wasm_log!(&format!("[WASM] Attempting to load group {}: raw={} lookup_key={} (len={})",
+                     _i, hex::encode(&gid), hex::encode(&lookup_key), lookup_key.len()));
 
                  // Debug: Check if this lookup key exists in each HashMap
                  let target = self.provider.storage();
                  let groups_map = target.groups.read().unwrap();
-                 let has_group = groups_map.contains_key(&lookup_key);
-                 log(&format!("[WASM] Lookup key in groups HashMap: {}", has_group));
+                 let _has_group = groups_map.contains_key(&lookup_key);
+                 wasm_log!(&format!("[WASM] Lookup key in groups HashMap: {}", _has_group));
 
                  // If not found, show what keys ARE in the HashMap
-                 if !has_group && groups_map.len() > 0 {
-                     log("[WASM] === KEY MISMATCH DEBUG ===");
+                 #[cfg(feature = "logging")]
+                 if !_has_group && groups_map.len() > 0 {
+                     wasm_log!("[WASM] === KEY MISMATCH DEBUG ===");
                      // Show as JSON string for readability
                      let lookup_str = String::from_utf8_lossy(&lookup_key);
-                     log(&format!("[WASM] Looking for (JSON): {}", lookup_str));
-                     log(&format!("[WASM] Looking for (hex): {} (len={})", hex::encode(&lookup_key), lookup_key.len()));
+                     wasm_log!(&format!("[WASM] Looking for (JSON): {}", lookup_str));
+                     wasm_log!(&format!("[WASM] Looking for (hex): {} (len={})", hex::encode(&lookup_key), lookup_key.len()));
                      for stored_key in groups_map.keys() {
                          let stored_str = String::from_utf8_lossy(stored_key);
-                         log(&format!("[WASM] HashMap has (JSON): {}", stored_str));
-                         log(&format!("[WASM] HashMap has (hex): {} (len={})", hex::encode(stored_key), stored_key.len()));
+                         wasm_log!(&format!("[WASM] HashMap has (JSON): {}", stored_str));
+                         wasm_log!(&format!("[WASM] HashMap has (hex): {} (len={})", hex::encode(stored_key), stored_key.len()));
                          // Show byte-by-byte comparison
                          if lookup_key.len() == stored_key.len() {
                              let mut diff_positions = Vec::new();
@@ -2196,19 +2222,20 @@ impl MlsClient {
                                  }
                              }
                              if diff_positions.is_empty() {
-                                 log("[WASM] Keys are identical but still not found?!");
+                                 wasm_log!("[WASM] Keys are identical but still not found?!");
                              } else {
-                                 log(&format!("[WASM] Differences: {:?}", diff_positions));
+                                 wasm_log!(&format!("[WASM] Differences: {:?}", diff_positions));
                              }
                          } else {
-                             log(&format!("[WASM] Length mismatch: lookup={} vs stored={}", lookup_key.len(), stored_key.len()));
+                             wasm_log!(&format!("[WASM] Length mismatch: lookup={} vs stored={}", lookup_key.len(), stored_key.len()));
                          }
                      }
-                     log("[WASM] === END KEY MISMATCH DEBUG ===");
+                     wasm_log!("[WASM] === END KEY MISMATCH DEBUG ===");
                  }
                  drop(groups_map);
 
                  // Debug: directly inspect hashmap values for this key
+                 #[cfg(feature = "logging")]
                  {
                      let storage = self.provider.storage();
 
@@ -2221,33 +2248,33 @@ impl MlsClient {
                      let has_cfg = storage.mls_join_configs.read().unwrap().contains_key(&lookup_key);
                      let has_ep_sec = storage.epoch_secrets.read().unwrap().contains_key(&lookup_key);
 
-                     log(&format!("[WASM] Storage state for lookup key:"));
-                     log(&format!("[WASM]   groups: {}", has_group));
-                     log(&format!("[WASM]   trees: {}", has_tree));
-                     log(&format!("[WASM]   context: {}", has_ctx));
-                     log(&format!("[WASM]   mls_join_configs: {}", has_cfg));
-                     log(&format!("[WASM]   epoch_secrets: {}", has_ep_sec));
+                     wasm_log!(&format!("[WASM] Storage state for lookup key:"));
+                     wasm_log!(&format!("[WASM]   groups: {}", has_group));
+                     wasm_log!(&format!("[WASM]   trees: {}", has_tree));
+                     wasm_log!(&format!("[WASM]   context: {}", has_ctx));
+                     wasm_log!(&format!("[WASM]   mls_join_configs: {}", has_cfg));
+                     wasm_log!(&format!("[WASM]   epoch_secrets: {}", has_ep_sec));
 
                      // If any are missing, that's likely the cause of MlsGroup::load() failing
                      if !has_group || !has_tree || !has_ctx || !has_cfg {
-                         log("[WASM] ⚠️  MISSING REQUIRED DATA - this is why MlsGroup::load() returns None!");
+                         wasm_log!("[WASM] ⚠️  MISSING REQUIRED DATA - this is why MlsGroup::load() returns None!");
                      }
                  }
 
                  match MlsGroup::load(self.provider.storage(), &group_id) {
                      Ok(Some(group)) => {
-                         log(&format!("[WASM] Successfully loaded group: {}", hex::encode(&gid)));
+                         wasm_log!(&format!("[WASM] Successfully loaded group: {}", hex::encode(&gid)));
                          self.groups.insert(gid, group);
                      }
                      Ok(None) => {
-                         log(&format!("[WASM] Group not found in storage: {}", hex::encode(&gid)));
+                         wasm_log!(&format!("[WASM] Group not found in storage: {}", hex::encode(&gid)));
                      }
-                     Err(e) => {
-                         log(&format!("[WASM] Error loading group {}: {:?}", hex::encode(&gid), e));
+                     Err(_e) => {
+                         wasm_log!(&format!("[WASM] Error loading group {}: {:?}", hex::encode(&gid), _e));
                      }
                  }
              }
-             log(&format!("[WASM] Restored {} groups to memory", self.groups.len()));
+             wasm_log!(&format!("[WASM] Restored {} groups to memory", self.groups.len()));
         }
         Ok(())
     }
@@ -2256,6 +2283,7 @@ impl MlsClient {
         let events: Vec<StorageEvent> = serde_wasm_bindgen::from_value(events_value)
             .map_err(|e| JsValue::from_str(&format!("Error deserializing events: {:?}", e)))?;
         
+        #[cfg(feature = "logging")]
         let event_count = events.len();
         
         // Use a block to restrict the scope of the borrow if needed, but here we need storage for MlsGroup::load
@@ -2284,11 +2312,11 @@ impl MlsClient {
                      "own_leaf_index" => Self::apply_event(&storage.own_leaf_index, key_bytes, event.value),
                      "sent_message" => Self::apply_event(&storage.sent_messages, key_bytes, event.value),
                      _ => {
-                         log(&format!("[WASM] Unknown category in import: {}", event.category));
+                         wasm_log!(&format!("[WASM] Unknown category in import: {}", event.category));
                      }
                  }
             } else {
-                log(&format!("[WASM] Failed to decode hex key: {}", event.key));
+                wasm_log!(&format!("[WASM] Failed to decode hex key: {}", event.key));
             }
         }
 
@@ -2299,6 +2327,7 @@ impl MlsClient {
              groups_map.keys().cloned().collect()
         };
         
+        #[cfg(feature = "logging")]
         let mut loaded_count = 0;
         for key_bytes in group_keys {
             if let Ok(group_id) = server_de::<GroupId>(&key_bytes) {
@@ -2311,15 +2340,21 @@ impl MlsClient {
                      Ok(Some(group)) => {
                          let gid_vec = group.group_id().as_slice().to_vec();
                          self.groups.insert(gid_vec, group);
-                         loaded_count += 1;
+                         #[cfg(feature = "logging")]
+                         {
+                             loaded_count += 1;
+                         }
                      },
-                     Ok(None) => log(&format!("[WASM] Group load returned None for key: {}", hex::encode(&key_bytes))),
-                     Err(e) => log(&format!("[WASM] Group load failed for key: {}: {:?}", hex::encode(&key_bytes), e)),
+                     Ok(None) => wasm_log!(&format!("[WASM] Group load returned None for key: {}", hex::encode(&key_bytes))),
+                     Err(_e) => wasm_log!(&format!("[WASM] Group load failed for key: {}: {:?}", hex::encode(&key_bytes), _e)),
                  }
             }
         }
         
-        log(&format!("[WASM] Granular hydration complete: {} events, {} groups loaded", event_count, loaded_count));
+        #[cfg(feature = "logging")]
+        {
+            wasm_log!(&format!("[WASM] Granular hydration complete: {} events, {} groups loaded", event_count, loaded_count));
+        }
         Ok(())
     }
 
@@ -2518,25 +2553,25 @@ impl StorageProvider<1> for GranularStorage {
           K: st::GroupId<1> + serde::Serialize
     {
         let k = server_ser(key)?;
-        log(&format!("[WASM] group_state() called with key len={}", k.len()));
+        wasm_log!(&format!("[WASM] group_state() called with key len={}", k.len()));
         let map = self.groups.read().unwrap();
-        log(&format!("[WASM] group_state() groups map has {} entries", map.len()));
+        wasm_log!(&format!("[WASM] group_state() groups map has {} entries", map.len()));
         match map.get(&k) {
             Some(v) => {
-                log(&format!("[WASM] group_state() found value, len={}", v.len()));
+                wasm_log!(&format!("[WASM] group_state() found value, len={}", v.len()));
                 match server_de(v) {
                     Ok(val) => {
-                        log("[WASM] group_state() deserialization SUCCESS");
+                        wasm_log!("[WASM] group_state() deserialization SUCCESS");
                         Ok(Some(val))
                     }
                     Err(e) => {
-                        log(&format!("[WASM] group_state() deserialization FAILED: {:?}", e));
+                        wasm_log!(&format!("[WASM] group_state() deserialization FAILED: {:?}", e));
                         Err(e)
                     }
                 }
             }
             None => {
-                log("[WASM] group_state() key NOT FOUND");
+                wasm_log!("[WASM] group_state() key NOT FOUND");
                 Ok(None)
             }
         }
@@ -2552,25 +2587,25 @@ impl StorageProvider<1> for GranularStorage {
           V: st::MlsGroupJoinConfig<1> + serde::de::DeserializeOwned
     {
         let k = server_ser(key)?;
-        log(&format!("[WASM] mls_group_join_config() called with key len={}", k.len()));
+        wasm_log!(&format!("[WASM] mls_group_join_config() called with key len={}", k.len()));
         let map = self.mls_join_configs.read().unwrap();
-        log(&format!("[WASM] mls_group_join_config() map has {} entries", map.len()));
+        wasm_log!(&format!("[WASM] mls_group_join_config() map has {} entries", map.len()));
         match map.get(&k) {
             Some(v) => {
-                log(&format!("[WASM] mls_group_join_config() found value, len={}", v.len()));
+                wasm_log!(&format!("[WASM] mls_group_join_config() found value, len={}", v.len()));
                 match server_de(v) {
                     Ok(val) => {
-                        log("[WASM] mls_group_join_config() deserialization SUCCESS");
+                        wasm_log!("[WASM] mls_group_join_config() deserialization SUCCESS");
                         Ok(Some(val))
                     }
                     Err(e) => {
-                        log(&format!("[WASM] mls_group_join_config() deserialization FAILED: {:?}", e));
+                        wasm_log!(&format!("[WASM] mls_group_join_config() deserialization FAILED: {:?}", e));
                         Err(e)
                     }
                 }
             }
             None => {
-                log("[WASM] mls_group_join_config() key NOT FOUND");
+                wasm_log!("[WASM] mls_group_join_config() key NOT FOUND");
                 Ok(None)
             }
         }
@@ -2583,25 +2618,25 @@ impl StorageProvider<1> for GranularStorage {
     where GroupId: st::GroupId<1> + serde::Serialize, LeafNode: st::LeafNode<1> + serde::de::DeserializeOwned
     {
          let k = server_ser(key)?;
-         log(&format!("[WASM] own_leaf_nodes() called with key len={}", k.len()));
+         wasm_log!(&format!("[WASM] own_leaf_nodes() called with key len={}", k.len()));
          let map = self.own_leaf_nodes.read().unwrap();
-         log(&format!("[WASM] own_leaf_nodes() map has {} entries", map.len()));
+         wasm_log!(&format!("[WASM] own_leaf_nodes() map has {} entries", map.len()));
          match map.get(&k) {
              Some(v) => {
-                 log(&format!("[WASM] own_leaf_nodes() found value, len={}", v.len()));
+                 wasm_log!(&format!("[WASM] own_leaf_nodes() found value, len={}", v.len()));
                  match server_de::<Vec<LeafNode>>(v) {
                      Ok(nodes) => {
-                         log(&format!("[WASM] own_leaf_nodes() deserialization SUCCESS, {} nodes", nodes.len()));
+                         wasm_log!(&format!("[WASM] own_leaf_nodes() deserialization SUCCESS, {} nodes", nodes.len()));
                          Ok(nodes)
                      }
                      Err(e) => {
-                         log(&format!("[WASM] own_leaf_nodes() deserialization FAILED: {:?}", e));
+                         wasm_log!(&format!("[WASM] own_leaf_nodes() deserialization FAILED: {:?}", e));
                          Err(e)
                      }
                  }
              }
              None => {
-                 log("[WASM] own_leaf_nodes() key NOT FOUND, returning empty Vec");
+                 wasm_log!("[WASM] own_leaf_nodes() key NOT FOUND, returning empty Vec");
                  Ok(Vec::new())
              }
          }
@@ -2610,21 +2645,21 @@ impl StorageProvider<1> for GranularStorage {
     where GroupId: st::GroupId<1> + serde::Serialize, LeafNode: st::LeafNode<1> + serde::Serialize + serde::de::DeserializeOwned
     {
          let k = server_ser(key)?;
-         log(&format!("[WASM] append_own_leaf_node() called with key len={}", k.len()));
+         wasm_log!(&format!("[WASM] append_own_leaf_node() called with key len={}", k.len()));
 
          // Helper:
          let mut nodes_vec: Vec<LeafNode> = if let Some(existing) = self.own_leaf_nodes.read().unwrap().get(&k) {
-             log(&format!("[WASM] append_own_leaf_node() found existing nodes"));
+             wasm_log!(&format!("[WASM] append_own_leaf_node() found existing nodes"));
              server_de(existing)?
          } else {
-             log(&format!("[WASM] append_own_leaf_node() no existing nodes, starting fresh"));
+             wasm_log!(&format!("[WASM] append_own_leaf_node() no existing nodes, starting fresh"));
              Vec::new()
          };
 
          // Clone node via serde (since LeafNode doesn't implement Clone)
          let node_clone: LeafNode = server_de(&server_ser(node)?)?;
          nodes_vec.push(node_clone);
-         log(&format!("[WASM] append_own_leaf_node() now has {} nodes", nodes_vec.len()));
+         wasm_log!(&format!("[WASM] append_own_leaf_node() now has {} nodes", nodes_vec.len()));
 
          let new_val = server_ser(&nodes_vec)?;
          self.own_leaf_nodes.write().unwrap().insert(k.clone(), new_val.clone());
@@ -2634,7 +2669,7 @@ impl StorageProvider<1> for GranularStorage {
             value: Some(new_val),
             category: "own_leaf_nodes".to_string(),
          });
-         log(&format!("[WASM] append_own_leaf_node() successfully stored"));
+         wasm_log!(&format!("[WASM] append_own_leaf_node() successfully stored"));
          Ok(())
     }
     impl_delete!(delete_own_leaf_nodes, own_leaf_nodes, K, st::GroupId<1>, "own_leaf_nodes");
@@ -2647,25 +2682,25 @@ impl StorageProvider<1> for GranularStorage {
           V: st::TreeSync<1> + serde::de::DeserializeOwned
     {
         let k = server_ser(key)?;
-        log(&format!("[WASM] tree() called with key len={}", k.len()));
+        wasm_log!(&format!("[WASM] tree() called with key len={}", k.len()));
         let map = self.trees.read().unwrap();
-        log(&format!("[WASM] tree() trees map has {} entries", map.len()));
+        wasm_log!(&format!("[WASM] tree() trees map has {} entries", map.len()));
         match map.get(&k) {
             Some(v) => {
-                log(&format!("[WASM] tree() found value, len={}", v.len()));
+                wasm_log!(&format!("[WASM] tree() found value, len={}", v.len()));
                 match server_de(v) {
                     Ok(val) => {
-                        log("[WASM] tree() deserialization SUCCESS");
+                        wasm_log!("[WASM] tree() deserialization SUCCESS");
                         Ok(Some(val))
                     }
                     Err(e) => {
-                        log(&format!("[WASM] tree() deserialization FAILED: {:?}", e));
+                        wasm_log!(&format!("[WASM] tree() deserialization FAILED: {:?}", e));
                         Err(e)
                     }
                 }
             }
             None => {
-                log("[WASM] tree() key NOT FOUND");
+                wasm_log!("[WASM] tree() key NOT FOUND");
                 Ok(None)
             }
         }
@@ -2696,25 +2731,25 @@ impl StorageProvider<1> for GranularStorage {
           V: st::GroupContext<1> + serde::de::DeserializeOwned
     {
         let k = server_ser(key)?;
-        log(&format!("[WASM] group_context() called with key len={}", k.len()));
+        wasm_log!(&format!("[WASM] group_context() called with key len={}", k.len()));
         let map = self.context.read().unwrap();
-        log(&format!("[WASM] group_context() map has {} entries", map.len()));
+        wasm_log!(&format!("[WASM] group_context() map has {} entries", map.len()));
         match map.get(&k) {
             Some(v) => {
-                log(&format!("[WASM] group_context() found value, len={}", v.len()));
+                wasm_log!(&format!("[WASM] group_context() found value, len={}", v.len()));
                 match server_de(v) {
                     Ok(val) => {
-                        log("[WASM] group_context() deserialization SUCCESS");
+                        wasm_log!("[WASM] group_context() deserialization SUCCESS");
                         Ok(Some(val))
                     }
                     Err(e) => {
-                        log(&format!("[WASM] group_context() deserialization FAILED: {:?}", e));
+                        wasm_log!(&format!("[WASM] group_context() deserialization FAILED: {:?}", e));
                         Err(e)
                     }
                 }
             }
             None => {
-                log("[WASM] group_context() key NOT FOUND");
+                wasm_log!("[WASM] group_context() key NOT FOUND");
                 Ok(None)
             }
         }
@@ -2861,25 +2896,25 @@ impl StorageProvider<1> for GranularStorage {
     where GroupId: st::GroupId<1> + serde::Serialize, LeafNodeIndex: st::LeafNodeIndex<1> + serde::de::DeserializeOwned
     {
         let k = server_ser(group_id)?;
-        log(&format!("[WASM] own_leaf_index() called with key len={}", k.len()));
+        wasm_log!(&format!("[WASM] own_leaf_index() called with key len={}", k.len()));
         let map = self.own_leaf_index.read().unwrap();
-        log(&format!("[WASM] own_leaf_index() map has {} entries", map.len()));
+        wasm_log!(&format!("[WASM] own_leaf_index() map has {} entries", map.len()));
         match map.get(&k) {
             Some(v) => {
-                log(&format!("[WASM] own_leaf_index() found value, len={}", v.len()));
+                wasm_log!(&format!("[WASM] own_leaf_index() found value, len={}", v.len()));
                 match server_de(v) {
                     Ok(val) => {
-                        log("[WASM] own_leaf_index() deserialization SUCCESS");
+                        wasm_log!("[WASM] own_leaf_index() deserialization SUCCESS");
                         Ok(Some(val))
                     }
                     Err(e) => {
-                        log(&format!("[WASM] own_leaf_index() deserialization FAILED: {:?}", e));
+                        wasm_log!(&format!("[WASM] own_leaf_index() deserialization FAILED: {:?}", e));
                         Err(e)
                     }
                 }
             }
             None => {
-                log("[WASM] own_leaf_index() key NOT FOUND");
+                wasm_log!("[WASM] own_leaf_index() key NOT FOUND");
                 Ok(None)
             }
         }
@@ -2890,14 +2925,14 @@ impl StorageProvider<1> for GranularStorage {
     {
         let k = server_ser(group_id)?;
         let v = server_ser(index)?;
-        log(&format!("[WASM] write_own_leaf_index() called with key len={}, value len={}", k.len(), v.len()));
+        wasm_log!(&format!("[WASM] write_own_leaf_index() called with key len={}, value len={}", k.len(), v.len()));
         self.own_leaf_index.write().unwrap().insert(k.clone(), v.clone());
         self.dirty_events.write().unwrap().push(StorageEvent {
             key: hex::encode(&k),
             value: Some(v),
             category: "own_leaf_index".to_string(),
         });
-        log("[WASM] write_own_leaf_index() stored successfully");
+        wasm_log!("[WASM] write_own_leaf_index() stored successfully");
         Ok(())
     }
 
@@ -2905,7 +2940,7 @@ impl StorageProvider<1> for GranularStorage {
     where GroupId: st::GroupId<1> + serde::Serialize
     {
         let k = server_ser(group_id)?;
-        log(&format!("[WASM] delete_own_leaf_index() called with key len={}", k.len()));
+        wasm_log!(&format!("[WASM] delete_own_leaf_index() called with key len={}", k.len()));
         self.own_leaf_index.write().unwrap().remove(&k);
         self.dirty_events.write().unwrap().push(StorageEvent {
             key: hex::encode(&k),

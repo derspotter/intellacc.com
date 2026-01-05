@@ -261,10 +261,13 @@ class CoreCryptoClient {
             this.client = new MlsClient();
             this.identityName = username;
 
-            // Create identity and generate keys
-            // This stores the KeyPackageBundle (private keys) in the WASM memory
+            // Create identity (credential + signature keypair)
             const result = this.client.create_identity(username);
             console.log('Identity created:', result);
+
+            // Generate initial key package bundle (needed for vault export)
+            this.client.regenerate_key_package();
+            console.log('[MLS] Initial key package generated');
 
             // Persist state for this user
             await this.saveState();
@@ -2077,8 +2080,25 @@ class CoreCryptoClient {
                             continue;
                         }
 
-                        let welcomeOutcome = 'accepted';
-                        if (this.welcomeRequestHandlers.length > 0 && messageId) {
+                        // Check if current user follows the sender - auto-accept if so
+                        let followsSender = false;
+                        if (msg.sender_user_id) {
+                            try {
+                                const followRes = await fetch(`/api/users/${msg.sender_user_id}/following-status`, {
+                                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                                });
+                                if (followRes.ok) {
+                                    const followData = await followRes.json();
+                                    followsSender = followData.isFollowing === true;
+                                    console.log('[MLS] Sender follow status:', { senderUserId: msg.sender_user_id, followsSender });
+                                }
+                            } catch (e) {
+                                console.warn('[MLS] Could not check follow status:', e);
+                            }
+                        }
+
+                        let welcomeOutcome = followsSender ? 'accepted' : 'pending';
+                        if (messageId) {
                             const pendingWelcome = {
                                 id: messageId,
                                 stagingId: staged.stagingId,
@@ -2105,21 +2125,24 @@ class CoreCryptoClient {
                                 validation
                             };
 
-                            let decision;
-                            for (const handler of this.welcomeRequestHandlers) {
-                                const result = await handler(pendingSummary);
-                                if (typeof result === 'boolean') {
-                                    decision = result;
-                                    break;
+                            // Only invoke handlers if outcome is 'pending' (not auto-accepted)
+                            // Handlers can override the decision or display UI for user confirmation
+                            if (welcomeOutcome === 'pending') {
+                                let decision;
+                                for (const handler of this.welcomeRequestHandlers) {
+                                    const result = await handler(pendingSummary);
+                                    if (typeof result === 'boolean') {
+                                        decision = result;
+                                        break;
+                                    }
                                 }
-                            }
 
-                            if (decision === true) {
-                                welcomeOutcome = 'accepted';
-                            } else if (decision === false) {
-                                welcomeOutcome = 'rejected';
-                            } else {
-                                welcomeOutcome = 'pending';
+                                if (decision === true) {
+                                    welcomeOutcome = 'accepted';
+                                } else if (decision === false) {
+                                    welcomeOutcome = 'rejected';
+                                }
+                                // If no explicit decision from handlers, keep pending
                             }
                         }
 
@@ -2666,10 +2689,6 @@ class CoreCryptoClient {
             const bundle = this.client.get_key_package_bundle_bytes();
             const signatureKey = this.client.get_signature_keypair_bytes();
 
-            // NOTE: storageState is NO LONGER included here
-            // All storage (groups, keys, epoch secrets) is persisted via granular events
-            // This makes exports small (~1KB) and saves efficient
-
             return {
                 credential: Array.from(credential),
                 bundle: Array.from(bundle),
@@ -3041,11 +3060,18 @@ class CoreCryptoClient {
             throw new Error(`Welcome validation failed: ${validation.issues.join(', ')}`);
         }
 
-        const groupId = await this.acceptStagedWelcome(stagingId);
-        this.pendingWelcomes.delete(pendingId);
+        // Ack first so server registers us as member before any messages are sent
         await api.mls.ackMessages([pendingId]);
         this.processedMessageIds.add(pendingId);
+        this.pendingWelcomes.delete(pendingId);
+
+        const groupId = await this.acceptStagedWelcome(stagingId);
         this.welcomeHandlers.forEach(h => h({ groupId, groupInfoBytes: record.groupInfoBytes }));
+
+        // Sync to get any held-back messages now that welcome is acked
+        // Run in background to not block the UI
+        this.syncMessages().catch(e => console.warn('[MLS] Post-accept sync failed:', e));
+
         return groupId;
     }
 
