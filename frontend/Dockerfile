@@ -14,8 +14,8 @@ COPY package*.json ./
 # Copy local packages
 COPY openmls-pkg ./openmls-pkg
 
-# Install dependencies
-RUN npm install
+# Install dependencies (include optional native bindings for Alpine)
+RUN npm install && npm install @rollup/rollup-linux-x64-musl --save-optional
 
 # Copy the rest of your frontend source code
 COPY . .

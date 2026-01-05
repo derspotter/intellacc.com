@@ -4,7 +4,7 @@
     "console:prod": "HEADLESS=true node scripts/collect_console.js https://intellacc.com 5000"
   },
   "dependencies": {
-    "@playwright/test": "^1.54.2",
+    "@playwright/test": "^1.57.0",
     "jsonwebtoken": "^9.0.2",
     "socket.io-client": "^4.8.1"
   }

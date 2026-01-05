@@ -27,6 +27,7 @@ services:
       - ./src:/usr/src/app/src    # Only mount source code for live updates
       - ./test:/usr/src/app/test  # for testing
       - ./.env:/usr/src/app/.env  # mount .env for live updates
+      - ./migrations:/usr/src/app/migrations  # mount migrations for auto-run
     working_dir: /usr/src/app
     ports:
       - "${NODE_PORT}:3000"
