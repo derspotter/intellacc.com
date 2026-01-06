@@ -4,36 +4,30 @@ import { api } from '../api.js';
 
 const KEY_PACKAGE_RENEWAL_WINDOW_SECONDS = 60 * 60 * 24 * 7;
 const MAX_LEAF_NODE_LIFETIME_RANGE_SECONDS = (60 * 60 * 24 * 28 * 3) + (60 * 60);
+const KEY_PACKAGE_POOL_TARGET = 10;
+const KEY_PACKAGE_POOL_MIN = 3;
 
-// Key package pool settings
-const KEY_PACKAGE_POOL_TARGET = 10; // Target number of key packages to maintain
-const KEY_PACKAGE_POOL_MIN = 3;     // Threshold below which we refill
-
-/**
- * Core Crypto Client for OpenMLS integration
- * Handles WASM initialization and wraps the Rust MlsClient
- */
 class CoreCryptoClient {
     constructor() {
         this.client = null;
         this.initialized = false;
         this.identityName = null;
-        this.messageHandlers = []; // Callbacks for decrypted messages
-        this.welcomeHandlers = []; // Callbacks for new group invites
-        this.welcomeRequestHandlers = []; // Callbacks for welcome approval/inspection
-        this.pendingWelcomes = new Map(); // messageId -> pending welcome payload
-        this.confirmationTags = new Map(); // groupId -> Map(epoch -> tagHex)
-        this.remoteConfirmationTags = new Map(); // groupId -> Map(epoch -> Set(tagHex))
-        this.sentConfirmationTags = new Map(); // groupId -> Set(epoch)
-        this.forkHandlers = []; // Callbacks for fork detection events
-        this.commitRejectionHandlers = []; // Callbacks for commit/proposal rejection events
+        this.messageHandlers = [];
+        this.welcomeHandlers = [];
+        this.welcomeRequestHandlers = [];
+        this.pendingWelcomes = new Map();
+        this.confirmationTags = new Map();
+        this.remoteConfirmationTags = new Map();
+        this.sentConfirmationTags = new Map();
+        this.forkHandlers = [];
+        this.commitRejectionHandlers = [];
         this._socketCleanup = null;
-        this.processedMessageIds = new Set(); // Track processed message IDs to prevent duplicates
+        this.processedMessageIds = new Set();
         this.processingMessageIds = new Set();
         this.syncPromise = null;
-        this.bootstrapPromise = null; // Lock for concurrent bootstrap calls
-        this.bootstrapUser = null;    // Track which user is being bootstrapped
-        this._vaultService = null;    // Cached vaultService import
+        this.bootstrapPromise = null;
+        this.bootstrapUser = null;
+        this._vaultService = null;
     }
 
     // ===== CORE HELPERS (DRY) =====
@@ -63,21 +57,6 @@ class CoreCryptoClient {
         return '\\x' + this.bytesToHex(bytes);
     }
 
-    parsePostgresBytes(data) {
-        if (!data) return null;
-        if (data.type === 'Buffer' && Array.isArray(data.data)) {
-            return new Uint8Array(data.data);
-        }
-        if (typeof data === 'string') {
-            let hex = data;
-            if (hex.startsWith('\\x')) hex = hex.slice(2);
-            if (/^[0-9a-f]+$/i.test(hex) && hex.length % 2 === 0) {
-                return new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-            }
-        }
-        return data instanceof Uint8Array ? data : null;
-    }
-
     normalizeGroupId(input) {
         const bytes = this.groupIdToBytes(input);
         const str = typeof input === 'string' ? input : this.groupIdFromBytes(bytes);
@@ -105,11 +84,36 @@ class CoreCryptoClient {
         return response.json();
     }
 
+    // Handler factory - creates on/emit pairs for event handlers
+    _createHandler(handlers) {
+        return (callback) => {
+            if (typeof callback !== 'function') throw new Error('Callback must be a function');
+            handlers.push(callback);
+            return () => { const i = handlers.indexOf(callback); if (i > -1) handlers.splice(i, 1); };
+        };
+    }
+
+    _emit(handlers, data) {
+        if (!data) return;
+        handlers.forEach(h => { try { h(data); } catch (e) { console.warn('[MLS] Handler error:', e); } });
+    }
+
+    // Unified byte parser for all formats (postgres bytea, Buffer, hex, Uint8Array)
+    _toBytes(data) {
+        if (!data) return null;
+        if (data instanceof Uint8Array) return data;
+        if (data?.type === 'Buffer' && Array.isArray(data.data)) return new Uint8Array(data.data);
+        if (typeof data === 'string') {
+            let hex = data.startsWith('\\x') ? data.slice(2) : data;
+            if (/^[0-9a-f]*$/i.test(hex) && hex.length % 2 === 0) {
+                return hex.length ? new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16))) : new Uint8Array();
+            }
+        }
+        return null;
+    }
+
     // ===== END CORE HELPERS =====
 
-    /**
-     * Initialize the WASM module and logging
-     */
     async initialize() {
         if (this.initialized) return;
 
@@ -117,9 +121,7 @@ class CoreCryptoClient {
             await init();
             init_logging();
             this.initialized = true;
-            console.log('OpenMLS WASM module initialized');
         } catch (error) {
-            console.error('Failed to initialize OpenMLS WASM:', error);
             throw new Error('Crypto initialization failed');
         }
     }
@@ -227,12 +229,7 @@ class CoreCryptoClient {
         return payload;
     }
 
-    // initDB removed - we rely on VaultService/Memory only
-
-    /**
-     * Save client state - drains granular events and persists them encrypted
-     * This is efficient: only changed entities are persisted, not the full state
-     */
+    // Save client state (drains granular events, persists encrypted)
     async saveState() {
         if (!this.client) return;
         try {
@@ -245,27 +242,12 @@ class CoreCryptoClient {
         }
     }
 
-    /**
-     * Load client state (No-op: Restoration is handled by VaultService)
-     * @returns {boolean} Always false (force fresh start or vault restore)
-     */
-    async loadState(username) {
-        // We rely on restoreStateFromVault.
-        // Returning false ensures ensureMlsBootstrap creates a new identity if no vault is present.
-        return false;
-    }
+    // Load state - returns false (actual restore is via restoreStateFromVault)
+    async loadState(username) { return false; }
 
-    /**
-     * Ensure the client is bootstrapped with an identity
-     * Uses a lock to prevent concurrent bootstrap calls from corrupting WASM state
-     * @param {string} username - The username to create an identity for
-     */
+    // Ensure client is bootstrapped (with lock to prevent concurrent calls)
     async ensureMlsBootstrap(username) {
-        // If bootstrap is already in progress for this user, wait for it
-        if (this.bootstrapPromise && this.bootstrapUser === username) {
-            console.log('[MLS] Bootstrap already in progress, waiting...');
-            return this.bootstrapPromise;
-        }
+        if (this.bootstrapPromise && this.bootstrapUser === username) return this.bootstrapPromise;
 
         // Start bootstrap and store promise
         this.bootstrapUser = username;
@@ -280,90 +262,48 @@ class CoreCryptoClient {
         }
     }
 
-    /**
-     * Internal bootstrap implementation (called by ensureMlsBootstrap with lock)
-     */
     async _doMlsBootstrap(username) {
         if (!this.initialized) await this.initialize();
 
-        // If client exists for the correct user, we're done
         if (this.client && this.identityName === username) {
-            console.log('MLS Client already initialized for:', username);
             this.setupSocketListeners();
-            // Key packages are handled by the caller (setupKeystoreWithPassword) after vault setup
             return;
         }
 
-        // Reset client if switching users
         if (this.client && this.identityName !== username) {
-            console.log('Switching MLS identity from', this.identityName, 'to', username);
             this.cleanupSocketListeners();
-            // Explicitly free WASM memory before creating new client
-            try {
-                this.client.free();
-            } catch (e) {
-                // Ignore errors if already freed
-            }
+            try { this.client.free(); } catch (e) {}
             this.client = null;
             this.identityName = null;
         }
 
-        // Try to load existing state for this specific user
         if (await this.loadState(username)) {
-            // Successfully loaded - key packages will be uploaded after vault setup
             this.setupSocketListeners();
             return;
         }
 
-        // No existing state found - create new identity
         try {
             this.client = new MlsClient();
             this.identityName = username;
-
-            // Create identity (credential + signature keypair)
-            const result = this.client.create_identity(username);
-            console.log('Identity created:', result);
-
-            // Generate initial key package bundle (needed for vault export)
+            this.client.create_identity(username);
             this.client.regenerate_key_package();
-            console.log('[MLS] Initial key package generated');
-
-            // Persist state for this user
             await this.saveState();
-
-            // Save to vault if unlocked (new identity needs to be persisted)
             try {
                 const vault = await this.getVaultService();
-                const saved = await vault.saveCurrentState();
-                if (saved) {
-                    console.log('[MLS] New identity saved to vault');
-                }
-            } catch (vaultErr) {
-                console.warn('[MLS] Could not save identity to vault:', vaultErr.message);
-            }
-
-            // Setup socket listeners for new identity
+                await vault.saveCurrentState();
+            } catch (e) {}
             this.setupSocketListeners();
-            // Key packages are handled by the caller (setupKeystoreWithPassword) after vault setup
         } catch (error) {
             console.error('Error bootstrapping MLS client:', error);
             throw error;
         }
     }
 
-    /**
-     * Get the public KeyPackage bytes for this client
-     * @returns {Uint8Array} The serialized KeyPackage
-     */
     getKeyPackageBytes() {
         if (!this.client) throw new Error('Client not initialized');
         return this.client.get_key_package_bytes();
     }
 
-    /**
-     * Get the public KeyPackage as a hex string (for API transport)
-     * @returns {string} Hex string of the KeyPackage
-     */
     getKeyPackageHex() {
         const bytes = this.getKeyPackageBytes();
         return Array.from(bytes)
@@ -399,21 +339,12 @@ class CoreCryptoClient {
         return lifetimeInfo.range_seconds <= MAX_LEAF_NODE_LIFETIME_RANGE_SECONDS;
     }
 
-    /**
-     * Compute SHA-256 hash of data and return as hex string
-     * @param {Uint8Array} data - Data to hash
-     * @returns {Promise<string>} Hex string of hash
-     */
     async computeHash(data) {
         const hashBuffer = await crypto.subtle.digest('SHA-256', data);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    /**
-     * Upload the key package to the server
-     * @returns {Promise<Object>} Server response
-     */
     async uploadKeyPackage(options = {}) {
         if (!this.client) throw new Error('Client not initialized');
         const { token, deviceId } = await this.getAuthContext();
@@ -451,15 +382,10 @@ class CoreCryptoClient {
             const error = await response.json().catch(() => ({}));
             throw new Error(error.error || 'Failed to upload key package');
         }
-        const result = await response.json();
-        console.log('Key package uploaded successfully:', result);
-        return result;
+        return response.json();
     }
 
-    /**
-     * Ensure key packages are fresh and pool is filled
-     * Consolidated method: generates all keys at once, uploads in bulk, saves state once
-     */
+    // Ensure key packages are fresh (consolidated: generates all, uploads bulk, saves once)
     async ensureKeyPackagesFresh() {
         if (!this.client) throw new Error('Client not initialized');
 
@@ -470,9 +396,7 @@ class CoreCryptoClient {
         }
 
         try {
-            // Check current pool status
             const counts = await this.getKeyPackageCount();
-            console.log(`[MLS] Key package pool: ${counts.regular} regular, ${counts.lastResort} last-resort`);
 
             const allPackages = [];
 
@@ -503,25 +427,15 @@ class CoreCryptoClient {
                 });
             }
 
-            if (allPackages.length === 0) {
-                console.log('[MLS] Key package pool is sufficient');
-                return;
-            }
+            if (allPackages.length === 0) return;
 
-            // Single state save and single bulk upload
             await this.saveState();
             await this.uploadKeyPackagesBulk(allPackages);
-            console.log(`[MLS] Uploaded ${allPackages.length} key packages (${regularNeeded} regular, ${counts.lastResort === 0 ? 1 : 0} last-resort)`);
         } catch (e) {
             console.warn('[MLS] Failed to ensure key packages:', e.message || e);
         }
     }
 
-    /**
-     * Upload multiple key packages to the server (bulk)
-     * @param {Array} keyPackages - Array of formatted packages with isLastResort flag
-     * @returns {Promise<Object>} Server response with inserted count
-     */
     async uploadKeyPackagesBulk(keyPackages) {
         if (!keyPackages?.length) return { inserted: 0 };
 
@@ -541,10 +455,6 @@ class CoreCryptoClient {
         return response.json();
     }
 
-    /**
-     * Get the current key package count from the server
-     * @returns {Promise<{regular: number, lastResort: number}>}
-     */
     async getKeyPackageCount() {
         const { token, deviceId } = await this.getAuthContext();
         const url = deviceId ? `/api/mls/key-packages/count?deviceId=${encodeURIComponent(deviceId)}` : '/api/mls/key-packages/count';
@@ -556,15 +466,8 @@ class CoreCryptoClient {
         return response.json();
     }
 
-    /**
-     * Fetch key packages for another user
-     * @param {string|number} userId - The user ID to fetch
-     * @param {boolean} fetchAll - Whether to fetch all device keys
-     * @param {string|null} deviceId - Specific device ID to fetch
-     * @returns {Promise<Uint8Array[]>} Array of key package bytes
-     */
     async fetchKeyPackages(userId, fetchAll = false, deviceId = null) {
-        if (!this.initialized) await this.initialize();
+        await this.ensureReady();
         const { token } = await this.getAuthContext();
 
         let url = `/api/mls/key-package/${userId}`;
@@ -580,7 +483,7 @@ class CoreCryptoClient {
 
         const data = await response.json();
         const packages = Array.isArray(data) ? data : [data];
-        const keyPackageBytes = packages.map(pkg => this.parsePostgresBytes(pkg?.package_data)).filter(Boolean);
+        const keyPackageBytes = packages.map(pkg => this._toBytes(pkg?.package_data)).filter(Boolean);
 
         return keyPackageBytes.filter(bytes => {
             try {
@@ -593,15 +496,8 @@ class CoreCryptoClient {
         });
     }
 
-    /**
-     * Create a new MLS group
-     * @param {string} name - Human readable group name
-     * @returns {Promise<Object>} Created group metadata
-     */
     async createGroup(name, options = {}) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized (Identity not found)');
+        await this.ensureReady();
 
         // Generate a random group ID (16 bytes as hex string)
         const groupIdBytes = new Uint8Array(16);
@@ -636,7 +532,6 @@ class CoreCryptoClient {
                 // WASM expects raw bytes, not hex string
                 groupState = this.client.create_group(groupIdBytes);
             }
-            console.log('MLS Group Created Locally:', groupId);
 
             // Persist group metadata in backend
             const groupData = await this.mlsFetch('/groups', { groupId, name }, { skipDeviceId: true });
@@ -678,9 +573,7 @@ class CoreCryptoClient {
     }
 
     async publishGroupInfo(groupId, { includeRatchetTree = true, isPublic = false } = {}) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
 
         const groupInfoBytes = this.exportGroupInfo(groupId, { includeRatchetTree });
         const infoMeta = this.inspectGroupInfo(groupInfoBytes);
@@ -704,15 +597,13 @@ class CoreCryptoClient {
         const payload = await response.json();
         if (!payload?.groupInfo) throw new Error('Group info not available');
 
-        const groupInfoBytes = this.parsePostgresBytes(payload.groupInfo);
+        const groupInfoBytes = this._toBytes(payload.groupInfo);
         if (!groupInfoBytes) throw new Error('Unsupported group info format');
         return { groupInfoBytes, epoch: payload.epoch };
     }
 
     async joinGroupByExternalCommit({ groupInfoBytes, ratchetTreeBytes = null, pskIds = [] }) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
 
         const infoMeta = this.inspectGroupInfo(groupInfoBytes);
         const groupId = infoMeta.groupId;
@@ -817,16 +708,8 @@ class CoreCryptoClient {
         return result;
     }
 
-    /**
-     * Start a direct message with another user
-     * Creates a DM group or returns existing one
-     * @param {string|number} targetUserId - The user ID to DM
-     * @returns {Promise<Object>} { groupId, isNew, otherUsername }
-     */
     async startDirectMessage(targetUserId) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
 
         try {
             // Get or create DM group on backend
@@ -834,17 +717,10 @@ class CoreCryptoClient {
             const { groupId, isNew } = result;
 
             if (isNew) {
-                // Create group locally in WASM
                 const groupIdBytes = this.groupIdToBytes(groupId);
                 this.client.create_group(groupIdBytes);
-                console.log('[MLS] Created local DM group:', groupId);
-
-                // Persist state
                 await this.saveState();
-
-                // Invite the target user
                 await this.inviteToGroup(groupId, targetUserId);
-                console.log('[MLS] Invited user to DM:', targetUserId);
             }
 
             return { groupId, isNew };
@@ -854,12 +730,6 @@ class CoreCryptoClient {
         }
     }
 
-    /**
-     * Check if a group is a DM (by checking the group ID format)
-     * DM group IDs have the format: dm_{userA}_{userB}
-     * @param {string} groupId - The group ID to check
-     * @returns {boolean} True if this is a DM group
-     */
     isDirectMessage(groupId) {
         return groupId && groupId.startsWith('dm_');
     }
@@ -898,20 +768,11 @@ class CoreCryptoClient {
         await api.mls.syncGroupMembers(groupId, memberIds);
     }
 
-    /**
-     * Invite a user (all their devices or a specific one) to a group
-     * @param {string} groupId - The Group ID
-     * @param {string|number} userId - The User ID to invite
-     * @param {string|null} targetDeviceId - Optional specific device ID to invite
-     * @returns {Promise<Object>} Success status
-     */
     async inviteToGroup(groupId, userId, targetDeviceId = null) {
         await this.ensureReady();
 
         try {
-            // 1. Fetch Key Packages (all or specific)
             const keyPackages = await this.fetchKeyPackages(userId, true, targetDeviceId);
-            console.log(`Fetched ${keyPackages.length} key packages for user ${userId} (targetDevice: ${targetDeviceId || 'all'})`);
 
             if (keyPackages.length === 0) {
                 throw new Error('No key packages found for user');
@@ -1001,9 +862,7 @@ class CoreCryptoClient {
     }
 
     async recoverForkByReadding(groupId, ownLeafIndices, keyPackageBytesList) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
 
         const groupIdBytes = this.groupIdToBytes(groupId);
         const indices = Array.isArray(ownLeafIndices) ? ownLeafIndices : [ownLeafIndices];
@@ -1021,9 +880,7 @@ class CoreCryptoClient {
     }
 
     async rebootGroup(groupId, newGroupId, keyPackageBytesList) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
 
         const groupIdBytes = this.groupIdToBytes(groupId);
         const newGroupIdBytes = this.groupIdToBytes(newGroupId);
@@ -1046,17 +903,8 @@ class CoreCryptoClient {
         this.client.remove_group(groupIdBytes);
     }
 
-    /**
-     * Join a group from a Welcome message
-     * Routes through two-phase validation for security
-     * @param {Uint8Array} welcomeBytes
-     * @param {Uint8Array|null} ratchetTreeBytes - Optional ratchet tree
-     * @returns {Promise<string>} Group ID (hex)
-     */
     async joinGroup(welcomeBytes, ratchetTreeBytes = null) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
 
         // Route through two-phase validation flow
         const staged = await this.stageWelcome(welcomeBytes, ratchetTreeBytes);
@@ -1074,29 +922,15 @@ class CoreCryptoClient {
         return groupId;
     }
 
-    // ===== TWO-PHASE JOIN (with credential validation) =====
-
-    /**
-     * Stage a welcome for inspection before joining (two-phase join)
-     * Per OpenMLS Book (p.17-21): Validate credentials before accepting
-     * @param {Uint8Array} welcomeBytes - The welcome message bytes
-     * @param {Uint8Array|null} ratchetTreeBytes - Optional ratchet tree
-     * @returns {Promise<Object>} Staging info with stagingId and member details
-     */
+    // ===== TWO-PHASE JOIN =====
     async stageWelcome(welcomeBytes, ratchetTreeBytes = null) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
 
         // Stage the welcome in WASM
         const stagingId = this.client.stage_welcome(welcomeBytes, ratchetTreeBytes);
 
-        // Get the inspection info
         const info = this.client.get_staged_welcome_info(stagingId);
         const groupId = this.groupIdFromHex(info.group_id_hex);
-
-        console.log('[MLS] Welcome staged for inspection:', stagingId);
-        console.log('[MLS] Group members:', info.members?.length || 0);
 
         return {
             stagingId,
@@ -1108,30 +942,16 @@ class CoreCryptoClient {
         };
     }
 
-    /**
-     * Get info about a staged welcome
-     * @param {string} stagingId - The staging ID from stageWelcome
-     * @returns {Object} Welcome info with sender and members
-     */
     getStagedWelcomeInfo(stagingId) {
         if (!this.client) throw new Error('Client not initialized');
         return this.client.get_staged_welcome_info(stagingId);
     }
 
-    /**
-     * Accept a staged welcome and join the group
-     * Call this after inspecting and approving the welcome
-     * @param {string} stagingId - The staging ID from stageWelcome
-     * @returns {Promise<string>} Group ID (hex)
-     */
     async acceptStagedWelcome(stagingId) {
         if (!this.client) throw new Error('Client not initialized');
 
-        // Accept and join in WASM
         const groupIdBytes = this.client.accept_staged_welcome(stagingId);
         const groupId = this.groupIdFromBytes(groupIdBytes);
-
-        console.log('[MLS] Accepted staged welcome, joined group:', groupId);
 
         // Save state
         await this.saveState();
@@ -1156,43 +976,23 @@ class CoreCryptoClient {
         return groupId;
     }
 
-    /**
-     * Reject a staged welcome (discard without joining)
-     * @param {string} stagingId - The staging ID from stageWelcome
-     */
     rejectStagedWelcome(stagingId) {
         if (!this.client) throw new Error('Client not initialized');
         this.client.reject_staged_welcome(stagingId);
-        console.log('[MLS] Rejected staged welcome:', stagingId);
     }
 
-    /**
-     * List all pending staged welcomes
-     * @returns {string[]} Array of staging IDs
-     */
     listStagedWelcomes() {
         if (!this.client) return [];
         return Array.from(this.client.list_staged_welcomes() || []);
     }
 
-    /**
-     * Validate members of a staged welcome against a policy
-     * @param {string} stagingId - The staging ID
-     * @param {Function} validator - Function(member) => boolean, return false to reject
-     * @returns {Object} { valid: boolean, invalidMembers: [] }
-     */
     validateStagedWelcomeMembers(stagingId, validator) {
         const info = this.getStagedWelcomeInfo(stagingId);
         const groupId = this.groupIdFromHex(info.group_id_hex);
-        console.log('[MLS] validateStagedWelcomeMembers:', { groupId, members: info.members, sender: info.sender });
         const invalidMembers = [];
         const issues = [];
         const defaultValidator = (member) => {
-            console.log('[MLS] Validating member:', JSON.stringify(member));
-            if (!member || !member.is_basic_credential) {
-                console.log('[MLS] Member rejected: missing or not basic credential');
-                return false;
-            }
+            if (!member || !member.is_basic_credential) return false;
             if (member.lifetime && !this.keyPackageLifetimeAcceptable(member.lifetime)) {
                 return false;
             }
@@ -1230,29 +1030,12 @@ class CoreCryptoClient {
 
     // ===== END TWO-PHASE JOIN =====
 
-    /**
-     * Regenerate KeyPackage after it's been consumed (e.g., by joining a group)
-     * Per OpenMLS Book: KeyPackages are single-use
-     * @returns {Promise<void>}
-     */
     async regenerateKeyPackage() {
         if (!this.client) throw new Error('Client not initialized');
-
-        // Generate new KeyPackage in WASM (internal state update)
         this.client.regenerate_key_package();
-        console.log('[MLS] KeyPackage regenerated');
-
-        // Refill the pool (includes the newly generated key)
         await this.ensureKeyPackagesFresh();
     }
 
-    /**
-     * Send an encrypted message to a group
-     * Per OpenMLS Book (p.45 "Creating application messages")
-     * @param {Uint8Array|string} groupId - The group ID (bytes or hex string)
-     * @param {string} plaintext - The message to encrypt
-     * @returns {Promise<Object>} Server response with message ID
-     */
     async sendMessage(groupId, plaintext) {
         await this.ensureReady();
         const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
@@ -1262,7 +1045,6 @@ class CoreCryptoClient {
         const plaintextBytes = new TextEncoder().encode(plaintext);
         this.setGroupAad(groupId, 'application');
         const ciphertextBytes = this.client.encrypt_message(groupIdBytes, plaintextBytes);
-        console.log(`[MLS] Encrypted message: ${plaintextBytes.length} bytes -> ${ciphertextBytes.length} bytes`);
 
         const result = await this.mlsFetch('/messages/group', {
             groupId: groupIdValue,
@@ -1270,11 +1052,9 @@ class CoreCryptoClient {
             data: this.toPostgresHex(ciphertextBytes)
         });
         const messageId = result.queueId || result.id;
-        console.log('[MLS] Message sent:', messageId);
 
         try {
             this.client.store_sent_message(groupIdBytes, String(messageId), plaintext);
-            console.log('[MLS] Stored sent message for history:', messageId);
             await this.saveState();
             const vault = await this.getVaultService();
             await vault.persistMessage({
@@ -1288,12 +1068,6 @@ class CoreCryptoClient {
         return { ...result, id: messageId };
     }
 
-    /**
-     * Send an internal MLS system message (not stored in user history)
-     * @param {Uint8Array|string} groupId - The group ID
-     * @param {Object|string} payload - JSON payload or plaintext string
-     * @returns {Promise<Object>} Server response with message ID
-     */
     async sendSystemMessage(groupId, payload) {
         await this.ensureReady();
         const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
@@ -1311,14 +1085,7 @@ class CoreCryptoClient {
         });
     }
 
-    /**
-     * Perform key rotation (self-update) for Post-Compromise Security
-     * Per OpenMLS Book (p.36-38 "Updating own leaf node")
-     * This generates fresh HPKE encryption keys and broadcasts a commit to the group.
-     * Should be called periodically or after suspected compromise.
-     * @param {Uint8Array|string} groupId - The group ID
-     * @returns {Promise<Object>} Server response
-     */
+    // Key rotation for Post-Compromise Security
     async selfUpdate(groupId) {
         await this.ensureReady();
         const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
@@ -1343,7 +1110,6 @@ class CoreCryptoClient {
 
         this.client.merge_pending_commit(groupIdBytes);
         await this.saveState();
-        console.log('[MLS] Self-update complete - keys rotated for PCS');
 
         try {
             await this.broadcastConfirmationTag(groupIdValue, this.getGroupEpoch(groupIdValue));
@@ -1353,13 +1119,6 @@ class CoreCryptoClient {
         return { success: true };
     }
 
-    /**
-     * Remove a member from a group
-     * Per OpenMLS Book (p.31-32 "Removing members from a group")
-     * @param {Uint8Array|string} groupId - The group ID
-     * @param {number} leafIndex - The leaf index of the member to remove
-     * @returns {Promise<Object>} Server response
-     */
     async removeMember(groupId, leafIndex) {
         await this.ensureReady();
         const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
@@ -1385,7 +1144,6 @@ class CoreCryptoClient {
         this.client.merge_pending_commit(groupIdBytes);
         await this.syncGroupMembers(groupIdValue);
         await this.saveState();
-        console.log(`[MLS] Member at leaf index ${leafIndex} removed from group`);
 
         try {
             await this.broadcastConfirmationTag(groupIdValue, this.getGroupEpoch(groupIdValue));
@@ -1395,13 +1153,6 @@ class CoreCryptoClient {
         return { success: true };
     }
 
-    /**
-     * Leave a group voluntarily
-     * Per OpenMLS Book (p.40 "Leaving a group")
-     * Creates a self-remove proposal that another member must commit.
-     * @param {Uint8Array|string} groupId - The group ID
-     * @returns {Promise<Object>} Server response
-     */
     async leaveGroup(groupId) {
         await this.ensureReady();
         const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
@@ -1412,18 +1163,10 @@ class CoreCryptoClient {
         const result = await this.mlsFetch('/messages/group', {
             groupId: groupIdValue, messageType: 'proposal', data: this.toPostgresHex(proposalBytes)
         });
-
-        console.log('[MLS] Leave-group proposal sent. Awaiting commit by another member.');
         await this.saveState();
         return result;
     }
 
-    /**
-     * Get own leaf index in a group
-     * Useful for UI to prevent users from trying to remove themselves via removeMember
-     * @param {Uint8Array|string} groupId - The group ID
-     * @returns {number} The leaf index
-     */
     getOwnLeafIndex(groupId) {
         if (!this.client) throw new Error('Client not initialized');
         const groupIdBytes = this.groupIdToBytes(groupId);
@@ -1523,39 +1266,17 @@ class CoreCryptoClient {
         this.recordRemoteConfirmationTag(groupId, payload.epoch, payload.tag_hex, senderId);
     }
 
-    /**
-     * Decrypt an incoming message
-     * Per OpenMLS Book (p.48-49 "Processing messages in groups")
-     * @param {Uint8Array|string} groupId - The group ID (bytes or hex string)
-     * @param {Uint8Array|string|Object} ciphertext - The encrypted message
-     * @returns {string} The decrypted plaintext
-     */
     decryptMessage(groupId, ciphertext) {
         if (!this.client) throw new Error('Client not initialized');
-
         const groupIdBytes = this.groupIdToBytes(groupId);
-
-        // Convert ciphertext to bytes if needed
-        let ciphertextBytes;
-        if (typeof ciphertext === 'string') {
-            let hex = ciphertext;
-            if (hex.startsWith('\\x')) hex = hex.substring(2);
-            ciphertextBytes = new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-        } else if (ciphertext.type === 'Buffer' && Array.isArray(ciphertext.data)) {
-            ciphertextBytes = new Uint8Array(ciphertext.data);
-        } else {
-            ciphertextBytes = ciphertext;
-        }
-
+        const ciphertextBytes = this._toBytes(ciphertext);
         const result = this.client.decrypt_message_with_aad(groupIdBytes, ciphertextBytes);
         const plaintextBytes = new Uint8Array(result.plaintext || []);
         const aadHex = result.aad_hex || '';
         const aadBytes = aadHex ? this.hexToBytes(aadHex) : new Uint8Array();
         const epoch = typeof result.epoch === 'bigint' ? Number(result.epoch) : result.epoch;
 
-        const decoder = new TextDecoder();
-        const plaintext = decoder.decode(plaintextBytes);
-        console.log(`[MLS] Decrypted message: ${ciphertextBytes.length} bytes -> "${plaintext}"`);
+        const plaintext = new TextDecoder().decode(plaintextBytes);
 
         return {
             plaintext,
@@ -1565,9 +1286,6 @@ class CoreCryptoClient {
         };
     }
 
-    /**
-     * Unified message sync - polls relay queue and processes all pending messages
-     */
     async syncMessages() {
         if (this.syncPromise) return this.syncPromise;
         this.syncPromise = this._syncMessagesInternal();
@@ -1585,16 +1303,11 @@ class CoreCryptoClient {
 
         const vault = await this.getVaultService();
         const deviceId = vault.getDeviceId();
-        if (!deviceId) {
-            console.log('[MLS] Device ID not available yet, skipping sync');
-            return [];
-        }
+        if (!deviceId) return [];
 
         try {
             const pending = await api.mls.getPendingMessages();
             if (!pending || pending.length === 0) return [];
-
-            console.log(`[MLS] Syncing ${pending.length} messages from relay queue`);
 
             const processedIds = [];
             for (const msg of pending) {
@@ -1609,12 +1322,12 @@ class CoreCryptoClient {
 
                 try {
                     if (msg.message_type === 'welcome') {
-                        const welcomeBytes = this.parsePostgresBytes(msg.data);
+                        const welcomeBytes = this._toBytes(msg.data);
                         if (!welcomeBytes) {
                             console.warn('[MLS] Invalid welcome data format');
                             continue;
                         }
-                        const groupInfoBytes = this.parsePostgresBytes(msg.group_info);
+                        const groupInfoBytes = this._toBytes(msg.group_info);
 
                         const staged = await this.stageWelcome(welcomeBytes, null);
                         const validation = this.validateStagedWelcomeMembers(staged.stagingId);
@@ -1742,11 +1455,6 @@ class CoreCryptoClient {
         }
     }
 
-    /**
-     * Handle an incoming encrypted message from the server
-     * @param {Object} messageData - Message object from server/socket
-     * @returns {Promise<Object>} Processed message with plaintext
-     */
     async handleIncomingMessage(messageData) {
         if (!this.client) throw new Error('Client not initialized');
 
@@ -1855,28 +1563,10 @@ class CoreCryptoClient {
         }
     }
 
-    /**
-     * Process a commit message (for member changes, key updates)
-     * Commits advance the epoch and may change group membership
-     * @param {string} groupId - Group ID (hex)
-     * @param {Object|string} commitData - Commit message data
-     */
     async processCommit(groupId, commitData) {
         if (!this.client) throw new Error('Client not initialized');
-
         const groupIdBytes = this.groupIdToBytes(groupId);
-
-        let commitBytes;
-        if (typeof commitData === 'string') {
-            let hex = commitData;
-            if (hex.startsWith('\\x')) hex = hex.substring(2);
-            commitBytes = new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-        } else if (commitData.type === 'Buffer' && Array.isArray(commitData.data)) {
-            commitBytes = new Uint8Array(commitData.data);
-        } else {
-            commitBytes = commitData;
-        }
-
+        const commitBytes = this._toBytes(commitData);
         const summary = this.client.process_commit(groupIdBytes, commitBytes);
         const commitEpoch = typeof summary?.epoch === 'bigint' ? Number(summary.epoch) : summary?.epoch;
         const aadBytes = summary?.aad_hex ? this.hexToBytes(summary.aad_hex) : new Uint8Array();
@@ -1937,19 +1627,8 @@ class CoreCryptoClient {
 
     async processProposal(groupId, proposalData) {
         if (!this.client) throw new Error('Client not initialized');
-
         const groupIdBytes = this.groupIdToBytes(groupId);
-        let proposalBytes;
-        if (typeof proposalData === 'string') {
-            let hex = proposalData;
-            if (hex.startsWith('\\x')) hex = hex.substring(2);
-            proposalBytes = new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-        } else if (proposalData?.type === 'Buffer' && Array.isArray(proposalData.data)) {
-            proposalBytes = new Uint8Array(proposalData.data);
-        } else {
-            proposalBytes = proposalData;
-        }
-
+        const proposalBytes = this._toBytes(proposalData);
         const summary = this.client.process_proposal(groupIdBytes, proposalBytes);
         const proposalEpoch = typeof summary?.epoch === 'bigint' ? Number(summary.epoch) : summary?.epoch;
         const aadBytes = summary?.aad_hex ? this.hexToBytes(summary.aad_hex) : new Uint8Array();
@@ -2054,138 +1733,49 @@ class CoreCryptoClient {
 
     async validateStagedCommit(groupId, summary) {
         if (!summary) return true;
+        const adds = summary.adds || [], updates = summary.updates || [], removes = summary.removes || [];
 
-        const adds = Array.isArray(summary.adds) ? summary.adds : [];
-        const updates = Array.isArray(summary.updates) ? summary.updates : [];
-        const removes = Array.isArray(summary.removes) ? summary.removes : [];
+        // Check lifetime validity
+        if ([...adds, ...updates].some(e => e?.lifetime && !this.keyPackageLifetimeAcceptable(e.lifetime))) return false;
+        if (adds.some(e => e && !e.lifetime)) return false;
+        if ([...adds, ...updates].some(e => e?.is_basic === false)) return false;
 
-        const lifetimeViolations = [...adds, ...updates].some(entry => {
-            if (!entry || !entry.lifetime) return false;
-            return !this.keyPackageLifetimeAcceptable(entry.lifetime);
-        });
-        if (lifetimeViolations) {
-            console.warn('[MLS] Commit contains leaf nodes with unacceptable lifetime range; rejecting.');
-            return false;
-        }
+        const current = new Set(this.getGroupMemberIdentities(groupId));
+        const addIds = adds.map(e => e?.identity).filter(Boolean);
+        const updateIds = updates.map(e => e?.identity).filter(Boolean);
+        const removeIds = removes.map(e => e?.identity?.identity).filter(Boolean);
+        if (removes.some(e => e && e.identity == null)) return false;
 
-        const missingAddLifetime = adds.some(entry => entry && !entry.lifetime);
-        if (missingAddLifetime) {
-            console.warn('[MLS] Commit add proposal missing lifetime; rejecting.');
-            return false;
-        }
-
-        const invalidCredential = [...adds, ...updates]
-            .some(entry => entry && entry.is_basic === false);
-
-        if (invalidCredential) {
-            console.warn('[MLS] Commit contains non-basic credentials; rejecting.');
-            return false;
-        }
-
-        const currentIdentities = new Set(this.getGroupMemberIdentities(groupId));
-        const addIdentities = adds.map(entry => entry?.identity).filter(Boolean);
-        const updateIdentities = updates.map(entry => entry?.identity).filter(Boolean);
-        const removeIdentities = removes.map(entry => entry?.identity?.identity).filter(Boolean);
-        const missingRemoveIdentity = removes.some(entry => entry && entry.identity == null);
-
-        if (missingRemoveIdentity) {
-            console.warn('[MLS] Commit remove proposal missing identity; rejecting.');
-            return false;
-        }
-
-        const allIdentities = [...addIdentities, ...updateIdentities, ...removeIdentities];
+        const allIds = [...addIds, ...updateIds, ...removeIds];
 
         if (this.isDirectMessage(groupId)) {
             const allowed = new Set(this.getDmParticipantIds(groupId));
-            if (allowed.size === 0) return false;
-            if (adds.length > 1) return false;
-
-            // Convert identities to strings for comparison (getDmParticipantIds returns strings)
-            if (allIdentities.some(identity => !allowed.has(String(identity)))) {
-                console.warn('[MLS] DM commit contains unexpected identity; rejecting.');
-                return false;
-            }
-
-            if (addIdentities.some(identity => currentIdentities.has(identity))) {
-                console.warn('[MLS] DM commit re-adds existing member; rejecting.');
-                return false;
-            }
-
-            if (updateIdentities.some(identity => !currentIdentities.has(identity))) {
-                console.warn('[MLS] DM commit updates unknown member; rejecting.');
-                return false;
-            }
-
-            if (removeIdentities.some(identity => !currentIdentities.has(identity))) {
-                console.warn('[MLS] DM commit removes unknown member; rejecting.');
-                return false;
-            }
+            if (allowed.size === 0 || adds.length > 1) return false;
+            if (allIds.some(id => !allowed.has(String(id)))) return false;
         } else {
-            if (allIdentities.some(identity => !this.isNumericIdentity(identity))) {
-                console.warn('[MLS] Commit add identity not numeric; rejecting.');
-                return false;
-            }
-
-            if (addIdentities.some(identity => currentIdentities.has(identity))) {
-                console.warn('[MLS] Commit adds existing member; rejecting.');
-                return false;
-            }
-
-            if (updateIdentities.some(identity => !currentIdentities.has(identity))) {
-                console.warn('[MLS] Commit updates unknown member; rejecting.');
-                return false;
-            }
-
-            if (removeIdentities.some(identity => !currentIdentities.has(identity))) {
-                console.warn('[MLS] Commit removes unknown member; rejecting.');
-                return false;
-            }
+            if (allIds.some(id => !this.isNumericIdentity(id))) return false;
         }
 
+        if (addIds.some(id => current.has(id))) return false;
+        if (updateIds.some(id => !current.has(id))) return false;
+        if (removeIds.some(id => !current.has(id))) return false;
         return true;
     }
 
-    /**
-     * Set up socket event listeners for real-time MLS events
-     */
     setupSocketListeners() {
-        if (this._socketCleanup) return; // Already set up
-
-        const cleanupWelcome = registerSocketEventHandler('mls-welcome', () => this.syncMessages());
-        const cleanupMessage = registerSocketEventHandler('mls-message', () => this.syncMessages());
-
-        this._socketCleanup = () => {
-            cleanupWelcome();
-            cleanupMessage();
-        };
-
-        // Initial sync
+        if (this._socketCleanup) return;
+        const c1 = registerSocketEventHandler('mls-welcome', () => this.syncMessages());
+        const c2 = registerSocketEventHandler('mls-message', () => this.syncMessages());
+        this._socketCleanup = () => { c1(); c2(); };
         this.syncMessages();
-        console.log('[MLS] Socket listeners and initial sync set up');
     }
 
-    /**
-     * Clean up socket listeners
-     */
     cleanupSocketListeners() {
-        if (this._socketCleanup) {
-            this._socketCleanup();
-            this._socketCleanup = null;
-        }
+        if (this._socketCleanup) { this._socketCleanup(); this._socketCleanup = null; }
     }
 
-    /**
-     * Export MLS identity for vault encryption (identity only, no storage state)
-     * Storage state is persisted via granular events for efficiency
-     * @returns {Promise<Object|null>} Identity object or null if no state
-     */
     async exportStateForVault() {
-        console.log('[MLS] exportStateForVault called, client:', !!this.client, 'identity:', this.identityName);
-
-        if (!this.client || !this.identityName) {
-            console.warn('[MLS] No state to export for vault');
-            return null;
-        }
+        if (!this.client || !this.identityName) return null;
 
         try {
             const credential = this.client.get_credential_bytes();
@@ -2205,58 +1795,28 @@ class CoreCryptoClient {
         }
     }
 
-    /**
-     * Restore MLS state from vault-decrypted data
-     * @param {Object} stateObj - State object from exportStateForVault
-     * @returns {Promise<boolean>} True if restored successfully
-     */
     async restoreStateFromVault(stateObj) {
-        if (!stateObj || !stateObj.credential || !stateObj.bundle || !stateObj.signatureKey) {
-            console.error('[MLS] Invalid vault state object');
-            return false;
-        }
-
+        if (!stateObj?.credential || !stateObj?.bundle || !stateObj?.signatureKey) return false;
         if (!this.initialized) await this.initialize();
 
         try {
-            // Convert arrays back to Uint8Array
-            const credential = new Uint8Array(stateObj.credential);
-            const bundle = new Uint8Array(stateObj.bundle);
-            const signatureKey = new Uint8Array(stateObj.signatureKey);
-
-            // Create new client and restore identity
             this.client = new MlsClient();
-            this.client.restore_identity(credential, bundle, signatureKey);
+            this.client.restore_identity(
+                new Uint8Array(stateObj.credential),
+                new Uint8Array(stateObj.bundle),
+                new Uint8Array(stateObj.signatureKey)
+            );
             this.identityName = stateObj.identityName;
 
-            // Load and apply granular events (all storage state comes from here)
-            // This is efficient: only changed entities are stored individually
             try {
                 const vault = await this.getVaultService();
-                const granularEvents = await vault.loadGranularEvents();
-                if (granularEvents && granularEvents.length > 0) {
-                    this.client.import_granular_events(granularEvents);
-                    console.log('[MLS] Granular storage restored:', granularEvents.length, 'events');
-                } else {
-                    console.log('[MLS] No granular events found (fresh identity)');
-                }
-            } catch (granularErr) {
-                console.warn('[MLS] Could not load granular events:', granularErr.message);
-            }
+                const events = await vault.loadGranularEvents();
+                if (events?.length > 0) this.client.import_granular_events(events);
+            } catch (e) {}
 
-            // Set up socket listeners
             this.setupSocketListeners();
-
-            // ALWAYS check for pending Welcome messages (new group invites)
-            // This must happen AFTER vault restore to merge new groups with existing state
-            const processedIds = await this.syncMessages();
-            if (processedIds.length > 0) {
-                console.log('[MLS] Processed pending invites after vault restore:', processedIds.length);
-                // Save updated state with new groups (uses granular persistence)
-                await this.saveState();
-            }
-
-            console.log('[MLS] State restored from vault for:', this.identityName);
+            const processed = await this.syncMessages();
+            if (processed.length > 0) await this.saveState();
             return true;
         } catch (error) {
             console.error('[MLS] Error restoring state from vault:', error);
@@ -2264,73 +1824,26 @@ class CoreCryptoClient {
         }
     }
 
-    /**
-     * Re-sync groups from server after vault unlock
-     * Processes any pending invites and logs missing groups
-     */
     async resyncGroupsFromServer() {
-        let token;
-        try {
-            ({ token } = await this.getAuthContext());
-        } catch { return; }
+        try { await this.getAuthContext(); } catch { return; }
 
         try {
-            // 1. Check for any pending Welcome messages (new invites)
-            const processedIds = await this.syncMessages();
-            if (processedIds.length > 0) {
-                console.log('[MLS] Processed pending invites, processed IDs:', processedIds.length);
-            }
-
-            // 2. Fetch list of groups user is a member of from server
+            await this.syncMessages();
             const serverGroups = await this.mlsFetch('/groups', null, { method: 'GET', skipDeviceId: true }).catch(() => null);
-            if (!serverGroups) {
-                console.warn('[MLS] Could not fetch groups from server');
-                return;
-            }
-            console.log('[MLS] Server reports membership in', serverGroups.length, 'groups');
+            if (!serverGroups) return;
 
-            // 3. Check which groups are missing locally
-            const missingGroups = [];
-            for (const group of serverGroups) {
-                const groupIdHex = group.group_id;
-                const groupIdBytes = this.groupIdToBytes(groupIdHex);
-
-                if (!this.client.has_group(groupIdBytes)) {
-                    missingGroups.push({
-                        id: groupIdHex,
-                        name: group.name
-                    });
-                }
-            }
-
-            if (missingGroups.length > 0) {
-                console.warn('[MLS] Missing local state for groups:', missingGroups.map(g => g.name).join(', '));
-                console.warn('[MLS] These groups need re-invitation to restore E2EE messaging');
-                // Store missing groups for UI to display
-                this._missingGroups = missingGroups;
-            } else {
-                console.log('[MLS] All groups synced successfully');
-                this._missingGroups = [];
-            }
-        } catch (error) {
-            console.error('[MLS] Error re-syncing groups:', error);
+            this._missingGroups = serverGroups
+                .filter(g => !this.client.has_group(this.groupIdToBytes(g.group_id)))
+                .map(g => ({ id: g.group_id, name: g.name }));
+        } catch (e) {
+            console.error('[MLS] Error re-syncing groups:', e);
         }
     }
 
-    /**
-     * Get list of groups that are missing local state after vault unlock
-     * @returns {Array} List of {id, name} objects for groups needing re-invitation
-     */
     getMissingGroups() {
         return this._missingGroups || [];
     }
 
-    /**
-     * Get the identity fingerprint (Safety Number) for the current user
-     * This is a SHA-256 hash of the MLS credential, displayed as hex
-     * Users can compare fingerprints out-of-band to verify identity
-     * @returns {string|null} 64-character hex fingerprint or null if not initialized
-     */
     getIdentityFingerprint() {
         if (!this.client) return null;
         try {
@@ -2341,22 +1854,12 @@ class CoreCryptoClient {
         }
     }
 
-    /**
-     * Format a fingerprint for display (groups of 4 hex chars)
-     * @param {string} fingerprint - 64-char hex string
-     * @returns {string} Formatted fingerprint like "ABCD 1234 5678 ..."
-     */
     formatFingerprint(fingerprint) {
         if (!fingerprint) return '';
         // Split into groups of 4 characters for readability
         return fingerprint.toUpperCase().match(/.{1,4}/g)?.join(' ') || fingerprint;
     }
 
-    /**
-     * Generate a numeric safety number (like Signal) for easier verbal comparison
-     * @param {string} fingerprint - 64-char hex string
-     * @returns {string} 60-digit number in groups of 5
-     */
     fingerprintToNumeric(fingerprint) {
         if (!fingerprint) return '';
         // Convert hex to decimal digits (take first 60 chars, convert each hex pair to 2-digit number)
@@ -2371,158 +1874,32 @@ class CoreCryptoClient {
         return numStr.match(/.{1,5}/g)?.join(' ') || numStr;
     }
 
-    /**
-     * Wipe all in-memory cryptographic material
-     * Called when locking the vault
-     */
     wipeMemory() {
         this.cleanupSocketListeners();
-        // Explicitly free WASM memory before dropping reference
-        if (this.client) {
-            try {
-                this.client.free();
-            } catch (e) {
-                // Ignore errors if already freed
-            }
-        }
+        if (this.client) { try { this.client.free(); } catch (e) {} }
         this.client = null;
         this.identityName = null;
         this.confirmationTags.clear();
         this.remoteConfirmationTags.clear();
         this.sentConfirmationTags.clear();
-        this.messageHandlers = [];  // Clear callback references
-        // Clear bootstrap lock in case logout happens during bootstrap
+        this.messageHandlers = [];
         this.bootstrapPromise = null;
         this.bootstrapUser = null;
-        console.log('[MLS] Memory wiped');
     }
 
-    /**
-     * Clear all stored state (for switching users)
-     * @returns {Promise<void>}
-     */
     async clearState() {
         this.wipeMemory();
-
-        // Clean up legacy openmls_storage DB if it exists (one-time migration)
-        try {
-            indexedDB.deleteDatabase('openmls_storage');
-        } catch (e) {
-            // Ignore errors - DB may not exist
-        }
+        try { indexedDB.deleteDatabase('openmls_storage'); } catch (e) {}
     }
 
-    /**
-     * Register a callback for incoming MLS messages
-     * @param {Function} callback - Function to call with decrypted message
-     * @returns {Function} Unsubscribe function
-     */
-    onMessage(callback) {
-        if (typeof callback !== 'function') {
-            throw new Error('onMessage requires a function callback');
-        }
-        this.messageHandlers.push(callback);
-        // Return unsubscribe function
-        return () => {
-            const index = this.messageHandlers.indexOf(callback);
-            if (index > -1) {
-                this.messageHandlers.splice(index, 1);
-            }
-        };
-    }
-
-    /**
-     * Register a callback for incoming welcome messages (group invites)
-     * @param {Function} callback - Function to call when invited to a group
-     * @returns {Function} Unsubscribe function
-     */
-    onWelcome(callback) {
-        if (typeof callback !== 'function') {
-            throw new Error('onWelcome requires a function callback');
-        }
-        this.welcomeHandlers.push(callback);
-        return () => {
-            const index = this.welcomeHandlers.indexOf(callback);
-            if (index > -1) {
-                this.welcomeHandlers.splice(index, 1);
-            }
-        };
-    }
-
-    /**
-     * Register a callback for pending welcome requests (approval/inspection)
-     * @param {Function} callback - Function invoked with pending welcome summary
-     * @returns {Function} Unsubscribe function
-     */
-    onWelcomeRequest(callback) {
-        if (typeof callback !== 'function') {
-            throw new Error('onWelcomeRequest requires a function callback');
-        }
-        this.welcomeRequestHandlers.push(callback);
-        return () => {
-            const index = this.welcomeRequestHandlers.indexOf(callback);
-            if (index > -1) {
-                this.welcomeRequestHandlers.splice(index, 1);
-            }
-        };
-    }
-
-    onForkDetected(callback) {
-        if (typeof callback !== 'function') {
-            throw new Error('onForkDetected requires a function callback');
-        }
-        this.forkHandlers.push(callback);
-        return () => {
-            const index = this.forkHandlers.indexOf(callback);
-            if (index > -1) {
-                this.forkHandlers.splice(index, 1);
-            }
-        };
-    }
-
-    emitForkDetected(details) {
-        if (!details) return;
-        this.forkHandlers.forEach(handler => {
-            try {
-                handler(details);
-            } catch (e) {
-                console.warn('[MLS] Fork handler error:', e);
-            }
-        });
-    }
-
-    /**
-     * Register a callback for commit/proposal rejection events
-     * @param {Function} callback - Function to call when a commit/proposal is rejected
-     * @returns {Function} Unsubscribe function
-     */
-    onCommitRejected(callback) {
-        if (typeof callback !== 'function') {
-            throw new Error('onCommitRejected requires a function callback');
-        }
-        this.commitRejectionHandlers.push(callback);
-        return () => {
-            const index = this.commitRejectionHandlers.indexOf(callback);
-            if (index > -1) {
-                this.commitRejectionHandlers.splice(index, 1);
-            }
-        };
-    }
-
-    /**
-     * Emit a commit/proposal rejection event
-     * @param {Object} details - { groupId, reason, type: 'commit'|'proposal', epoch? }
-     */
-    emitCommitRejected(details) {
-        if (!details) return;
-        this.commitRejectionHandlers.forEach(handler => {
-            try {
-                handler(details);
-            } catch (e) {
-                console.warn('[MLS] Commit rejection handler error:', e);
-            }
-        });
-    }
+    // Event handler registration (using factory pattern)
+    onMessage(cb) { return this._createHandler(this.messageHandlers)(cb); }
+    onWelcome(cb) { return this._createHandler(this.welcomeHandlers)(cb); }
+    onWelcomeRequest(cb) { return this._createHandler(this.welcomeRequestHandlers)(cb); }
+    onForkDetected(cb) { return this._createHandler(this.forkHandlers)(cb); }
+    onCommitRejected(cb) { return this._createHandler(this.commitRejectionHandlers)(cb); }
+    emitForkDetected(details) { this._emit(this.forkHandlers, details); }
+    emitCommitRejected(details) { this._emit(this.commitRejectionHandlers, details); }
 
     async acceptWelcome(pending) {
         if (!pending) throw new Error('Pending welcome required');
@@ -2567,11 +1944,7 @@ class CoreCryptoClient {
 
         const groupId = await this.acceptStagedWelcome(stagingId);
         this.welcomeHandlers.forEach(h => h({ groupId, groupInfoBytes: record.groupInfoBytes }));
-
-        // Sync to get any held-back messages now that welcome is acked
-        // Run in background to not block the UI
-        this.syncMessages().catch(e => console.warn('[MLS] Post-accept sync failed:', e));
-
+        this.syncMessages().catch(() => {});
         return groupId;
     }
 
@@ -2588,11 +1961,6 @@ class CoreCryptoClient {
         this.processedMessageIds.add(pendingId);
     }
 
-    /**
-     * Fetch and decrypt messages for a specific group
-     * @param {string} groupId - The MLS group ID
-     * @returns {Promise<Array>} Array of decrypted messages
-     */
     async fetchAndDecryptMessages(groupId) {
         if (!this.initialized) await this.initialize();
         if (!this.client) return [];
