@@ -333,8 +333,8 @@ class CoreCryptoClient {
 
             // Save to vault if unlocked (new identity needs to be persisted)
             try {
-                const vaultService = (await import('../vaultService.js')).default;
-                const saved = await vaultService.saveCurrentState();
+                const vault = await this.getVaultService();
+                const saved = await vault.saveCurrentState();
                 if (saved) {
                     console.log('[MLS] New identity saved to vault');
                 }
@@ -456,88 +456,89 @@ class CoreCryptoClient {
         return result;
     }
 
+    /**
+     * Ensure key packages are fresh and pool is filled
+     * Consolidated method: generates all keys at once, uploads in bulk, saves state once
+     */
     async ensureKeyPackagesFresh() {
         if (!this.client) throw new Error('Client not initialized');
 
-        let lifetimeInfo = null;
+        const { deviceId } = await this.getAuthContext();
+        if (!deviceId) {
+            console.warn('[MLS] Skipping key package refresh (device ID not set)');
+            return;
+        }
+
         try {
-            lifetimeInfo = this.getKeyPackageLifetimeInfo();
-        } catch (e) {
-            console.warn('[MLS] Failed to read key package lifetime:', e);
-        }
+            // Check current pool status
+            const counts = await this.getKeyPackageCount();
+            console.log(`[MLS] Key package pool: ${counts.regular} regular, ${counts.lastResort} last-resort`);
 
-        let regenerated = false;
-        if (!lifetimeInfo || !this.keyPackageLifetimeAcceptable(lifetimeInfo) || this.keyPackageExpiresSoon(lifetimeInfo)) {
-            await this.regenerateKeyPackage();
-            regenerated = true;
-        } else {
-            await this.uploadKeyPackage();
-        }
+            const allPackages = [];
 
-        if (!regenerated) {
-            await this.ensureLastResortKeyPackage();
-        }
+            // Generate regular key packages to fill pool
+            const regularNeeded = Math.max(0, KEY_PACKAGE_POOL_TARGET - counts.regular);
+            if (regularNeeded > 0) {
+                const result = this.client.generate_key_packages(regularNeeded);
+                for (const kp of result.key_packages) {
+                    allPackages.push({
+                        packageData: this.toPostgresHex(new Uint8Array(kp.key_package_bytes)),
+                        hash: kp.hash,
+                        notBefore: kp.lifetime?.not_before ?? null,
+                        notAfter: kp.lifetime?.not_after ?? null,
+                        isLastResort: false
+                    });
+                }
+            }
 
-        // Check and refill key package pool in background (don't block login)
-        this.ensureKeyPackagePool().catch(e =>
-            console.warn('[MLS] Background pool refill failed:', e.message || e)
-        );
-    }
+            // Generate last-resort key package if missing
+            if (counts.lastResort === 0) {
+                const lrResult = this.client.generate_last_resort_key_package();
+                allPackages.push({
+                    packageData: this.toPostgresHex(new Uint8Array(lrResult.key_package_bytes)),
+                    hash: lrResult.hash,
+                    notBefore: lrResult.lifetime?.not_before ?? null,
+                    notAfter: lrResult.lifetime?.not_after ?? null,
+                    isLastResort: true
+                });
+            }
 
-    async ensureLastResortKeyPackage() {
-        if (!this.client) throw new Error('Client not initialized');
-        try {
-            // generate_last_resort_key_package now returns { key_package_bytes, lifetime, hash, is_last_resort }
-            const result = this.client.generate_last_resort_key_package();
+            if (allPackages.length === 0) {
+                console.log('[MLS] Key package pool is sufficient');
+                return;
+            }
+
+            // Single state save and single bulk upload
             await this.saveState();
-            // Pass the pre-computed lifetime and hash to avoid re-parsing
-            await this.uploadKeyPackage({
-                keyPackageBytes: new Uint8Array(result.key_package_bytes),
-                isLastResort: true,
-                precomputedLifetime: result.lifetime,
-                precomputedHash: result.hash
-            });
+            await this.uploadKeyPackagesBulk(allPackages);
+            console.log(`[MLS] Uploaded ${allPackages.length} key packages (${regularNeeded} regular, ${counts.lastResort === 0 ? 1 : 0} last-resort)`);
         } catch (e) {
-            console.warn('[MLS] Failed to generate last-resort key package:', e.message || e);
+            console.warn('[MLS] Failed to ensure key packages:', e.message || e);
         }
     }
 
     /**
      * Upload multiple key packages to the server (bulk)
-     * @param {Array} keyPackages - Array of {key_package_bytes, lifetime, hash}
+     * @param {Array} keyPackages - Array of formatted packages with isLastResort flag
      * @returns {Promise<Object>} Server response with inserted count
      */
-    async uploadKeyPackages(keyPackages) {
-        if (!this.client) throw new Error('Client not initialized');
+    async uploadKeyPackagesBulk(keyPackages) {
         if (!keyPackages?.length) return { inserted: 0 };
 
         const { token, deviceId } = await this.getAuthContext();
-        if (!deviceId) {
-            console.warn('[MLS] Skipping bulk key package upload (device ID not set)');
-            return null;
-        }
-
-        const formattedPackages = keyPackages.map(kp => ({
-            packageData: this.toPostgresHex(new Uint8Array(kp.key_package_bytes)),
-            hash: kp.hash,
-            notBefore: kp.lifetime?.not_before ?? null,
-            notAfter: kp.lifetime?.not_after ?? null,
-            isLastResort: false
-        }));
+        if (!deviceId) return null;
 
         const response = await fetch('/api/mls/key-packages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ deviceId, keyPackages: formattedPackages })
+            body: JSON.stringify({ deviceId, keyPackages })
         });
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
             throw new Error(error.error || 'Failed to upload key packages');
         }
-        const result = await response.json();
-        console.log(`[MLS] Bulk uploaded ${result.inserted} key packages`);
-        return result;
+        return response.json();
     }
 
     /**
@@ -553,38 +554,6 @@ class CoreCryptoClient {
             throw new Error(error.error || 'Failed to get key package count');
         }
         return response.json();
-    }
-
-    /**
-     * Ensure the key package pool is adequately filled
-     * Generates and uploads new key packages if below threshold
-     */
-    async ensureKeyPackagePool() {
-        if (!this.client) throw new Error('Client not initialized');
-
-        try {
-            const counts = await this.getKeyPackageCount();
-            console.log(`[MLS] Key package pool: ${counts.regular} regular, ${counts.lastResort} last-resort`);
-
-            if (counts.regular >= KEY_PACKAGE_POOL_MIN) {
-                console.log('[MLS] Key package pool is sufficient');
-                return;
-            }
-
-            // Calculate how many to generate
-            const needed = KEY_PACKAGE_POOL_TARGET - counts.regular;
-            console.log(`[MLS] Generating ${needed} new key packages to refill pool`);
-
-            // Generate new key packages using WASM
-            const result = this.client.generate_key_packages(needed);
-            await this.saveState();
-
-            // Upload in bulk
-            await this.uploadKeyPackages(result.key_packages);
-            console.log(`[MLS] Key package pool refilled with ${result.key_packages.length} packages`);
-        } catch (e) {
-            console.warn('[MLS] Failed to ensure key package pool:', e.message || e);
-        }
     }
 
     /**
@@ -1269,26 +1238,12 @@ class CoreCryptoClient {
     async regenerateKeyPackage() {
         if (!this.client) throw new Error('Client not initialized');
 
-        // Generate new KeyPackage in WASM
+        // Generate new KeyPackage in WASM (internal state update)
         this.client.regenerate_key_package();
         console.log('[MLS] KeyPackage regenerated');
 
-        // Save updated state (granular events)
-        await this.saveState();
-
-        // Upload new KeyPackage to server
-        try {
-            await this.uploadKeyPackage();
-            console.log('[MLS] New KeyPackage uploaded to server');
-        } catch (e) {
-            console.warn('[MLS] Failed to upload new KeyPackage:', e);
-        }
-
-        try {
-            await this.ensureLastResortKeyPackage();
-        } catch (e) {
-            console.warn('[MLS] Failed to refresh last-resort key package:', e);
-        }
+        // Refill the pool (includes the newly generated key)
+        await this.ensureKeyPackagesFresh();
     }
 
     /**
@@ -1628,9 +1583,8 @@ class CoreCryptoClient {
         if (!this.client && this.identityName) await this.loadState(this.identityName);
         if (!this.client) return [];
 
-        // Import vaultService dynamically to avoid circular deps
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
+        const vault = await this.getVaultService();
+        const deviceId = vault.getDeviceId();
         if (!deviceId) {
             console.log('[MLS] Device ID not available yet, skipping sync');
             return [];
@@ -1655,30 +1609,12 @@ class CoreCryptoClient {
 
                 try {
                     if (msg.message_type === 'welcome') {
-                        // msg.data is from Postgres bytea
-                        let welcomeBytes;
-                        if (msg.data && msg.data.type === 'Buffer') {
-                            welcomeBytes = new Uint8Array(msg.data.data);
-                        } else if (typeof msg.data === 'string' && msg.data.startsWith('\\x')) {
-                            const hex = msg.data.substring(2);
-                            welcomeBytes = new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-                        } else {
-                            welcomeBytes = new Uint8Array(msg.data);
+                        const welcomeBytes = this.parsePostgresBytes(msg.data);
+                        if (!welcomeBytes) {
+                            console.warn('[MLS] Invalid welcome data format');
+                            continue;
                         }
-
-                        let groupInfoBytes = null;
-                        if (msg.group_info) {
-                            if (msg.group_info.type === 'Buffer' && Array.isArray(msg.group_info.data)) {
-                                groupInfoBytes = new Uint8Array(msg.group_info.data);
-                            } else if (typeof msg.group_info === 'string' && msg.group_info.startsWith('\\x')) {
-                                const hex = msg.group_info.substring(2);
-                                groupInfoBytes = new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-                            } else if (msg.group_info instanceof Uint8Array) {
-                                groupInfoBytes = msg.group_info;
-                            } else if (Array.isArray(msg.group_info)) {
-                                groupInfoBytes = new Uint8Array(msg.group_info);
-                            }
-                        }
+                        const groupInfoBytes = this.parsePostgresBytes(msg.group_info);
 
                         const staged = await this.stageWelcome(welcomeBytes, null);
                         const validation = this.validateStagedWelcomeMembers(staged.stagingId);
@@ -1823,10 +1759,10 @@ class CoreCryptoClient {
         }
 
         if (content_type === 'application') {
-            // Note: sender_id is now senderDeviceId. 
+            // Note: sender_id is now senderDeviceId.
             // To check if it's own message, we compare with our own deviceId.
-            const vaultService = (await import('../vaultService.js')).default;
-            const myDeviceId = vaultService.getDeviceId();
+            const vault = await this.getVaultService();
+            const myDeviceId = vault.getDeviceId();
 
             // We need to resolve deviceId to identityName if UI expects it, 
             // or just use deviceId for now.
@@ -1892,8 +1828,8 @@ class CoreCryptoClient {
             
             // Persist to encrypted local storage
             if (plaintext && plaintext !== '[Encrypted Message]') {
-                const vaultService = (await import('../vaultService.js')).default;
-                await vaultService.persistMessage(messageObj);
+                const vault = await this.getVaultService();
+                await vault.persistMessage(messageObj);
             }
             
             return messageObj;
@@ -2296,8 +2232,8 @@ class CoreCryptoClient {
             // Load and apply granular events (all storage state comes from here)
             // This is efficient: only changed entities are stored individually
             try {
-                const vaultService = (await import('../vaultService.js')).default;
-                const granularEvents = await vaultService.loadGranularEvents();
+                const vault = await this.getVaultService();
+                const granularEvents = await vault.loadGranularEvents();
                 if (granularEvents && granularEvents.length > 0) {
                     this.client.import_granular_events(granularEvents);
                     console.log('[MLS] Granular storage restored:', granularEvents.length, 'events');
