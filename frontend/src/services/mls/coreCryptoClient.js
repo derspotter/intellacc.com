@@ -33,7 +33,79 @@ class CoreCryptoClient {
         this.syncPromise = null;
         this.bootstrapPromise = null; // Lock for concurrent bootstrap calls
         this.bootstrapUser = null;    // Track which user is being bootstrapped
+        this._vaultService = null;    // Cached vaultService import
     }
+
+    // ===== CORE HELPERS (DRY) =====
+
+    async getVaultService() {
+        if (!this._vaultService) {
+            this._vaultService = (await import('../vaultService.js')).default;
+        }
+        return this._vaultService;
+    }
+
+    async ensureReady() {
+        if (!this.initialized) await this.initialize();
+        if (!this.client && this.identityName) await this.loadState(this.identityName);
+        if (!this.client) throw new Error('Client not initialized');
+    }
+
+    async getAuthContext() {
+        const token = localStorage.getItem('token');
+        if (!token) throw new Error('Not authenticated');
+        const vault = await this.getVaultService();
+        const deviceId = vault.getDeviceId();
+        return { token, deviceId };
+    }
+
+    toPostgresHex(bytes) {
+        return '\\x' + this.bytesToHex(bytes);
+    }
+
+    parsePostgresBytes(data) {
+        if (!data) return null;
+        if (data.type === 'Buffer' && Array.isArray(data.data)) {
+            return new Uint8Array(data.data);
+        }
+        if (typeof data === 'string') {
+            let hex = data;
+            if (hex.startsWith('\\x')) hex = hex.slice(2);
+            if (/^[0-9a-f]+$/i.test(hex) && hex.length % 2 === 0) {
+                return new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+            }
+        }
+        return data instanceof Uint8Array ? data : null;
+    }
+
+    normalizeGroupId(input) {
+        const bytes = this.groupIdToBytes(input);
+        const str = typeof input === 'string' ? input : this.groupIdFromBytes(bytes);
+        return { bytes, str };
+    }
+
+    async mlsFetch(endpoint, body, { method = 'POST', skipDeviceId = false } = {}) {
+        const { token, deviceId } = await this.getAuthContext();
+        const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        };
+        if (!skipDeviceId && deviceId) headers['x-device-id'] = deviceId;
+
+        const response = await fetch(`/api/mls${endpoint}`, {
+            method,
+            headers,
+            body: body ? JSON.stringify(body) : undefined
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || `MLS API error: ${endpoint}`);
+        }
+        return response.json();
+    }
+
+    // ===== END CORE HELPERS =====
 
     /**
      * Initialize the WASM module and logging
@@ -163,24 +235,11 @@ class CoreCryptoClient {
      */
     async saveState() {
         if (!this.client) return;
-
         try {
-            // Check if vault is unlocked BEFORE draining events
-            // drain_storage_events() is destructive - events are removed from WASM
-            // If we drain when vault is locked, events are lost forever
-            const vaultService = (await import('../vaultService.js')).default;
-            if (!vaultService.isUnlocked()) {
-                // Don't drain events yet - let them accumulate until vault unlocks
-                return;
-            }
-
-            // Drain events from WASM (sync operation)
+            const vault = await this.getVaultService();
+            if (!vault.isUnlocked()) return;
             const events = this.client.drain_storage_events();
-
-            if (events && events.length > 0) {
-                // Persist to encrypted IndexedDB (async)
-                await vaultService.persistGranularEvents(events);
-            }
+            if (events?.length > 0) await vault.persistGranularEvents(events);
         } catch (e) {
             console.warn('[MLS] Failed to persist granular events:', e);
         }
@@ -357,55 +416,30 @@ class CoreCryptoClient {
      */
     async uploadKeyPackage(options = {}) {
         if (!this.client) throw new Error('Client not initialized');
-
-        // Get token directly from localStorage to avoid circular import with auth.js
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
+        const { token, deviceId } = await this.getAuthContext();
         if (!deviceId) {
             console.warn('[MLS] Skipping key package upload (device ID not set)');
             return null;
         }
 
-        const {
-            keyPackageBytes: providedBytes = null,
-            isLastResort = false,
-            precomputedLifetime = null,
-            precomputedHash = null
-        } = options;
+        const { keyPackageBytes: providedBytes = null, isLastResort = false, precomputedLifetime = null, precomputedHash = null } = options;
         const keyPackageBytes = providedBytes || this.getKeyPackageBytes();
-        const keyPackageHex = Array.from(keyPackageBytes)
-            .map(b => b.toString(16).padStart(2, '0'))
-            .join('');
-        // Use pre-computed values if available, otherwise compute them
         const hash = precomputedHash || await this.computeHash(keyPackageBytes);
-        let lifetimeInfo = precomputedLifetime || null;
+        let lifetimeInfo = precomputedLifetime;
         if (!lifetimeInfo) {
             try {
-                lifetimeInfo = providedBytes
-                    ? this.getKeyPackageLifetimeInfoFromBytes(keyPackageBytes)
-                    : this.getKeyPackageLifetimeInfo();
+                lifetimeInfo = providedBytes ? this.getKeyPackageLifetimeInfoFromBytes(keyPackageBytes) : this.getKeyPackageLifetimeInfo();
             } catch (e) {
-                // Last-resort key packages may have extensions that can't be parsed
-                // WASM errors are JsValue strings, not Error objects
                 console.warn('[MLS] Could not extract lifetime from key package:', e.message || e);
             }
         }
 
-        // Format for postgres bytea: \x prefix
-        const packageData = '\\x' + keyPackageHex;
-
         const response = await fetch('/api/mls/key-package', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({
                 deviceId,
-                packageData,
+                packageData: this.toPostgresHex(keyPackageBytes),
                 hash,
                 notBefore: lifetimeInfo?.not_before ?? null,
                 notAfter: lifetimeInfo?.not_after ?? null,
@@ -417,7 +451,6 @@ class CoreCryptoClient {
             const error = await response.json().catch(() => ({}));
             throw new Error(error.error || 'Failed to upload key package');
         }
-
         const result = await response.json();
         console.log('Key package uploaded successfully:', result);
         return result;
@@ -476,48 +509,32 @@ class CoreCryptoClient {
      */
     async uploadKeyPackages(keyPackages) {
         if (!this.client) throw new Error('Client not initialized');
-        if (!keyPackages || keyPackages.length === 0) return { inserted: 0 };
+        if (!keyPackages?.length) return { inserted: 0 };
 
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
+        const { token, deviceId } = await this.getAuthContext();
         if (!deviceId) {
             console.warn('[MLS] Skipping bulk key package upload (device ID not set)');
             return null;
         }
 
-        // Format key packages for the API
-        const formattedPackages = keyPackages.map(kp => {
-            const bytes = new Uint8Array(kp.key_package_bytes);
-            const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-            return {
-                packageData: '\\x' + hex,
-                hash: kp.hash,
-                notBefore: kp.lifetime?.not_before ?? null,
-                notAfter: kp.lifetime?.not_after ?? null,
-                isLastResort: false
-            };
-        });
+        const formattedPackages = keyPackages.map(kp => ({
+            packageData: this.toPostgresHex(new Uint8Array(kp.key_package_bytes)),
+            hash: kp.hash,
+            notBefore: kp.lifetime?.not_before ?? null,
+            notAfter: kp.lifetime?.not_after ?? null,
+            isLastResort: false
+        }));
 
         const response = await fetch('/api/mls/key-packages', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-                deviceId,
-                keyPackages: formattedPackages
-            })
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ deviceId, keyPackages: formattedPackages })
         });
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
             throw new Error(error.error || 'Failed to upload key packages');
         }
-
         const result = await response.json();
         console.log(`[MLS] Bulk uploaded ${result.inserted} key packages`);
         return result;
@@ -528,25 +545,13 @@ class CoreCryptoClient {
      * @returns {Promise<{regular: number, lastResort: number}>}
      */
     async getKeyPackageCount() {
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
-
-        const url = deviceId
-            ? `/api/mls/key-packages/count?deviceId=${encodeURIComponent(deviceId)}`
-            : '/api/mls/key-packages/count';
-
-        const response = await fetch(url, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-
+        const { token, deviceId } = await this.getAuthContext();
+        const url = deviceId ? `/api/mls/key-packages/count?deviceId=${encodeURIComponent(deviceId)}` : '/api/mls/key-packages/count';
+        const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
             throw new Error(error.error || 'Failed to get key package count');
         }
-
         return response.json();
     }
 
@@ -591,41 +596,22 @@ class CoreCryptoClient {
      */
     async fetchKeyPackages(userId, fetchAll = false, deviceId = null) {
         if (!this.initialized) await this.initialize();
-
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
+        const { token } = await this.getAuthContext();
 
         let url = `/api/mls/key-package/${userId}`;
         const params = new URLSearchParams();
         if (deviceId) params.set('deviceId', deviceId);
         else if (fetchAll) params.set('all', 'true');
-        
         if (params.size > 0) url += `?${params.toString()}`;
 
         const response = await fetch(url, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
-
-        if (!response.ok) {
-            throw new Error('Failed to fetch key packages');
-        }
+        if (!response.ok) throw new Error('Failed to fetch key packages');
 
         const data = await response.json();
         const packages = Array.isArray(data) ? data : [data];
-
-        const keyPackageBytes = packages.map(pkg => {
-            if (!pkg.package_data) return null;
-            
-            // Handle Postgres bytea format
-            if (pkg.package_data && pkg.package_data.type === 'Buffer' && Array.isArray(pkg.package_data.data)) {
-                return new Uint8Array(pkg.package_data.data);
-            } else if (typeof pkg.package_data === 'string') {
-                let hex = pkg.package_data;
-                if (hex.startsWith('\\x')) hex = hex.substring(2);
-                return new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
-            }
-            return null;
-        }).filter(Boolean);
+        const keyPackageBytes = packages.map(pkg => this.parsePostgresBytes(pkg?.package_data)).filter(Boolean);
 
         return keyPackageBytes.filter(bytes => {
             try {
@@ -684,25 +670,7 @@ class CoreCryptoClient {
             console.log('MLS Group Created Locally:', groupId);
 
             // Persist group metadata in backend
-            const token = localStorage.getItem('token');
-            const response = await fetch('/api/mls/groups', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    groupId,
-                    name
-                })
-            });
-
-            if (!response.ok) {
-                const error = await response.json().catch(() => ({}));
-                throw new Error(error.error || 'Failed to register group with backend');
-            }
-
-            const groupData = await response.json();
+            const groupData = await this.mlsFetch('/groups', { groupId, name }, { skipDeviceId: true });
 
             // Persist state (granular events)
             await this.saveState();
@@ -747,67 +715,29 @@ class CoreCryptoClient {
 
         const groupInfoBytes = this.exportGroupInfo(groupId, { includeRatchetTree });
         const infoMeta = this.inspectGroupInfo(groupInfoBytes);
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const response = await fetch(`/api/mls/groups/${encodeURIComponent(groupId)}/group-info`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-                groupInfo: '\\x' + this.bytesToHex(groupInfoBytes),
-                epoch: infoMeta.epoch,
-                isPublic: !!isPublic
-            })
-        });
-
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.error || 'Failed to publish group info');
-        }
-
-        return await response.json();
+        return this.mlsFetch(`/groups/${encodeURIComponent(groupId)}/group-info`, {
+            groupInfo: this.toPostgresHex(groupInfoBytes),
+            epoch: infoMeta.epoch,
+            isPublic: !!isPublic
+        }, { skipDeviceId: true });
     }
 
     async fetchGroupInfo(groupId) {
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
+        const { token } = await this.getAuthContext();
         const response = await fetch(`/api/mls/groups/${encodeURIComponent(groupId)}/group-info`, {
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
+            headers: { 'Authorization': `Bearer ${token}` }
         });
-
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
             throw new Error(error.error || 'Failed to fetch group info');
         }
 
         const payload = await response.json();
-        if (!payload?.groupInfo) {
-            throw new Error('Group info not available');
-        }
+        if (!payload?.groupInfo) throw new Error('Group info not available');
 
-        let groupInfoBytes;
-        if (payload.groupInfo.type === 'Buffer' && Array.isArray(payload.groupInfo.data)) {
-            groupInfoBytes = new Uint8Array(payload.groupInfo.data);
-        } else if (typeof payload.groupInfo === 'string' && payload.groupInfo.startsWith('\\x')) {
-            groupInfoBytes = this.hexToBytes(payload.groupInfo);
-        } else if (payload.groupInfo instanceof Uint8Array) {
-            groupInfoBytes = payload.groupInfo;
-        } else if (Array.isArray(payload.groupInfo)) {
-            groupInfoBytes = new Uint8Array(payload.groupInfo);
-        } else {
-            throw new Error('Unsupported group info format');
-        }
-
-        return {
-            groupInfoBytes,
-            epoch: payload.epoch
-        };
+        const groupInfoBytes = this.parsePostgresBytes(payload.groupInfo);
+        if (!groupInfoBytes) throw new Error('Unsupported group info format');
+        return { groupInfoBytes, epoch: payload.epoch };
     }
 
     async joinGroupByExternalCommit({ groupInfoBytes, ratchetTreeBytes = null, pskIds = [] }) {
@@ -839,38 +769,16 @@ class CoreCryptoClient {
         const commitEpoch = typeof result.epoch === 'bigint' ? Number(result.epoch) : result.epoch;
         const finalGroupId = this.groupIdFromHex(result.group_id_hex || infoMeta.groupIdHex);
 
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
-        if (!deviceId) {
-            throw new Error('Device ID not available. Unlock or set up your keystore first.');
-        }
-
-        const commitResponse = await fetch('/api/mls/messages/group', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'x-device-id': deviceId
-            },
-            body: JSON.stringify({
+        try {
+            await this.mlsFetch('/messages/group', {
                 groupId: finalGroupId,
                 epoch: commitEpoch ?? infoMeta.epoch,
                 messageType: 'commit',
-                data: '\\x' + this.bytesToHex(commitBytes)
-            })
-        });
-
-        if (!commitResponse.ok) {
-            const error = await commitResponse.json().catch(() => ({}));
-            try {
-                this.removeGroup(finalGroupId);
-            } catch (removeErr) {
-                console.warn('[MLS] Failed to remove external commit group after rejection:', removeErr);
-            }
-            throw new Error(error.error || 'Failed to send external commit');
+                data: this.toPostgresHex(commitBytes)
+            });
+        } catch (error) {
+            try { this.removeGroup(finalGroupId); } catch (e) { /* ignore */ }
+            throw error;
         }
 
         await this.saveState();
@@ -920,49 +828,24 @@ class CoreCryptoClient {
     }
 
     async proposeExternalPsk(groupId, pskIdSerialized) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
 
         const groupIdBytes = this.groupIdToBytes(groupId);
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
-        if (!deviceId) {
-            throw new Error('Device ID not available. Unlock or set up your keystore first.');
-        }
-
         const pskIdBytes = pskIdSerialized instanceof Uint8Array
             ? pskIdSerialized
             : this.hexToBytes(pskIdSerialized);
 
         this.setGroupAad(groupId, 'proposal');
         const proposalBytes = this.client.propose_external_psk(groupIdBytes, pskIdBytes);
-        const proposalHex = this.bytesToHex(proposalBytes);
 
-        const response = await fetch('/api/mls/messages/group', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'x-device-id': deviceId
-            },
-            body: JSON.stringify({
-                groupId,
-                messageType: 'proposal',
-                data: '\\x' + proposalHex
-            })
+        const result = await this.mlsFetch('/messages/group', {
+            groupId,
+            messageType: 'proposal',
+            data: this.toPostgresHex(proposalBytes)
         });
 
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.error || 'Failed to send PSK proposal');
-        }
-
         await this.saveState();
-        return await response.json();
+        return result;
     }
 
     /**
@@ -1054,9 +937,7 @@ class CoreCryptoClient {
      * @returns {Promise<Object>} Success status
      */
     async inviteToGroup(groupId, userId, targetDeviceId = null) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
 
         try {
             // 1. Fetch Key Packages (all or specific)
@@ -1067,15 +948,6 @@ class CoreCryptoClient {
                 throw new Error('No key packages found for user');
             }
 
-            const token = localStorage.getItem('token');
-            const { default: vaultService } = await import('../vaultService.js');
-            const deviceId = vaultService.getDeviceId();
-            if (!deviceId) {
-                throw new Error('Device ID not available. Unlock or set up your keystore first.');
-            }
-            
-            // Helper to convert to hex
-            const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
             const groupIdBytes = this.groupIdToBytes(groupId);
 
             // 2. Iterate and add each device
@@ -1099,34 +971,16 @@ class CoreCryptoClient {
 
                     // 4. Upload Commit Message (existing members only)
                     // OpenMLS Book: commit goes to existing members; welcome goes to new members.
-                    const commitResponse = await fetch('/api/mls/messages/group', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`,
-                            'x-device-id': deviceId
-                        },
-                        body: JSON.stringify({
-                            groupId,
-                            epoch,
-                            messageType: 'commit',
-                            data: '\\x' + toHex(commitBytes),
+                    try {
+                        await this.mlsFetch('/messages/group', {
+                            groupId, epoch, messageType: 'commit',
+                            data: this.toPostgresHex(commitBytes),
                             excludeUserIds: [userId]
-                        })
-                    });
-
-                    if (!commitResponse.ok) {
-                        const error = await commitResponse.json().catch(() => ({}));
-                        try {
-                            this.client.clear_pending_commit(groupIdBytes);
-                        } catch (clearErr) {
-                            console.warn('[MLS] Failed to clear pending commit after rejection:', clearErr);
-                        }
-                        // Roll back local state if the delivery service rejected the commit
-                        if (rollbackState) {
-                            await this.restoreStateFromVault(rollbackState);
-                        }
-                        throw new Error(error.error || 'Failed to send commit message');
+                        });
+                    } catch (commitErr) {
+                        try { this.client.clear_pending_commit(groupIdBytes); } catch (e) { /* ignore */ }
+                        if (rollbackState) await this.restoreStateFromVault(rollbackState);
+                        throw commitErr;
                     }
 
                     try {
@@ -1144,25 +998,11 @@ class CoreCryptoClient {
                     }
 
                     // 5. Upload Welcome Message (new members only, after commit accepted)
-                    const welcomeResponse = await fetch('/api/mls/messages/welcome', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`,
-                            'x-device-id': deviceId
-                        },
-                        body: JSON.stringify({
-                            groupId,
-                            receiverId: userId,
-                            data: '\\x' + toHex(welcomeBytes),
-                            groupInfo: groupInfoBytes ? ('\\x' + toHex(groupInfoBytes)) : null
-                        })
+                    await this.mlsFetch('/messages/welcome', {
+                        groupId, receiverId: userId,
+                        data: this.toPostgresHex(welcomeBytes),
+                        groupInfo: groupInfoBytes ? this.toPostgresHex(groupInfoBytes) : null
                     });
-
-                    if (!welcomeResponse.ok) {
-                        const error = await welcomeResponse.json().catch(() => ({}));
-                        throw new Error(error.error || 'Failed to send welcome message');
-                    }
 
                     addedCount++;
                     
@@ -1459,86 +1299,37 @@ class CoreCryptoClient {
      * @returns {Promise<Object>} Server response with message ID
      */
     async sendMessage(groupId, plaintext) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
+        const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
+        const { deviceId } = await this.getAuthContext();
+        if (!deviceId) throw new Error('Device ID not available. Unlock or set up your keystore first.');
 
-        // Convert groupId to bytes for MLS operations
-        const groupIdBytes = this.groupIdToBytes(groupId);
-
-        // Convert plaintext to bytes
-        const encoder = new TextEncoder();
-        const plaintextBytes = encoder.encode(plaintext);
-
-        // Bind AAD metadata for this application message
+        const plaintextBytes = new TextEncoder().encode(plaintext);
         this.setGroupAad(groupId, 'application');
-
-        // Encrypt the message using WASM
         const ciphertextBytes = this.client.encrypt_message(groupIdBytes, plaintextBytes);
         console.log(`[MLS] Encrypted message: ${plaintextBytes.length} bytes -> ${ciphertextBytes.length} bytes`);
 
-        // Convert to hex for PostgreSQL bytea storage
-        const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
-        const ciphertextHex = '\\x' + toHex(ciphertextBytes);
-        const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupIdBytes);
-
-        // Send to server
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
-        if (!deviceId) {
-            throw new Error('Device ID not available. Unlock or set up your keystore first.');
-        }
-
-        const response = await fetch('/api/mls/messages/group', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'x-device-id': deviceId
-            },
-            body: JSON.stringify({
-                groupId: groupIdValue,
-                messageType: 'application',
-                data: ciphertextHex
-            })
+        const result = await this.mlsFetch('/messages/group', {
+            groupId: groupIdValue,
+            messageType: 'application',
+            data: this.toPostgresHex(ciphertextBytes)
         });
-
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            console.error('[MLS] Send message failed:', response.status, error);
-            throw new Error(error.error || 'Failed to send message');
-        }
-
-        const result = await response.json();
-        const messageId = result.queueId || result.id; // Handle both just in case
+        const messageId = result.queueId || result.id;
         console.log('[MLS] Message sent:', messageId);
 
-        // Store plaintext for own message history (can't decrypt own messages in MLS)
         try {
             this.client.store_sent_message(groupIdBytes, String(messageId), plaintext);
             console.log('[MLS] Stored sent message for history:', messageId);
-
-            // Save state to persist sent message (granular)
             await this.saveState();
-
-            // Persist message history to vault
-            const vaultService = (await import('../vaultService.js')).default;
-            await vaultService.persistMessage({
-                id: messageId,
-                groupId: groupIdValue,
-                senderId: this.identityName || localStorage.getItem('userId'), // We are the sender
-                plaintext,
-                type: 'application',
-                timestamp: new Date().toISOString()
+            const vault = await this.getVaultService();
+            await vault.persistMessage({
+                id: messageId, groupId: groupIdValue,
+                senderId: this.identityName || localStorage.getItem('userId'),
+                plaintext, type: 'application', timestamp: new Date().toISOString()
             });
-            
         } catch (e) {
             console.warn('[MLS] Failed to store sent message:', e);
         }
-
         return { ...result, id: messageId };
     }
 
@@ -1549,54 +1340,20 @@ class CoreCryptoClient {
      * @returns {Promise<Object>} Server response with message ID
      */
     async sendSystemMessage(groupId, payload) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
-
-        const groupIdBytes = this.groupIdToBytes(groupId);
-        const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupIdBytes);
+        await this.ensureReady();
+        const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
+        const { deviceId } = await this.getAuthContext();
+        if (!deviceId) throw new Error('Device ID not available. Unlock or set up your keystore first.');
 
         const plaintext = typeof payload === 'string' ? payload : JSON.stringify(payload);
-        const encoder = new TextEncoder();
-        const plaintextBytes = encoder.encode(plaintext);
-
-        // Bind AAD metadata for this application message
         this.setGroupAad(groupIdValue, 'application');
+        const ciphertextBytes = this.client.encrypt_message(groupIdBytes, new TextEncoder().encode(plaintext));
 
-        const ciphertextBytes = this.client.encrypt_message(groupIdBytes, plaintextBytes);
-        const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
-        const ciphertextHex = '\\x' + toHex(ciphertextBytes);
-
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
-        if (!deviceId) {
-            throw new Error('Device ID not available. Unlock or set up your keystore first.');
-        }
-
-        const response = await fetch('/api/mls/messages/group', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'x-device-id': deviceId
-            },
-            body: JSON.stringify({
-                groupId: groupIdValue,
-                messageType: 'application',
-                data: ciphertextHex
-            })
+        return this.mlsFetch('/messages/group', {
+            groupId: groupIdValue,
+            messageType: 'application',
+            data: this.toPostgresHex(ciphertextBytes)
         });
-
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            console.error('[MLS] System message send failed:', response.status, error);
-            throw new Error(error.error || 'Failed to send system message');
-        }
-
-        return await response.json();
     }
 
     /**
@@ -1608,92 +1365,37 @@ class CoreCryptoClient {
      * @returns {Promise<Object>} Server response
      */
     async selfUpdate(groupId) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
+        const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
+        const { deviceId } = await this.getAuthContext();
+        if (!deviceId) throw new Error('Device ID not available');
 
-        const groupIdBytes = this.groupIdToBytes(groupId);
-        const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupIdBytes);
-
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
-        if (!deviceId) {
-            throw new Error('Device ID not available. Unlock or set up your keystore first.');
-        }
-
-        // Helper to convert to hex
-        const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
-
-        // Capture state for rollback
         const rollbackState = await this.exportStateForVault();
-
         this.setGroupAad(groupIdValue, 'commit');
-
-        // Call WASM self_update - returns [commit, optional_welcome, optional_group_info]
         const result = this.client.self_update(groupIdBytes);
-
-        if (!result || result.length < 1) {
-            throw new Error('self_update returned invalid result');
-        }
+        if (!result?.length) throw new Error('self_update returned invalid result');
 
         const commitBytes = result[0];
-        const welcomeBytes = result[1]; // May be null
         const epoch = this.getGroupEpoch(groupId);
 
-        // Send commit to server
-        const commitResponse = await fetch('/api/mls/messages/group', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'x-device-id': deviceId
-            },
-            body: JSON.stringify({
-                groupId: groupIdValue,
-                epoch,
-                messageType: 'commit',
-                data: '\\x' + toHex(commitBytes)
-            })
-        });
-
-        if (!commitResponse.ok) {
-            const error = await commitResponse.json().catch(() => ({}));
-            // Clear pending commit on failure
-            try {
-                this.client.clear_pending_commit(groupIdBytes);
-            } catch (clearErr) {
-                console.warn('[MLS] Failed to clear pending commit:', clearErr);
-            }
-            // Rollback
-            if (rollbackState) {
-                await this.restoreStateFromVault(rollbackState);
-            }
-            throw new Error(error.error || 'Failed to send self-update commit');
-        }
-
-        // Merge the pending commit locally
         try {
-            this.client.merge_pending_commit(groupIdBytes);
-        } catch (mergeErr) {
-            console.warn('[MLS] Failed to merge pending commit:', mergeErr);
-            throw mergeErr;
+            await this.mlsFetch('/messages/group', { groupId: groupIdValue, epoch, messageType: 'commit', data: this.toPostgresHex(commitBytes) });
+        } catch (e) {
+            try { this.client.clear_pending_commit(groupIdBytes); } catch (_) {}
+            if (rollbackState) await this.restoreStateFromVault(rollbackState);
+            throw e;
         }
 
-        // Save updated state
+        this.client.merge_pending_commit(groupIdBytes);
         await this.saveState();
         console.log('[MLS] Self-update complete - keys rotated for PCS');
 
         try {
-            const currentEpoch = this.getGroupEpoch(groupIdValue);
-            await this.broadcastConfirmationTag(groupIdValue, currentEpoch);
+            await this.broadcastConfirmationTag(groupIdValue, this.getGroupEpoch(groupIdValue));
         } catch (tagErr) {
             console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
         }
-
-        return await commitResponse.json();
+        return { success: true };
     }
 
     /**
@@ -1704,92 +1406,38 @@ class CoreCryptoClient {
      * @returns {Promise<Object>} Server response
      */
     async removeMember(groupId, leafIndex) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
+        const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
+        const { deviceId } = await this.getAuthContext();
+        if (!deviceId) throw new Error('Device ID not available');
 
-        const groupIdBytes = this.groupIdToBytes(groupId);
-        const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupIdBytes);
-
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
-        if (!deviceId) {
-            throw new Error('Device ID not available. Unlock or set up your keystore first.');
-        }
-
-        // Helper to convert to hex
-        const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
-
-        // Capture state for rollback
         const rollbackState = await this.exportStateForVault();
-
         this.setGroupAad(groupIdValue, 'commit');
-
-        // Call WASM remove_member - returns [commit, optional_welcome, optional_group_info]
         const result = this.client.remove_member(groupIdBytes, leafIndex);
-
-        if (!result || result.length < 1) {
-            throw new Error('remove_member returned invalid result');
-        }
+        if (!result?.length) throw new Error('remove_member returned invalid result');
 
         const commitBytes = result[0];
         const epoch = this.getGroupEpoch(groupId);
 
-        // Send commit to server
-        const commitResponse = await fetch('/api/mls/messages/group', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'x-device-id': deviceId
-            },
-            body: JSON.stringify({
-                groupId: groupIdValue,
-                epoch,
-                messageType: 'commit',
-                data: '\\x' + toHex(commitBytes)
-            })
-        });
-
-        if (!commitResponse.ok) {
-            const error = await commitResponse.json().catch(() => ({}));
-            try {
-                this.client.clear_pending_commit(groupIdBytes);
-            } catch (clearErr) {
-                console.warn('[MLS] Failed to clear pending commit:', clearErr);
-            }
-            if (rollbackState) {
-                await this.restoreStateFromVault(rollbackState);
-            }
-            throw new Error(error.error || 'Failed to send remove-member commit');
-        }
-
-        // Merge the pending commit locally
         try {
-            this.client.merge_pending_commit(groupIdBytes);
-        } catch (mergeErr) {
-            console.warn('[MLS] Failed to merge pending commit:', mergeErr);
-            throw mergeErr;
+            await this.mlsFetch('/messages/group', { groupId: groupIdValue, epoch, messageType: 'commit', data: this.toPostgresHex(commitBytes) });
+        } catch (e) {
+            try { this.client.clear_pending_commit(groupIdBytes); } catch (_) {}
+            if (rollbackState) await this.restoreStateFromVault(rollbackState);
+            throw e;
         }
 
-        // Sync server-side membership
+        this.client.merge_pending_commit(groupIdBytes);
         await this.syncGroupMembers(groupIdValue);
-
-        // Save updated state
         await this.saveState();
         console.log(`[MLS] Member at leaf index ${leafIndex} removed from group`);
 
         try {
-            const currentEpoch = this.getGroupEpoch(groupIdValue);
-            await this.broadcastConfirmationTag(groupIdValue, currentEpoch);
+            await this.broadcastConfirmationTag(groupIdValue, this.getGroupEpoch(groupIdValue));
         } catch (tagErr) {
             console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
         }
-
-        return await commitResponse.json();
+        return { success: true };
     }
 
     /**
@@ -1800,57 +1448,19 @@ class CoreCryptoClient {
      * @returns {Promise<Object>} Server response
      */
     async leaveGroup(groupId) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
+        const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
 
-        const groupIdBytes = this.groupIdToBytes(groupId);
-        const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupIdBytes);
-
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
-        if (!deviceId) {
-            throw new Error('Device ID not available. Unlock or set up your keystore first.');
-        }
-
-        // Helper to convert to hex
-        const toHex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
-
-        // Call WASM leave_group - returns proposal bytes (NOT a commit)
         this.setGroupAad(groupIdValue, 'proposal');
         const proposalBytes = this.client.leave_group(groupIdBytes);
 
-        // Send proposal to server (messageType = 'proposal' or relay as-is)
-        // Note: This is a proposal, not a commit. Another member must commit it.
-        const response = await fetch('/api/mls/messages/group', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'x-device-id': deviceId
-            },
-            body: JSON.stringify({
-                groupId: groupIdValue,
-                messageType: 'proposal',
-                data: '\\x' + toHex(proposalBytes)
-            })
+        const result = await this.mlsFetch('/messages/group', {
+            groupId: groupIdValue, messageType: 'proposal', data: this.toPostgresHex(proposalBytes)
         });
 
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.error || 'Failed to send leave-group proposal');
-        }
-
         console.log('[MLS] Leave-group proposal sent. Awaiting commit by another member.');
-
-        // Note: We don't mark the group as inactive yet - that happens when we process
-        // the commit that includes our removal proposal.
         await this.saveState();
-
-        return await response.json();
+        return result;
     }
 
     /**
@@ -2446,21 +2056,9 @@ class CoreCryptoClient {
     }
 
     async commitPendingProposals(groupId, { welcomeRecipients = [] } = {}) {
-        if (!this.initialized) await this.initialize();
-        if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        await this.ensureReady();
 
         const groupIdBytes = this.groupIdToBytes(groupId);
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
-        const { default: vaultService } = await import('../vaultService.js');
-        const deviceId = vaultService.getDeviceId();
-        if (!deviceId) {
-            throw new Error('Device ID not available. Unlock or set up your keystore first.');
-        }
-
-        // Capture rollback state before committing
         const rollbackState = await this.exportStateForVault();
 
         this.setGroupAad(groupId, 'commit');
@@ -2470,33 +2068,15 @@ class CoreCryptoClient {
         const groupInfoBytes = result[2] ? new Uint8Array(result[2]) : null;
         const epoch = this.getGroupEpoch(groupId);
 
-        const commitResponse = await fetch('/api/mls/messages/group', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'x-device-id': deviceId
-            },
-            body: JSON.stringify({
-                groupId,
-                epoch,
-                messageType: 'commit',
-                data: '\\x' + this.bytesToHex(commitBytes)
-            })
-        });
-
-        if (!commitResponse.ok) {
-            const error = await commitResponse.json().catch(() => ({}));
-            try {
-                this.client.clear_pending_commit(groupIdBytes);
-            } catch (clearErr) {
-                console.warn('[MLS] Failed to clear pending commit:', clearErr);
-            }
-            // Restore state on failure
-            if (rollbackState) {
-                await this.restoreStateFromVault(rollbackState);
-            }
-            throw new Error(error.error || 'Failed to send commit for pending proposals');
+        try {
+            await this.mlsFetch('/messages/group', {
+                groupId, epoch, messageType: 'commit',
+                data: this.toPostgresHex(commitBytes)
+            });
+        } catch (commitErr) {
+            try { this.client.clear_pending_commit(groupIdBytes); } catch (e) { /* ignore */ }
+            if (rollbackState) await this.restoreStateFromVault(rollbackState);
+            throw commitErr;
         }
 
         try {
@@ -2519,24 +2099,11 @@ class CoreCryptoClient {
         if (welcomeBytes && welcomeRecipients.length > 0) {
             for (const receiverId of welcomeRecipients) {
                 try {
-                    const welcomeResponse = await fetch('/api/mls/messages/welcome', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`,
-                            'x-device-id': deviceId
-                        },
-                        body: JSON.stringify({
-                            groupId,
-                            receiverId,
-                            data: '\\x' + this.bytesToHex(welcomeBytes),
-                            groupInfo: groupInfoBytes ? ('\\x' + this.bytesToHex(groupInfoBytes)) : null
-                        })
+                    await this.mlsFetch('/messages/welcome', {
+                        groupId, receiverId,
+                        data: this.toPostgresHex(welcomeBytes),
+                        groupInfo: groupInfoBytes ? this.toPostgresHex(groupInfoBytes) : null
                     });
-                    if (!welcomeResponse.ok) {
-                        console.warn(`[MLS] Failed to send welcome to ${receiverId}`);
-                        failedRecipients.push(receiverId);
-                    }
                 } catch (welcomeErr) {
                     console.warn(`[MLS] Error sending welcome to ${receiverId}:`, welcomeErr);
                     failedRecipients.push(receiverId);
@@ -2766,8 +2333,10 @@ class CoreCryptoClient {
      * Processes any pending invites and logs missing groups
      */
     async resyncGroupsFromServer() {
-        const token = localStorage.getItem('token');
-        if (!token) return;
+        let token;
+        try {
+            ({ token } = await this.getAuthContext());
+        } catch { return; }
 
         try {
             // 1. Check for any pending Welcome messages (new invites)
@@ -2777,16 +2346,11 @@ class CoreCryptoClient {
             }
 
             // 2. Fetch list of groups user is a member of from server
-            const response = await fetch('/api/mls/groups', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!response.ok) {
+            const serverGroups = await this.mlsFetch('/groups', null, { method: 'GET', skipDeviceId: true }).catch(() => null);
+            if (!serverGroups) {
                 console.warn('[MLS] Could not fetch groups from server');
                 return;
             }
-
-            const serverGroups = await response.json();
             console.log('[MLS] Server reports membership in', serverGroups.length, 'groups');
 
             // 3. Check which groups are missing locally
@@ -3097,22 +2661,8 @@ class CoreCryptoClient {
         if (!this.initialized) await this.initialize();
         if (!this.client) return [];
 
-        const token = localStorage.getItem('token');
-        if (!token) throw new Error('Not authenticated');
-
         try {
-            const response = await fetch(`/api/mls/messages/group/${encodeURIComponent(groupId)}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to fetch messages: ${response.status}`);
-            }
-
-            const messages = await response.json();
+            const messages = await this.mlsFetch(`/messages/group/${encodeURIComponent(groupId)}`, null, { method: 'GET', skipDeviceId: true });
             const decrypted = [];
 
             for (const msg of messages) {

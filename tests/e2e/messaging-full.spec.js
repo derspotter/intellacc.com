@@ -196,7 +196,28 @@ test.describe('E2E Messaging', () => {
     await pageBob.goto('/#messages');
     await pageBob.waitForTimeout(2000);
 
-    // Bob should see the DM in sidebar (via sync)
+    // Bob needs to accept the welcome first (welcome holdback mechanism)
+    console.log('Bob accepting welcome...');
+    const acceptResult = await pageBob.evaluate(async () => {
+      const coreCryptoClient = window.coreCryptoClient;
+      if (!coreCryptoClient) return { error: 'coreCryptoClient not on window' };
+
+      const pending = coreCryptoClient.pendingWelcomes;
+      if (pending.size === 0) return { error: 'No pending welcomes' };
+
+      const [pendingId, invite] = pending.entries().next().value;
+      try {
+        const groupId = await coreCryptoClient.acceptWelcome(invite);
+        await coreCryptoClient.syncMessages();
+        return { success: true, groupId };
+      } catch (e) {
+        return { error: e.message };
+      }
+    });
+    console.log('Accept result:', acceptResult);
+    await pageBob.waitForTimeout(1000);
+
+    // Bob should now see the DM in sidebar
     const convItem = pageBob.locator('.conversation-item, .chat-item, .dm-item').filter({ hasText: USER1.name });
     await expect(convItem).toBeVisible({ timeout: 15000 });
     await convItem.click();
