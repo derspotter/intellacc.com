@@ -63,7 +63,7 @@ describe('Push Notifications API', () => {
       const res = await request(app)
         .post('/api/push/subscribe')
         .send({
-          endpoint: 'https://fcm.googleapis.com/fcm/send/test',
+          endpoint: 'https://example.com/push/test',
           keys: { p256dh: 'testkey', auth: 'testauth' }
         });
 
@@ -86,10 +86,10 @@ describe('Push Notifications API', () => {
       if (!authToken) return;
 
       const subscription = {
-        endpoint: `https://fcm.googleapis.com/fcm/send/test_${Date.now()}`,
+        endpoint: `https://example.com/push/test_${Date.now()}`,
         keys: {
-          p256dh: 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM',
-          auth: 'tBHItJI5svbpez7KI4CCXg'
+          p256dh: 'test-p256dh-key-placeholder',
+          auth: 'test-auth-placeholder'
         }
       };
 
@@ -116,7 +116,7 @@ describe('Push Notifications API', () => {
       if (!authToken) return;
 
       // First subscribe
-      const endpoint = `https://fcm.googleapis.com/fcm/send/unsub_${Date.now()}`;
+      const endpoint = `https://example.com/push/unsub_${Date.now()}`;
       await request(app)
         .post('/api/push/subscribe')
         .set('Authorization', `Bearer ${authToken}`)
