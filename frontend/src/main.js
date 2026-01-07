@@ -3,6 +3,7 @@ import { initializeStore } from './store';
 import { checkAuth, isLoggedInState } from './services/auth';
 import { initializeSocket } from './services/socket';
 import { initIdleAutoLock } from './services/idleLock';
+import { registerServiceWorker } from './services/pushService';
 import Router, { updatePageFromHash } from './router';
 
 // Initialize store before anything else
@@ -20,6 +21,9 @@ if (isLoggedInState.val) {
 setTimeout(() => {
   initializeSocket();
 }, 100);
+
+// Register service worker for push notifications
+registerServiceWorker();
 
 // Mount the application
 document.addEventListener('DOMContentLoaded', () => {

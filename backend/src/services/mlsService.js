@@ -1,4 +1,5 @@
 const db = require('../db');
+const pushNotificationService = require('./pushNotificationService');
 
 let io = null;
 
@@ -272,6 +273,21 @@ const mlsService = {
                 io.to(`mls:${uid}`).emit('mls-message', { groupId });
             }
         }
+
+        // Send push notifications for application messages (actual user messages)
+        if (messageType === 'application') {
+            // Get sender username for push notification
+            const senderRes = await db.query('SELECT username FROM users WHERE id = $1', [senderUserId]);
+            const senderUsername = senderRes.rows[0]?.username || 'Someone';
+
+            for (const uid of notifiedUsers) {
+                if (uid !== senderUserId) {
+                    pushNotificationService.sendMessagePush(uid, senderUsername)
+                        .catch(err => console.error('[Push] Error sending message push:', err));
+                }
+            }
+        }
+
         return { queueId };
     } catch (e) {
         await client.query('ROLLBACK');

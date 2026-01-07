@@ -1309,6 +1309,173 @@ body.dark-mode .delete-btn:hover {
   background-color: #444;
 }
 
+/* Push Permission Banner */
+.push-permission-banner {
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+  color: white;
+  padding: 1rem;
+  border-radius: var(--border-radius);
+  margin: 0.5rem 1rem;
+  box-shadow: var(--box-shadow);
+}
+
+.push-permission-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.push-permission-icon {
+  font-size: 1.5rem;
+}
+
+.push-permission-text {
+  flex: 1;
+  min-width: 200px;
+}
+
+.push-permission-title {
+  font-weight: 600;
+  margin: 0 0 0.25rem 0;
+}
+
+.push-permission-description {
+  font-size: 0.9rem;
+  opacity: 0.9;
+  margin: 0;
+}
+
+.push-permission-error {
+  color: #ffcccc;
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0 0;
+}
+
+.push-permission-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.push-permission-enable {
+  background: white;
+  color: var(--primary-dark);
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: var(--border-radius);
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+
+.push-permission-enable:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.push-permission-enable:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.push-permission-dismiss {
+  background: transparent;
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  padding: 0.5rem 1rem;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.push-permission-dismiss:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.push-permission-dismiss:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Notification Settings */
+.notification-settings {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: var(--card-bg);
+  border-radius: var(--border-radius);
+  box-shadow: var(--box-shadow);
+}
+
+.notification-settings h2 {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+}
+
+.notification-settings-toggle {
+  margin: 1rem 0;
+}
+
+.notification-settings-unsupported,
+.notification-settings-denied {
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 1rem 0;
+}
+
+.notification-settings-preferences {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.notification-settings-preferences h2 {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.notification-settings-hint {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.preference-item {
+  margin: 0.75rem 0;
+}
+
+.preference-item label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.preference-item input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.notification-settings-error {
+  color: var(--error-color);
+  font-size: 0.9rem;
+  margin-top: 1rem;
+}
+
+.notification-settings-success {
+  color: var(--success-color);
+  font-size: 0.9rem;
+  margin-top: 1rem;
+}
+
+/* Dark mode for push notifications */
+body.dark-mode .push-permission-banner {
+  background: linear-gradient(135deg, #1a3a5c 0%, #0d2137 100%);
+}
+
+body.dark-mode .notification-settings {
+  background: var(--card-bg);
+}
+
 /* Leaderboard Table Styles */
 .leaderboard-table {
   width: 100%;

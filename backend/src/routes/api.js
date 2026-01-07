@@ -9,6 +9,7 @@ const predictionsController = require('../controllers/predictionsController');
 const scoringController = require('../controllers/scoringController');
 const leaderboardController = require('../controllers/leaderboardController');
 const notificationController = require('../controllers/notificationController');
+const pushController = require('../controllers/pushController');
 const weeklyAssignmentController = require('../controllers/weeklyAssignmentController');
 const mlsRoutes = require('./mls');
 const authenticateJWT = require("../middleware/auth");
@@ -100,6 +101,13 @@ router.get("/notifications/count", authenticateJWT, notificationController.getUn
 router.put("/notifications/:notificationId/read", authenticateJWT, notificationController.markAsRead);
 router.put("/notifications/mark-all-read", authenticateJWT, notificationController.markAllAsRead);
 router.delete("/notifications/:notificationId", authenticateJWT, notificationController.deleteNotification);
+
+// Push Notification Routes
+router.get("/push/vapid-public-key", pushController.getVapidPublicKey);
+router.post("/push/subscribe", authenticateJWT, pushController.subscribe);
+router.delete("/push/subscribe", authenticateJWT, pushController.unsubscribe);
+router.get("/push/preferences", authenticateJWT, pushController.getPreferences);
+router.put("/push/preferences", authenticateJWT, pushController.updatePreferences);
 
 // Scoring Routes (proxy to prediction engine)
 router.get("/scoring/leaderboard", scoringController.getLogScoringLeaderboard);

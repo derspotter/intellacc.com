@@ -450,8 +450,26 @@ export const api = {
     markAllAsRead: () => 
       request('/notifications/mark-all-read', { method: 'PUT' }),
 
-    delete: (notificationId) => 
+    delete: (notificationId) =>
       request(`/notifications/${notificationId}`, { method: 'DELETE' })
+  },
+
+  // Push notification endpoints
+  push: {
+    getVapidKey: () =>
+      request('/push/vapid-public-key'),
+
+    subscribe: (subscription) =>
+      request('/push/subscribe', { method: 'POST', body: subscription }),
+
+    unsubscribe: (endpoint) =>
+      request('/push/subscribe', { method: 'DELETE', body: { endpoint } }),
+
+    getPreferences: () =>
+      request('/push/preferences'),
+
+    updatePreferences: (preferences) =>
+      request('/push/preferences', { method: 'PUT', body: preferences })
   },
 
   // Key management endpoints (for end-to-end encryption)
