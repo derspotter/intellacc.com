@@ -1,8 +1,12 @@
 // backend/src/services/notificationService.js
 const db = require('../db');
+const pushNotificationService = require('./pushNotificationService');
 
 // Socket.io instance will be injected
 let io = null;
+
+// High-priority notification types that trigger push
+const PUSH_TYPES = ['reply', 'follow'];
 
 /**
  * Set the Socket.io instance for real-time notifications
@@ -77,6 +81,16 @@ async function createNotification({ userId, type, actorId, targetId, targetType,
         console.error('Error emitting real-time notification:', socketError);
         // Don't fail the notification creation if socket emission fails
       }
+    }
+
+    // Send Web Push for high-priority notification types
+    if (PUSH_TYPES.includes(type) && notification) {
+      pushNotificationService.sendPushToUser(userId, {
+        type,
+        actorId,
+        content,
+        notificationId: notification.id
+      }).catch(err => console.error('[Push] Error sending push notification:', err));
     }
 
     return notification;
