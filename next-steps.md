@@ -5,6 +5,113 @@ Based on original synthesis by Claude, Gemini, and Codex - updated to reflect cu
 
 ---
 
+## Priority 0: Essential Account Features (MISSING)
+
+**Status**: Not implemented - critical gaps
+**Impact**: User trust, security, legal compliance
+
+### 0a. Password Reset (Forgot Password) ❌ CRITICAL
+
+**Current State**: Only `changePassword` exists (requires old password + being logged in)
+**Problem**: Users who forget password are locked out forever
+
+#### Complexity with E2EE
+The vault is encrypted with the user's password. A password reset means:
+- Option A: Recovery codes generated at signup (recommended)
+- Option B: Trusted device recovery (existing device approves reset)
+- Option C: Accept vault data loss on reset (re-encrypt with new password, lose old keys)
+
+#### Files to Create/Modify
+- `backend/src/controllers/passwordResetController.js` - new
+- `backend/src/routes/api.js` - add reset routes
+- `backend/migrations/` - recovery_codes table
+- `frontend/src/components/auth/ForgotPassword.js` - new
+- `frontend/src/components/auth/ResetPassword.js` - new
+- `frontend/src/services/vaultService.js` - recovery code generation
+
+#### Implementation Steps
+1. Generate 12 recovery codes at signup, hash and store
+2. Show codes ONCE to user, require confirmation they saved them
+3. Create forgot password flow: email → verify → enter recovery code → new password
+4. Re-encrypt vault with new password (or create fresh vault)
+
+---
+
+### 0b. Email Verification ❌ IMPORTANT
+
+**Current State**: No verification on signup
+**Problem**: Spam accounts, no proof of email ownership
+
+#### Files to Create/Modify
+- `backend/src/controllers/userController.js` - add verification
+- `backend/src/services/emailService.js` - new (or use existing if any)
+- `backend/migrations/` - add email_verified, verification_token columns
+- `frontend/src/pages/VerifyEmail.js` - new
+
+#### Implementation Steps
+1. Add `email_verified` boolean + `verification_token` to users table
+2. On signup, send verification email with token link
+3. Create `/verify-email/:token` endpoint
+4. Restrict certain features until verified (posting, messaging)
+
+---
+
+### 0c. Account Deletion ❌ GDPR REQUIRED
+
+**Current State**: No way to delete account
+**Problem**: GDPR/CCPA compliance, user rights
+
+#### Files to Create/Modify
+- `backend/src/controllers/userController.js` - add deleteAccount
+- `backend/src/routes/api.js` - add delete route
+- `frontend/src/components/settings/DangerZone.js` - new
+
+#### Implementation Steps
+1. Soft delete: mark account as deleted, anonymize data
+2. Hard delete after 30 days grace period
+3. Remove from MLS groups, delete messages, posts (or anonymize)
+4. Require password confirmation for deletion
+
+---
+
+### 0d. Profile Editing ⚠️ PARTIAL
+
+**Current State**: Need to verify what exists
+**Problem**: Users can't update their profile
+
+#### Files to Check/Modify
+- `backend/src/controllers/userController.js` - editUserProfile exists?
+- `frontend/src/pages/Profile.js` - edit UI?
+- `frontend/src/components/settings/ProfileSettings.js` - may need creation
+
+#### Implementation Steps
+1. Verify current state of profile editing
+2. Add avatar upload (ties into file attachments)
+3. Add bio, display name editing
+4. Add profile visibility settings
+
+---
+
+### 0e. Two-Factor Authentication (TOTP) ❌ SECURITY
+
+**Current State**: Device verification exists, but no TOTP/authenticator app support
+**Problem**: Password-only auth is vulnerable
+
+#### Files to Create/Modify
+- `backend/src/controllers/twoFactorController.js` - new
+- `backend/src/middleware/auth.js` - add 2FA check
+- `frontend/src/components/settings/TwoFactorSetup.js` - new
+- `frontend/src/components/auth/TwoFactorVerify.js` - new
+
+#### Implementation Steps
+1. Use `speakeasy` or `otplib` for TOTP generation
+2. Add 2FA setup flow with QR code
+3. Store encrypted TOTP secret
+4. Add 2FA step to login flow
+5. Provide backup codes
+
+---
+
 ## Priority 1: Safety Numbers / Trust Layer ✅ DONE (MVP)
 
 **Status**: Complete for MVP - UI exists with fingerprint display, copy, hex/numeric formats
