@@ -665,6 +665,61 @@ pub async fn get_market_state(
     }
 }
 
+// Get recent trades for an event
+pub async fn get_event_trades(
+    pool: &PgPool,
+    event_id: i32,
+    limit: i32,
+) -> Result<serde_json::Value> {
+    let rows = sqlx::query(
+        r#"
+        SELECT
+            mu.id,
+            mu.username,
+            mu.share_type,
+            mu.stake_amount,
+            mu.prev_prob,
+            mu.new_prob,
+            mu.shares_acquired,
+            mu.created_at
+        FROM market_updates mu
+        WHERE mu.event_id = $1
+        ORDER BY mu.created_at DESC
+        LIMIT $2
+        "#
+    )
+    .bind(event_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    let trades: Vec<serde_json::Value> = rows.iter().map(|row| {
+        let prev_prob = DbAdapter::decimal_to_f64(row.get("prev_prob")).unwrap_or(0.5);
+        let new_prob = DbAdapter::decimal_to_f64(row.get("new_prob")).unwrap_or(0.5);
+        let stake_amount = DbAdapter::decimal_to_f64(row.get("stake_amount")).unwrap_or(0.0);
+        let shares_acquired = DbAdapter::decimal_to_f64(row.get("shares_acquired")).unwrap_or(0.0);
+        let share_type: String = row.get("share_type");
+        let created_at: DateTime<Utc> = row.get("created_at");
+
+        serde_json::json!({
+            "id": row.get::<i32, _>("id"),
+            "user": row.get::<String, _>("username"),
+            "direction": share_type.to_uppercase(),
+            "amount": stake_amount,
+            "shares_acquired": shares_acquired,
+            "price_before": prev_prob,
+            "price_after": new_prob,
+            "timestamp": created_at.to_rfc3339()
+        })
+    }).collect();
+
+    Ok(serde_json::json!({
+        "event_id": event_id,
+        "trades": trades,
+        "count": trades.len()
+    }))
+}
+
 // Get user's shares for an event
 pub async fn get_user_shares(
     pool: &PgPool,
