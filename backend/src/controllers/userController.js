@@ -428,7 +428,7 @@ exports.getUserPositions = async (req, res) => {
 exports.getMasterKey = async (req, res) => {
   const userId = req.user.id;
   const deviceIdsHeader = req.headers['x-device-ids'];
-  
+
   try {
     // 1. Verify Device Trust
     // If no devices provided, we can't verify. New device? 
@@ -452,10 +452,10 @@ exports.getMasterKey = async (req, res) => {
     }
 
     const deviceIds = deviceIdsHeader.split(',');
-    
+
     // Check if any of the provided IDs are trusted
     const deviceRes = await db.query(
-        `SELECT id, device_public_id, last_verified_at FROM user_devices 
+        `SELECT id, device_public_id, last_verified_at FROM user_devices
          WHERE user_id = $1 AND device_public_id = ANY($2::uuid[])`,
         [userId, deviceIds]
     );

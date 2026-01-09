@@ -41,7 +41,6 @@ describe('Push Notifications API', () => {
       await db.query('DELETE FROM push_subscriptions WHERE user_id = $1', [testUserId]);
       await db.query('DELETE FROM notification_preferences WHERE user_id = $1', [testUserId]);
     }
-    await db.end();
   });
 
   describe('GET /api/push/vapid-public-key', () => {

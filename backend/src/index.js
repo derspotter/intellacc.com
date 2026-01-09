@@ -143,8 +143,12 @@ app.use('/api', require('./routes/api'));
 // Attach io instance to app for controllers to use
 app.set('io', io);
 
-// Start server
+// Start server only when run directly (not when imported for testing)
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running with Socket.IO on port ${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running with Socket.IO on port ${PORT}`);
+  });
+}
+
+module.exports = { app, server, io };
