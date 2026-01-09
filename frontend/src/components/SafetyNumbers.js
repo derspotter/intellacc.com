@@ -168,4 +168,293 @@ export function SafetyNumbersButton() {
     ]);
 }
 
+/**
+ * Contact Verification Modal
+ * Shows side-by-side comparison of your fingerprint and contact's fingerprint
+ * @param {Object} props
+ * @param {number} props.contactUserId - Contact's user ID
+ * @param {string} props.contactUsername - Contact's display name
+ * @param {Function} props.onClose - Callback to close modal
+ * @param {Function} props.onVerify - Callback when contact is verified
+ */
+export function ContactVerificationModal({ contactUserId, contactUsername, onClose, onVerify }) {
+    const loading = van.state(true);
+    const myFingerprint = van.state('');
+    const contactFingerprint = van.state('');
+    const verificationStatus = van.state('unverified');
+    const error = van.state(null);
+    const showNumeric = van.state(false);
+    const verifying = van.state(false);
+
+    // Load fingerprints
+    (async () => {
+        try {
+            // Get own fingerprint
+            const my = coreCryptoClient.getIdentityFingerprint();
+            myFingerprint.val = my || '';
+
+            // Get contact's fingerprint from vault
+            const contact = await coreCryptoClient.getContactFingerprint(contactUserId);
+            if (contact) {
+                contactFingerprint.val = contact.fingerprint || '';
+                verificationStatus.val = contact.status || 'unverified';
+            } else {
+                error.val = 'No safety number recorded for this contact yet. Send or receive a message first.';
+            }
+        } catch (e) {
+            console.error('[SafetyNumbers] Error loading fingerprints:', e);
+            error.val = e.message || 'Failed to load safety numbers';
+        } finally {
+            loading.val = false;
+        }
+    })();
+
+    const handleVerify = async () => {
+        verifying.val = true;
+        try {
+            await coreCryptoClient.verifyContact(contactUserId);
+            verificationStatus.val = 'verified';
+            onVerify?.();
+        } catch (e) {
+            console.error('[SafetyNumbers] Error verifying contact:', e);
+            error.val = e.message || 'Failed to verify contact';
+        } finally {
+            verifying.val = false;
+        }
+    };
+
+    const handleUnverify = async () => {
+        verifying.val = true;
+        try {
+            await coreCryptoClient.unverifyContact(contactUserId);
+            verificationStatus.val = 'unverified';
+        } catch (e) {
+            console.error('[SafetyNumbers] Error unverifying contact:', e);
+        } finally {
+            verifying.val = false;
+        }
+    };
+
+    const formatFingerprint = (fp) => {
+        if (!fp) return '';
+        return showNumeric.val
+            ? coreCryptoClient.fingerprintToNumeric(fp)
+            : coreCryptoClient.formatFingerprint(fp);
+    };
+
+    return div({ class: "modal-overlay", onclick: (e) => {
+        if (e.target.classList.contains('modal-overlay')) onClose();
+    }}, [
+        div({ class: "modal safety-numbers-modal contact-verification" }, [
+            div({ class: "modal-header" }, [
+                h3(`Verify ${contactUsername || 'Contact'}`),
+                button({ class: "btn-close", onclick: onClose }, "\u00D7")
+            ]),
+
+            div({ class: "modal-body" }, [
+                () => {
+                    if (loading.val) {
+                        return div({ class: "loading-state" }, "Loading safety numbers...");
+                    }
+
+                    if (error.val && !contactFingerprint.val) {
+                        return div({ class: "error-state" }, [
+                            span({ class: "error-icon" }, "\u26A0"),
+                            span(error.val)
+                        ]);
+                    }
+
+                    return div({ class: "fingerprint-comparison" }, [
+                        // Format toggle
+                        div({ class: "format-toggle" }, [
+                            button({
+                                class: () => `btn btn-sm ${showNumeric.val ? '' : 'btn-primary'}`,
+                                onclick: () => { showNumeric.val = false; }
+                            }, "Hex"),
+                            button({
+                                class: () => `btn btn-sm ${showNumeric.val ? 'btn-primary' : ''}`,
+                                onclick: () => { showNumeric.val = true; }
+                            }, "Numeric")
+                        ]),
+
+                        // Your fingerprint
+                        div({ class: "fingerprint-section yours" }, [
+                            h4("Your Safety Number"),
+                            div({ class: "fingerprint-display" }, [
+                                () => div({ class: "fingerprint-grid" },
+                                    showNumeric.val
+                                        ? formatNumericGrid(formatFingerprint(myFingerprint.val))
+                                        : formatHexGrid(formatFingerprint(myFingerprint.val))
+                                )
+                            ])
+                        ]),
+
+                        // Contact's fingerprint
+                        div({ class: "fingerprint-section theirs" }, [
+                            h4(`${contactUsername || 'Contact'}'s Safety Number`),
+                            () => verificationStatus.val === 'changed'
+                                ? div({ class: "warning-banner" }, [
+                                    span({ class: "warning-icon" }, "\u26A0"),
+                                    span("This contact's safety number has changed! Verify their identity carefully.")
+                                ])
+                                : null,
+                            div({ class: "fingerprint-display" }, [
+                                () => div({ class: "fingerprint-grid" },
+                                    showNumeric.val
+                                        ? formatNumericGrid(formatFingerprint(contactFingerprint.val))
+                                        : formatHexGrid(formatFingerprint(contactFingerprint.val))
+                                )
+                            ])
+                        ]),
+
+                        // Verification status and action
+                        div({ class: "verification-status" }, [
+                            () => {
+                                if (verificationStatus.val === 'verified') {
+                                    return div({ class: "verified-state" }, [
+                                        div({ class: "verified-badge-large" }, [
+                                            span({ class: "check-icon" }, "\u2713"),
+                                            span("Verified")
+                                        ]),
+                                        p({ class: "verified-note" },
+                                            "You've verified this contact's safety number."
+                                        ),
+                                        button({
+                                            class: "btn btn-sm btn-secondary",
+                                            onclick: handleUnverify,
+                                            disabled: () => verifying.val
+                                        }, "Remove Verification")
+                                    ]);
+                                }
+
+                                return div({ class: "unverified-state" }, [
+                                    div({ class: "verify-instructions" }, [
+                                        p("Compare these numbers with your contact over a secure channel:"),
+                                        div({ class: "instruction-methods" }, [
+                                            span("\u2022 In person"),
+                                            span("\u2022 Video call"),
+                                            span("\u2022 Voice call")
+                                        ]),
+                                        p("If they match exactly, tap 'Mark as Verified' to confirm.")
+                                    ]),
+                                    button({
+                                        class: "btn btn-primary verify-btn",
+                                        onclick: handleVerify,
+                                        disabled: () => verifying.val
+                                    }, () => verifying.val ? "Verifying..." : "Mark as Verified")
+                                ]);
+                            }
+                        ])
+                    ]);
+                }
+            ])
+        ])
+    ]);
+}
+
+/**
+ * Verification Badge Component
+ * Small badge showing contact verification status
+ * @param {Object} props
+ * @param {number} props.contactUserId - Contact's user ID
+ */
+export function VerificationBadge({ contactUserId }) {
+    const status = van.state('loading');
+
+    // Load verification status
+    (async () => {
+        try {
+            const s = await coreCryptoClient.getContactVerificationStatus(contactUserId);
+            status.val = s;
+        } catch (e) {
+            status.val = 'unknown';
+        }
+    })();
+
+    return () => {
+        switch (status.val) {
+            case 'verified':
+                return span({
+                    class: "verification-badge verified",
+                    title: "Verified contact"
+                }, "\u2713");
+            case 'changed':
+                return span({
+                    class: "verification-badge warning",
+                    title: "Safety number changed!"
+                }, "\u26A0");
+            case 'unverified':
+                return span({
+                    class: "verification-badge unverified",
+                    title: "Not verified"
+                }, "");
+            case 'loading':
+                return span({ class: "verification-badge loading" }, "");
+            default:
+                return null;
+        }
+    };
+}
+
+/**
+ * Contact Verify Button
+ * Button to open contact verification modal
+ * @param {Object} props
+ * @param {number} props.contactUserId - Contact's user ID
+ * @param {string} props.contactUsername - Contact's display name
+ * @param {Function} props.onVerified - Callback when verification changes
+ */
+export function ContactVerifyButton({ contactUserId, contactUsername, onVerified }) {
+    const showModal = van.state(false);
+
+    return div({ class: "contact-verify-trigger" }, [
+        button({
+            class: "btn btn-sm btn-icon btn-verify-contact",
+            title: "Verify contact identity",
+            onclick: () => { showModal.val = true; }
+        }, [
+            span({ class: "shield-check-icon" }, "\uD83D\uDEE1\uFE0F"),
+            span({ class: "btn-text" }, "Verify")
+        ]),
+        () => {
+            if (!showModal.val) return div({ style: "display:none" });
+            return ContactVerificationModal({
+                contactUserId,
+                contactUsername,
+                onClose: () => { showModal.val = false; },
+                onVerify: () => {
+                    onVerified?.();
+                }
+            });
+        }
+    ]);
+}
+
+/**
+ * Fingerprint Change Warning Banner
+ * Shows warning when a contact's fingerprint has changed
+ * @param {Object} props
+ * @param {string} props.message - Warning message
+ * @param {Function} props.onDismiss - Callback to dismiss warning
+ * @param {Function} props.onVerify - Callback to open verification
+ */
+export function FingerprintWarningBanner({ message, onDismiss, onVerify }) {
+    return div({ class: "fingerprint-warning-banner" }, [
+        div({ class: "warning-content" }, [
+            span({ class: "warning-icon" }, "\u26A0"),
+            span({ class: "warning-message" }, message || "A contact's encryption key has changed.")
+        ]),
+        div({ class: "warning-actions" }, [
+            button({
+                class: "btn btn-sm btn-warning",
+                onclick: onVerify
+            }, "Verify"),
+            button({
+                class: "btn btn-sm btn-secondary",
+                onclick: onDismiss
+            }, "Dismiss")
+        ])
+    ]);
+}
+
 export default SafetyNumbersModal;

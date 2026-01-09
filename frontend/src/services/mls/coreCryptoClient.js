@@ -39,10 +39,21 @@ class CoreCryptoClient {
         return this._vaultService;
     }
 
+    requireClient() {
+        if (!this.client) throw new Error('Client not initialized');
+        return this.client;
+    }
+
+    async requireDeviceId(message = 'Device ID not available') {
+        const { deviceId } = await this.getAuthContext();
+        if (!deviceId) throw new Error(message);
+        return deviceId;
+    }
+
     async ensureReady() {
         if (!this.initialized) await this.initialize();
         if (!this.client && this.identityName) await this.loadState(this.identityName);
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
     }
 
     async getAuthContext() {
@@ -63,8 +74,8 @@ class CoreCryptoClient {
         return { bytes, str };
     }
 
-    async mlsFetch(endpoint, body, { method = 'POST', skipDeviceId = false } = {}) {
-        const { token, deviceId } = await this.getAuthContext();
+    async mlsFetch(endpoint, body, { method = 'POST', skipDeviceId = false, errorMessage = null, authContext = null } = {}) {
+        const { token, deviceId } = authContext || await this.getAuthContext();
         const headers = {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
@@ -79,7 +90,7 @@ class CoreCryptoClient {
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
-            throw new Error(error.error || `MLS API error: ${endpoint}`);
+            throw new Error(error.error || errorMessage || `MLS API error: ${endpoint}`);
         }
         return response.json();
     }
@@ -96,6 +107,10 @@ class CoreCryptoClient {
     _emit(handlers, data) {
         if (!data) return;
         handlers.forEach(h => { try { h(data); } catch (e) { console.warn('[MLS] Handler error:', e); } });
+    }
+
+    markProcessed(id) {
+        if (id) this.processedMessageIds.add(id);
     }
 
     // Unified byte parser for all formats (postgres bytea, Buffer, hex, Uint8Array)
@@ -150,7 +165,7 @@ class CoreCryptoClient {
                 return text;
             }
         } catch (e) {}
-        return Array.from(groupIdBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        return this.bytesToHex(groupIdBytes);
     }
 
     groupIdFromHex(groupIdHex) {
@@ -219,7 +234,7 @@ class CoreCryptoClient {
     }
 
     setGroupAad(groupId, type, epochOverride) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdValue = typeof groupId === 'string' ? groupId : this.groupIdFromBytes(groupId);
         const epoch = typeof epochOverride === 'number' ? epochOverride : this.getGroupEpoch(groupIdValue);
         const payload = this.buildAadPayload(groupIdValue, epoch, type);
@@ -300,24 +315,21 @@ class CoreCryptoClient {
     }
 
     getKeyPackageBytes() {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         return this.client.get_key_package_bytes();
     }
 
     getKeyPackageHex() {
-        const bytes = this.getKeyPackageBytes();
-        return Array.from(bytes)
-            .map(b => b.toString(16).padStart(2, '0'))
-            .join('');
+        return this.bytesToHex(this.getKeyPackageBytes());
     }
 
     getKeyPackageLifetimeInfo() {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         return this.client.get_key_package_lifetime();
     }
 
     getKeyPackageLifetimeInfoFromBytes(keyPackageBytes) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         return this.client.key_package_lifetime_from_bytes(keyPackageBytes);
     }
 
@@ -341,13 +353,13 @@ class CoreCryptoClient {
 
     async computeHash(data) {
         const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return this.bytesToHex(new Uint8Array(hashBuffer));
     }
 
     async uploadKeyPackage(options = {}) {
-        if (!this.client) throw new Error('Client not initialized');
-        const { token, deviceId } = await this.getAuthContext();
+        this.requireClient();
+        const authContext = await this.getAuthContext();
+        const { deviceId } = authContext;
         if (!deviceId) {
             console.warn('[MLS] Skipping key package upload (device ID not set)');
             return null;
@@ -365,29 +377,19 @@ class CoreCryptoClient {
             }
         }
 
-        const response = await fetch('/api/mls/key-package', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({
-                deviceId,
-                packageData: this.toPostgresHex(keyPackageBytes),
-                hash,
-                notBefore: lifetimeInfo?.not_before ?? null,
-                notAfter: lifetimeInfo?.not_after ?? null,
-                isLastResort
-            })
-        });
-
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.error || 'Failed to upload key package');
-        }
-        return response.json();
+        return this.mlsFetch('/key-package', {
+            deviceId,
+            packageData: this.toPostgresHex(keyPackageBytes),
+            hash,
+            notBefore: lifetimeInfo?.not_before ?? null,
+            notAfter: lifetimeInfo?.not_after ?? null,
+            isLastResort
+        }, { skipDeviceId: true, errorMessage: 'Failed to upload key package', authContext });
     }
 
     // Ensure key packages are fresh (consolidated: generates all, uploads bulk, saves once)
     async ensureKeyPackagesFresh() {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
 
         const { deviceId } = await this.getAuthContext();
         if (!deviceId) {
@@ -439,49 +441,45 @@ class CoreCryptoClient {
     async uploadKeyPackagesBulk(keyPackages) {
         if (!keyPackages?.length) return { inserted: 0 };
 
-        const { token, deviceId } = await this.getAuthContext();
+        const authContext = await this.getAuthContext();
+        const { deviceId } = authContext;
         if (!deviceId) return null;
 
-        const response = await fetch('/api/mls/key-packages', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ deviceId, keyPackages })
+        return this.mlsFetch('/key-packages', { deviceId, keyPackages }, {
+            skipDeviceId: true,
+            errorMessage: 'Failed to upload key packages',
+            authContext
         });
-
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.error || 'Failed to upload key packages');
-        }
-        return response.json();
     }
 
     async getKeyPackageCount() {
-        const { token, deviceId } = await this.getAuthContext();
-        const url = deviceId ? `/api/mls/key-packages/count?deviceId=${encodeURIComponent(deviceId)}` : '/api/mls/key-packages/count';
-        const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.error || 'Failed to get key package count');
-        }
-        return response.json();
+        const authContext = await this.getAuthContext();
+        const { deviceId } = authContext;
+        const endpoint = deviceId
+            ? `/key-packages/count?deviceId=${encodeURIComponent(deviceId)}`
+            : '/key-packages/count';
+        return this.mlsFetch(endpoint, null, {
+            method: 'GET',
+            skipDeviceId: true,
+            errorMessage: 'Failed to get key package count',
+            authContext
+        });
     }
 
     async fetchKeyPackages(userId, fetchAll = false, deviceId = null) {
         await this.ensureReady();
-        const { token } = await this.getAuthContext();
 
-        let url = `/api/mls/key-package/${userId}`;
+        let endpoint = `/key-package/${userId}`;
         const params = new URLSearchParams();
         if (deviceId) params.set('deviceId', deviceId);
         else if (fetchAll) params.set('all', 'true');
-        if (params.size > 0) url += `?${params.toString()}`;
+        if (params.size > 0) endpoint += `?${params.toString()}`;
 
-        const response = await fetch(url, {
-            headers: { 'Authorization': `Bearer ${token}` }
+        const data = await this.mlsFetch(endpoint, null, {
+            method: 'GET',
+            skipDeviceId: true,
+            errorMessage: 'Failed to fetch key packages'
         });
-        if (!response.ok) throw new Error('Failed to fetch key packages');
-
-        const data = await response.json();
         const packages = Array.isArray(data) ? data : [data];
         const keyPackageBytes = packages.map(pkg => this._toBytes(pkg?.package_data)).filter(Boolean);
 
@@ -502,7 +500,7 @@ class CoreCryptoClient {
         // Generate a random group ID (16 bytes as hex string)
         const groupIdBytes = new Uint8Array(16);
         crypto.getRandomValues(groupIdBytes);
-        const groupId = Array.from(groupIdBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        const groupId = this.bytesToHex(groupIdBytes);
 
         try {
             const externalSenders = Array.isArray(options.externalSenders) ? options.externalSenders : [];
@@ -553,14 +551,14 @@ class CoreCryptoClient {
     }
 
     exportGroupInfo(groupId, { includeRatchetTree = true } = {}) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
         const infoBytes = this.client.export_group_info(groupIdBytes, includeRatchetTree);
         return infoBytes instanceof Uint8Array ? infoBytes : new Uint8Array(infoBytes);
     }
 
     inspectGroupInfo(groupInfoBytes) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const summary = this.client.inspect_group_info(groupInfoBytes);
         return {
             groupIdHex: summary.group_id_hex,
@@ -585,16 +583,11 @@ class CoreCryptoClient {
     }
 
     async fetchGroupInfo(groupId) {
-        const { token } = await this.getAuthContext();
-        const response = await fetch(`/api/mls/groups/${encodeURIComponent(groupId)}/group-info`, {
-            headers: { 'Authorization': `Bearer ${token}` }
+        const payload = await this.mlsFetch(`/groups/${encodeURIComponent(groupId)}/group-info`, null, {
+            method: 'GET',
+            skipDeviceId: true,
+            errorMessage: 'Failed to fetch group info'
         });
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.error || 'Failed to fetch group info');
-        }
-
-        const payload = await response.json();
         if (!payload?.groupInfo) throw new Error('Group info not available');
 
         const groupInfoBytes = this._toBytes(payload.groupInfo);
@@ -664,7 +657,7 @@ class CoreCryptoClient {
     }
 
     createExternalPsk(pskIdHex = '') {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const pskIdBytes = pskIdHex ? this.hexToBytes(pskIdHex) : new Uint8Array();
         const bundle = this.client.generate_external_psk(pskIdBytes);
         const pskIdSerialized = new Uint8Array(bundle.psk_id_serialized || []);
@@ -677,7 +670,7 @@ class CoreCryptoClient {
     }
 
     storeExternalPsk(pskIdSerialized, secretBytes) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const pskIdBytes = pskIdSerialized instanceof Uint8Array
             ? pskIdSerialized
             : this.hexToBytes(pskIdSerialized);
@@ -735,7 +728,7 @@ class CoreCryptoClient {
     }
 
     getGroupEpoch(groupId) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
         const epoch = this.client.get_group_epoch(groupIdBytes);
         if (typeof epoch === 'bigint') {
@@ -745,14 +738,14 @@ class CoreCryptoClient {
     }
 
     getGroupMemberIdentities(groupId) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
         const identities = this.client.get_group_member_identities(groupIdBytes);
         return Array.from(identities || []).filter(Boolean);
     }
 
     getGroupMembers(groupId) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
         return this.client.get_group_members(groupIdBytes) || [];
     }
@@ -898,7 +891,7 @@ class CoreCryptoClient {
     }
 
     removeGroup(groupId) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
         this.client.remove_group(groupIdBytes);
     }
@@ -932,26 +925,96 @@ class CoreCryptoClient {
         const info = this.client.get_staged_welcome_info(stagingId);
         const groupId = this.groupIdFromHex(info.group_id_hex);
 
+        // Extract and record sender fingerprint for TOFU using signature key
+        let senderFingerprintStatus = null;
+        let senderFingerprint = null;
+        if (info.sender?.signature_key_hex) {
+            try {
+                // Use signature key (not identity) for fingerprint - detects key changes
+                senderFingerprint = await this.extractFingerprintFromSignatureKey(info.sender.signature_key_hex);
+
+                if (senderFingerprint) {
+                    // Identity is already a string from WASM (userId as UTF-8)
+                    const senderUserId = parseInt(info.sender.identity, 10);
+                    if (!isNaN(senderUserId) && senderUserId !== parseInt(this.identityName, 10)) {
+                        senderFingerprintStatus = await this.recordContactFingerprint(senderUserId, senderFingerprint);
+                    }
+                }
+            } catch (e) {
+                console.warn('[MLS] Error extracting sender fingerprint in stageWelcome:', e);
+            }
+        }
+
         return {
             stagingId,
             groupId,
             ciphersuite: info.ciphersuite,
             epoch: info.epoch,
             sender: info.sender,
-            members: info.members
+            members: info.members,
+            senderFingerprint,
+            senderFingerprintStatus
         };
     }
 
     getStagedWelcomeInfo(stagingId) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         return this.client.get_staged_welcome_info(stagingId);
     }
 
     async acceptStagedWelcome(stagingId) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
+
+        // Get welcome info before accepting (to extract member fingerprints)
+        const info = this.getStagedWelcomeInfo(stagingId);
 
         const groupIdBytes = this.client.accept_staged_welcome(stagingId);
         const groupId = this.groupIdFromBytes(groupIdBytes);
+
+        // Record fingerprints for all group members (TOFU) using signature keys
+        const fingerprintWarnings = [];
+        if (info.members && Array.isArray(info.members)) {
+            for (const member of info.members) {
+                // Use signature_key_hex for fingerprinting (detects key changes)
+                if (!member?.signature_key_hex) continue;
+
+                try {
+                    // Identity is already a string from WASM (userId as UTF-8)
+                    const memberUserId = parseInt(member.identity, 10);
+
+                    // Skip self and invalid IDs
+                    if (isNaN(memberUserId) || memberUserId === parseInt(this.identityName, 10)) {
+                        continue;
+                    }
+
+                    const fingerprint = await this.extractFingerprintFromSignatureKey(member.signature_key_hex);
+                    if (fingerprint) {
+                        const result = await this.recordContactFingerprint(memberUserId, fingerprint);
+                        if (result.changed) {
+                            fingerprintWarnings.push({
+                                userId: memberUserId,
+                                previousFingerprint: result.previousFingerprint,
+                                currentFingerprint: fingerprint
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[MLS] Error extracting member fingerprint:', e);
+                }
+            }
+        }
+
+        // Store warnings in messagingStore for UI display
+        if (fingerprintWarnings.length > 0) {
+            console.warn('[MLS] SECURITY: Fingerprint changes detected for members:', fingerprintWarnings);
+            // Notify UI about fingerprint changes
+            try {
+                const { default: messagingStore } = await import('../../stores/messagingStore.js');
+                messagingStore.addFingerprintWarnings(fingerprintWarnings);
+            } catch (e) {
+                console.warn('[MLS] Could not notify UI of fingerprint warnings:', e);
+            }
+        }
 
         // Save state
         await this.saveState();
@@ -977,7 +1040,7 @@ class CoreCryptoClient {
     }
 
     rejectStagedWelcome(stagingId) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         this.client.reject_staged_welcome(stagingId);
     }
 
@@ -1031,7 +1094,7 @@ class CoreCryptoClient {
     // ===== END TWO-PHASE JOIN =====
 
     async regenerateKeyPackage() {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         this.client.regenerate_key_package();
         await this.ensureKeyPackagesFresh();
     }
@@ -1039,11 +1102,10 @@ class CoreCryptoClient {
     async sendMessage(groupId, plaintext) {
         await this.ensureReady();
         const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
-        const { deviceId } = await this.getAuthContext();
-        if (!deviceId) throw new Error('Device ID not available. Unlock or set up your keystore first.');
+        await this.requireDeviceId('Device ID not available. Unlock or set up your keystore first.');
 
         const plaintextBytes = new TextEncoder().encode(plaintext);
-        this.setGroupAad(groupId, 'application');
+        this.setGroupAad(groupIdValue, 'application');
         const ciphertextBytes = this.client.encrypt_message(groupIdBytes, plaintextBytes);
 
         const result = await this.mlsFetch('/messages/group', {
@@ -1071,8 +1133,7 @@ class CoreCryptoClient {
     async sendSystemMessage(groupId, payload) {
         await this.ensureReady();
         const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
-        const { deviceId } = await this.getAuthContext();
-        if (!deviceId) throw new Error('Device ID not available. Unlock or set up your keystore first.');
+        await this.requireDeviceId('Device ID not available. Unlock or set up your keystore first.');
 
         const plaintext = typeof payload === 'string' ? payload : JSON.stringify(payload);
         this.setGroupAad(groupIdValue, 'application');
@@ -1089,8 +1150,7 @@ class CoreCryptoClient {
     async selfUpdate(groupId) {
         await this.ensureReady();
         const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
-        const { deviceId } = await this.getAuthContext();
-        if (!deviceId) throw new Error('Device ID not available');
+        await this.requireDeviceId('Device ID not available');
 
         const rollbackState = await this.exportStateForVault();
         this.setGroupAad(groupIdValue, 'commit');
@@ -1122,8 +1182,7 @@ class CoreCryptoClient {
     async removeMember(groupId, leafIndex) {
         await this.ensureReady();
         const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
-        const { deviceId } = await this.getAuthContext();
-        if (!deviceId) throw new Error('Device ID not available');
+        await this.requireDeviceId('Device ID not available');
 
         const rollbackState = await this.exportStateForVault();
         this.setGroupAad(groupIdValue, 'commit');
@@ -1168,13 +1227,13 @@ class CoreCryptoClient {
     }
 
     getOwnLeafIndex(groupId) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
         return this.client.get_own_leaf_index(groupIdBytes);
     }
 
     getGroupConfirmationTag(groupId) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
         const tagBytes = this.client.get_group_confirmation_tag(groupIdBytes);
         return this.bytesToHex(tagBytes);
@@ -1267,7 +1326,7 @@ class CoreCryptoClient {
     }
 
     decryptMessage(groupId, ciphertext) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
         const ciphertextBytes = this._toBytes(ciphertext);
         const result = this.client.decrypt_message_with_aad(groupIdBytes, ciphertextBytes);
@@ -1335,7 +1394,7 @@ class CoreCryptoClient {
                         if (!validation.valid) {
                             console.warn('[MLS] Staged welcome failed validation:', validation.issues);
                             this.rejectStagedWelcome(staged.stagingId);
-                            if (messageId) this.processedMessageIds.add(messageId);
+                            this.markProcessed(messageId);
                             continue;
                         }
 
@@ -1409,11 +1468,11 @@ class CoreCryptoClient {
                             const groupId = await this.acceptStagedWelcome(staged.stagingId);
                             this.pendingWelcomes.delete(messageId);
                             this.welcomeHandlers.forEach(h => h({ groupId, groupInfoBytes }));
-                            if (messageId) this.processedMessageIds.add(messageId);
+                            this.markProcessed(messageId);
                         } else if (welcomeOutcome === 'rejected') {
                             this.rejectStagedWelcome(staged.stagingId);
                             this.pendingWelcomes.delete(messageId);
-                            if (messageId) this.processedMessageIds.add(messageId);
+                            this.markProcessed(messageId);
                         } else {
                             continue;
                         }
@@ -1456,7 +1515,7 @@ class CoreCryptoClient {
     }
 
     async handleIncomingMessage(messageData) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
 
         const { group_id, data, content_type, sender_id, sender_user_id, id } = messageData;
         const senderUserId = sender_user_id || sender_id;
@@ -1493,7 +1552,7 @@ class CoreCryptoClient {
                 });
                 if (!aadCheck.valid) {
                     console.warn('[MLS] Application AAD validation failed:', aadCheck.reason);
-                    if (id) this.processedMessageIds.add(id);
+                    this.markProcessed(id);
                     return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'invalid_aad', skipped: true };
                 }
             } catch (e) {
@@ -1511,7 +1570,7 @@ class CoreCryptoClient {
                 }
             }
 
-            if (id) this.processedMessageIds.add(id);
+            this.markProcessed(id);
 
             if (plaintext && plaintext !== '[Encrypted Message]') {
                 let payload = null;
@@ -1543,7 +1602,7 @@ class CoreCryptoClient {
             return messageObj;
         } else if (content_type === 'proposal') {
             const proposalResult = await this.processProposal(group_id, data);
-            if (id) this.processedMessageIds.add(id);
+            this.markProcessed(id);
             return {
                 id,
                 groupId: group_id,
@@ -1555,16 +1614,16 @@ class CoreCryptoClient {
             };
         } else if (content_type === 'commit') {
             await this.processCommit(group_id, data);
-            if (id) this.processedMessageIds.add(id);
+            this.markProcessed(id);
             return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'commit' };
         } else {
-            if (id) this.processedMessageIds.add(id);
+            this.markProcessed(id);
             return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'unknown' };
         }
     }
 
     async processCommit(groupId, commitData) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
         const commitBytes = this._toBytes(commitData);
         const summary = this.client.process_commit(groupIdBytes, commitBytes);
@@ -1626,7 +1685,7 @@ class CoreCryptoClient {
     }
 
     async processProposal(groupId, proposalData) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
         const proposalBytes = this._toBytes(proposalData);
         const summary = this.client.process_proposal(groupIdBytes, proposalBytes);
@@ -1665,7 +1724,7 @@ class CoreCryptoClient {
     }
 
     clearPendingProposals(groupId) {
-        if (!this.client) throw new Error('Client not initialized');
+        this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
         this.client.clear_pending_proposals(groupIdBytes);
     }
@@ -1874,6 +1933,200 @@ class CoreCryptoClient {
         return numStr.match(/.{1,5}/g)?.join(' ') || numStr;
     }
 
+    // ==================== Contact Fingerprint Methods (TOFU) ====================
+
+    /**
+     * Extract fingerprint from a user's signature key (from welcome/commit)
+     * Uses SHA-256 hash of the PUBLIC SIGNATURE KEY to detect key changes
+     * This is critical for TOFU - identity alone doesn't change when keys rotate
+     * @param {string} signatureKeyHex - The signature public key as hex string
+     * @returns {Promise<string|null>} - Hex fingerprint or null
+     */
+    async extractFingerprintFromSignatureKey(signatureKeyHex) {
+        if (!signatureKeyHex || signatureKeyHex.length === 0) return null;
+        try {
+            // Convert hex string to bytes
+            const keyBytes = new Uint8Array(
+                signatureKeyHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16))
+            );
+            // Hash the signature key using SHA-256 to create fingerprint
+            const hashBuffer = await window.crypto.subtle.digest('SHA-256', keyBytes);
+            const hashArray = new Uint8Array(hashBuffer);
+            // Convert to hex string (full 32 bytes = 64 hex chars for complete fingerprint)
+            return Array.from(hashArray)
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+        } catch (e) {
+            console.error('[MLS] Error extracting fingerprint from signature key:', e);
+            return null;
+        }
+    }
+
+    /**
+     * @deprecated Use extractFingerprintFromSignatureKey instead
+     * Kept for backwards compatibility but now delegates to signature key method
+     */
+    async extractFingerprintFromIdentity(identityBytes) {
+        console.warn('[MLS] extractFingerprintFromIdentity is deprecated, use extractFingerprintFromSignatureKey');
+        if (!identityBytes || identityBytes.length === 0) return null;
+        try {
+            // Hash the identity bytes using SHA-256 to create fingerprint
+            const hashBuffer = await window.crypto.subtle.digest('SHA-256', identityBytes);
+            const hashArray = new Uint8Array(hashBuffer);
+            // Convert to hex string (first 30 bytes = 60 hex chars)
+            return Array.from(hashArray.slice(0, 30))
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+        } catch (e) {
+            console.error('[MLS] Error extracting fingerprint from identity:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Get stored fingerprint for a contact from vault
+     * @param {number} contactUserId
+     * @returns {Promise<{fingerprint: string, status: string, verifiedAt: number|null}|null>}
+     */
+    async getContactFingerprint(contactUserId) {
+        try {
+            const vault = await this.getVaultService();
+            return await vault.getContactFingerprint(contactUserId);
+        } catch (e) {
+            console.warn('[MLS] Error getting contact fingerprint:', e);
+            return null;
+        }
+    }
+
+    /**
+     * Store a contact's fingerprint (TOFU - Trust on First Use)
+     * @param {number} contactUserId
+     * @param {string} fingerprint - Hex fingerprint
+     * @returns {Promise<{isNew: boolean, changed: boolean, previousFingerprint?: string}>}
+     */
+    async recordContactFingerprint(contactUserId, fingerprint) {
+        try {
+            const vault = await this.getVaultService();
+            const result = await vault.checkFingerprintChanged(contactUserId, fingerprint);
+
+            if (result.isNew) {
+                // First contact - TOFU
+                await vault.saveContactFingerprint(contactUserId, fingerprint);
+                console.log(`[MLS] TOFU: Recorded fingerprint for user ${contactUserId}`);
+                return { isNew: true, changed: false };
+            }
+
+            if (result.changed) {
+                // FINGERPRINT CHANGED - potential MITM!
+                await vault.updateContactFingerprint(contactUserId, fingerprint, result.previousFingerprint);
+                console.warn(`[MLS] WARNING: Fingerprint changed for user ${contactUserId}!`);
+                return { isNew: false, changed: true, previousFingerprint: result.previousFingerprint };
+            }
+
+            // Same fingerprint - no action needed
+            return { isNew: false, changed: false };
+        } catch (e) {
+            console.error('[MLS] Error recording contact fingerprint:', e);
+            return { isNew: false, changed: false, error: e.message };
+        }
+    }
+
+    /**
+     * Mark a contact as verified after out-of-band comparison
+     * @param {number} contactUserId
+     */
+    async verifyContact(contactUserId) {
+        try {
+            const vault = await this.getVaultService();
+            await vault.setContactVerified(contactUserId, true);
+            console.log(`[MLS] Contact ${contactUserId} marked as verified`);
+        } catch (e) {
+            console.error('[MLS] Error verifying contact:', e);
+            throw e;
+        }
+    }
+
+    /**
+     * Unmark a contact as verified
+     * @param {number} contactUserId
+     */
+    async unverifyContact(contactUserId) {
+        try {
+            const vault = await this.getVaultService();
+            await vault.setContactVerified(contactUserId, false);
+            console.log(`[MLS] Contact ${contactUserId} marked as unverified`);
+        } catch (e) {
+            console.error('[MLS] Error unverifying contact:', e);
+            throw e;
+        }
+    }
+
+    /**
+     * Get verification status for a contact
+     * @param {number} contactUserId
+     * @returns {Promise<'unverified'|'verified'|'changed'>}
+     */
+    async getContactVerificationStatus(contactUserId) {
+        try {
+            const vault = await this.getVaultService();
+            const record = await vault.getContactFingerprint(contactUserId);
+            return record?.status || 'unverified';
+        } catch (e) {
+            console.warn('[MLS] Error getting verification status:', e);
+            return 'unverified';
+        }
+    }
+
+    /**
+     * Check if a message sender's fingerprint has changed
+     * Called when processing incoming messages for MITM detection
+     * @param {number} senderId - Sender's user ID
+     * @param {Uint8Array} senderIdentity - Sender's identity bytes
+     * @returns {Promise<{warning: boolean, message?: string}>}
+     */
+    async checkSenderFingerprint(senderId, senderIdentity) {
+        if (!senderIdentity) return { warning: false };
+
+        try {
+            const currentFingerprint = await this.extractFingerprintFromIdentity(senderIdentity);
+            if (!currentFingerprint) return { warning: false };
+
+            const result = await this.recordContactFingerprint(senderId, currentFingerprint);
+
+            if (result.changed) {
+                return {
+                    warning: true,
+                    senderId,
+                    currentFingerprint,
+                    previousFingerprint: result.previousFingerprint,
+                    message: `Security warning: User ${senderId}'s encryption key has changed. ` +
+                             `This could indicate a security issue. Please verify their identity.`
+                };
+            }
+
+            return { warning: false };
+        } catch (e) {
+            console.error('[MLS] Error checking sender fingerprint:', e);
+            return { warning: false };
+        }
+    }
+
+    /**
+     * Get all contact fingerprints for current device
+     * @returns {Promise<Array>}
+     */
+    async getAllContactFingerprints() {
+        try {
+            const vault = await this.getVaultService();
+            return await vault.getAllContactFingerprints();
+        } catch (e) {
+            console.warn('[MLS] Error getting all contact fingerprints:', e);
+            return [];
+        }
+    }
+
+    // ==================== End Contact Fingerprint Methods ====================
+
     wipeMemory() {
         this.cleanupSocketListeners();
         if (this.client) { try { this.client.free(); } catch (e) {} }
@@ -1939,7 +2192,7 @@ class CoreCryptoClient {
 
         // Ack first so server registers us as member before any messages are sent
         await api.mls.ackMessages([pendingId]);
-        this.processedMessageIds.add(pendingId);
+        this.markProcessed(pendingId);
         this.pendingWelcomes.delete(pendingId);
 
         const groupId = await this.acceptStagedWelcome(stagingId);
@@ -1958,7 +2211,7 @@ class CoreCryptoClient {
         }
         this.pendingWelcomes.delete(pendingId);
         await api.mls.ackMessages([pendingId]);
-        this.processedMessageIds.add(pendingId);
+        this.markProcessed(pendingId);
     }
 
     async fetchAndDecryptMessages(groupId) {
