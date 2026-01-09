@@ -20,10 +20,16 @@ const vaultStore = vanX.reactive({
     showUnlockModal: false,      // Show passphrase entry modal
     showSetupModal: false,       // Show first-time setup modal
     showMigrationModal: false,   // Show password migration modal (unlock failed but vaults exist)
+    showDeviceLinkModal: false,  // Show device linking modal (new device needs verification)
 
     // Error state
     unlockError: '',             // Error message from failed unlock attempt
     setupError: '',              // Error message from failed setup
+
+    // Device linking state
+    deviceLinkToken: null,       // Token for device linking flow
+    deviceLinkExpiry: null,      // Token expiration time
+    deviceLinkError: '',         // Error message from device linking
 
     // User context
     userId: null,                // Current user ID (for per-user vaults)
@@ -63,6 +69,22 @@ const vaultStore = vanX.reactive({
         vaultStore.showMigrationModal = show;
     },
 
+    setShowDeviceLinkModal(show) {
+        vaultStore.showDeviceLinkModal = show;
+        if (show) {
+            vaultStore.deviceLinkError = '';
+        }
+    },
+
+    setDeviceLinkToken(token, expiresAt) {
+        vaultStore.deviceLinkToken = token;
+        vaultStore.deviceLinkExpiry = expiresAt ? new Date(expiresAt) : null;
+    },
+
+    setDeviceLinkError(error) {
+        vaultStore.deviceLinkError = error;
+    },
+
     setUnlockError(error) {
         vaultStore.unlockError = error;
     },
@@ -97,8 +119,12 @@ const vaultStore = vanX.reactive({
         vaultStore.showUnlockModal = false;
         vaultStore.showSetupModal = false;
         vaultStore.showMigrationModal = false;
+        vaultStore.showDeviceLinkModal = false;
         vaultStore.unlockError = '';
         vaultStore.setupError = '';
+        vaultStore.deviceLinkToken = null;
+        vaultStore.deviceLinkExpiry = null;
+        vaultStore.deviceLinkError = '';
         vaultStore.userId = null;
         vaultStore.lastActivity = Date.now();
     }

@@ -15,10 +15,11 @@ import { api } from './api.js';
 let wasmInitialized = false;
 
 const KEYSTORE_DB_NAME = 'intellacc_keystore';
-const KEYSTORE_DB_VERSION = 7; // Bump for Granular MLS Storage
+const KEYSTORE_DB_VERSION = 8; // Bump for Contact Fingerprints (TOFU)
 const KEYSTORE_STORE_NAME = 'device_keystore';
 const MESSAGES_STORE_NAME = 'encrypted_messages';
 const MLS_GRANULAR_STORE_NAME = 'mls_granular_storage';
+const CONTACT_FINGERPRINTS_STORE = 'contact_fingerprints';
 
 class VaultService {
     constructor() {
@@ -90,6 +91,13 @@ class VaultService {
                     store.createIndex('deviceId', 'deviceId', { unique: false });
                     store.createIndex('category', 'category', { unique: false });
                 }
+                // V8: Contact fingerprints for TOFU (Trust on First Use) verification
+                if (!db.objectStoreNames.contains(CONTACT_FINGERPRINTS_STORE)) {
+                    const store = db.createObjectStore(CONTACT_FINGERPRINTS_STORE, { keyPath: 'id' });
+                    store.createIndex('contactUserId', 'contactUserId', { unique: false });
+                    store.createIndex('status', 'status', { unique: false });
+                    store.createIndex('deviceId', 'deviceId', { unique: false });
+                }
             };
         });
     }
@@ -99,8 +107,21 @@ class VaultService {
         return new Promise((resolve) => {
             const tx = this.db.transaction([KEYSTORE_STORE_NAME], 'readonly');
             const req = tx.objectStore(KEYSTORE_STORE_NAME).getAllKeys();
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => resolve([]);
+            req.onsuccess = () => {
+                const ids = req.result || [];
+                // Also include device_public_id from localStorage (used for device linking)
+                // This is set by DeviceLinkModal when a new device starts the linking process
+                const linkedDeviceId = localStorage.getItem('device_public_id');
+                if (linkedDeviceId && !ids.includes(linkedDeviceId)) {
+                    ids.push(linkedDeviceId);
+                }
+                resolve(ids);
+            };
+            req.onerror = () => {
+                // Still try localStorage even if IndexedDB fails
+                const linkedDeviceId = localStorage.getItem('device_public_id');
+                resolve(linkedDeviceId ? [linkedDeviceId] : []);
+            };
         });
     }
 
@@ -568,6 +589,331 @@ class VaultService {
             tx.onerror = () => reject(tx.error);
         });
     }
+
+    // ==================== Contact Fingerprints (TOFU) ====================
+
+    /**
+     * Save a contact's fingerprint for TOFU verification
+     * @param {number} contactUserId - The contact's user ID
+     * @param {string} fingerprint - Hex fingerprint string
+     * @returns {Promise<void>}
+     */
+    async saveContactFingerprint(contactUserId, fingerprint) {
+        if (!this.compositeKey || !this.deviceId) {
+            console.warn('[Vault] saveContactFingerprint skipped (vault locked)');
+            return;
+        }
+
+        await this.initDB();
+
+        const record = {
+            id: `contact:${this.deviceId}:${contactUserId}`,
+            deviceId: this.deviceId,
+            contactUserId,
+            fingerprint,
+            firstSeenAt: Date.now(),
+            verifiedAt: null,
+            status: 'unverified',
+            previousFingerprint: null
+        };
+
+        // Encrypt the record
+        const payload = JSON.stringify(record);
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+        const encrypted = await window.crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            this.compositeKey,
+            new TextEncoder().encode(payload)
+        );
+
+        const encryptedRecord = {
+            id: record.id,
+            deviceId: this.deviceId,
+            contactUserId,
+            encryptedValue: {
+                iv: Array.from(iv),
+                ciphertext: Array.from(new Uint8Array(encrypted))
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction([CONTACT_FINGERPRINTS_STORE], 'readwrite');
+            const store = tx.objectStore(CONTACT_FINGERPRINTS_STORE);
+            store.put(encryptedRecord);
+            tx.oncomplete = () => {
+                console.log(`[Vault] Saved fingerprint for contact ${contactUserId}`);
+                resolve();
+            };
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
+    /**
+     * Get a contact's fingerprint from vault
+     * @param {number} contactUserId - The contact's user ID
+     * @returns {Promise<{contactUserId, fingerprint, status, verifiedAt, firstSeenAt, previousFingerprint}|null>}
+     */
+    async getContactFingerprint(contactUserId) {
+        if (!this.compositeKey || !this.deviceId) {
+            return null;
+        }
+
+        await this.initDB();
+
+        const recordId = `contact:${this.deviceId}:${contactUserId}`;
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction([CONTACT_FINGERPRINTS_STORE], 'readonly');
+            const store = tx.objectStore(CONTACT_FINGERPRINTS_STORE);
+            const req = store.get(recordId);
+
+            req.onsuccess = async () => {
+                const record = req.result;
+                if (!record || !record.encryptedValue) {
+                    return resolve(null);
+                }
+
+                try {
+                    const iv = new Uint8Array(record.encryptedValue.iv);
+                    const ciphertext = new Uint8Array(record.encryptedValue.ciphertext);
+                    const decrypted = await window.crypto.subtle.decrypt(
+                        { name: 'AES-GCM', iv },
+                        this.compositeKey,
+                        ciphertext
+                    );
+                    const data = JSON.parse(new TextDecoder().decode(decrypted));
+                    resolve(data);
+                } catch (e) {
+                    console.warn('[Vault] Failed to decrypt contact fingerprint:', e);
+                    resolve(null);
+                }
+            };
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    /**
+     * Update a contact's fingerprint (called when fingerprint changes - potential MITM)
+     * @param {number} contactUserId - The contact's user ID
+     * @param {string} newFingerprint - New hex fingerprint
+     * @param {string} previousFingerprint - Previous hex fingerprint
+     * @returns {Promise<void>}
+     */
+    async updateContactFingerprint(contactUserId, newFingerprint, previousFingerprint) {
+        if (!this.compositeKey || !this.deviceId) {
+            console.warn('[Vault] updateContactFingerprint skipped (vault locked)');
+            return;
+        }
+
+        // Get existing record to preserve firstSeenAt
+        const existing = await this.getContactFingerprint(contactUserId);
+
+        await this.initDB();
+
+        const record = {
+            id: `contact:${this.deviceId}:${contactUserId}`,
+            deviceId: this.deviceId,
+            contactUserId,
+            fingerprint: newFingerprint,
+            firstSeenAt: existing?.firstSeenAt || Date.now(),
+            verifiedAt: null, // Reset verification on change
+            status: 'changed',
+            previousFingerprint
+        };
+
+        // Encrypt the record
+        const payload = JSON.stringify(record);
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+        const encrypted = await window.crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            this.compositeKey,
+            new TextEncoder().encode(payload)
+        );
+
+        const encryptedRecord = {
+            id: record.id,
+            deviceId: this.deviceId,
+            contactUserId,
+            status: 'changed', // Store status unencrypted for indexing
+            encryptedValue: {
+                iv: Array.from(iv),
+                ciphertext: Array.from(new Uint8Array(encrypted))
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction([CONTACT_FINGERPRINTS_STORE], 'readwrite');
+            const store = tx.objectStore(CONTACT_FINGERPRINTS_STORE);
+            store.put(encryptedRecord);
+            tx.oncomplete = () => {
+                console.warn(`[Vault] Updated fingerprint for contact ${contactUserId} (CHANGED!)`);
+                resolve();
+            };
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
+    /**
+     * Set a contact's verification status
+     * @param {number} contactUserId - The contact's user ID
+     * @param {boolean} verified - Whether the contact is verified
+     * @returns {Promise<void>}
+     */
+    async setContactVerified(contactUserId, verified) {
+        if (!this.compositeKey || !this.deviceId) {
+            console.warn('[Vault] setContactVerified skipped (vault locked)');
+            return;
+        }
+
+        // Get existing record
+        const existing = await this.getContactFingerprint(contactUserId);
+        if (!existing) {
+            console.warn(`[Vault] Cannot verify unknown contact ${contactUserId}`);
+            return;
+        }
+
+        await this.initDB();
+
+        const record = {
+            ...existing,
+            id: `contact:${this.deviceId}:${contactUserId}`,
+            status: verified ? 'verified' : 'unverified',
+            verifiedAt: verified ? Date.now() : null
+        };
+
+        // Encrypt the record
+        const payload = JSON.stringify(record);
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+        const encrypted = await window.crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            this.compositeKey,
+            new TextEncoder().encode(payload)
+        );
+
+        const encryptedRecord = {
+            id: record.id,
+            deviceId: this.deviceId,
+            contactUserId,
+            status: record.status, // Store status unencrypted for indexing
+            encryptedValue: {
+                iv: Array.from(iv),
+                ciphertext: Array.from(new Uint8Array(encrypted))
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction([CONTACT_FINGERPRINTS_STORE], 'readwrite');
+            const store = tx.objectStore(CONTACT_FINGERPRINTS_STORE);
+            store.put(encryptedRecord);
+            tx.oncomplete = () => {
+                console.log(`[Vault] Contact ${contactUserId} marked as ${record.status}`);
+                resolve();
+            };
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
+    /**
+     * Get all contact fingerprints for current device
+     * @returns {Promise<Array<{contactUserId, fingerprint, status, verifiedAt, firstSeenAt}>>}
+     */
+    async getAllContactFingerprints() {
+        if (!this.compositeKey || !this.deviceId) {
+            return [];
+        }
+
+        await this.initDB();
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction([CONTACT_FINGERPRINTS_STORE], 'readonly');
+            const store = tx.objectStore(CONTACT_FINGERPRINTS_STORE);
+            const index = store.index('deviceId');
+            const req = index.getAll(this.deviceId);
+
+            req.onsuccess = async () => {
+                const records = req.result || [];
+                const fingerprints = [];
+
+                for (const record of records) {
+                    if (!record.encryptedValue) continue;
+
+                    try {
+                        const iv = new Uint8Array(record.encryptedValue.iv);
+                        const ciphertext = new Uint8Array(record.encryptedValue.ciphertext);
+                        const decrypted = await window.crypto.subtle.decrypt(
+                            { name: 'AES-GCM', iv },
+                            this.compositeKey,
+                            ciphertext
+                        );
+                        const data = JSON.parse(new TextDecoder().decode(decrypted));
+                        fingerprints.push(data);
+                    } catch (e) {
+                        console.warn('[Vault] Failed to decrypt contact fingerprint:', record.id, e);
+                    }
+                }
+
+                resolve(fingerprints);
+            };
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    /**
+     * Check if a contact's fingerprint has changed
+     * @param {number} contactUserId - The contact's user ID
+     * @param {string} currentFingerprint - Current fingerprint to check
+     * @returns {Promise<{isNew: boolean, changed: boolean, previousFingerprint?: string}>}
+     */
+    async checkFingerprintChanged(contactUserId, currentFingerprint) {
+        const existing = await this.getContactFingerprint(contactUserId);
+
+        if (!existing) {
+            // First contact - TOFU
+            return { isNew: true, changed: false };
+        }
+
+        if (existing.fingerprint !== currentFingerprint) {
+            // Fingerprint changed - potential MITM!
+            return {
+                isNew: false,
+                changed: true,
+                previousFingerprint: existing.fingerprint
+            };
+        }
+
+        return { isNew: false, changed: false };
+    }
+
+    /**
+     * Clear all contact fingerprints for current device
+     * Called on logout or device reset
+     */
+    async clearContactFingerprints() {
+        if (!this.deviceId) return;
+
+        await this.initDB();
+
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction([CONTACT_FINGERPRINTS_STORE], 'readwrite');
+            const store = tx.objectStore(CONTACT_FINGERPRINTS_STORE);
+            const index = store.index('deviceId');
+            const req = index.getAllKeys(this.deviceId);
+
+            req.onsuccess = () => {
+                const keys = req.result || [];
+                for (const key of keys) {
+                    store.delete(key);
+                }
+            };
+            tx.oncomplete = () => {
+                console.log('[Vault] Cleared contact fingerprints');
+                resolve();
+            };
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
+    // ==================== End Contact Fingerprints ====================
 
     async deriveWrappingKey(password, salt) {
         if (!wasmInitialized) { await init(); wasmInitialized = true; }

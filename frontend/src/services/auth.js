@@ -11,8 +11,8 @@ import coreCryptoClient from './mls/coreCryptoClient';
 import vaultStore from '../stores/vaultStore';
 import vaultService from './vaultService';
 import { initIdleAutoLock, stopIdleAutoLock, loadIdleLockConfig } from './idleLock';
-import { 
-  getToken, 
+import {
+  getToken,
   saveToken, 
   clearToken, 
   getTokenData, 
@@ -24,6 +24,16 @@ import {
 
 // Re-export token states for components that expect them from auth.js
 export { isLoggedInState, tokenState, getToken, saveToken, clearToken, getTokenData, isTokenExpired, getUserId };
+
+// Helper to check if error is a device verification requirement
+function isLinkRequiredError(e) {
+    return (
+        (e.status === 403 && e.data?.code === 'LINK_REQUIRED') ||
+        (e.status === 403 && e.message?.includes('Device verification')) ||
+        e.message?.includes('Device verification required') ||
+        e.data?.code === 'LINK_REQUIRED'
+    );
+}
 
 export const userProfileState = van.state(null);
 export const isAdminState = van.state(false);
@@ -76,7 +86,13 @@ export async function onLoginSuccess(password = null) {
         // If unlock fails (returns false/throws), it means no vault exists for this user/password combo.
         // So we proceed to setup a new one.
         
+        // Staged Login Flow: Device verification happens BEFORE password entry
+        // So by this point, the device should already be verified and device_public_id
+        // should be in localStorage. If we get LINK_REQUIRED here, it means the
+        // device_public_id was cleared (e.g., browser data cleared after verification).
+
         let unlocked = false;
+
         if (password) {
             try {
                 // Try to find and unlock a vault for this user
@@ -84,7 +100,20 @@ export async function onLoginSuccess(password = null) {
                 console.log('Vault unlocked automatically');
                 unlocked = true;
             } catch (e) {
-                console.log('[Vault] No existing vault found or unlock failed; will create new vault');
+                // Check if this is a device verification requirement
+                const isLinkRequired = (
+                    (e.status === 403 && e.data?.code === 'LINK_REQUIRED') ||
+                    (e.status === 403 && e.message?.includes('Device verification')) ||
+                    e.message?.includes('Device verification required') ||
+                    e.data?.code === 'LINK_REQUIRED'
+                );
+                if (isLinkRequired) {
+                    // This shouldn't happen with staged login flow, but handle gracefully
+                    console.warn('[Vault] Device verification required unexpectedly - please log in again');
+                    throw new Error('Device verification expired. Please log in again.');
+                } else {
+                    console.log('[Vault] No existing vault found or unlock failed; will create new vault', e.message);
+                }
             }
         }
 
@@ -96,19 +125,22 @@ export async function onLoginSuccess(password = null) {
                 try {
                     await vaultService.setupKeystoreWithPassword(password);
                 } catch (e) {
+                    if (isLinkRequiredError(e)) {
+                        throw new Error('Device verification expired. Please log in again.');
+                    }
                     console.error('Vault setup failed:', e);
                 }
             } else if (hasVaults) {
                 // Vaults exist but unlock failed with correct password.
                 // This means the vaults belong to a different user (different userId in encrypted state).
-                // Since password is correct (verified via login), we can safely set up a new keystore.
-                // The old vaults will be overwritten - they don't belong to this user anyway.
                 console.log('Unlock failed but vaults exist (different user). Setting up fresh keystore...');
                 try {
                     await vaultService.setupKeystoreWithPassword(password);
                 } catch (e) {
+                    if (isLinkRequiredError(e)) {
+                        throw new Error('Device verification expired. Please log in again.');
+                    }
                     console.error('Vault setup failed:', e);
-                    // Fall back to migration modal if setup fails
                     vaultStore.setVaultExists(true);
                     vaultStore.setShowMigrationModal(true);
                 }
@@ -117,6 +149,9 @@ export async function onLoginSuccess(password = null) {
                 try {
                     await vaultService.setupKeystoreWithPassword(password);
                 } catch (e) {
+                    if (isLinkRequiredError(e)) {
+                        throw new Error('Device verification expired. Please log in again.');
+                    }
                     console.error('Vault setup failed:', e);
                 }
             }
