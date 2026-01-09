@@ -197,6 +197,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/metaculus/sync-categories", get(manual_category_sync))
         // LMSR Market API endpoints
         .route("/events/:id/market", get(get_market_state_endpoint))
+        .route("/events/:id/trades", get(get_event_trades_endpoint))
         .route("/events/:id/update", post(update_market_endpoint))
         .route("/events/:id/kelly", get(kelly_suggestion_endpoint))
         .route("/events/:id/sell", post(sell_shares_endpoint))
@@ -241,6 +242,7 @@ async fn main() -> anyhow::Result<()> {
     println!("  GET /metaculus/bulk-import - Complete import of ALL Metaculus questions");
     println!("  GET /metaculus/sync-categories - Manual category sync");
     println!("  GET /events/:id/market - Get market state for event");
+    println!("  GET /events/:id/trades - Get recent trades for event");
     println!("  POST /events/:id/update - Update market with stake");
     println!("  GET /events/:id/kelly - Get Kelly criterion suggestion");
     println!("  POST /events/:id/sell - Sell shares back to market");
@@ -691,6 +693,25 @@ async fn get_market_state_endpoint(
     match lmsr_api::get_market_state(&app_state.db, event_id).await {
         Ok(market_state) => Ok(Json(market_state)),
         Err(e) => Err(internal_error(&format!("Market state error: {}", e)))
+    }
+}
+
+// Get recent trades for an event
+async fn get_event_trades_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    Query(params): Query<HashMap<String, String>>,
+) -> ApiResult<Value> {
+    let limit: i32 = params.get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50);
+
+    // Cap at 100 trades max
+    let limit = limit.min(100);
+
+    match lmsr_api::get_event_trades(&app_state.db, event_id, limit).await {
+        Ok(trades) => Ok(Json(trades)),
+        Err(e) => Err(internal_error(&format!("Trades fetch error: {}", e)))
     }
 }
 

@@ -16,6 +16,8 @@ if (chromiumPath && fs.existsSync(chromiumPath)) {
 const config = {
   testDir: 'tests/e2e',
   timeout: 60_000,
+  // Serial by default to avoid shared test-user resets colliding across files.
+  workers: 1,
   use: {
     baseURL,
     browserName: 'chromium',
