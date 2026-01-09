@@ -523,14 +523,14 @@ const VerificationStatus = ({ user }) => {
 
 ## Implementation Roadmap
 
-### Phase 1: Email Verification (2-3 days)
-- [ ] Create migration
-- [ ] Implement emailVerificationService
-- [ ] Add endpoints
-- [ ] Create frontend components
-- [ ] Update signup flow to send verification
-- [ ] Gate posting behind Tier 1
-- [ ] Add verification banner
+### Phase 1: Email Verification ✅ COMPLETE (Jan 9, 2026)
+- [x] Create migration (`20260110_add_user_verifications.sql`)
+- [x] Implement emailVerificationService
+- [x] Add endpoints (`/auth/verify-email/*`, `/verification/status`)
+- [x] Create frontend components (`VerificationStatus`, `EmailVerification`, `VerifyEmailPage`, `VerificationBanner`)
+- [x] Update signup flow to send verification
+- [x] Gate posting behind Tier 1 (`requireEmailVerified` middleware)
+- [x] Add verification banner (component created)
 
 ### Phase 2: Phone Verification (2-3 days)
 - [ ] Set up Twilio Verify
