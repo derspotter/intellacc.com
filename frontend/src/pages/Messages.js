@@ -8,7 +8,7 @@ import messagingStore from '../stores/messagingStore.js';
 import coreCryptoClient from '../services/mls/coreCryptoClient.js';
 import vaultStore from '../stores/vaultStore.js';
 import { api } from '../services/api.js';
-import { SafetyNumbersButton } from '../components/SafetyNumbers.js';
+import { SafetyNumbersButton, ContactVerifyButton, VerificationBadge, FingerprintWarningBanner, ContactVerificationModal } from '../components/SafetyNumbers.js';
 import { NewConversationPanel } from '../components/UserSearch.js';
 
 // Pending fetch promises (not sensitive data, just coordination)
@@ -81,6 +81,8 @@ export default function MessagesPage() {
   const showInviteForm = van.state(false);
   // Local state for showing inline new conversation panel
   const showNewConvoPanel = van.state(false);
+  // Local state for fingerprint verification modal (userId to verify, null if closed)
+  const verifyingUserId = van.state(null);
 
   // Initialize MLS messaging
   const initialize = async () => {
@@ -457,7 +459,9 @@ export default function MessagesPage() {
                       div({ class: "conversation-info" }, [
                         div({ class: "conversation-name" }, [
                           span({ class: "lock-icon" }, "\uD83D\uDD12 "),
-                          item.name
+                          item.name,
+                          // Verification badge for DM contacts
+                          item.otherUserId ? VerificationBadge({ contactUserId: item.otherUserId }) : null
                         ])
                       ])
                     ]))
@@ -523,6 +527,11 @@ export default function MessagesPage() {
               ]),
               div({ class: "chat-header-actions" }, [
                 SafetyNumbersButton(),
+                // Show contact verify button for DMs
+                isDm && dmInfo?.other_user_id ? ContactVerifyButton({
+                  contactUserId: dmInfo.other_user_id,
+                  contactUsername: dmInfo.other_username || 'Contact'
+                }) : null,
                 // Only show invite button for groups, not DMs
                 isDm ? null : button({
                   class: "btn btn-sm",
@@ -530,6 +539,38 @@ export default function MessagesPage() {
                 }, "+ Invite")
               ])
             ]),
+
+            // Fingerprint warning banners (TOFU security alerts)
+            () => {
+              const warnings = messagingStore.fingerprintWarnings || [];
+              if (warnings.length === 0) return null;
+              return div({ class: "fingerprint-warnings" },
+                warnings.map(warning => FingerprintWarningBanner({
+                  message: `Security alert: User ${warning.userId}'s encryption key has changed!`,
+                  onDismiss: () => messagingStore.dismissFingerprintWarning(warning.userId),
+                  onVerify: () => {
+                    // Open verification modal for this user
+                    verifyingUserId.val = warning.userId;
+                  }
+                }))
+              );
+            },
+
+            // Verification modal for fingerprint warnings
+            () => {
+              if (!verifyingUserId.val) return null;
+              return ContactVerificationModal({
+                contactUserId: verifyingUserId.val,
+                contactUsername: `User ${verifyingUserId.val}`,
+                onClose: () => {
+                  verifyingUserId.val = null;
+                },
+                onVerify: () => {
+                  messagingStore.dismissFingerprintWarning(verifyingUserId.val);
+                  verifyingUserId.val = null;
+                }
+              });
+            },
 
             // Invite form - always rendered but hidden via CSS class
             div({

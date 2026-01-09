@@ -42,6 +42,9 @@ const messagingStore = vanX.reactive({
   dmSearchResults: [],              // Search results for starting DM
   showDmModal: false,               // Show the DM user search modal
 
+  // Fingerprint warnings (TOFU security alerts)
+  fingerprintWarnings: [],          // Array of {userId, previousFingerprint, currentFingerprint}
+
   // Typing indicators - use array instead of Set for VanX compatibility
   typingUsers: [],
 
@@ -403,6 +406,26 @@ const messagingStore = vanX.reactive({
     }
   },
 
+  // Fingerprint warning methods (TOFU security)
+  addFingerprintWarnings(warnings) {
+    if (!warnings || warnings.length === 0) return;
+    // Add new warnings, avoiding duplicates by userId
+    const existingUserIds = new Set(messagingStore.fingerprintWarnings.map(w => w.userId));
+    const newWarnings = warnings.filter(w => !existingUserIds.has(w.userId));
+    if (newWarnings.length > 0) {
+      messagingStore.fingerprintWarnings = [...messagingStore.fingerprintWarnings, ...newWarnings];
+      console.log('[MessagingStore] Added fingerprint warnings:', newWarnings);
+    }
+  },
+
+  dismissFingerprintWarning(userId) {
+    messagingStore.fingerprintWarnings = messagingStore.fingerprintWarnings.filter(w => w.userId !== userId);
+  },
+
+  clearFingerprintWarnings() {
+    messagingStore.fingerprintWarnings = [];
+  },
+
   clearCache() {
     // SECURITY: Clear all potentially sensitive data from memory
     messagingStore.conversations = [];
@@ -423,6 +446,8 @@ const messagingStore = vanX.reactive({
     messagingStore.dmSearchQuery = '';
     messagingStore.dmSearchResults = [];
     messagingStore.showDmModal = false;
+    // Clear fingerprint warnings
+    messagingStore.fingerprintWarnings = [];
     // Clear user cache
     messagingStore.userNameCache = {};
     messagingStore.currentUserId = null;
