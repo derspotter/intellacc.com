@@ -1,367 +1,582 @@
-# Tiered Identity Verification System Implementation Plan
+# Tiered Identity Verification + AI Detection System
 
 ## Overview
-This plan introduces a 4-tier verification system to progressively build trust, enable high-stakes features, and prevent Sybil attacks. The system is designed to be modular, allowing users to unlock capabilities as they verify their identity.
+
+A 3-tier verification system combined with AI content detection to:
+1. Prevent spam accounts
+2. Achieve sybil resistance (1 phone = 1 account)
+3. Prove financial identity (payment method = real person)
+4. Detect and flag AI-generated content
+
+**No real money involved** - this is purely for identity assurance and bot prevention.
 
 ---
 
-## Tier Summary
+## System Components
 
-| Tier | Method | Unlocks | Cost |
+### Verification Tiers
+
+| Tier | Method | Purpose | Cost |
 |------|--------|---------|------|
-| 0 | None | Read-only | Free |
-| 1 | Email | Posting, commenting, basic messaging | ~Free |
-| 2 | Phone (SMS/TOTP) | Prediction markets participation | ~$0.05/verify |
-| 3 | Identity (KYC) | Withdrawals, payouts | ~$1.50-5.00/verify |
-| 4 | Proof of Human | High-stakes markets, governance | Free (World ID) |
+| 0 | None | Read-only access | Free |
+| 1 | Email | Spam prevention, account recovery | Free |
+| 2 | Phone (hashed) | Sybil resistance, 1 phone = 1 account | ~$0.05 |
+| 3 | Payment Method | Financial identity = real person | ~$0.50-1 |
+
+### AI Content Detection (Pangram)
+
+All user-generated content is analyzed for AI generation:
+- Posts
+- Comments
+- Messages (if not E2EE)
+- Profile bios
 
 ---
 
-## Database Schema Changes
+## Feature Gating
 
-### 1. New Table: `user_verifications`
-Tracks the granular status of each verification attempt.
+| Feature | Required Tier |
+|---------|---------------|
+| Read content | 0 (none) |
+| Create account | 0 (none) |
+| Post, comment | 1 (email) |
+| Send messages | 1 (email) |
+| Prediction markets | 2 (phone) |
+| Create markets | 3 (payment) |
+| Governance voting | 3 (payment) |
+
+---
+
+## Database Schema
+
+### Migration: `add_user_verifications.sql`
 
 ```sql
+-- Verification tracking table
 CREATE TABLE user_verifications (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    tier_level INTEGER NOT NULL CHECK (tier_level BETWEEN 1 AND 4),
-    verification_type VARCHAR(50) NOT NULL, -- 'email', 'phone', 'document', 'biometric'
-    provider VARCHAR(50), -- 'internal', 'twilio', 'stripe', 'worldcoin'
+    tier INTEGER NOT NULL CHECK (tier BETWEEN 1 AND 3),
+    verification_type VARCHAR(50) NOT NULL, -- 'email', 'phone', 'payment'
+    provider VARCHAR(50) NOT NULL, -- 'internal', 'twilio', 'stripe', 'paypal'
     status VARCHAR(20) NOT NULL DEFAULT 'pending', -- 'pending', 'verified', 'failed', 'revoked'
-    provider_id VARCHAR(255), -- External reference ID (e.g., Stripe verification session ID)
-    metadata JSONB, -- Store provider-specific details (non-sensitive)
+    provider_id VARCHAR(255), -- External reference ID
     verified_at TIMESTAMP,
-    expires_at TIMESTAMP, -- For documents that expire
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(user_id, tier_level)
+    updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_user_verifications_user ON user_verifications(user_id);
-CREATE INDEX idx_user_verifications_status ON user_verifications(status);
-```
+-- Enforce sequential tiers: can't verify tier N without tier N-1
+CREATE UNIQUE INDEX idx_user_verifications_user_tier ON user_verifications(user_id, tier);
 
-### 2. Update `users` Table
-Add a summary column for performance in permission checks.
+-- Phone uniqueness for sybil resistance (store hash only)
+CREATE TABLE phone_hashes (
+    id SERIAL PRIMARY KEY,
+    phone_hash VARCHAR(64) NOT NULL UNIQUE, -- SHA-256 of normalized E.164 number
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
 
-```sql
+-- Payment method verification (no sensitive data stored)
+CREATE TABLE payment_verifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(20) NOT NULL, -- 'stripe', 'paypal'
+    provider_customer_id VARCHAR(255), -- Stripe customer ID or PayPal payer ID
+    verification_method VARCHAR(50), -- 'card_check', 'micro_deposit', 'paypal_auth'
+    verified_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- AI detection results
+CREATE TABLE content_ai_analysis (
+    id SERIAL PRIMARY KEY,
+    content_type VARCHAR(20) NOT NULL, -- 'post', 'comment', 'bio'
+    content_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ai_probability DECIMAL(5,4), -- 0.0000 to 1.0000
+    detected_model VARCHAR(50), -- 'chatgpt', 'claude', 'gemini', etc.
+    is_flagged BOOLEAN DEFAULT FALSE,
+    analyzed_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_ai_analysis_flagged ON content_ai_analysis(is_flagged) WHERE is_flagged = TRUE;
+
+-- Update users table
 ALTER TABLE users
 ADD COLUMN verification_tier INTEGER DEFAULT 0,
-ADD COLUMN is_email_verified BOOLEAN DEFAULT FALSE,
-ADD COLUMN phone_number VARCHAR(20); -- E.164 format
+ADD COLUMN email_verified_at TIMESTAMP,
+ADD COLUMN ai_flag_count INTEGER DEFAULT 0;
 ```
 
 ---
 
-## Tier 1: Email Verification (Basic)
+## Tier 1: Email Verification
 
-**Requirement for:** Posting, commenting, basic messaging.
+### Flow
+1. User registers with email
+2. System sends verification link (JWT token, 24h expiry)
+3. User clicks link → email verified
+4. User can now post/comment/message
 
 ### Backend Implementation
 
-#### Email Service (`backend/src/services/emailService.js`)
 ```javascript
+// backend/src/services/emailVerificationService.js
+const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: process.env.SMTP_PORT,
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-    }
-});
+const EMAIL_TOKEN_SECRET = process.env.EMAIL_TOKEN_SECRET;
+const EMAIL_TOKEN_EXPIRY = '24h';
 
-exports.sendVerificationEmail = async (email, token) => {
+exports.sendVerificationEmail = async (userId, email) => {
+    const token = jwt.sign({ userId, email, purpose: 'email_verify' }, EMAIL_TOKEN_SECRET, { expiresIn: EMAIL_TOKEN_EXPIRY });
+
     const verifyUrl = `${process.env.FRONTEND_URL}/#verify-email?token=${token}`;
 
     await transporter.sendMail({
         from: '"Intellacc" <noreply@intellacc.com>',
         to: email,
-        subject: 'Verify your email address',
+        subject: 'Verify your Intellacc account',
         html: `
             <h1>Welcome to Intellacc!</h1>
-            <p>Click the link below to verify your email:</p>
-            <a href="${verifyUrl}">${verifyUrl}</a>
+            <p>Click below to verify your email:</p>
+            <a href="${verifyUrl}" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px;">Verify Email</a>
             <p>This link expires in 24 hours.</p>
         `
     });
 };
+
+exports.verifyEmailToken = async (token) => {
+    const decoded = jwt.verify(token, EMAIL_TOKEN_SECRET);
+
+    await db.query(`
+        INSERT INTO user_verifications (user_id, tier, verification_type, provider, status, verified_at)
+        VALUES ($1, 1, 'email', 'internal', 'verified', NOW())
+        ON CONFLICT (user_id, tier) DO UPDATE SET status = 'verified', verified_at = NOW()
+    `, [decoded.userId]);
+
+    await db.query(`
+        UPDATE users SET verification_tier = GREATEST(verification_tier, 1), email_verified_at = NOW()
+        WHERE id = $1
+    `, [decoded.userId]);
+
+    return decoded.userId;
+};
 ```
 
-#### Endpoints
-- `POST /api/auth/verify-email/request` - Resend verification link
-- `GET /api/auth/verify-email/confirm?token=...` - Confirm email
+### Endpoints
+- `POST /api/auth/verify-email/send` - Resend verification email
+- `POST /api/auth/verify-email/confirm` - Verify token (POST to avoid URL leakage)
 
-### Frontend Components
-- `EmailVerificationBanner.js` - "Please verify your email" banner
-- `VerifyEmail.js` - Landing page for token handling
+---
+
+## Tier 2: Phone Verification
 
 ### Flow
-1. On Registration: Send email automatically
-2. User clicks link → Backend validates token
-3. Update `user_verifications` (Tier 1) and `users.is_email_verified`
-
----
-
-## Tier 2: Phone Verification (Sybil Resistance Lite)
-
-**Requirement for:** Prediction markets participation (betting/trading).
-
-### Provider: Twilio Verify API
-- Cost: ~$0.05 per verification
-- Supports SMS, Voice, TOTP
+1. User enters phone number (E.164 format)
+2. System checks if phone hash already exists (sybil check)
+3. Twilio sends SMS code
+4. User enters code → phone verified
+5. Phone hash stored for uniqueness
 
 ### Backend Implementation
 
-#### Endpoints
 ```javascript
-// POST /api/verification/phone/start
-// Input: { phone_number: "+1234567890" }
-// Calls Twilio Verify to send code
+// backend/src/services/phoneVerificationService.js
+const twilio = require('twilio');
+const crypto = require('crypto');
 
-// POST /api/verification/phone/check
-// Input: { code: "123456" }
-// Verifies code with Twilio
+const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
+const VERIFY_SERVICE_SID = process.env.TWILIO_VERIFY_SID;
+
+// Normalize and hash phone for privacy + uniqueness
+const hashPhone = (phone) => {
+    const normalized = phone.replace(/\D/g, ''); // Remove non-digits
+    return crypto.createHash('sha256').update(normalized + process.env.PHONE_HASH_SALT).digest('hex');
+};
+
+exports.startPhoneVerification = async (userId, phoneNumber) => {
+    // Check tier 1 first (sequential enforcement)
+    const user = await db.query('SELECT verification_tier FROM users WHERE id = $1', [userId]);
+    if (user.rows[0].verification_tier < 1) {
+        throw new Error('Email verification required first');
+    }
+
+    // Check if phone already used
+    const phoneHash = hashPhone(phoneNumber);
+    const existing = await db.query('SELECT user_id FROM phone_hashes WHERE phone_hash = $1', [phoneHash]);
+    if (existing.rows.length > 0 && existing.rows[0].user_id !== userId) {
+        throw new Error('Phone number already associated with another account');
+    }
+
+    // Send verification code via Twilio
+    await client.verify.v2.services(VERIFY_SERVICE_SID)
+        .verifications
+        .create({ to: phoneNumber, channel: 'sms' });
+
+    return { success: true };
+};
+
+exports.confirmPhoneVerification = async (userId, phoneNumber, code) => {
+    const verification = await client.verify.v2.services(VERIFY_SERVICE_SID)
+        .verificationChecks
+        .create({ to: phoneNumber, code });
+
+    if (verification.status !== 'approved') {
+        throw new Error('Invalid verification code');
+    }
+
+    const phoneHash = hashPhone(phoneNumber);
+
+    // Store phone hash for uniqueness
+    await db.query(`
+        INSERT INTO phone_hashes (phone_hash, user_id)
+        VALUES ($1, $2)
+        ON CONFLICT (phone_hash) DO NOTHING
+    `, [phoneHash, userId]);
+
+    // Update verification status
+    await db.query(`
+        INSERT INTO user_verifications (user_id, tier, verification_type, provider, status, verified_at)
+        VALUES ($1, 2, 'phone', 'twilio', 'verified', NOW())
+        ON CONFLICT (user_id, tier) DO UPDATE SET status = 'verified', verified_at = NOW()
+    `, [userId]);
+
+    await db.query(`
+        UPDATE users SET verification_tier = GREATEST(verification_tier, 2) WHERE id = $1
+    `, [userId]);
+
+    return { success: true };
+};
 ```
 
-### Frontend Components
-- `PhoneVerificationModal.js` - Phone number input + OTP input
+### Endpoints
+- `POST /api/verification/phone/start` - Send SMS code
+- `POST /api/verification/phone/confirm` - Verify code
 
-### Security
-- Rate limit: Max 3 attempts per hour
-- Store hash of phone number to prevent duplicate accounts
+### Rate Limits
+- 3 SMS per phone per hour
+- 5 SMS per user per day
+- 10 SMS per IP per hour
 
 ---
 
-## Tier 3: Identity Verification (KYC)
+## Tier 3: Payment Verification
 
-**Requirement for:** Withdrawals, converting RP to value, large deposits.
+### Purpose
+Proves user has a real financial identity. Bots don't have credit cards.
 
-### Provider: Stripe Identity
-- Cost: ~$1.50-5.00 per verification
-- Global coverage, developer-friendly
+**No charges are made** - we just verify the payment method is valid.
 
-### Backend Implementation
+### Options
 
-#### Endpoints
-```javascript
-// POST /api/verification/identity/session
-// Creates Stripe Verification Session, returns client_secret
+#### Option A: Stripe (Recommended)
+- Create SetupIntent to verify card
+- No charge, just validation
+- Cost: ~$0.50 per verification attempt
 
-// Webhook: identity.verification_session.verified
-// Updates user_verifications when Stripe confirms
-```
-
-### Frontend Components
-- Button to launch Stripe Identity modal
-- Status UI: "Pending", "Verified", "Rejected"
-
-### Privacy (CRITICAL)
-- **DO NOT** store PII (passport photos, ID numbers) in Intellacc DB
-- Store only `provider_id` and status
-- Trust Stripe to handle sensitive data storage
-
----
-
-## Tier 4: Proof of Human (Biometric / Unique Human)
-
-**Requirement for:** High-stakes markets, "One Person One Vote" governance.
-
-### Provider: World ID (Worldcoin)
+#### Option B: PayPal
+- OAuth flow to verify PayPal account
+- No charge, just authentication
 - Cost: Free
-- Specifically solves "Unique Human" problem
-- Zero-Knowledge proofs (no biometric data stored)
 
-### Alternative Providers
-- Civic
-- Stripe Identity enhanced (Video Selfie)
+### Backend Implementation (Stripe)
 
-### Backend Implementation
-
-#### Protocol: OIDC (OpenID Connect)
 ```javascript
-// GET /api/auth/world-id/login
-// Redirect to Worldcoin authorization
+// backend/src/services/paymentVerificationService.js
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
-// GET /api/auth/world-id/callback
-// Handle code exchange
-// Verify nullifier_hash has not been used by another user
+exports.createVerificationSession = async (userId) => {
+    // Check tier 2 first (sequential enforcement)
+    const user = await db.query('SELECT verification_tier, email FROM users WHERE id = $1', [userId]);
+    if (user.rows[0].verification_tier < 2) {
+        throw new Error('Phone verification required first');
+    }
+
+    // Create or get Stripe customer
+    let customerId;
+    const existing = await db.query('SELECT provider_customer_id FROM payment_verifications WHERE user_id = $1 AND provider = $2', [userId, 'stripe']);
+
+    if (existing.rows.length > 0) {
+        customerId = existing.rows[0].provider_customer_id;
+    } else {
+        const customer = await stripe.customers.create({
+            email: user.rows[0].email,
+            metadata: { intellacc_user_id: userId.toString() }
+        });
+        customerId = customer.id;
+
+        await db.query(`
+            INSERT INTO payment_verifications (user_id, provider, provider_customer_id)
+            VALUES ($1, 'stripe', $2)
+        `, [userId, customerId]);
+    }
+
+    // Create SetupIntent (verifies card without charging)
+    const setupIntent = await stripe.setupIntents.create({
+        customer: customerId,
+        payment_method_types: ['card'],
+        metadata: { purpose: 'verification', user_id: userId.toString() }
+    });
+
+    return { clientSecret: setupIntent.client_secret };
+};
+
+// Webhook handler for successful verification
+exports.handleSetupIntentSucceeded = async (setupIntent) => {
+    const userId = parseInt(setupIntent.metadata.user_id);
+
+    await db.query(`
+        UPDATE payment_verifications
+        SET verification_method = 'card_check', verified_at = NOW()
+        WHERE user_id = $1 AND provider = 'stripe'
+    `, [userId]);
+
+    await db.query(`
+        INSERT INTO user_verifications (user_id, tier, verification_type, provider, status, verified_at)
+        VALUES ($1, 3, 'payment', 'stripe', 'verified', NOW())
+        ON CONFLICT (user_id, tier) DO UPDATE SET status = 'verified', verified_at = NOW()
+    `, [userId]);
+
+    await db.query(`
+        UPDATE users SET verification_tier = GREATEST(verification_tier, 3) WHERE id = $1
+    `, [userId]);
+};
 ```
 
-### Frontend Components
-- "Verify with World ID" button
+### Endpoints
+- `POST /api/verification/payment/setup` - Create SetupIntent
+- `POST /api/webhooks/stripe` - Handle Stripe webhooks
 
 ---
 
-## Middleware: Permission Gating
+## Pangram AI Detection
+
+### Integration
+
+All user-generated content is analyzed before/after publishing.
+
+```javascript
+// backend/src/services/pangramService.js
+const PANGRAM_API_KEY = process.env.PANGRAM_API_KEY;
+const PANGRAM_API_URL = 'https://api.pangram.com/v1/detect';
+
+exports.analyzeContent = async (text, contentType, contentId, userId) => {
+    if (!text || text.length < 50) {
+        return { ai_probability: 0, is_flagged: false }; // Too short to analyze
+    }
+
+    const response = await fetch(PANGRAM_API_URL, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${PANGRAM_API_KEY}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ text })
+    });
+
+    const result = await response.json();
+
+    const aiProbability = result.ai_probability || 0;
+    const detectedModel = result.detected_model || null;
+    const isFlagged = aiProbability > 0.85; // Flag if >85% likely AI
+
+    // Store analysis result
+    await db.query(`
+        INSERT INTO content_ai_analysis (content_type, content_id, user_id, ai_probability, detected_model, is_flagged)
+        VALUES ($1, $2, $3, $4, $5, $6)
+    `, [contentType, contentId, userId, aiProbability, detectedModel, isFlagged]);
+
+    // Update user's AI flag count
+    if (isFlagged) {
+        await db.query(`
+            UPDATE users SET ai_flag_count = ai_flag_count + 1 WHERE id = $1
+        `, [userId]);
+    }
+
+    return { ai_probability: aiProbability, detected_model: detectedModel, is_flagged: isFlagged };
+};
+```
+
+### Integration Points
+
+```javascript
+// In postController.js
+const pangram = require('../services/pangramService');
+
+exports.createPost = async (req, res) => {
+    // ... create post ...
+
+    // Analyze content asynchronously
+    pangram.analyzeContent(post.content, 'post', post.id, req.user.id)
+        .catch(err => console.error('[Pangram] Analysis failed:', err));
+
+    res.json(post);
+};
+```
+
+### Display
+- Posts/comments with high AI probability show a subtle indicator
+- Users with many AI flags may face restrictions
+- Optional: Hide AI-flagged content from feeds
+
+---
+
+## Middleware
 
 ```javascript
 // backend/src/middleware/verification.js
 
 const requireTier = (minTier) => (req, res, next) => {
+    if (!req.user) {
+        return res.status(401).json({ error: 'Authentication required' });
+    }
+
     if (req.user.verification_tier < minTier) {
+        const tierNames = ['none', 'email', 'phone', 'payment'];
         return res.status(403).json({
-            error: 'Insufficient verification tier',
-            required: minTier,
-            current: req.user.verification_tier,
-            upgrade_url: '/settings/verification'
+            error: 'Higher verification required',
+            required_tier: minTier,
+            required_method: tierNames[minTier],
+            current_tier: req.user.verification_tier,
+            upgrade_url: '/#settings/verification'
         });
     }
+
     next();
 };
 
-// Usage in routes:
+module.exports = { requireTier };
+```
+
+### Usage
+
+```javascript
+// backend/src/routes/api.js
+const { requireTier } = require('../middleware/verification');
+
+// Tier 1: Email verified
 router.post('/posts', authenticateJWT, requireTier(1), postController.createPost);
+router.post('/comments', authenticateJWT, requireTier(1), postController.createComment);
+
+// Tier 2: Phone verified
 router.post('/predict', authenticateJWT, requireTier(2), predictionsController.createPrediction);
-router.post('/withdraw', authenticateJWT, requireTier(3), paymentsController.withdraw);
+router.post('/events/:id/update', authenticateJWT, requireTier(2), /* ... */);
+
+// Tier 3: Payment verified
+router.post('/events', authenticateJWT, requireTier(3), predictionsController.createEvent);
+router.post('/governance/vote', authenticateJWT, requireTier(3), governanceController.vote);
 ```
 
 ---
 
-## Tier Interaction Logic
+## Frontend Components
 
-### Sequential Model (Recommended)
-- Tier 1 (Email) is mandatory foundation
-- Tier 2 (Phone) requires Tier 1
-- Tier 3 (ID) requires Tier 2
-- Tier 4 (Proof of Human) is optional enhancement
+### Files to Create
 
-### Tier Calculation
+```
+frontend/src/components/verification/
+├── VerificationStatus.js      # Shows current tier + next steps
+├── EmailVerification.js       # Email verify flow
+├── PhoneVerification.js       # Phone verify flow
+├── PaymentVerification.js     # Stripe card verification
+└── VerificationBanner.js      # "Verify to unlock features" banner
+
+frontend/src/components/common/
+└── AiContentBadge.js          # Shows AI probability indicator
+```
+
+### VerificationStatus Component
+
 ```javascript
-// Update users.verification_tier whenever user_verifications changes
-const updateTier = async (userId) => {
-    const result = await db.query(`
-        SELECT MAX(tier_level) as max_tier
-        FROM user_verifications
-        WHERE user_id = $1 AND status = 'verified'
-    `, [userId]);
+// frontend/src/components/verification/VerificationStatus.js
+import van from 'vanjs-core';
+const { div, h3, p, button, span } = van.tags;
 
-    await db.query(`
-        UPDATE users SET verification_tier = $1 WHERE id = $2
-    `, [result.rows[0].max_tier || 0, userId]);
+const VerificationStatus = ({ user }) => {
+    const tiers = [
+        { level: 1, name: 'Email', icon: '📧', unlocks: 'Post, comment, message' },
+        { level: 2, name: 'Phone', icon: '📱', unlocks: 'Prediction markets' },
+        { level: 3, name: 'Payment', icon: '💳', unlocks: 'Create markets, governance' }
+    ];
+
+    return div({ class: 'verification-status' },
+        h3('Verification Status'),
+        div({ class: 'tier-list' },
+            tiers.map(tier =>
+                div({ class: `tier-item ${user.verification_tier >= tier.level ? 'verified' : 'pending'}` },
+                    span({ class: 'tier-icon' }, tier.icon),
+                    span({ class: 'tier-name' }, `Tier ${tier.level}: ${tier.name}`),
+                    span({ class: 'tier-status' },
+                        user.verification_tier >= tier.level ? '✓ Verified' : 'Not verified'
+                    ),
+                    p({ class: 'tier-unlocks' }, `Unlocks: ${tier.unlocks}`)
+                )
+            )
+        )
+    );
 };
 ```
-
----
-
-## Password Recovery via Verified Identity
-
-Instead of recovery codes, use verified identity for account recovery:
-
-| User's Tier | Recovery Method |
-|-------------|-----------------|
-| Tier 1 | Email reset link (standard) |
-| Tier 2 | SMS code to verified phone |
-| Tier 3 | Support ticket + ID verification match |
-| Tier 4 | World ID re-verification |
-
-### Implementation
-```javascript
-// POST /api/auth/forgot-password
-// 1. Check user's verification tier
-// 2. Send recovery via highest verified method
-// 3. For Tier 3+, require support intervention
-```
-
----
-
-## Security & Privacy Considerations
-
-### Data Minimization
-- **Phone numbers**: Store encrypted or hashed if only needed for uniqueness
-- **ID Documents**: NEVER store - rely on Stripe
-- **Biometrics**: NEVER store - World ID uses Zero-Knowledge proofs
-
-### Tier Downgrade
-- If user changes email → Tier 1 revoked until re-verified
-- If user changes phone → Tier 2 revoked until re-verified
-- If Stripe sends invalidation webhook → Tier 3 revoked
-
-### Rate Limiting
-- Email: 3 requests per hour
-- Phone: 3 attempts per hour
-- Identity: 3 sessions per day
-
----
-
-## Cost Management
-
-| Tier | Cost per Verification | Strategy |
-|------|----------------------|----------|
-| 1 | ~$0.001 (email) | Absorb |
-| 2 | ~$0.05 (SMS) | Absorb for now |
-| 3 | ~$1.50-5.00 | Pass to user OR absorb for high-value users |
-| 4 | Free | N/A |
 
 ---
 
 ## Implementation Roadmap
 
-### Phase 1: Foundation & Email (2-3 days)
-- [ ] Create migration: `user_verifications` table
-- [ ] Update `users` table with verification columns
-- [ ] Implement `emailService.js` with Nodemailer/SendGrid
-- [ ] Add `/verify-email` endpoints
-- [ ] Create `EmailVerificationBanner.js` component
-- [ ] Gate `POST /posts` behind Tier 1
-- [ ] Update signup flow to send verification email
+### Phase 1: Email Verification (2-3 days)
+- [ ] Create migration
+- [ ] Implement emailVerificationService
+- [ ] Add endpoints
+- [ ] Create frontend components
+- [ ] Update signup flow to send verification
+- [ ] Gate posting behind Tier 1
+- [ ] Add verification banner
 
 ### Phase 2: Phone Verification (2-3 days)
-- [ ] Sign up for Twilio Verify
-- [ ] Implement phone verification endpoints
-- [ ] Create `PhoneVerificationModal.js`
-- [ ] Add phone verification to Settings page
-- [ ] Gate `POST /predict` behind Tier 2
+- [ ] Set up Twilio Verify
+- [ ] Implement phoneVerificationService
+- [ ] Add phone hash table + uniqueness check
+- [ ] Create PhoneVerification component
+- [ ] Gate prediction markets behind Tier 2
 
-### Phase 3: Identity Verification (3-4 days)
-- [ ] Set up Stripe Identity (Test Mode first)
-- [ ] Implement verification session endpoint
-- [ ] Set up Stripe webhook handler
-- [ ] Create Identity verification UI in Settings
-- [ ] Gate withdrawals behind Tier 3
+### Phase 3: Payment Verification (2-3 days)
+- [ ] Set up Stripe (test mode)
+- [ ] Implement paymentVerificationService
+- [ ] Add Stripe webhook handler
+- [ ] Create PaymentVerification component
+- [ ] Gate market creation behind Tier 3
 
-### Phase 4: Proof of Human (2-3 days)
-- [ ] Register World ID application
-- [ ] Implement OIDC flow
-- [ ] Add World ID verification button
-- [ ] Create special "verified human" badge/features
-
-### Phase 5: Recovery Integration (1-2 days)
-- [ ] Update forgot-password flow to use tiered recovery
-- [ ] Implement phone-based recovery for Tier 2+
-- [ ] Document support process for Tier 3 recovery
+### Phase 4: Pangram Integration (1-2 days)
+- [ ] Implement pangramService
+- [ ] Add content_ai_analysis table
+- [ ] Integrate into post/comment creation
+- [ ] Create AiContentBadge component
+- [ ] Add admin view for flagged content
 
 ---
 
-## Files to Create/Modify
+## Environment Variables
 
-### New Files
-```
-backend/src/services/emailService.js
-backend/src/services/twilioService.js
-backend/src/services/stripeIdentityService.js
-backend/src/services/worldIdService.js
-backend/src/controllers/verificationController.js
-backend/src/middleware/verification.js
-backend/migrations/YYYYMMDD_add_user_verifications.sql
+```bash
+# Email
+SMTP_HOST=smtp.sendgrid.net
+SMTP_PORT=587
+SMTP_USER=apikey
+SMTP_PASS=your_sendgrid_api_key
+EMAIL_TOKEN_SECRET=random_secret_for_jwt
 
-frontend/src/components/auth/EmailVerificationBanner.js
-frontend/src/components/auth/VerifyEmail.js
-frontend/src/components/settings/PhoneVerification.js
-frontend/src/components/settings/IdentityVerification.js
-frontend/src/components/settings/WorldIdVerification.js
-frontend/src/components/settings/VerificationStatus.js
-```
+# Phone
+TWILIO_SID=your_twilio_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+TWILIO_VERIFY_SID=your_verify_service_sid
+PHONE_HASH_SALT=random_salt_for_hashing
 
-### Modified Files
-```
-backend/src/routes/api.js - Add verification routes
-backend/src/controllers/userController.js - Send verification on signup
-frontend/src/components/layout/MainLayout.js - Add verification banner
-frontend/src/pages/Settings.js - Add verification section
+# Payment
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+
+# AI Detection
+PANGRAM_API_KEY=your_pangram_api_key
 ```
 
 ---
@@ -370,7 +585,8 @@ frontend/src/pages/Settings.js - Add verification section
 
 1. New users cannot post until email verified
 2. Users cannot participate in markets until phone verified
-3. Withdrawals require KYC verification
-4. High-stakes features require proof of human
-5. Password recovery works via verified identity (no recovery codes)
-6. No sensitive PII stored in Intellacc database
+3. Phone numbers are unique (1 phone = 1 account)
+4. Users cannot create markets until payment verified
+5. All posts/comments are analyzed for AI content
+6. AI-generated content is flagged and visible to moderators
+7. No sensitive data (actual phone numbers, card details) stored locally
