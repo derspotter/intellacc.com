@@ -1747,7 +1747,7 @@ body.dark-mode .notification-settings {
   line-height: 1.2;
 }
 
-.predictions-header {
+.predictions-col-header {
   text-align: center;
   width: 90px;
   vertical-align: middle;
