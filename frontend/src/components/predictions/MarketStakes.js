@@ -24,28 +24,18 @@ const MarketStakes = ({ eventId, title = "Market Stakes", showTitle = true }) =>
         marketState.val = market;
       }
       
-      // Get recent trades/updates (mock data for now)
-      // TODO: Implement actual trades history endpoint
-      recentTrades.val = [
-        {
-          id: 1,
-          user: 'User123',
-          direction: 'YES',
-          amount: 25.50,
-          timestamp: new Date(Date.now() - 5 * 60 * 1000),
-          price_before: 0.45,
-          price_after: 0.47
-        },
-        {
-          id: 2,
-          user: 'Trader456',
-          direction: 'NO',
-          amount: 15.00,
-          timestamp: new Date(Date.now() - 15 * 60 * 1000),
-          price_before: 0.47,
-          price_after: 0.45
-        }
-      ];
+      // Get recent trades from prediction engine
+      const tradesResponse = await fetch(`http://localhost:3001/events/${eventId}/trades?limit=20`);
+      if (tradesResponse.ok) {
+        const tradesData = await tradesResponse.json();
+        // Convert ISO timestamps to Date objects for formatting
+        recentTrades.val = (tradesData.trades || []).map(trade => ({
+          ...trade,
+          timestamp: new Date(trade.timestamp)
+        }));
+      } else {
+        recentTrades.val = [];
+      }
       
     } catch (err) {
       console.error('Error loading market data:', err);

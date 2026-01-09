@@ -5,7 +5,8 @@ import Sidebar from './Sidebar';
 import MobileHeader from '../mobile/MobileHeader';
 import BottomNav from '../mobile/BottomNav';
 import UnlockKeystoreModal from '../vault/UnlockKeystoreModal';
-import PushPermissionBanner from '../common/PushPermissionBanner';
+import DeviceLinkModal from '../vault/DeviceLinkModal';
+// import PushPermissionBanner from '../common/PushPermissionBanner';
 import { isMobile } from '../../utils/deviceDetection';
 import { isLoggedInState } from '../../services/auth';
 
@@ -18,18 +19,18 @@ import { isLoggedInState } from '../../services/auth';
 export default function MainLayout({ children }) {
   // State for mobile menu
   const sidebarOpen = van.state(false);
-  
+
   // Toggle function for mobile menu
   const toggleSidebar = () => {
     sidebarOpen.val = !sidebarOpen.val;
   };
-  
+
   return div({ class: "app-container" }, [
     // Mobile header (only on mobile)
     MobileHeader({ onMenuToggle: toggleSidebar }),
 
     // Push notification permission banner (only when logged in)
-    () => isLoggedInState.val ? PushPermissionBanner() : null,
+    // () => isLoggedInState.val ? PushPermissionBanner() : null,
 
     div({ class: () => `wrapper ${isMobile.val ? 'mobile' : ''}` }, [
       // Header(), 
@@ -38,11 +39,14 @@ export default function MainLayout({ children }) {
         div({ class: "main-content" }, children)
       ])
     ]),
-    
+
     // Bottom navigation (only on mobile)
     BottomNav(),
 
     // Global Modals
-    UnlockKeystoreModal()
+    UnlockKeystoreModal(),
+    // DeviceLinkModal is now primarily used for the Settings page to manage devices
+    // The staged login flow handles device verification in LoginForm.js
+    DeviceLinkModal()
   ]);
 }

@@ -2,7 +2,9 @@ import van from 'vanjs-core';
 const { div, h1, button, p, span } = van.tags;
 import api from '../services/api';
 import NotificationItem from '../components/common/NotificationItem';
+// import PushPermissionBanner from '../components/common/PushPermissionBanner'; // Removed in favor of header button
 import socketService from '../services/socket';
+import { isPushSupported, getSubscriptionState, subscribeToPush } from '../services/pushService';
 
 /**
  * Notifications page - displays all user notifications
@@ -17,6 +19,37 @@ export default function NotificationsPage() {
   const filter = van.state('all'); // 'all' or 'unread' - start with 'all'
   const limit = 20;
 
+  // Push notification state
+  const pushSupported = van.state(isPushSupported());
+  const pushEnabled = van.state(false);
+  const pushLoading = van.state(false);
+
+  // Check push status
+  const checkPushStatus = async () => {
+    if (!pushSupported.val) return;
+    try {
+      const state = await getSubscriptionState();
+      pushEnabled.val = state.subscribed;
+    } catch (err) {
+      console.error('Error checking push status:', err);
+    }
+  };
+
+  // Enable push notifications
+  const handleEnablePush = async () => {
+    pushLoading.val = true;
+    try {
+      await subscribeToPush();
+      pushEnabled.val = true;
+      // Show success message or just update UI
+    } catch (err) {
+      console.error('Error enabling push:', err);
+      alert('Failed to enable notifications. Please check your browser settings.');
+    } finally {
+      pushLoading.val = false;
+    }
+  };
+
   // Load notifications
   const loadNotifications = async (reset = false) => {
     try {
@@ -26,7 +59,7 @@ export default function NotificationsPage() {
 
       const currentOffset = reset ? 0 : offset.val;
       console.log('📤 API call parameters:', { limit, offset: currentOffset, unreadOnly: filter.val === 'unread' });
-      
+
       const result = await api.notifications.getAll({
         limit,
         offset: currentOffset,
@@ -69,15 +102,15 @@ export default function NotificationsPage() {
   const markAllAsRead = async () => {
     try {
       await api.notifications.markAllAsRead();
-      
+
       // Update local state
       notifications.val = notifications.val.map(n => ({ ...n, read: true }));
-      
+
       // Update bell count
       if (window.NotificationBell) {
         window.NotificationBell.refresh();
       }
-      
+
     } catch (err) {
       console.error('Error marking all as read:', err);
       error.val = 'Failed to mark all as read';
@@ -86,10 +119,10 @@ export default function NotificationsPage() {
 
   // Handle notification marked as read
   const handleNotificationRead = (notificationId) => {
-    notifications.val = notifications.val.map(n => 
+    notifications.val = notifications.val.map(n =>
       n.id === notificationId ? { ...n, read: true } : n
     );
-    
+
     // Update bell count
     if (window.NotificationBell) {
       window.NotificationBell.refresh();
@@ -99,7 +132,7 @@ export default function NotificationsPage() {
   // Handle notification deleted
   const handleNotificationDeleted = (notificationId) => {
     notifications.val = notifications.val.filter(n => n.id !== notificationId);
-    
+
     // Update bell count
     if (window.NotificationBell) {
       window.NotificationBell.refresh();
@@ -109,7 +142,7 @@ export default function NotificationsPage() {
   // Socket notification handler
   const handleSocketNotification = (data) => {
     console.log('Notification received in page:', data);
-    
+
     if (data.type === 'new' && data.notification) {
       // Add new notification to the top of the list
       notifications.val = [data.notification, ...notifications.val];
@@ -127,15 +160,26 @@ export default function NotificationsPage() {
     }
   };
 
-  // Load initial notifications
+  // Load initial notifications and push status
   loadNotifications(true);
+  checkPushStatus();
 
   // Cleanup on unmount
   const pageElement = div({ class: "notifications-page" }, [
     div({ class: "page-header" }, [
       h1("Notifications"),
-      
+
       div({ class: "header-actions" }, [
+        // Enable Notifications Button (only if supported and not enabled)
+        () => pushSupported.val && !pushEnabled.val
+          ? button({
+            class: "enable-push-btn primary-btn",
+            onclick: handleEnablePush,
+            disabled: pushLoading,
+            style: "margin-right: 0.5rem; background-color: var(--primary-dark);" // Distinct style
+          }, pushLoading.val ? "Enabling..." : "Enable Notifications 🔔")
+          : null,
+
         // Filter buttons
         div({ class: "filter-buttons" }, [
           button({
@@ -147,7 +191,7 @@ export default function NotificationsPage() {
             onclick: () => handleFilterChange('unread')
           }, "Unread")
         ]),
-        
+
         // Mark all read button
         button({
           class: "mark-all-read-btn primary-btn",
@@ -160,63 +204,66 @@ export default function NotificationsPage() {
     // Content
     () => {
       console.log('🔄 Content render - loading:', loading.val, 'notifications:', notifications.val.length, 'error:', error.val);
-      
+
       return div({ class: "notifications-page-content" }, [
+        // Push permission banner - REMOVED
+        // PushPermissionBanner(),
+
         // Loading state
         loading.val && notifications.val.length === 0
           ? div({ class: "loading-state" }, [
-              div({ class: "loading-spinner" }),
-              p("Loading notifications...")
-            ])
+            div({ class: "loading-spinner" }),
+            p("Loading notifications...")
+          ])
           : null,
 
         // Error state
         error.val
           ? div({ class: "error-state" }, [
-              p({ class: "error-message" }, error.val),
-              button({
-                class: "retry-btn",
-                onclick: () => loadNotifications(true)
-              }, "Try again")
-            ])
+            p({ class: "error-message" }, error.val),
+            button({
+              class: "retry-btn",
+              onclick: () => loadNotifications(true)
+            }, "Try again")
+          ])
           : null,
 
         // Empty state
         !loading.val && notifications.val.length === 0 && !error.val
           ? div({ class: "empty-state" }, [
-              div({ class: "empty-icon" }, "🔔"),
-              p({ class: "empty-title" }, 
-                filter.val === 'unread' ? "No unread notifications" : "No notifications yet"
-              ),
-              p({ class: "empty-subtitle" }, 
-                "When someone likes, comments, or follows you, you'll see it here."
-              )
-            ])
+            div({ class: "empty-icon" }, "🔔"),
+            p({ class: "empty-title" },
+              filter.val === 'unread' ? "No unread notifications" : "No notifications yet"
+            ),
+            p({ class: "empty-subtitle" },
+              "When someone likes, comments, or follows you, you'll see it here."
+            )
+          ])
           : null,
 
         // Notifications list
         !loading.val && notifications.val.length > 0
           ? div({ class: "notifications-list" }, [
-              ...notifications.val.map(notification => {
-                console.log('🔸 Rendering notification:', notification.id, notification.type);
-                return NotificationItem({
-                  notification,
-                  onMarkAsRead: handleNotificationRead,
-                  onDelete: handleNotificationDeleted
-                });
-              }),
-              
-              // Load more button
-              hasMore.val
-                ? div({ class: "load-more-container" }, [
-                    button({
-                      class: "load-more-btn",
-                      onclick: loadMore,
-                      disabled: () => loading.val
-                    }, () => loading.val ? "Loading..." : "Load more")
-                  ])
-                : null
-            ])
+            ...notifications.val.map(notification => {
+              console.log('🔸 Rendering notification:', notification.id, notification.type);
+              return NotificationItem({
+                notification,
+                onMarkAsRead: handleNotificationRead,
+                onDelete: handleNotificationDeleted
+              });
+            }),
+
+            // Load more button
+            hasMore.val
+              ? div({ class: "load-more-container" }, [
+                button({
+                  class: "load-more-btn",
+                  onclick: loadMore,
+                  disabled: () => loading.val
+                }, () => loading.val ? "Loading..." : "Load more")
+              ])
+              : null
+          ])
           : null
       ]);
     }
