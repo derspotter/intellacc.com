@@ -567,6 +567,14 @@ export const api = {
     deleteCredential: (id) => request(`/webauthn/credentials/${id}`, { method: 'DELETE' })
   },
 
+  // Verification endpoints (tiered identity verification)
+  verification: {
+    getStatus: () => request('/verification/status'),
+    sendEmailVerification: () => request('/auth/verify-email/send', { method: 'POST' }),
+    confirmEmailVerification: (token) => request('/auth/verify-email/confirm', { method: 'POST', body: { token } }),
+    resendEmailVerification: () => request('/verification/email/resend', { method: 'POST' })
+  },
+
   // Device management
   devices: {
     list: () => request('/devices'),

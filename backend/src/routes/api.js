@@ -15,6 +15,8 @@ const mlsRoutes = require('./mls');
 const authenticateJWT = require("../middleware/auth");
 const rateLimit = require('express-rate-limit');
 const attachmentsController = require('../controllers/attachmentsController');
+const verificationController = require('../controllers/verificationController');
+const { requireTier, requireEmailVerified } = require('../middleware/verification');
 
 // Base test route
 router.get("/", (req, res) => {
@@ -40,6 +42,18 @@ router.post('/users/master-key', authenticateJWT, userController.setMasterKey);
 router.get("/users/:id", authenticateJWT, userController.getUser);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
 router.post('/login', userController.loginUser);
+
+// Email Verification Routes (Tier 1)
+// Confirm can be unauthenticated (token contains user info) for email links
+const emailResendRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 3, // 3 resends per 15 minutes
+    message: { error: 'Too many verification emails requested, please try again later' },
+});
+router.post('/auth/verify-email/send', authenticateJWT, emailResendRateLimit, verificationController.sendVerificationEmail);
+router.post('/auth/verify-email/confirm', verificationController.confirmEmailVerification);
+router.get('/verification/status', authenticateJWT, verificationController.getVerificationStatus);
+router.post('/verification/email/resend', authenticateJWT, emailResendRateLimit, verificationController.resendVerificationEmail);
 
 // Pre-login device verification (staged login flow - unauthenticated)
 // Rate limiting to prevent abuse of unauthenticated endpoints
@@ -99,8 +113,8 @@ router.get("/predictions/assigned", authenticateJWT, predictionsController.getAs
 router.post("/assignments/:id/bet", authenticateJWT, predictionsController.placeBet);
 router.get("/bets/stats", authenticateJWT, predictionsController.getMonthlyBettingStats);
 
-// Post Routes
-router.post("/posts", authenticateJWT, postController.createPost);
+// Post Routes (require email verification - Tier 1)
+router.post("/posts", authenticateJWT, requireEmailVerified, postController.createPost);
 router.get("/posts", authenticateJWT, postController.getPosts);                // Get all posts
 router.get("/feed", authenticateJWT, postController.getFeed);                  // Get personalized feed
 router.get("/posts/:id", authenticateJWT, postController.getPostById);         // Get a single post

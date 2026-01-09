@@ -4522,3 +4522,307 @@ body.dark-mode .device-link-modal .instructions {
     padding: 1rem;
   }
 }
+
+/* ===== Verification Components ===== */
+
+/* Verification Status */
+.verification-status {
+  padding: 1rem;
+}
+
+.verification-status h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+}
+
+.tier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tier-item {
+  padding: 1rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  opacity: 0.6;
+}
+
+.tier-item.verified {
+  opacity: 1;
+  border-color: var(--success-color);
+}
+
+.tier-item.current {
+  border-color: var(--primary-color);
+  background: var(--hover-bg);
+}
+
+.tier-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.tier-icon {
+  font-size: 1.25rem;
+}
+
+.tier-name {
+  font-weight: 600;
+  flex: 1;
+}
+
+.tier-badge {
+  font-size: 1rem;
+}
+
+.tier-badge.verified {
+  color: var(--success-color);
+}
+
+.tier-badge.pending {
+  color: var(--secondary-text);
+}
+
+.tier-details {
+  padding-left: 2rem;
+}
+
+.tier-description {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--secondary-text);
+}
+
+.tier-unlocks {
+  font-size: 0.75rem;
+  color: var(--secondary-text);
+  margin-top: 0.25rem;
+}
+
+.unlocks-label {
+  font-weight: 500;
+}
+
+.upgrade-btn {
+  margin-top: 0.75rem;
+  margin-left: 2rem;
+}
+
+/* Email Verification Component */
+.email-verification {
+  text-align: center;
+  padding: 2rem;
+}
+
+.email-verification .verification-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.email-verification h3 {
+  margin: 0 0 1rem 0;
+}
+
+.email-verification .description {
+  color: var(--secondary-text);
+  margin-bottom: 1.5rem;
+}
+
+.email-verification .email-display {
+  font-size: 0.875rem;
+  margin-bottom: 1.5rem;
+}
+
+.email-verification .success-state {
+  padding: 1rem;
+}
+
+.email-verification .success-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: var(--success-color);
+  color: white;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.email-verification .success-message {
+  color: var(--success-color);
+  margin-bottom: 1rem;
+}
+
+.email-verification .instructions {
+  color: var(--secondary-text);
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.email-verification .spam-note {
+  font-size: 0.75rem;
+  color: var(--secondary-text);
+}
+
+.email-verification .cooldown {
+  color: var(--warning-color);
+}
+
+.email-verification .btn-link {
+  background: none;
+  border: none;
+  color: var(--primary-color);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* Verify Email Page */
+.verify-email-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--bg-color);
+}
+
+.verification-card {
+  max-width: 480px;
+  width: 100%;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 2rem;
+  text-align: center;
+}
+
+.verification-card h1 {
+  margin: 0 0 1rem 0;
+}
+
+.verification-card h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.25rem;
+}
+
+.verification-card p {
+  margin: 0 0 1rem 0;
+  color: var(--secondary-text);
+}
+
+.verification-card .actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
+.verification-card .success-icon.large,
+.verification-card .error-icon.large {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  font-size: 2rem;
+  margin-bottom: 1rem;
+}
+
+.verification-card .success-icon.large {
+  background: var(--success-color);
+  color: white;
+}
+
+.verification-card .error-icon.large {
+  background: var(--error-color);
+  color: white;
+}
+
+.verification-card .error-help {
+  text-align: left;
+  background: var(--hover-bg);
+  padding: 1rem;
+  border-radius: 8px;
+  margin: 1rem 0;
+}
+
+.verification-card .error-reasons p {
+  margin: 0.25rem 0;
+  font-size: 0.875rem;
+}
+
+.verification-card .spinner.large {
+  width: 32px;
+  height: 32px;
+  border-width: 3px;
+  margin-bottom: 1rem;
+}
+
+/* Verification Banner */
+.verification-banner {
+  background: linear-gradient(135deg, var(--primary-color), #4a90d9);
+  color: white;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.verification-banner .banner-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.verification-banner .banner-icon {
+  font-size: 1.25rem;
+}
+
+.verification-banner .banner-text {
+  font-size: 0.875rem;
+}
+
+.verification-banner .banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.verification-banner .btn-close {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1.25rem;
+  cursor: pointer;
+  opacity: 0.8;
+  padding: 0;
+  line-height: 1;
+}
+
+.verification-banner .btn-close:hover {
+  opacity: 1;
+}
+
+/* Dark mode for verification components */
+body.dark-mode .tier-item {
+  background: var(--black-bg);
+}
+
+body.dark-mode .verification-card {
+  background: var(--black-bg);
+}
+
+body.dark-mode .verification-card .error-help {
+  background: var(--card-bg);
+}

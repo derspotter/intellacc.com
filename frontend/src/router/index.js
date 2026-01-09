@@ -25,13 +25,16 @@ import ProfileEditor from '../components/profile/ProfileEditor';
 import ProfilePredictions from '../components/profile/ProfilePredictions';
 import NetworkTabs from '../components/profile/NetworkTabs';
 import SettingsPage from '../components/settings/SettingsPage';
+import VerifyEmailPage from '../components/verification/VerifyEmailPage';
 
 // Use shorthand for tag functions
 const { div, h1, h2, p, button } = van.tags;
 
 // Update page from hash (now async to handle store loading and initial fetch)
 export const updatePageFromHash = async () => {
-  const page = window.location.hash.slice(1) || 'home';
+  // Extract page name, handling query params (e.g., #verify-email?token=abc → verify-email)
+  const hashValue = window.location.hash.slice(1) || 'home';
+  const page = hashValue.split('?')[0] || 'home';
   
   // Update the reactive state so the router re-renders
   currentPageState.val = page;
@@ -105,6 +108,7 @@ export default function Router() {
     
     login: () => LoginForm(),
     signup: () => SignUpForm(),
+    'verify-email': () => VerifyEmailPage(),
     settings: () => SettingsPage(),
     
     predictions: () => div({ class: "predictions-page" }, [
@@ -169,8 +173,8 @@ export default function Router() {
   return () => {
     const page = currentPageState.val;
 
-    // Special case for login and signup (no layout)
-    if (page === 'login' || page === 'signup') {
+    // Special case for login, signup, and verify-email (no layout)
+    if (page === 'login' || page === 'signup' || page === 'verify-email') {
       return pages[page] ? pages[page]() : pages.notFound();
     }
 

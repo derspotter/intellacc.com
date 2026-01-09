@@ -4,6 +4,7 @@ const db = require('../db');
 const bcrypt = require('bcryptjs');
 const { generateToken } = require('../utils/jwt');
 const notificationService = require('../services/notificationService');
+const emailVerificationService = require('../services/emailVerificationService');
 
 // Create a new user
 exports.createUser = async (req, res) => {
@@ -49,7 +50,18 @@ exports.createUser = async (req, res) => {
       'INSERT INTO users (username, email, password_hash, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, username, email, created_at',
       [username, email, hashedPassword]
     );
-    res.status(201).json({ user: result.rows[0] });
+
+    const newUser = result.rows[0];
+
+    // Send verification email (async, don't block response)
+    emailVerificationService.sendVerificationEmail(newUser.id, newUser.email)
+      .then(() => console.log(`[Signup] Verification email sent to ${newUser.email}`))
+      .catch(err => console.error(`[Signup] Failed to send verification email:`, err));
+
+    res.status(201).json({
+      user: newUser,
+      message: 'Account created! Please check your email to verify your account.'
+    });
   } catch (err) {
     console.error('User creation error:', err);
     
