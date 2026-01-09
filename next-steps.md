@@ -37,22 +37,22 @@ The vault is encrypted with the user's password. A password reset means:
 
 ---
 
-### 0b. Email Verification ❌ IMPORTANT
+### 0b. Email Verification ✅ DONE
 
-**Current State**: No verification on signup
-**Problem**: Spam accounts, no proof of email ownership
+**Status**: Implemented as part of tiered verification system (Tier 1)
+**Files Created**:
+- `backend/src/services/emailVerificationService.js`
+- `backend/src/controllers/verificationController.js`
+- `backend/src/middleware/verification.js`
+- `backend/migrations/20260110_add_user_verifications.sql`
+- `frontend/src/components/verification/` (multiple components)
 
-#### Files to Create/Modify
-- `backend/src/controllers/userController.js` - add verification
-- `backend/src/services/emailService.js` - new (or use existing if any)
-- `backend/migrations/` - add email_verified, verification_token columns
-- `frontend/src/pages/VerifyEmail.js` - new
-
-#### Implementation Steps
-1. Add `email_verified` boolean + `verification_token` to users table
-2. On signup, send verification email with token link
-3. Create `/verify-email/:token` endpoint
-4. Restrict certain features until verified (posting, messaging)
+**Features**:
+- JWT-based email verification tokens (24h expiry)
+- Verification email sent on signup
+- `requireEmailVerified` middleware gates posting
+- Verification status API endpoint
+- Frontend verification page and components
 
 ---
 
