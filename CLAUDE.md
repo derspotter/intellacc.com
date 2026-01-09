@@ -59,11 +59,13 @@ docker compose up -d --build prediction-engine
 ## Key Technical Details
 
 ### Frontend (`frontend/`)
-- **Framework**: VanJS (lightweight reactive UI)
+- **Framework**: VanJS (lightweight reactive UI) - see `vanjs.md` for patterns
 - **State**: Lazy-loaded stores in `src/store/` (navigation, posts, predictions, user)
 - **Routing**: Hash-based (`#home`, `#predictions`, `#profile`, `#messages`)
 - **E2EE Client**: `src/services/mls/coreCryptoClient.js` - OpenMLS WASM wrapper
 - **Vault**: `src/services/vaultService.js` - encrypted keystore for MLS credentials
+- **Hot Reload**: Vite HMR is enabled - DO NOT restart frontend container after code changes, changes apply automatically
+- **VanJS Input Pattern**: Use show/hide via CSS for multi-stage forms, NOT conditional rendering (causes input focus loss)
 
 ### Backend (`backend/`)
 - **Entry**: `src/index.js`
@@ -98,3 +100,31 @@ Uses `userId` (not username) for MLS identity - immutable and already in JWT.
 - Prediction Engine: 3001
 - Database: 5432
 - Caddy (prod): 80/443
+
+## Consulting External AI (Gemini/Codex)
+
+When asking Gemini or Codex for feedback on implementation or architecture decisions:
+1. **Always reference the actual files** that would be changed
+2. **Include relevant code snippets** or file paths from this codebase
+3. **Provide context** about existing patterns in the codebase
+
+Example prompt structure:
+```
+We're implementing [feature] in this codebase.
+
+RELEVANT FILES:
+- frontend/src/services/auth.js - current auth flow
+- frontend/src/components/vault/DeviceLinkModal.js - device verification UI
+- backend/src/controllers/deviceController.js - device verification backend
+
+CURRENT IMPLEMENTATION:
+[describe or quote relevant code]
+
+PROPOSED CHANGE:
+[describe the change]
+
+QUESTIONS:
+[specific questions]
+```
+
+This helps the AI give more relevant, actionable feedback specific to our codebase.
