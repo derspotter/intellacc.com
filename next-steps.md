@@ -24,9 +24,9 @@ Based on original synthesis by Claude, Gemini, and Codex - updated to reflect cu
 
 ---
 
-## Priority 2: Trade History Endpoint
+## Priority 2: Trade History Endpoint ✅ DONE
 
-**Status**: Event selection works, but trades endpoint returns mock data
+**Status**: Complete - real trades now displayed
 **Impact**: Core market transparency
 
 ### What's Implemented ✅
@@ -34,18 +34,8 @@ Based on original synthesis by Claude, Gemini, and Codex - updated to reflect cu
 - `MarketStakes.js` component renders trade list
 - Socket `marketUpdate` events for real-time updates
 - Event selection in `EventsList.js` (local state, click-to-select)
-
-### What's Missing
-- `GET /events/:id/trades` endpoint returning real data from `market_updates`
-- `MarketStakes.js` currently uses hardcoded mock trades (lines 27-42)
-
-### Files to Modify
-- `prediction-engine/src/lmsr_api.rs` - add `/events/:id/trades` endpoint
-- `frontend/src/components/predictions/MarketStakes.js` - fetch from real endpoint
-
-### Implementation Steps
-1. Add `GET /events/:id/trades` endpoint (return last 50 trades from `market_updates`)
-2. Update `MarketStakes.js` to fetch from real endpoint instead of mock data
+- `GET /events/:id/trades` endpoint returns real data from `market_updates`
+- `MarketStakes.js` fetches from real endpoint (no more mock data)
 
 ---
 

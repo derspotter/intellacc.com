@@ -675,7 +675,7 @@ pub async fn get_event_trades(
         r#"
         SELECT
             mu.id,
-            mu.username,
+            u.username,
             mu.share_type,
             mu.stake_amount,
             mu.prev_prob,
@@ -683,6 +683,7 @@ pub async fn get_event_trades(
             mu.shares_acquired,
             mu.created_at
         FROM market_updates mu
+        JOIN users u ON mu.user_id = u.id
         WHERE mu.event_id = $1
         ORDER BY mu.created_at DESC
         LIMIT $2
