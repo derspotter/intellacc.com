@@ -40,6 +40,31 @@ router.post('/users/master-key', authenticateJWT, userController.setMasterKey);
 router.get("/users/:id", authenticateJWT, userController.getUser);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
 router.post('/login', userController.loginUser);
+
+// Pre-login device verification (staged login flow - unauthenticated)
+// Rate limiting to prevent abuse of unauthenticated endpoints
+// Higher limits in development/test for E2E testing
+const isProduction = process.env.NODE_ENV === 'production';
+const preLoginRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: isProduction ? 10 : 100, // 10 in prod, 100 in dev/test
+    message: { error: 'Too many requests, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+const linkStatusRateLimit = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: isProduction ? 30 : 300, // 30 in prod, 300 in dev/test
+    message: { error: 'Too many requests, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+const deviceController = require('../controllers/deviceController');
+router.post('/auth/check-device-status', preLoginRateLimit, deviceController.checkDeviceStatus);
+router.post('/auth/start-pre-login-link', preLoginRateLimit, deviceController.startPreLoginLink);
+router.get('/auth/link-status/:sessionToken', linkStatusRateLimit, deviceController.getPreLoginLinkStatus);
+router.post('/auth/approve-pre-login-link', authenticateJWT, deviceController.approvePreLoginLink);
+
 router.post('/users/change-password', authenticateJWT, userController.changePassword);
 router.get("/me", authenticateJWT, userController.getUserProfile);
 router.patch("/users/profile", authenticateJWT, userController.editUserProfile);

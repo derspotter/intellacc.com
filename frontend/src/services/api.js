@@ -143,11 +143,24 @@ async function request(endpoint, options = {}) {
 export const api = {
   // Auth endpoints
   auth: {
-    login: (email, password) => 
+    login: (email, password) =>
       request('/login', { method: 'POST', body: { email, password } }),
-      
-    register: (username, email, password) => 
-      request('/users/register', { method: 'POST', body: { username, email, password } })
+
+    register: (username, email, password) =>
+      request('/users/register', { method: 'POST', body: { username, email, password } }),
+
+    // Pre-login device verification (staged login flow)
+    checkDeviceStatus: (email, deviceFingerprint) =>
+      request('/auth/check-device-status', { method: 'POST', body: { email, deviceFingerprint } }),
+
+    startPreLoginLink: (sessionToken, email, deviceFingerprint, deviceName) =>
+      request('/auth/start-pre-login-link', { method: 'POST', body: { sessionToken, email, deviceFingerprint, deviceName } }),
+
+    getPreLoginLinkStatus: (sessionToken) =>
+      request(`/auth/link-status/${sessionToken}`),
+
+    approvePreLoginLink: (verificationCode, approvingDeviceId) =>
+      request('/auth/approve-pre-login-link', { method: 'POST', body: { verificationCode, approvingDeviceId } })
   },
   
   // Users endpoints
