@@ -42,33 +42,32 @@ export default function PushPermissionBanner() {
     visible.val = false;
   };
 
-  // Don't render if not visible
-  return () => {
-    if (!visible.val) return div();
-
-    return div({ class: 'push-permission-banner' },
-      div({ class: 'push-permission-content' },
-        span({ class: 'push-permission-icon' }, '🔔'),
-        div({ class: 'push-permission-text' },
-          p({ class: 'push-permission-title' }, 'Enable notifications'),
-          p({ class: 'push-permission-description' },
-            'Get notified when someone replies to you, follows you, or sends you a message.'
-          ),
-          error.val ? p({ class: 'push-permission-error' }, error.val) : null
+  // Return reactive DOM - visibility controlled by style
+  return div({
+    class: 'push-permission-banner',
+    style: () => visible.val ? '' : 'display: none;'
+  },
+    div({ class: 'push-permission-content' },
+      span({ class: 'push-permission-icon' }, '🔔'),
+      div({ class: 'push-permission-text' },
+        p({ class: 'push-permission-title' }, 'Enable notifications'),
+        p({ class: 'push-permission-description' },
+          'Get notified when someone replies to you, follows you, or sends you a message.'
         ),
-        div({ class: 'push-permission-actions' },
-          button({
-            class: 'push-permission-enable',
-            onclick: handleEnable,
-            disabled: loading.val
-          }, loading.val ? 'Enabling...' : 'Enable'),
-          button({
-            class: 'push-permission-dismiss',
-            onclick: handleDismiss,
-            disabled: loading.val
-          }, 'Not now')
-        )
+        () => error.val ? p({ class: 'push-permission-error' }, error.val) : null
+      ),
+      div({ class: 'push-permission-actions' },
+        button({
+          class: 'push-permission-enable',
+          onclick: handleEnable,
+          disabled: () => loading.val
+        }, () => loading.val ? 'Enabling...' : 'Enable'),
+        button({
+          class: 'push-permission-dismiss',
+          onclick: handleDismiss,
+          disabled: () => loading.val
+        }, 'Not now')
       )
-    );
-  };
+    )
+  );
 }

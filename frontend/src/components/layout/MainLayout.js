@@ -5,9 +5,7 @@ import Sidebar from './Sidebar';
 import MobileHeader from '../mobile/MobileHeader';
 import BottomNav from '../mobile/BottomNav';
 import UnlockKeystoreModal from '../vault/UnlockKeystoreModal';
-import PushPermissionBanner from '../common/PushPermissionBanner';
 import { isMobile } from '../../utils/deviceDetection';
-import { isLoggedInState } from '../../services/auth';
 
 /**
  * Main layout component that provides the application shell
@@ -27,9 +25,6 @@ export default function MainLayout({ children }) {
   return div({ class: "app-container" }, [
     // Mobile header (only on mobile)
     MobileHeader({ onMenuToggle: toggleSidebar }),
-
-    // Push notification permission banner (only when logged in)
-    () => isLoggedInState.val ? PushPermissionBanner() : null,
 
     div({ class: () => `wrapper ${isMobile.val ? 'mobile' : ''}` }, [
       // Header(), 
