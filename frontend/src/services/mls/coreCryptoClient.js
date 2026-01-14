@@ -303,10 +303,9 @@ class CoreCryptoClient {
             this.client.create_identity(username);
             this.client.regenerate_key_package();
             await this.saveState();
-            try {
-                const vault = await this.getVaultService();
-                await vault.saveCurrentState();
-            } catch (e) {}
+            // Note: saveCurrentState() is NOT called here during initial bootstrap
+            // because the IndexedDB record doesn't exist yet. The caller
+            // (setupKeystoreWithPassword) saves state after creating the record.
             this.setupSocketListeners();
         } catch (error) {
             console.error('Error bootstrapping MLS client:', error);
