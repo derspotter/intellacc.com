@@ -283,6 +283,18 @@ class VaultService {
         // Derive Composite
         this.compositeKey = await this.deriveCompositeKey(this.masterKey, this.localKey);
 
+        // Set deviceId BEFORE MLS operations so saveState() can persist
+        this.setDeviceId(deviceId);
+
+        // Register device on server BEFORE MLS bootstrap
+        // Bootstrap calls syncMessages() which needs device to exist
+        try {
+            const deviceName = `${navigator.platform || 'Web'} - ${navigator.userAgent.split('/')[0]}`;
+            await api.devices.register(deviceId, deviceName);
+        } catch (e) {
+            console.warn('[Vault] Device registration failed:', e.message || e);
+        }
+
         await coreCryptoClient.ensureMlsBootstrap(String(userId));
         const mlsState = await coreCryptoClient.exportStateForVault();
         const stateJson = JSON.stringify(mlsState);
@@ -319,13 +331,7 @@ class VaultService {
             tx.onerror = () => reject(tx.error);
         });
 
-        this.setDeviceId(deviceId);
         this.deviceKey = this.compositeKey; // alias
-
-        try {
-            const deviceName = `${navigator.platform || 'Web'} - ${navigator.userAgent.split('/')[0]}`;
-            await api.devices.register(deviceId, deviceName);
-        } catch (e) {}
 
         vaultStore.setVaultExists(true);
         vaultStore.setLocked(false);
@@ -334,10 +340,14 @@ class VaultService {
         initIdleAutoLock();
         console.log('[Keystore] Setup complete (Split-Key Mode)');
 
-        // Now that deviceId is set, upload key packages in background
-        coreCryptoClient.ensureKeyPackagesFresh().catch(e =>
-            console.warn('[MLS] Key package upload failed:', e.message || e)
-        );
+        // Upload key packages (sequential to prevent WASM concurrent access)
+        try {
+            await coreCryptoClient.ensureKeyPackagesFresh();
+            console.log('[Keystore] Key packages uploaded successfully');
+        } catch (e) {
+            console.warn('[MLS] Key package upload failed:', e.message || e);
+            // Non-fatal: key packages can be uploaded later
+        }
     }
 
     async saveCurrentState() {
