@@ -155,14 +155,23 @@ Each step is small, testable, and builds on the previous one.
 
 ---
 
-## Step 10: Process Commits
+## Step 10: Process Commits ✅ COMPLETE
 **Goal**: Handle incoming commits (member changes, updates).
 
-- [ ] Add handling for `content_type: 'commit'` messages
-- [ ] Call WASM `process_commit()` for non-application messages
-- [ ] Update local group state
+- [x] Add handling for `content_type: 'commit'` messages
+- [x] Call WASM `process_commit()` for non-application messages
+- [x] Update local group state
+- [x] AAD validation for commit integrity
+- [x] Policy validation via `validateStagedCommit()`
+- [x] State persistence after `merge_staged_commit()`
 
 **Test**: Remove a member, verify other members process the commit.
+
+### Implementation Notes (2026-01)
+- `handleIncomingMessage()` routes commits to `processCommit()` (coreCryptoClient.js:1614-1617)
+- `processCommit()` calls WASM `process_commit()`, validates AAD/policy, merges, saves state (lines 1624-1683)
+- Backend stores commits with epoch tracking, prevents duplicates (mlsService.js:197-298)
+- Socket `mls-message` events trigger sync for real-time delivery
 
 ---
 
@@ -245,7 +254,7 @@ Each step is small, testable, and builds on the previous one.
 
 ---
 
-## Current Status (2025-12-15)
+## Current Status (2026-01-15)
 
 **Steps 1-14 COMPLETE** - Full E2EE flow with vault persistence:
 - ✅ WASM module loads and initializes
@@ -265,11 +274,12 @@ Each step is small, testable, and builds on the previous one.
 - ✅ Frontend messaging service is MLS-only wrapper
 - ✅ **Vault with Argon2id + AES-256-GCM encryption**
 - ✅ **Group state persistence across vault lock/unlock (Step 14)**
+- ✅ **Commit processing for member changes (Step 10)**
 
 **Next Steps**:
 1. ~~Add Socket.io events for real-time message delivery~~ ✅ DONE
 2. ~~Build minimal chat UI (Step 9)~~ ✅ DONE (MLS-only)
-3. Handle commit processing for member changes (Step 10)
+3. ~~Handle commit processing for member changes (Step 10)~~ ✅ DONE
 4. Tune Group Robustness & Configuration (Step 11)
 5. Implement Trust & Validation Logic (Step 12)
 6. ~~Clean up legacy RSA code (Step 13)~~ ✅ DONE
