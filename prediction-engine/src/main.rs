@@ -1,7 +1,7 @@
 // Import the things we need
 use axum::{
     extract::{Path, State, WebSocketUpgrade, Query, Json as ExtractJson},
-    response::{Json, Response},
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
@@ -13,6 +13,9 @@ use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
 use std::net::SocketAddr;
 use std::collections::HashMap;
 use axum::extract::ws::{WebSocket, Message};
+use axum::http::{Method, Request, StatusCode};
+use axum::middleware::{self, Next};
+use axum::body::Body;
 use futures_util::{sink::SinkExt, stream::StreamExt};
 use tokio::sync::broadcast;
 use chrono;
@@ -60,6 +63,27 @@ fn bad_request_error(message: &str) -> (axum::http::StatusCode, Json<Value>) {
         axum::http::StatusCode::BAD_REQUEST,
         Json(json!({"error": message}))
     )
+}
+
+async fn auth_guard(
+    State(app_state): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if req.method() == Method::OPTIONS || req.uri().path() == "/health" {
+        return next.run(req).await;
+    }
+
+    if let Some(token) = &app_state.auth_token {
+        let provided = req.headers()
+            .get("x-engine-token")
+            .and_then(|value| value.to_str().ok());
+        if provided != Some(token.as_str()) {
+            return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        }
+    }
+
+    next.run(req).await
 }
 
 // Cache and broadcast helper for score updates
@@ -125,6 +149,7 @@ struct AppState {
     tx: broadcast::Sender<String>,
     cache: Cache<String, String>,
     config: config::Config,
+    auth_token: Option<String>,
 }
 
 // This is our main function - but notice the #[tokio::main] attribute!
@@ -159,11 +184,20 @@ async fn main() -> anyhow::Result<()> {
         .build();
     
     // Create shared app state
+    let auth_token = std::env::var("PREDICTION_ENGINE_AUTH_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if auth_token.is_none() {
+        eprintln!("⚠️  PREDICTION_ENGINE_AUTH_TOKEN not set; auth guard disabled");
+    }
+
     let app_state = AppState {
         db: pool,
         tx: tx.clone(),
         cache,
         config,
+        auth_token,
     };
 
     // Clone pool for background task before moving app_state
@@ -209,6 +243,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/lmsr/verify-staked-invariant", post(verify_staked_invariant_endpoint))
         .route("/lmsr/verify-post-resolution", post(verify_post_resolution_endpoint))
         .route("/lmsr/verify-consistency", post(verify_consistency_endpoint))
+        .layer(middleware::from_fn_with_state(app_state.clone(), auth_guard))
         .layer(
             CorsLayer::new()
                 .allow_origin(tower_http::cors::Any)
@@ -778,7 +813,17 @@ async fn update_market_endpoint(
             }));
             Ok(Json(json!(result)))
         },
-        Err(e) => Err(internal_error(&format!("Market update error: {}", e)))
+        Err(e) => {
+            let msg = e.to_string();
+            let msg_lower = msg.to_lowercase();
+            if msg_lower.contains("market resolved") {
+                return Err(bad_request_error("Market resolved"));
+            }
+            if msg_lower.contains("market closed") {
+                return Err(bad_request_error("Market closed"));
+            }
+            Err(internal_error(&format!("Market update error: {}", msg)))
+        }
     }
 }
 
@@ -907,8 +952,15 @@ async fn sell_shares_endpoint(
         },
         Err(e) => {
             let msg = e.to_string();
-            if msg.to_lowercase().contains("hold period not expired") {
+            let msg_lower = msg.to_lowercase();
+            if msg_lower.contains("hold period not expired") {
                 return Err(bad_request_error("Hold period not expired for recent purchases"));
+            }
+            if msg_lower.contains("market resolved") {
+                return Err(bad_request_error("Market resolved"));
+            }
+            if msg_lower.contains("market closed") {
+                return Err(bad_request_error("Market closed"));
             }
             Err(internal_error(&format!("Share sale error: {}", msg)))
         }
@@ -1151,4 +1203,3 @@ async fn verify_consistency_endpoint(
         Err(e) => Err(internal_error(&format!("System consistency verification error: {}", e)))
     }
 }
-

@@ -19,6 +19,8 @@ use std::str::FromStr;
 // Configuration constants for concurrency control
 const MAX_RETRY_ATTEMPTS: u32 = 5;
 const BASE_RETRY_DELAY_MS: u64 = 10;
+const ERR_MARKET_RESOLVED: &str = "Market resolved";
+const ERR_MARKET_CLOSED: &str = "Market closed";
 
 /// PostgreSQL SQLSTATE codes for retryable errors
 /// Reference: https://www.postgresql.org/docs/current/errcodes-appendix.html
@@ -220,13 +222,26 @@ async fn update_market_transaction(
     
     // Get current market state with row lock
     let row = sqlx::query(
-        "SELECT market_prob, cumulative_stake, liquidity_b, q_yes, q_no FROM events WHERE id = $1 FOR UPDATE"
+        "SELECT market_prob, cumulative_stake, liquidity_b, q_yes, q_no, outcome,
+                COALESCE(closing_date <= NOW(), false) AS is_closed
+         FROM events
+         WHERE id = $1
+         FOR UPDATE"
     )
     .bind(update.event_id)
     .fetch_one(tx.as_mut())
     .await
     .map_err(|_| anyhow!("Event not found or market not initialized"))?;
     
+    let outcome: Option<String> = row.get("outcome");
+    let is_closed: bool = row.get("is_closed");
+    if outcome.is_some() {
+        return Err(anyhow!(ERR_MARKET_RESOLVED));
+    }
+    if is_closed {
+        return Err(anyhow!(ERR_MARKET_CLOSED));
+    }
+
     // Extract market state using clean adapter
     let market_state = DbAdapter::extract_market_state(&row)?;
     let prev_prob = market_state.market_prob;
@@ -360,6 +375,27 @@ async fn sell_shares_transaction(
     amount: f64,
 ) -> Result<SellResult> {
     
+    // Get current market state FIRST (consistent lock order with buy path)
+    let event_row = sqlx::query(
+        "SELECT market_prob, cumulative_stake, liquidity_b, q_yes, q_no, outcome,
+                COALESCE(closing_date <= NOW(), false) AS is_closed
+         FROM events
+         WHERE id = $1
+         FOR UPDATE"
+    )
+    .bind(event_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+
+    let outcome: Option<String> = event_row.get("outcome");
+    let is_closed: bool = event_row.get("is_closed");
+    if outcome.is_some() {
+        return Err(anyhow!(ERR_MARKET_RESOLVED));
+    }
+    if is_closed {
+        return Err(anyhow!(ERR_MARKET_CLOSED));
+    }
+    
     // Check hold period (if enabled in config)
     if config.market.enable_hold_period {
         let now = Utc::now();
@@ -377,14 +413,6 @@ async fn sell_shares_transaction(
             return Err(anyhow!("Hold period not expired for recent purchases"));
         }
     }
-    
-    // Get current market state FIRST (consistent lock order with buy path)
-    let event_row = sqlx::query(
-        "SELECT market_prob, cumulative_stake, liquidity_b, q_yes, q_no FROM events WHERE id = $1 FOR UPDATE"
-    )
-    .bind(event_id)
-    .fetch_one(tx.as_mut())
-    .await?;
     
     // Then get user shares with side-specific staked amounts (lock user_shares SECOND)
     let row = sqlx::query(

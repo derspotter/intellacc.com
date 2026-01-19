@@ -4,6 +4,7 @@ const axios = require('axios');
 
 // Configuration for prediction engine
 const PREDICTION_ENGINE_URL = process.env.PREDICTION_ENGINE_URL || 'http://prediction-engine:3001';
+const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
 
 // Helper function to make requests to prediction engine
 async function forwardToPredictionEngine(path, method = 'GET', data = null) {
@@ -13,6 +14,7 @@ async function forwardToPredictionEngine(path, method = 'GET', data = null) {
       url: `${PREDICTION_ENGINE_URL}${path}`,
       headers: {
         'Content-Type': 'application/json',
+        ...(PREDICTION_ENGINE_AUTH_TOKEN ? { 'x-engine-token': PREDICTION_ENGINE_AUTH_TOKEN } : {})
       }
     };
 
