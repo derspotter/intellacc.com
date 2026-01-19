@@ -155,15 +155,15 @@ macro_rules! with_serializable_tx {
     }};
 }
 
-/// Macro for executing transactions with REPEATABLE READ isolation (optimistic)
+/// Macro for executing transactions with READ COMMITTED isolation (optimistic)
 macro_rules! with_optimistic_tx {
     ($pool:expr, $tx_var:ident, $body:block) => {{
         let mut attempt = 1;
         loop {
             let mut $tx_var = $pool.begin().await?;
             
-            // Set REPEATABLE READ isolation level
-            $tx_var.execute(sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+            // Set READ COMMITTED isolation level
+            $tx_var.execute(sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
                 .await?;
             
             let result: Result<_> = async { $body }.await;
@@ -207,7 +207,7 @@ pub async fn update_market(
         return Err(anyhow!("Stake must be positive"));
     }
 
-    with_serializable_tx!(pool, tx, {
+    with_optimistic_tx!(pool, tx, {
         update_market_transaction(&mut tx, config, user_id, &update).await
     })
 }
@@ -360,7 +360,7 @@ pub async fn sell_shares(
         return Err(anyhow!("Amount must be positive"));
     }
 
-    with_serializable_tx!(pool, tx, {
+    with_optimistic_tx!(pool, tx, {
         sell_shares_transaction(&mut tx, config, user_id, event_id, side, amount).await
     })
 }

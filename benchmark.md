@@ -40,11 +40,11 @@
 - Notes: DB CPU saturated; high failure rate implies balance checks or insufficient funds are frequent under current parameters.
 
 ## Iteration Log
-- Change:
-- Date:
-- Commit:
-- Command:
-- Duration:
-- TPS:
-- Success rate:
-- Notes:
+- Change: Trades use READ COMMITTED isolation (update_market + sell_shares) via with_optimistic_tx.
+- Date: 2026-01-19T16:05:30+01:00
+- Commit: (pending)
+- Command: docker compose -f prediction-engine/docker-compose.test.yml run --rm prediction-engine-tests bash -c "export PATH=/usr/local/cargo/bin:$PATH; export PGPASSWORD=password; export RUST_LOG=info; until pg_isready -h db -U postgres; do sleep 1; done; cargo test --release stress::tests::test_comprehensive_market_simulation -- --nocapture"
+- Duration: 352.84s
+- TPS: 2834.9
+- Success rate: 33.01% (330,149 ok / 669,851 failed)
+- Notes: Throughput +11% vs baseline; success rate slightly higher.
