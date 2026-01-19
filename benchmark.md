@@ -42,7 +42,7 @@
 ## Iteration Log
 - Change: Trades use READ COMMITTED isolation (update_market + sell_shares) via with_optimistic_tx.
 - Date: 2026-01-19T16:05:30+01:00
-- Commit: (pending)
+- Commit: de8ace9
 - Command: docker compose -f prediction-engine/docker-compose.test.yml run --rm prediction-engine-tests bash -c "export PATH=/usr/local/cargo/bin:$PATH; export PGPASSWORD=password; export RUST_LOG=info; until pg_isready -h db -U postgres; do sleep 1; done; cargo test --release stress::tests::test_comprehensive_market_simulation -- --nocapture"
 - Duration: 352.84s
 - TPS: 2834.9
