@@ -16,6 +16,7 @@ const authenticateJWT = require("../middleware/auth");
 const rateLimit = require('express-rate-limit');
 const attachmentsController = require('../controllers/attachmentsController');
 const verificationController = require('../controllers/verificationController');
+const passwordResetController = require('../controllers/passwordResetController');
 const { requireTier, requireEmailVerified } = require('../middleware/verification');
 
 // Base test route
@@ -73,11 +74,23 @@ const linkStatusRateLimit = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
 });
+const passwordResetRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: isProduction ? 5 : 50,
+    message: { error: 'Too many reset attempts, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 const deviceController = require('../controllers/deviceController');
 router.post('/auth/check-device-status', preLoginRateLimit, deviceController.checkDeviceStatus);
 router.post('/auth/start-pre-login-link', preLoginRateLimit, deviceController.startPreLoginLink);
 router.get('/auth/link-status/:sessionToken', linkStatusRateLimit, deviceController.getPreLoginLinkStatus);
 router.post('/auth/approve-pre-login-link', authenticateJWT, deviceController.approvePreLoginLink);
+
+// Password reset routes
+router.post('/auth/forgot-password', passwordResetRateLimit, passwordResetController.forgotPassword);
+router.post('/auth/reset-password', passwordResetRateLimit, passwordResetController.resetPassword);
+router.post('/auth/reset-password/cancel', authenticateJWT, passwordResetController.cancelReset);
 
 router.post('/users/change-password', authenticateJWT, userController.changePassword);
 router.get("/me", authenticateJWT, userController.getUserProfile);

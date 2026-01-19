@@ -4,6 +4,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const { verifyToken } = require('./utils/jwt');
 const notificationService = require('./services/notificationService');
+const passwordResetService = require('./services/passwordResetService');
 
 const app = express();
 const port = process.env.NODE_PORT || 3000;
@@ -26,13 +27,26 @@ const io = socketIo(server, {
 });
 
 // Authenticate socket connections with JWT
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
     if (!token) return next(new Error('Authentication required'));
     const payload = verifyToken(token);
     if (payload?.error) return next(new Error('Invalid token'));
-    socket.userId = payload.userId;
+
+    const userId = payload.userId;
+    const result = await pool.query('SELECT password_changed_at FROM users WHERE id = $1', [userId]);
+    if (result.rows.length === 0) return next(new Error('Invalid token'));
+
+    const passwordChangedAt = result.rows[0].password_changed_at;
+    if (passwordChangedAt && payload.iat) {
+      const tokenIssuedAt = new Date(payload.iat * 1000);
+      if (tokenIssuedAt < new Date(passwordChangedAt)) {
+        return next(new Error('Token revoked'));
+      }
+    }
+
+    socket.userId = userId;
     next();
   } catch (err) {
     next(new Error('Invalid token'));
@@ -41,6 +55,7 @@ io.use((socket, next) => {
 
 // Set Socket.IO instance in notification service
 notificationService.setSocketIo(io);
+passwordResetService.setSocketIo(io);
 
 // Set Socket.IO instance in MLS service
 const mlsService = require('./services/mlsService');
@@ -104,6 +119,9 @@ io.on('connection', (socket) => {
 
 // Middleware
 app.use(express.json());
+
+// Background worker for delayed password resets
+passwordResetService.startResetWorker();
 
 // Security headers
 app.use((req, res, next) => {

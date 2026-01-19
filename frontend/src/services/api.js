@@ -160,7 +160,24 @@ export const api = {
       request(`/auth/link-status/${sessionToken}`),
 
     approvePreLoginLink: (verificationCode, approvingDeviceId) =>
-      request('/auth/approve-pre-login-link', { method: 'POST', body: { verificationCode, approvingDeviceId } })
+      request('/auth/approve-pre-login-link', { method: 'POST', body: { verificationCode, approvingDeviceId } }),
+
+    requestPasswordReset: (email) =>
+      request('/auth/forgot-password', { method: 'POST', body: { email } }),
+
+    resetPassword: (token, newPassword, acknowledged, devicePublicId) =>
+      request('/auth/reset-password', {
+        method: 'POST',
+        body: {
+          token,
+          newPassword,
+          acknowledged,
+          device_public_id: devicePublicId
+        }
+      }),
+
+    cancelPasswordReset: () =>
+      request('/auth/reset-password/cancel', { method: 'POST' })
   },
   
   // Users endpoints

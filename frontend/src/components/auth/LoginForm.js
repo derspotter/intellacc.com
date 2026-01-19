@@ -269,6 +269,9 @@ const LoginForm = () => {
             class: 'btn-link',
             onclick: handleCancel
           }, 'Use a different email')
+        ),
+        div({ class: 'auth-links' },
+          a({ href: '#forgot-password' }, 'Forgot password?')
         )
       ),
 
