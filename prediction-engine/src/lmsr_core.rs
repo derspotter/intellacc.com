@@ -266,6 +266,7 @@ pub fn delta_q_for_stake(side: Side, q_yes: f64, q_no: f64, b: f64, s: f64) -> R
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use proptest::test_runner::TestCaseError;
 
     // Helper: do a random sequence of trades, then unwind, and assert float & ledger invariants.
     proptest! {
@@ -293,14 +294,16 @@ mod tests {
                 let pre = mkt.cost();
 
                 if sides[i] == 0 {
-                    let (dq, cash_debit) = mkt.buy_yes(stake_ledger)?;
+                    let (dq, cash_debit) = mkt.buy_yes(stake_ledger)
+                        .map_err(TestCaseError::fail)?;
                     yes_shares += dq;
                     let post = mkt.cost();
                     let delta_c = post - pre;
                     cash_float += delta_c;
                     cash_ledger -= cash_debit; // user pays (cash leaves user)
                 } else {
-                    let (dq, cash_debit) = mkt.buy_no(stake_ledger)?;
+                    let (dq, cash_debit) = mkt.buy_no(stake_ledger)
+                        .map_err(TestCaseError::fail)?;
                     no_shares += dq;
                     let post = mkt.cost();
                     let delta_c = post - pre;
@@ -315,10 +318,12 @@ mod tests {
             // unwind positions
             let pre = mkt.cost();
             let cash_credit_yes = if yes_shares > 0.0 {
-                mkt.sell_yes(yes_shares)?
+                mkt.sell_yes(yes_shares)
+                    .map_err(TestCaseError::fail)?
             } else { 0 };
             let cash_credit_no = if no_shares > 0.0 {
-                mkt.sell_no(no_shares)?
+                mkt.sell_no(no_shares)
+                    .map_err(TestCaseError::fail)?
             } else { 0 };
             let post = mkt.cost();
             let delta_c_back = pre - post;

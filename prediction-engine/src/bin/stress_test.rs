@@ -6,6 +6,7 @@ use sqlx::postgres::PgPoolOptions;
 use prediction_engine::config::Config;
 use prediction_engine::stress;
 use tracing_subscriber;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,10 +28,15 @@ async fn main() -> Result<()> {
     // Create database connection pool
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://postgres:password@localhost/test_intellacc".to_string());
+    let acquire_timeout_secs = std::env::var("STRESS_TEST_ACQUIRE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(120);
     
     println!("Connecting to database: {}", database_url);
     let pool = PgPoolOptions::new()
         .max_connections(50)
+        .acquire_timeout(Duration::from_secs(acquire_timeout_secs))
         .connect(&database_url)
         .await?;
 

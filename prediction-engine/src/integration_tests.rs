@@ -7,19 +7,40 @@
 //! - Concurrency safety
 
 use crate::lmsr_api;
-use crate::lmsr_core::{to_ledger_units, from_ledger_units, Side};
-use crate::db_adapter::DbAdapter;
+use crate::lmsr_api::MarketUpdate;
+use crate::lmsr_core::{to_ledger_units, Side};
 use crate::config::Config;
-use sqlx::{PgPool, Row, Executor};
+use sqlx::{PgPool, Row};
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
+use std::env;
 use rand::Rng;
-use tokio_test;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
 /// Test database configuration for isolated testing
-const TEST_DB_URL: &str = "postgresql://postgres:password@localhost:5432/test_intellacc";
+const DEFAULT_TEST_DB_URL: &str = "postgresql://postgres:password@localhost:5432/test_intellacc";
+const DEFAULT_TEST_DB_ADMIN_URL: &str = "postgresql://postgres:password@localhost:5432/postgres";
+
+fn test_db_url() -> String {
+    env::var("TEST_DB_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string())
+}
+
+fn test_db_admin_url() -> String {
+    env::var("TEST_DB_ADMIN_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_ADMIN_URL.to_string())
+}
+
+fn test_config() -> Config {
+    let mut config = Config::default();
+    config.market.enable_hold_period = false;
+    config.market.hold_period_hours = 0.0;
+    config
+}
+
+fn to_ledger_i64(value: f64) -> Result<i64> {
+    let ledger = to_ledger_units(value).map_err(|e| anyhow!(e))?;
+    i64::try_from(ledger).map_err(|_| anyhow!("ledger value out of i64 range"))
+}
 
 /// Initial user balance for tests (1000 RP in ledger units)
 const INITIAL_BALANCE_LEDGER: i64 = 1_000_000_000; // 1000 * 1_000_000
@@ -49,14 +70,48 @@ struct OperationResult {
     shares_acquired: f64,
 }
 
+async fn fetch_user_ledger(pool: &PgPool, user_id: i32) -> Result<(i64, i64)> {
+    let row = sqlx::query(
+        "SELECT rp_balance_ledger, rp_staked_ledger FROM users WHERE id = $1"
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    
+    Ok((row.get("rp_balance_ledger"), row.get("rp_staked_ledger")))
+}
+
+async fn build_operation_result(
+    pool: &PgPool,
+    user_id: i32,
+    operation: &str,
+    shares_acquired: f64,
+    before_balance: i64,
+    before_staked: i64,
+) -> Result<OperationResult> {
+    let (after_balance, after_staked) = fetch_user_ledger(pool, user_id).await?;
+    let balance_change = after_balance - before_balance;
+    let staked_change = after_staked - before_staked;
+    
+    Ok(OperationResult {
+        user_id,
+        operation: operation.to_string(),
+        balance_change,
+        staked_change,
+        cost_ledger: -balance_change,
+        shares_acquired,
+    })
+}
+
 /// Setup test database with clean state
 async fn setup_test_database() -> Result<PgPool> {
     println!("🔧 Setting up test database...");
     
     // Connect to default postgres database first
+    let admin_url = test_db_admin_url();
     let setup_pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
-        .connect("postgresql://postgres:password@localhost:5432/postgres")
+        .connect(&admin_url)
         .await?;
     
     // Drop and recreate test database
@@ -72,9 +127,10 @@ async fn setup_test_database() -> Result<PgPool> {
     setup_pool.close().await;
     
     // Connect to test database
+    let test_url = test_db_url();
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(10)
-        .connect(TEST_DB_URL)
+        .connect(&test_url)
         .await?;
     
     // Run migrations
@@ -152,12 +208,13 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id),
             event_id INTEGER NOT NULL REFERENCES events(id),
-            update_type VARCHAR(20) NOT NULL,  -- 'buy_yes', 'buy_no', 'sell_yes', 'sell_no'
             prev_prob DECIMAL(15,10) NOT NULL,
             new_prob DECIMAL(15,10) NOT NULL,
-            stake_amount DECIMAL(15,6) NOT NULL,
-            shares_acquired DECIMAL(15,6) NOT NULL,
-            share_type VARCHAR(10) NOT NULL,   -- 'yes' or 'no'
+            stake_amount DECIMAL(15,6) NOT NULL CHECK (stake_amount > 0),
+            stake_amount_ledger BIGINT NOT NULL DEFAULT 0 CHECK (stake_amount_ledger >= 0),
+            shares_acquired DECIMAL(15,6) NOT NULL CHECK (shares_acquired > 0),
+            share_type VARCHAR(10) NOT NULL CHECK (share_type IN ('yes', 'no')),
+            hold_until TIMESTAMP WITH TIME ZONE NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
     "#).execute(pool).await?;
@@ -399,7 +456,7 @@ async fn cleanup_test_database(pool: PgPool) -> Result<()> {
     
     let cleanup_pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
-        .connect("postgresql://postgres:password@localhost:5432/postgres")
+        .connect(&test_db_admin_url())
         .await?;
     
     sqlx::query("DROP DATABASE IF EXISTS test_intellacc")
@@ -415,7 +472,6 @@ async fn cleanup_test_database(pool: PgPool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio_test;
     
     /// Single user market cycle test
     #[tokio::test]
@@ -424,6 +480,7 @@ mod tests {
         let users = create_test_users(&pool, 1).await?;
         let user = &users[0];
         let event_id = create_test_event(&pool, "Single User Test Event").await?;
+        let config = test_config();
         
         let initial_state = capture_initial_state(&pool).await?;
         let mut operations = Vec::new();
@@ -432,24 +489,28 @@ mod tests {
         println!("🧪 Starting single user market cycle test...");
         
         // Buy YES shares
-        println("📈 Buying YES shares...");
+        println!("📈 Buying YES shares...");
         let stake1 = 50.0; // 50 RP
-        let buy_yes_result = lmsr_api::update_market_probability(
-            &pool, 
-            event_id, 
-            user.id, 
-            0.7, 
-            to_ledger_units(stake1)?
+        let (before_balance, before_staked) = fetch_user_ledger(&pool, user.id).await?;
+        let buy_yes_result = lmsr_api::update_market(
+            &pool,
+            &config,
+            user.id,
+            MarketUpdate {
+                event_id,
+                target_prob: 0.7,
+                stake: stake1,
+            },
         ).await?;
         
-        operations.push(OperationResult {
-            user_id: user.id,
-            operation: "buy_yes".to_string(),
-            balance_change: -(buy_yes_result.cost_ledger as i64),
-            staked_change: buy_yes_result.cost_ledger as i64,
-            cost_ledger: buy_yes_result.cost_ledger as i64,
-            shares_acquired: buy_yes_result.shares_acquired,
-        });
+        operations.push(build_operation_result(
+            &pool,
+            user.id,
+            &format!("buy_{}", buy_yes_result.share_type),
+            buy_yes_result.shares_acquired,
+            before_balance,
+            before_staked,
+        ).await?);
         
         // Verify invariants after buy YES
         verify_balance_invariant(&pool, &initial_state, &operations, &resolution_credits).await?;
@@ -458,22 +519,26 @@ mod tests {
         // Buy NO shares
         println!("📉 Buying NO shares...");
         let stake2 = 30.0; // 30 RP
-        let buy_no_result = lmsr_api::update_market_probability(
+        let (before_balance, before_staked) = fetch_user_ledger(&pool, user.id).await?;
+        let buy_no_result = lmsr_api::update_market(
             &pool,
-            event_id,
+            &config,
             user.id,
-            0.4,
-            to_ledger_units(stake2)?
+            MarketUpdate {
+                event_id,
+                target_prob: 0.4,
+                stake: stake2,
+            },
         ).await?;
         
-        operations.push(OperationResult {
-            user_id: user.id,
-            operation: "buy_no".to_string(),
-            balance_change: -(buy_no_result.cost_ledger as i64),
-            staked_change: buy_no_result.cost_ledger as i64,
-            cost_ledger: buy_no_result.cost_ledger as i64,
-            shares_acquired: buy_no_result.shares_acquired,
-        });
+        operations.push(build_operation_result(
+            &pool,
+            user.id,
+            &format!("buy_{}", buy_no_result.share_type),
+            buy_no_result.shares_acquired,
+            before_balance,
+            before_staked,
+        ).await?);
         
         // Verify invariants after buy NO
         verify_balance_invariant(&pool, &initial_state, &operations, &resolution_credits).await?;
@@ -495,22 +560,24 @@ mod tests {
         if yes_shares > 0.0 {
             println!("💰 Selling partial YES shares...");
             let sell_amount = yes_shares * 0.3; // Sell 30% of YES shares
-            let sell_yes_result = lmsr_api::sell_shares(
+            let (before_balance, before_staked) = fetch_user_ledger(&pool, user.id).await?;
+            let _sell_yes_result = lmsr_api::sell_shares(
                 &pool,
+                &config,
                 user.id,
                 event_id,
-                Side::Yes,
+                Side::Yes.as_str(),
                 sell_amount
             ).await?;
             
-            operations.push(OperationResult {
-                user_id: user.id,
-                operation: "sell_yes".to_string(),
-                balance_change: sell_yes_result.payout_ledger as i64,
-                staked_change: -(sell_yes_result.stake_unwound_ledger as i64),
-                cost_ledger: -(sell_yes_result.payout_ledger as i64),
-                shares_acquired: -sell_amount,
-            });
+            operations.push(build_operation_result(
+                &pool,
+                user.id,
+                "sell_yes",
+                -sell_amount,
+                before_balance,
+                before_staked,
+            ).await?);
             
             // Verify invariants after sell YES
             verify_balance_invariant(&pool, &initial_state, &operations, &resolution_credits).await?;
@@ -521,22 +588,24 @@ mod tests {
         if no_shares > 0.0 {
             println!("💰 Selling partial NO shares...");
             let sell_amount = no_shares * 0.5; // Sell 50% of NO shares
-            let sell_no_result = lmsr_api::sell_shares(
+            let (before_balance, before_staked) = fetch_user_ledger(&pool, user.id).await?;
+            let _sell_no_result = lmsr_api::sell_shares(
                 &pool,
+                &config,
                 user.id,
                 event_id,
-                Side::No,
+                Side::No.as_str(),
                 sell_amount
             ).await?;
             
-            operations.push(OperationResult {
-                user_id: user.id,
-                operation: "sell_no".to_string(),
-                balance_change: sell_no_result.payout_ledger as i64,
-                staked_change: -(sell_no_result.stake_unwound_ledger as i64),
-                cost_ledger: -(sell_no_result.payout_ledger as i64),
-                shares_acquired: -sell_amount,
-            });
+            operations.push(build_operation_result(
+                &pool,
+                user.id,
+                "sell_no",
+                -sell_amount,
+                before_balance,
+                before_staked,
+            ).await?);
             
             // Verify invariants after sell NO
             verify_balance_invariant(&pool, &initial_state, &operations, &resolution_credits).await?;
@@ -561,7 +630,7 @@ mod tests {
             
             // YES outcome: YES shares worth 1 RP each, NO shares worth 0
             let resolution_value = final_yes_shares; // + final_no_shares * 0.0
-            resolution_credits.insert(user.id, to_ledger_units(resolution_value)?);
+            resolution_credits.insert(user.id, to_ledger_i64(resolution_value)?);
         }
         
         lmsr_api::resolve_event(&pool, event_id, true).await?;
@@ -584,6 +653,7 @@ mod tests {
             let pool = setup_test_database().await?;
             let users = create_test_users(&pool, STRESS_TEST_USERS).await?;
             let event_id = create_test_event(&pool, &format!("Stress Test Event {}", iteration)).await?;
+            let config = test_config();
             
             let initial_state = capture_initial_state(&pool).await?;
             let mut operations = Vec::new();
@@ -606,22 +676,26 @@ mod tests {
                             rng.gen_range(0.05..0.45) // Buy NO - push prob down
                         };
                         
-                        match lmsr_api::update_market_probability(
+                        let (before_balance, before_staked) = fetch_user_ledger(&pool, user.id).await?;
+                        match lmsr_api::update_market(
                             &pool,
-                            event_id,
+                            &config,
                             user.id,
-                            target_prob,
-                            to_ledger_units(stake)?
+                            MarketUpdate {
+                                event_id,
+                                target_prob,
+                                stake,
+                            },
                         ).await {
                             Ok(result) => {
-                                operations.push(OperationResult {
-                                    user_id: user.id,
-                                    operation: if operation_type == 0 { "buy_yes".to_string() } else { "buy_no".to_string() },
-                                    balance_change: -(result.cost_ledger as i64),
-                                    staked_change: result.cost_ledger as i64,
-                                    cost_ledger: result.cost_ledger as i64,
-                                    shares_acquired: result.shares_acquired,
-                                });
+                                operations.push(build_operation_result(
+                                    &pool,
+                                    user.id,
+                                    &format!("buy_{}", result.share_type),
+                                    result.shares_acquired,
+                                    before_balance,
+                                    before_staked,
+                                ).await?);
                             },
                             Err(_) => {
                                 // Expected for some operations (insufficient balance, etc.)
@@ -651,17 +725,26 @@ mod tests {
                             
                             if available_shares > 0.01 {
                                 let sell_amount = available_shares * rng.gen_range(0.1..0.8);
+                                let (before_balance, before_staked) = fetch_user_ledger(&pool, user.id).await?;
                                 
-                                match lmsr_api::sell_shares(&pool, user.id, event_id, side, sell_amount).await {
+                                match lmsr_api::sell_shares(
+                                    &pool,
+                                    &config,
+                                    user.id,
+                                    event_id,
+                                    side.as_str(),
+                                    sell_amount,
+                                ).await {
                                     Ok(result) => {
-                                        operations.push(OperationResult {
-                                            user_id: user.id,
-                                            operation: if operation_type == 2 { "sell_yes".to_string() } else { "sell_no".to_string() },
-                                            balance_change: result.payout_ledger as i64,
-                                            staked_change: -(result.stake_unwound_ledger as i64),
-                                            cost_ledger: -(result.payout_ledger as i64),
-                                            shares_acquired: -sell_amount,
-                                        });
+                                        let _ = result;
+                                        operations.push(build_operation_result(
+                                            &pool,
+                                            user.id,
+                                            if operation_type == 2 { "sell_yes" } else { "sell_no" },
+                                            -sell_amount,
+                                            before_balance,
+                                            before_staked,
+                                        ).await?);
                                     },
                                     Err(_) => {
                                         // Expected for some operations
@@ -708,7 +791,7 @@ mod tests {
                     no_shares // NO outcome
                 };
                 
-                resolution_credits.insert(user_id, to_ledger_units(resolution_value)?);
+                resolution_credits.insert(user_id, to_ledger_i64(resolution_value)?);
             }
             
             // Resolve event
@@ -731,6 +814,7 @@ mod tests {
         let pool = setup_test_database().await?;
         let users = create_test_users(&pool, 3).await?;
         let event_id = create_test_event(&pool, "Edge Case Test Event").await?;
+        let config = test_config();
         
         println!("🧪 Starting edge case tests...");
         
@@ -743,12 +827,15 @@ mod tests {
             .execute(&pool)
             .await?;
         
-        let zero_balance_result = lmsr_api::update_market_probability(
+        let zero_balance_result = lmsr_api::update_market(
             &pool,
-            event_id,
+            &config,
             users[0].id,
-            0.7,
-            to_ledger_units(100.0)?
+            MarketUpdate {
+                event_id,
+                target_prob: 0.7,
+                stake: 100.0,
+            },
         ).await;
         
         assert!(zero_balance_result.is_err(), "Zero balance user should not be able to trade");
@@ -756,12 +843,15 @@ mod tests {
         
         // Test 2: Maximum stake amount (should hit overflow protection)
         println!("💥 Test 2: Maximum stake amount test");
-        let max_stake_result = lmsr_api::update_market_probability(
+        let max_stake_result = lmsr_api::update_market(
             &pool,
-            event_id,
+            &config,
             users[1].id,
-            0.9,
-            to_ledger_units(1_000_000.0)? // Very large stake
+            MarketUpdate {
+                event_id,
+                target_prob: 0.9,
+                stake: 1_000_000.0, // Very large stake
+            },
         ).await;
         
         // This should either succeed with limited impact or fail gracefully
@@ -774,20 +864,24 @@ mod tests {
         println!("🚫 Test 3: Overselling shares test");
         
         // First, give user some shares
-        let buy_result = lmsr_api::update_market_probability(
+        let buy_result = lmsr_api::update_market(
             &pool,
-            event_id,
+            &config,
             users[2].id,
-            0.6,
-            to_ledger_units(50.0)?
+            MarketUpdate {
+                event_id,
+                target_prob: 0.6,
+                stake: 50.0,
+            },
         ).await?;
         
         // Try to sell more than owned
         let oversell_result = lmsr_api::sell_shares(
             &pool,
+            &config,
             users[2].id,
             event_id,
-            Side::Yes,
+            Side::Yes.as_str(),
             buy_result.shares_acquired * 2.0 // Try to sell double what we own
         ).await;
         
@@ -798,12 +892,15 @@ mod tests {
         println!("🏃 Test 4: Concurrent transaction test");
         
         let futures = (0..10).map(|_| {
-            lmsr_api::update_market_probability(
+            lmsr_api::update_market(
                 &pool,
-                event_id,
+                &config,
                 users[1].id,
-                0.55,
-                to_ledger_units(10.0).unwrap()
+                MarketUpdate {
+                    event_id,
+                    target_prob: 0.55,
+                    stake: 10.0,
+                },
             )
         });
         
@@ -815,20 +912,26 @@ mod tests {
         // Test 5: Invalid probability bounds
         println!("📊 Test 5: Invalid probability bounds test");
         
-        let invalid_prob_high = lmsr_api::update_market_probability(
+        let invalid_prob_high = lmsr_api::update_market(
             &pool,
-            event_id,
+            &config,
             users[1].id,
-            1.5, // Invalid: > 1.0
-            to_ledger_units(10.0)?
+            MarketUpdate {
+                event_id,
+                target_prob: 1.5, // Invalid: > 1.0
+                stake: 10.0,
+            },
         ).await;
         
-        let invalid_prob_low = lmsr_api::update_market_probability(
+        let invalid_prob_low = lmsr_api::update_market(
             &pool,
-            event_id,
+            &config,
             users[1].id,
-            -0.1, // Invalid: < 0.0
-            to_ledger_units(10.0)?
+            MarketUpdate {
+                event_id,
+                target_prob: -0.1, // Invalid: < 0.0
+                stake: 10.0,
+            },
         ).await;
         
         assert!(invalid_prob_high.is_err(), "Probability > 1.0 should be rejected");
@@ -842,12 +945,15 @@ mod tests {
         lmsr_api::resolve_event(&pool, event_id, true).await?;
         
         // Try to trade on resolved event
-        let post_resolution_trade = lmsr_api::update_market_probability(
+        let post_resolution_trade = lmsr_api::update_market(
             &pool,
-            event_id,
+            &config,
             users[1].id,
-            0.7,
-            to_ledger_units(20.0)?
+            MarketUpdate {
+                event_id,
+                target_prob: 0.7,
+                stake: 20.0,
+            },
         ).await;
         
         assert!(post_resolution_trade.is_err(), "Trading on resolved event should be rejected");
@@ -860,13 +966,17 @@ mod tests {
         let consistency_event_id = create_test_event(&pool, "Consistency Test").await?;
         
         // Perform a transaction and verify all tables are consistent
-        let trade_result = lmsr_api::update_market_probability(
+        let trade_result = lmsr_api::update_market(
             &pool,
-            consistency_event_id,
+            &config,
             users[1].id,
-            0.65,
-            to_ledger_units(25.0)?
+            MarketUpdate {
+                event_id: consistency_event_id,
+                target_prob: 0.65,
+                stake: 25.0,
+            },
         ).await?;
+        let _ = trade_result;
         
         // Verify data consistency across all tables
         let user_balance: i64 = sqlx::query_scalar(
@@ -917,6 +1027,7 @@ mod tests {
         let pool = setup_test_database().await?;
         let users = create_test_users(&pool, 1).await?;
         let event_id = create_test_event(&pool, "Precision Test Event").await?;
+        let config = test_config();
         
         println!("🔢 Starting numerical precision tests...");
         
@@ -924,12 +1035,15 @@ mod tests {
         println!("🔬 Test 1: Micro-RP precision test");
         
         let micro_stake = 0.000001; // 1 micro-RP
-        let micro_result = lmsr_api::update_market_probability(
+        let micro_result = lmsr_api::update_market(
             &pool,
-            event_id,
+            &config,
             users[0].id,
-            0.50001, // Very small probability change
-            to_ledger_units(micro_stake)?
+            MarketUpdate {
+                event_id,
+                target_prob: 0.50001, // Very small probability change
+                stake: micro_stake,
+            },
         ).await;
         
         match micro_result {
@@ -950,12 +1064,15 @@ mod tests {
         ];
         
         for prob in extreme_prob_tests {
-            let result = lmsr_api::update_market_probability(
+            let result = lmsr_api::update_market(
                 &pool,
-                event_id,
+                &config,
                 users[0].id,
-                prob,
-                to_ledger_units(1.0)?
+                MarketUpdate {
+                    event_id,
+                    target_prob: prob,
+                    stake: 1.0,
+                },
             ).await;
             
             match result {
@@ -979,12 +1096,15 @@ mod tests {
             let stake = 0.1 + (cycle as f64 * 0.01); // Varying small stakes
             
             // Buy shares
-            let buy_result = lmsr_api::update_market_probability(
+            let buy_result = lmsr_api::update_market(
                 &pool,
-                event_id,
+                &config,
                 users[0].id,
-                0.6,
-                to_ledger_units(stake)?
+                MarketUpdate {
+                    event_id,
+                    target_prob: 0.6,
+                    stake,
+                },
             ).await?;
             
             // Sell a portion back
@@ -992,9 +1112,10 @@ mod tests {
                 let sell_amount = buy_result.shares_acquired * 0.5;
                 let _sell_result = lmsr_api::sell_shares(
                     &pool,
+                    &config,
                     users[0].id,
                     event_id,
-                    Side::Yes,
+                    buy_result.share_type.as_str(),
                     sell_amount
                 ).await?;
             }

@@ -10,8 +10,9 @@
 use anyhow::{Result, anyhow};
 use rand::prelude::*;
 use sqlx::{PgPool, Row};
+use std::env;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::{info, warn, error};
 
 use crate::config::Config;
@@ -438,11 +439,18 @@ mod tests {
         tracing_subscriber::fmt::init();
 
         // Create test database connection
-        let database_url = std::env::var("DATABASE_URL")
+        let database_url = env::var("STRESS_TEST_DB_URL")
+            .or_else(|_| env::var("TEST_DB_URL"))
+            .or_else(|_| env::var("DATABASE_URL"))
             .unwrap_or_else(|_| "postgresql://postgres:password@localhost/test_intellacc".to_string());
+        let acquire_timeout_secs = env::var("STRESS_TEST_ACQUIRE_TIMEOUT_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(120);
         
         let pool = PgPoolOptions::new()
             .max_connections(50)
+            .acquire_timeout(Duration::from_secs(acquire_timeout_secs))
             .connect(&database_url)
             .await?;
 
