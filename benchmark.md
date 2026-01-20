@@ -48,3 +48,12 @@
 - TPS: 2834.9
 - Success rate: 33.01% (330,149 ok / 669,851 failed)
 - Notes: Throughput +11% vs baseline; success rate slightly higher.
+
+- Change: Stress test mixes buys/sells with skip tracking; ledger-based balance updates recompute numeric columns from ledger.
+- Date: 2026-01-19T17:15:41+01:00
+- Commit: dacdcd0 (dirty)
+- Command: docker compose -f prediction-engine/docker-compose.test.yml run --rm prediction-engine-tests bash -c "export PATH=/usr/local/cargo/bin:$PATH; export PGPASSWORD=password; export RUST_LOG=info; until pg_isready -h db -U postgres; do sleep 1; done; cargo test --release stress::tests::test_comprehensive_market_simulation -- --nocapture"
+- Duration: 344.11s
+- TPS: 2906.05
+- Success rate: 32.2% (322,079 ok / 0 failed / 677,921 skipped)
+- Notes: Command runs the test twice (lib + bin); metrics recorded from the second run.
