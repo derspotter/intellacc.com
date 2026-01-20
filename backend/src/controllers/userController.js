@@ -167,7 +167,7 @@ exports.getUserProfile = async (req, res) => {
     const userId = req.user.id; // Using standardized user object from auth middleware
 
     const result = await db.query(
-      "SELECT id, username, email, role, rp_balance FROM users WHERE id = $1",
+      "SELECT id, username, email, role, (rp_balance_ledger::DOUBLE PRECISION / 1000000.0) AS rp_balance FROM users WHERE id = $1",
       [userId]
     );
 

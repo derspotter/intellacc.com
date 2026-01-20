@@ -1,5 +1,17 @@
 const db = require('../db');
 
+const LEDGER_SCALE = 1_000_000n;
+const LEDGER_SCALE_NUMBER = 1_000_000;
+
+const formatLedgerToRp2 = (ledgerValue) => {
+  const negative = ledgerValue < 0n;
+  const abs = negative ? -ledgerValue : ledgerValue;
+  const cents = (abs + 5_000n) / 10_000n;
+  const whole = cents / 100n;
+  const frac = cents % 100n;
+  return `${negative ? '-' : ''}${whole.toString()}.${frac.toString().padStart(2, '0')}`;
+};
+
 class WeeklyAssignmentService {
   /**
    * Get current week in YYYY-WXX format
@@ -134,7 +146,7 @@ class WeeklyAssignmentService {
           u.username, 
           u.weekly_assigned_event_id, 
           u.weekly_assignment_week, 
-          u.rp_balance,
+          u.rp_balance_ledger,
           e.title as event_title,
           e.market_prob,
           p.prediction_value,
@@ -158,7 +170,8 @@ class WeeklyAssignmentService {
         // Calculate Kelly optimal amount for this user's belief
         const belief = user.confidence !== null ? parseFloat(user.confidence) / 100.0 : null;
         const marketProb = parseFloat(user.market_prob);
-        const balance = parseFloat(user.rp_balance);
+        const balanceLedger = BigInt(user.rp_balance_ledger);
+        const balance = Number(balanceLedger) / LEDGER_SCALE_NUMBER;
 
         if (belief === null || Number.isNaN(belief) || Number.isNaN(marketProb) || Number.isNaN(balance)) {
           skipCount++;
@@ -181,13 +194,14 @@ class WeeklyAssignmentService {
 
         if (userStake >= quarterKelly && quarterKelly > 0) {
           // User staked enough - award the bonus
+          const rewardLedger = BigInt(Math.round(rewardAmount * LEDGER_SCALE_NUMBER));
           await client.query(`
             UPDATE users 
             SET weekly_assignment_completed = true,
                 weekly_assignment_completed_at = NOW(),
-                rp_balance = rp_balance + $1
+                rp_balance_ledger = rp_balance_ledger + $1
             WHERE id = $2
-          `, [rewardAmount, user.id]);
+          `, [rewardLedger.toString(), user.id]);
           
           rewardCount++;
           totalRewards += rewardAmount;
@@ -248,28 +262,33 @@ class WeeklyAssignmentService {
         return { processed: 0, message: `Decay already applied for ${currentWeek}` };
       }
       
+      const decayThresholdLedger = 100n * LEDGER_SCALE;
+      
       // Get all users with RP balance > 100 (minimum threshold)
       const usersResult = await client.query(`
-        SELECT id, username, rp_balance 
+        SELECT id, username, rp_balance_ledger 
         FROM users 
-        WHERE rp_balance > 100.0
+        WHERE rp_balance_ledger > $1
         ORDER BY id
-      `);
+      `, [decayThresholdLedger.toString()]);
       
       let processedCount = 0;
-      let totalDecayAmount = 0;
+      let totalDecayLedger = 0n;
       
       for (const user of usersResult.rows) {
-        const originalBalance = parseFloat(user.rp_balance);
-        const decayAmount = originalBalance * 0.01; // 1% decay
-        const newBalance = originalBalance - decayAmount;
+        const originalBalanceLedger = BigInt(user.rp_balance_ledger);
+        const decayLedger = originalBalanceLedger / 100n; // 1% decay
+        const newBalanceLedger = originalBalanceLedger - decayLedger;
+        const originalBalance = formatLedgerToRp2(originalBalanceLedger);
+        const decayAmount = formatLedgerToRp2(decayLedger);
+        const newBalance = formatLedgerToRp2(newBalanceLedger);
         
         // Apply decay
         await client.query(`
           UPDATE users 
-          SET rp_balance = $1
+          SET rp_balance_ledger = $1
           WHERE id = $2
-        `, [newBalance.toFixed(2), user.id]);
+        `, [newBalanceLedger.toString(), user.id]);
         
         // Log the decay
         await client.query(`
@@ -279,18 +298,19 @@ class WeeklyAssignmentService {
         `, [user.id, currentWeek, originalBalance, decayAmount, newBalance]);
         
         processedCount++;
-        totalDecayAmount += decayAmount;
+        totalDecayLedger += decayLedger;
         
-        console.log(`📉 Applied 1% decay to ${user.username}: ${originalBalance.toFixed(2)} → ${newBalance.toFixed(2)} RP`);
+        console.log(`📉 Applied 1% decay to ${user.username}: ${originalBalance} → ${newBalance} RP`);
       }
       
       await client.query('COMMIT');
       
-      console.log(`💸 Weekly decay completed: ${processedCount} users, ${totalDecayAmount.toFixed(2)} total RP decayed`);
+      const totalDecayAmount = formatLedgerToRp2(totalDecayLedger);
+      console.log(`💸 Weekly decay completed: ${processedCount} users, ${totalDecayAmount} total RP decayed`);
       
       return {
         processed: processedCount,
-        totalDecayAmount: totalDecayAmount.toFixed(2),
+        totalDecayAmount,
         week: currentWeek,
         message: `Applied 1% decay to ${processedCount} users`
       };
