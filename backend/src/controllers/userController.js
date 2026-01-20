@@ -167,7 +167,7 @@ exports.getUserProfile = async (req, res) => {
     const userId = req.user.id; // Using standardized user object from auth middleware
 
     const result = await db.query(
-      "SELECT id, username, email, role, rp_balance FROM users WHERE id = $1",
+      "SELECT id, username, email, role, (rp_balance_ledger::DOUBLE PRECISION / 1000000.0) AS rp_balance FROM users WHERE id = $1",
       [userId]
     );
 
@@ -417,7 +417,7 @@ exports.getUserPositions = async (req, res) => {
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         
         await db.query(
-          'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+          'UPDATE users SET password_hash = $1, password_changed_at = NOW(), updated_at = NOW() WHERE id = $2',
           [hashedPassword, userId]
         );
         

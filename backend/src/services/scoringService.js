@@ -3,13 +3,15 @@
 const axios = require('axios');
 
 const PREDICTION_ENGINE_URL = process.env.PREDICTION_ENGINE_URL || 'http://prediction-engine:3001';
+const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
 
 // Create axios instance with default config
 const predictionEngineClient = axios.create({
   baseURL: PREDICTION_ENGINE_URL,
   timeout: 30000, // 30 second timeout
   headers: {
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    ...(PREDICTION_ENGINE_AUTH_TOKEN ? { 'x-engine-token': PREDICTION_ENGINE_AUTH_TOKEN } : {})
   }
 });
 

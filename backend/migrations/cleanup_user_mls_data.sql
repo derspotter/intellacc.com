@@ -17,6 +17,7 @@
 -- ============================================
 
 -- Function to clear all MLS data for a specific user
+DROP FUNCTION IF EXISTS clear_user_mls_data(INTEGER);
 CREATE OR REPLACE FUNCTION clear_user_mls_data(target_user_id INTEGER)
 RETURNS TABLE(table_name TEXT, deleted_count BIGINT) AS $$
 DECLARE

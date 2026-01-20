@@ -11,6 +11,10 @@ ADD COLUMN IF NOT EXISTS weekly_assignment_completed_at TIMESTAMP;
 CREATE INDEX IF NOT EXISTS idx_users_weekly_assignment ON users(weekly_assigned_event_id, weekly_assignment_week);
 CREATE INDEX IF NOT EXISTS idx_users_weekly_completion ON users(weekly_assignment_completed, weekly_assignment_week);
 
+-- Ensure assigned_predictions has week_year for weekly reporting
+ALTER TABLE assigned_predictions
+ADD COLUMN IF NOT EXISTS week_year VARCHAR(8);
+
 -- Create index for week-based queries
 CREATE INDEX IF NOT EXISTS idx_assigned_predictions_week ON assigned_predictions(week_year);
 CREATE INDEX IF NOT EXISTS idx_assigned_predictions_user_week ON assigned_predictions(user_id, week_year);

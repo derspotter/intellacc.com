@@ -16,7 +16,13 @@ const authenticateJWT = require("../middleware/auth");
 const rateLimit = require('express-rate-limit');
 const attachmentsController = require('../controllers/attachmentsController');
 const verificationController = require('../controllers/verificationController');
+const passwordResetController = require('../controllers/passwordResetController');
 const { requireTier, requireEmailVerified } = require('../middleware/verification');
+const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
+const predictionEngineHeaders = {
+    'Content-Type': 'application/json',
+    ...(PREDICTION_ENGINE_AUTH_TOKEN ? { 'x-engine-token': PREDICTION_ENGINE_AUTH_TOKEN } : {})
+};
 
 // Base test route
 router.get("/", (req, res) => {
@@ -73,11 +79,23 @@ const linkStatusRateLimit = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
 });
+const passwordResetRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: isProduction ? 5 : 50,
+    message: { error: 'Too many reset attempts, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 const deviceController = require('../controllers/deviceController');
 router.post('/auth/check-device-status', preLoginRateLimit, deviceController.checkDeviceStatus);
 router.post('/auth/start-pre-login-link', preLoginRateLimit, deviceController.startPreLoginLink);
 router.get('/auth/link-status/:sessionToken', linkStatusRateLimit, deviceController.getPreLoginLinkStatus);
 router.post('/auth/approve-pre-login-link', authenticateJWT, deviceController.approvePreLoginLink);
+
+// Password reset routes
+router.post('/auth/forgot-password', passwordResetRateLimit, passwordResetController.forgotPassword);
+router.post('/auth/reset-password', passwordResetRateLimit, passwordResetController.resetPassword);
+router.post('/auth/reset-password/cancel', authenticateJWT, passwordResetController.cancelReset);
 
 router.post('/users/change-password', authenticateJWT, userController.changePassword);
 router.get("/me", authenticateJWT, userController.getUserProfile);
@@ -188,7 +206,9 @@ router.get("/events/:eventId/shares", async (req, res) => {
         const { eventId } = req.params;
         const { user_id } = req.query;
 
-        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/shares?user_id=${user_id}`);
+        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/shares?user_id=${user_id}`, {
+            headers: predictionEngineHeaders
+        });
         const data = await response.json();
 
         res.json(data);
@@ -203,7 +223,9 @@ router.get("/events/:eventId/kelly", async (req, res) => {
         const { eventId } = req.params;
         const { belief, user_id } = req.query;
 
-        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/kelly?belief=${belief}&user_id=${user_id}`);
+        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/kelly?belief=${belief}&user_id=${user_id}`, {
+            headers: predictionEngineHeaders
+        });
         const data = await response.json();
 
         res.json(data);
@@ -220,9 +242,7 @@ router.post("/events/:eventId/sell", async (req, res) => {
 
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/sell`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: predictionEngineHeaders,
             body: JSON.stringify({ user_id, share_type, amount })
         });
 
@@ -264,9 +284,7 @@ router.post("/events/:eventId/update", async (req, res) => {
 
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/update`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: predictionEngineHeaders,
             body: JSON.stringify({ user_id, stake, target_prob })
         });
 

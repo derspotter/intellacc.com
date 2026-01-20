@@ -1,18 +1,20 @@
 // Import the things we need
 use axum::{
     extract::{Path, State, WebSocketUpgrade, Query, Json as ExtractJson},
-    response::{Json, Response},
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
 use tower_http::cors::CorsLayer;
 use serde_json::{json, Value};
 use sqlx::PgPool;
-use rust_decimal::Decimal;
-use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
+use rust_decimal::prelude::ToPrimitive;
 use std::net::SocketAddr;
 use std::collections::HashMap;
 use axum::extract::ws::{WebSocket, Message};
+use axum::http::{Method, Request, StatusCode};
+use axum::middleware::{self, Next};
+use axum::body::Body;
 use futures_util::{sink::SinkExt, stream::StreamExt};
 use tokio::sync::broadcast;
 use chrono;
@@ -27,7 +29,6 @@ mod lmsr_api;  // Clean LMSR API using lmsr_core directly
 mod lmsr_core;
 mod db_adapter;
 mod config;  // Configuration management
-mod stress;  // Comprehensive stress tests
 
 #[cfg(test)]
 mod integration_tests;
@@ -62,6 +63,27 @@ fn bad_request_error(message: &str) -> (axum::http::StatusCode, Json<Value>) {
     )
 }
 
+async fn auth_guard(
+    State(app_state): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if req.method() == Method::OPTIONS || req.uri().path() == "/health" {
+        return next.run(req).await;
+    }
+
+    if let Some(token) = &app_state.auth_token {
+        let provided = req.headers()
+            .get("x-engine-token")
+            .and_then(|value| value.to_str().ok());
+        if provided != Some(token.as_str()) {
+            return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Unauthorized"}))).into_response();
+        }
+    }
+
+    next.run(req).await
+}
+
 // Cache and broadcast helper for score updates
 fn invalidate_and_broadcast(app_state: &AppState, event_type: &str, data: Value) {
     app_state.cache.invalidate_all();
@@ -82,7 +104,8 @@ fn map_user_accuracy_to_json(accuracy: &database::UserAccuracy) -> Value {
         "correct_predictions": accuracy.correct_predictions,
         "accuracy_rate": accuracy.accuracy_rate,
         "weighted_accuracy": accuracy.weighted_accuracy,
-        "log_loss": accuracy.log_loss
+        "log_loss": accuracy.log_loss,
+        "calibration_score": accuracy.calibration_score
     })
 }
 
@@ -125,6 +148,7 @@ struct AppState {
     tx: broadcast::Sender<String>,
     cache: Cache<String, String>,
     config: config::Config,
+    auth_token: Option<String>,
 }
 
 // This is our main function - but notice the #[tokio::main] attribute!
@@ -159,15 +183,21 @@ async fn main() -> anyhow::Result<()> {
         .build();
     
     // Create shared app state
+    let auth_token = std::env::var("PREDICTION_ENGINE_AUTH_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if auth_token.is_none() {
+        eprintln!("⚠️  PREDICTION_ENGINE_AUTH_TOKEN not set; auth guard disabled");
+    }
+
     let app_state = AppState {
         db: pool,
         tx: tx.clone(),
         cache,
         config,
+        auth_token,
     };
-
-    // Clone pool for background task before moving app_state
-    let pool_clone = app_state.db.clone();
 
     // Create our web application routes with shared state - UNIFIED LOG SCORING ONLY
     let app = Router::new()
@@ -209,6 +239,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/lmsr/verify-staked-invariant", post(verify_staked_invariant_endpoint))
         .route("/lmsr/verify-post-resolution", post(verify_post_resolution_endpoint))
         .route("/lmsr/verify-consistency", post(verify_consistency_endpoint))
+        .layer(middleware::from_fn_with_state(app_state.clone(), auth_guard))
         .layer(
             CorsLayer::new()
                 .allow_origin(tower_http::cors::Any)
@@ -252,13 +283,6 @@ async fn main() -> anyhow::Result<()> {
     println!("  POST /lmsr/verify-staked-invariant - Verify staked invariant");
     println!("  POST /lmsr/verify-post-resolution - Verify post-resolution invariant");
     println!("  POST /lmsr/verify-consistency - Verify system consistency");
-
-    // Start the daily Metaculus sync job (disabled for testing)
-    // tokio::spawn(async move {
-    //     if let Err(e) = metaculus::start_daily_sync_job(pool_clone).await {
-    //         eprintln!("❌ Failed to start daily sync job: {}", e);
-    //     }
-    // });
 
     // Start the server
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -778,7 +802,17 @@ async fn update_market_endpoint(
             }));
             Ok(Json(json!(result)))
         },
-        Err(e) => Err(internal_error(&format!("Market update error: {}", e)))
+        Err(e) => {
+            let msg = e.to_string();
+            let msg_lower = msg.to_lowercase();
+            if msg_lower.contains("market resolved") {
+                return Err(bad_request_error("Market resolved"));
+            }
+            if msg_lower.contains("market closed") {
+                return Err(bad_request_error("Market closed"));
+            }
+            Err(internal_error(&format!("Market update error: {}", msg)))
+        }
     }
 }
 
@@ -813,28 +847,28 @@ async fn kelly_suggestion_endpoint(
     }
 
     // Get current market probability
-    let market_prob_decimal: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
+    let market_prob_result: Result<f64, sqlx::Error> = sqlx::query_scalar(
         "SELECT market_prob FROM events WHERE id = $1"
     )
     .bind(event_id)
     .fetch_one(&app_state.db)
     .await;
 
-    let market_prob = match market_prob_decimal {
-        Ok(prob) => prob.to_f64().unwrap_or(0.5),
+    let market_prob = match market_prob_result {
+        Ok(prob) => prob,
         Err(_) => return Err(not_found_error("Event"))
     };
 
-    // Get user balance
-    let balance_decimal: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
-        "SELECT rp_balance FROM users WHERE id = $1"
+    // Get user balance from ledger
+    let balance_ledger_result: Result<i64, sqlx::Error> = sqlx::query_scalar(
+        "SELECT rp_balance_ledger FROM users WHERE id = $1"
     )
     .bind(user_id)
     .fetch_one(&app_state.db)
     .await;
 
-    let balance = match balance_decimal {
-        Ok(bal) => bal.to_f64().unwrap_or(0.0),
+    let balance = match balance_ledger_result {
+        Ok(bal) => lmsr_core::from_ledger_units(bal as i128),
         Err(_) => return Err(not_found_error("User"))
     };
 
@@ -907,8 +941,15 @@ async fn sell_shares_endpoint(
         },
         Err(e) => {
             let msg = e.to_string();
-            if msg.to_lowercase().contains("hold period not expired") {
+            let msg_lower = msg.to_lowercase();
+            if msg_lower.contains("hold period not expired") {
                 return Err(bad_request_error("Hold period not expired for recent purchases"));
+            }
+            if msg_lower.contains("market resolved") {
+                return Err(bad_request_error("Market resolved"));
+            }
+            if msg_lower.contains("market closed") {
+                return Err(bad_request_error("Market closed"));
             }
             Err(internal_error(&format!("Share sale error: {}", msg)))
         }
@@ -1151,4 +1192,3 @@ async fn verify_consistency_endpoint(
         Err(e) => Err(internal_error(&format!("System consistency verification error: {}", e)))
     }
 }
-

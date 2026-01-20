@@ -362,6 +362,46 @@ button:disabled,
   cursor: pointer;
 }
 
+.auth-links {
+  text-align: center;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: var(--secondary-text);
+}
+
+.auth-links a {
+  color: #007bff;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.reset-warning {
+  background: #fff3cd;
+  border: 1px solid #ffecb5;
+  color: #664d03;
+  padding: 1rem;
+  border-radius: var(--border-radius);
+  font-size: 0.9rem;
+}
+
+.reset-warning ul {
+  margin: 0.5rem 0 1rem 1.2rem;
+}
+
+.reset-checkbox {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.reset-note {
+  margin-top: 1rem;
+  font-size: 0.95rem;
+  color: var(--secondary-text);
+}
+
 /* Staged Login Flow - Verification Stage */
 .verification-stage {
   text-align: center;

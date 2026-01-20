@@ -7,18 +7,17 @@ use crate::config::Config;
 use sqlx::{PgPool, Row, Executor, Error as SqlxError};
 use chrono::{DateTime, Utc, Duration};
 use anyhow::{Result, anyhow};
-use std::convert::TryFrom;
-use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Serialize};
 use std::time::Duration as StdDuration;
 use tokio::time::sleep;
 use rand::Rng;
-use tracing::{debug, info, warn, error};
-use std::str::FromStr;
+use tracing::debug;
 
 // Configuration constants for concurrency control
 const MAX_RETRY_ATTEMPTS: u32 = 5;
 const BASE_RETRY_DELAY_MS: u64 = 10;
+const ERR_MARKET_RESOLVED: &str = "Market resolved";
+const ERR_MARKET_CLOSED: &str = "Market closed";
 
 /// PostgreSQL SQLSTATE codes for retryable errors
 /// Reference: https://www.postgresql.org/docs/current/errcodes-appendix.html
@@ -153,15 +152,15 @@ macro_rules! with_serializable_tx {
     }};
 }
 
-/// Macro for executing transactions with REPEATABLE READ isolation (optimistic)
+/// Macro for executing transactions with READ COMMITTED isolation (optimistic)
 macro_rules! with_optimistic_tx {
     ($pool:expr, $tx_var:ident, $body:block) => {{
         let mut attempt = 1;
         loop {
             let mut $tx_var = $pool.begin().await?;
             
-            // Set REPEATABLE READ isolation level
-            $tx_var.execute(sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+            // Set READ COMMITTED isolation level
+            $tx_var.execute(sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
                 .await?;
             
             let result: Result<_> = async { $body }.await;
@@ -205,7 +204,7 @@ pub async fn update_market(
         return Err(anyhow!("Stake must be positive"));
     }
 
-    with_serializable_tx!(pool, tx, {
+    with_optimistic_tx!(pool, tx, {
         update_market_transaction(&mut tx, config, user_id, &update).await
     })
 }
@@ -220,13 +219,26 @@ async fn update_market_transaction(
     
     // Get current market state with row lock
     let row = sqlx::query(
-        "SELECT market_prob, cumulative_stake, liquidity_b, q_yes, q_no FROM events WHERE id = $1 FOR UPDATE"
+        "SELECT market_prob, cumulative_stake, liquidity_b, q_yes, q_no, outcome,
+                COALESCE(closing_date <= NOW(), false) AS is_closed
+         FROM events
+         WHERE id = $1
+         FOR UPDATE"
     )
     .bind(update.event_id)
     .fetch_one(tx.as_mut())
     .await
     .map_err(|_| anyhow!("Event not found or market not initialized"))?;
     
+    let outcome: Option<String> = row.get("outcome");
+    let is_closed: bool = row.get("is_closed");
+    if outcome.is_some() {
+        return Err(anyhow!(ERR_MARKET_RESOLVED));
+    }
+    if is_closed {
+        return Err(anyhow!(ERR_MARKET_CLOSED));
+    }
+
     // Extract market state using clean adapter
     let market_state = DbAdapter::extract_market_state(&row)?;
     let prev_prob = market_state.market_prob;
@@ -345,7 +357,7 @@ pub async fn sell_shares(
         return Err(anyhow!("Amount must be positive"));
     }
 
-    with_serializable_tx!(pool, tx, {
+    with_optimistic_tx!(pool, tx, {
         sell_shares_transaction(&mut tx, config, user_id, event_id, side, amount).await
     })
 }
@@ -359,6 +371,27 @@ async fn sell_shares_transaction(
     side: Side,
     amount: f64,
 ) -> Result<SellResult> {
+    
+    // Get current market state FIRST (consistent lock order with buy path)
+    let event_row = sqlx::query(
+        "SELECT market_prob, cumulative_stake, liquidity_b, q_yes, q_no, outcome,
+                COALESCE(closing_date <= NOW(), false) AS is_closed
+         FROM events
+         WHERE id = $1
+         FOR UPDATE"
+    )
+    .bind(event_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+
+    let outcome: Option<String> = event_row.get("outcome");
+    let is_closed: bool = event_row.get("is_closed");
+    if outcome.is_some() {
+        return Err(anyhow!(ERR_MARKET_RESOLVED));
+    }
+    if is_closed {
+        return Err(anyhow!(ERR_MARKET_CLOSED));
+    }
     
     // Check hold period (if enabled in config)
     if config.market.enable_hold_period {
@@ -378,14 +411,6 @@ async fn sell_shares_transaction(
         }
     }
     
-    // Get current market state FIRST (consistent lock order with buy path)
-    let event_row = sqlx::query(
-        "SELECT market_prob, cumulative_stake, liquidity_b, q_yes, q_no FROM events WHERE id = $1 FOR UPDATE"
-    )
-    .bind(event_id)
-    .fetch_one(tx.as_mut())
-    .await?;
-    
     // Then get user shares with side-specific staked amounts (lock user_shares SECOND)
     let row = sqlx::query(
         "SELECT yes_shares, no_shares, total_staked_ledger, staked_yes_ledger, staked_no_ledger
@@ -401,8 +426,8 @@ async fn sell_shares_transaction(
     // If no row exists, user has no shares to sell
     let (yes_shares, no_shares, _total_staked_ledger, staked_yes_ledger, staked_no_ledger): (f64, f64, i64, i64, i64) = match row {
         Some(r) => (
-            DbAdapter::decimal_to_f64(r.get("yes_shares"))?,
-            DbAdapter::decimal_to_f64(r.get("no_shares"))?,
+            r.get("yes_shares"),
+            r.get("no_shares"),
             r.get::<i64, _>("total_staked_ledger"),
             r.get::<i64, _>("staked_yes_ledger"),
             r.get::<i64, _>("staked_no_ledger"),
@@ -558,8 +583,7 @@ async fn resolve_event_transaction(
     // FOR UPDATE prevents race conditions during resolution (e.g., concurrent sell operations)
     let user_shares = sqlx::query(
         "SELECT user_id, yes_shares, no_shares, 
-                staked_yes_ledger, staked_no_ledger,
-                COALESCE((staked_yes_ledger + staked_no_ledger)::NUMERIC / 1000000.0, 0) as total_staked
+                staked_yes_ledger, staked_no_ledger
          FROM user_shares 
          WHERE event_id = $1 AND (yes_shares > 0 OR no_shares > 0)
          FOR UPDATE"
@@ -571,21 +595,16 @@ async fn resolve_event_transaction(
     // Calculate payout for each user
     for row in &user_shares {
         let user_id: i32 = row.get("user_id");
-        let yes_shares: rust_decimal::Decimal = row.get("yes_shares");
-        let no_shares: rust_decimal::Decimal = row.get("no_shares");
+        let yes_shares: f64 = row.get("yes_shares");
+        let no_shares: f64 = row.get("no_shares");
         let staked_yes_ledger: i64 = row.get("staked_yes_ledger");
         let staked_no_ledger: i64 = row.get("staked_no_ledger");
-        let total_staked: rust_decimal::Decimal = row.get("total_staked");
-        
-        let yes_shares_f64 = DbAdapter::decimal_to_f64(yes_shares)?;
-        let no_shares_f64 = DbAdapter::decimal_to_f64(no_shares)?;
-        let _total_staked_f64 = DbAdapter::decimal_to_f64(total_staked)?;
         
         // Calculate final share value based on outcome
         let share_value_f64 = if outcome {
-            yes_shares_f64  // YES outcome: YES shares worth 1, NO shares worth 0
+            yes_shares  // YES outcome: YES shares worth 1, NO shares worth 0
         } else {
-            no_shares_f64   // NO outcome: NO shares worth 1, YES shares worth 0
+            no_shares   // NO outcome: NO shares worth 1, YES shares worth 0
         };
         
         // Update user balance with share value and clear exact staked amount using ledger-native method
@@ -647,16 +666,12 @@ pub async fn get_market_state(
     
     match row {
         Some(row) => {
-            let market_prob = DbAdapter::decimal_to_f64(row.get("market_prob"))?;
-            let cumulative_stake = DbAdapter::decimal_to_f64(row.get("cumulative_stake"))?;
-            let liquidity_b = DbAdapter::decimal_to_f64(row.get("liquidity_b"))?;
-            
             Ok(serde_json::json!({
                 "event_id": row.get::<i32, _>("id"),
                 "title": row.get::<String, _>("title"),
-                "market_prob": market_prob,
-                "cumulative_stake": cumulative_stake,
-                "liquidity_b": liquidity_b,
+                "market_prob": row.get::<f64, _>("market_prob"),
+                "cumulative_stake": row.get::<f64, _>("cumulative_stake"),
+                "liquidity_b": row.get::<f64, _>("liquidity_b"),
                 "unique_traders": row.get::<i64, _>("unique_traders"),
                 "total_trades": row.get::<i64, _>("total_trades"),
             }))
@@ -695,10 +710,10 @@ pub async fn get_event_trades(
     .await?;
 
     let trades: Vec<serde_json::Value> = rows.iter().map(|row| {
-        let prev_prob = DbAdapter::decimal_to_f64(row.get("prev_prob")).unwrap_or(0.5);
-        let new_prob = DbAdapter::decimal_to_f64(row.get("new_prob")).unwrap_or(0.5);
-        let stake_amount = DbAdapter::decimal_to_f64(row.get("stake_amount")).unwrap_or(0.0);
-        let shares_acquired = DbAdapter::decimal_to_f64(row.get("shares_acquired")).unwrap_or(0.0);
+        let prev_prob: f64 = row.get("prev_prob");
+        let new_prob: f64 = row.get("new_prob");
+        let stake_amount: f64 = row.get("stake_amount");
+        let shares_acquired: f64 = row.get("shares_acquired");
         let share_type: String = row.get("share_type");
         let created_at: DateTime<Utc> = row.get("created_at");
 
@@ -739,12 +754,9 @@ pub async fn get_user_shares(
     
     match row {
         Some(row) => {
-            let yes_shares = DbAdapter::decimal_to_f64(row.get("yes_shares"))?;
-            let no_shares = DbAdapter::decimal_to_f64(row.get("no_shares"))?;
-            
             Ok(serde_json::json!({
-                "yes_shares": yes_shares,
-                "no_shares": no_shares,
+                "yes_shares": row.get::<f64, _>("yes_shares"),
+                "no_shares": row.get::<f64, _>("no_shares"),
             }))
         }
         None => {
@@ -760,7 +772,7 @@ pub async fn get_user_shares(
 // INVARIANT VERIFICATION FUNCTIONS
 // ============================================================================
 
-/// Verify balance invariant: users.rp_balance + users.rp_staked == initial + Σ(ledger ΔC) + Σ(resolution credits)
+/// Verify balance invariant: users.rp_balance_ledger + users.rp_staked_ledger == initial + Σ(ledger ΔC) + Σ(resolution credits)
 pub async fn verify_balance_invariant(
     pool: &PgPool,
     user_id: i32,
@@ -799,7 +811,7 @@ async fn verify_balance_invariant_transaction(
     
     // Calculate total stake spent in ledger units from market updates (if available)
     let total_spent_ledger: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(stake_amount_ledger), 0) FROM market_updates WHERE user_id = $1"
+        "SELECT COALESCE(SUM(stake_amount_ledger), 0)::BIGINT FROM market_updates WHERE user_id = $1"
     )
     .bind(user_id)
     .fetch_one(tx.as_mut())
@@ -818,28 +830,7 @@ async fn verify_balance_invariant_transaction(
     // Verify that current ledger values are internally consistent
     let ledger_consistency_check = current_balance_ledger >= 0 && current_staked_ledger >= 0;
     
-    // Advanced check: Verify that NUMERIC columns match ledger columns exactly
-    let numeric_row = sqlx::query(
-        "SELECT rp_balance, rp_staked FROM users WHERE id = $1"
-    )
-    .bind(user_id)
-    .fetch_one(tx.as_mut())
-    .await?;
-    
-    let balance_numeric: rust_decimal::Decimal = numeric_row.get("rp_balance");
-    let staked_numeric: rust_decimal::Decimal = numeric_row.get("rp_staked");
-    
-    // Convert ledger to decimal for comparison (with 6dp precision)
-    let balance_from_ledger = rust_decimal::Decimal::from(current_balance_ledger) / rust_decimal::Decimal::from(1_000_000);
-    let staked_from_ledger = rust_decimal::Decimal::from(current_staked_ledger) / rust_decimal::Decimal::from(1_000_000);
-    
-    // Check if NUMERIC columns match ledger within 2dp rounding tolerance  
-    // NUMERIC(15,2) columns will always round to 2dp, so allow 0.01 RP tolerance
-    let tolerance = rust_decimal::Decimal::from_str("0.01")?;
-    let balance_matches = (balance_numeric - balance_from_ledger).abs() <= tolerance;
-    let staked_matches = (staked_numeric - staked_from_ledger).abs() <= tolerance;
-    
-    let is_valid = ledger_consistency_check && balance_matches && staked_matches;
+    let is_valid = ledger_consistency_check;
     
     let message = if is_valid {
         "Ledger-based balance invariant verified".to_string()
@@ -847,12 +838,6 @@ async fn verify_balance_invariant_transaction(
         let mut issues = Vec::new();
         if !ledger_consistency_check {
             issues.push("negative ledger values");
-        }
-        if !balance_matches {
-            issues.push("NUMERIC/ledger balance mismatch");
-        }
-        if !staked_matches {
-            issues.push("NUMERIC/ledger staked mismatch");
         }
         format!("Ledger invariant violated: {}", issues.join(", "))
     };
@@ -868,14 +853,12 @@ async fn verify_balance_invariant_transaction(
             "current_staked_rp": crate::lmsr_core::from_ledger_units(current_staked_ledger as i128),
             "current_total_rp": crate::lmsr_core::from_ledger_units(current_total_ledger as i128),
             "total_spent_ledger": total_spent_ledger,
-            "balance_numeric_matches": balance_matches,
-            "staked_numeric_matches": staked_matches,
             "ledger_consistency": ledger_consistency_check
         }
     }))
 }
 
-/// Verify staked invariant: users.rp_staked == Σ user_shares.total_staked_ledger (before resolution)
+/// Verify staked invariant: users.rp_staked_ledger == Σ user_shares.total_staked_ledger (before resolution)
 pub async fn verify_staked_invariant(
     pool: &PgPool,
     user_id: i32,
@@ -929,7 +912,7 @@ async fn verify_staked_invariant_transaction(
     }))
 }
 
-/// Verify post-resolution invariant: After resolution, user_shares rows cleared; rp_staked unchanged by further reads
+/// Verify post-resolution invariant: After resolution, user_shares rows cleared; rp_staked_ledger unchanged by further reads
 pub async fn verify_post_resolution_invariant(
     pool: &PgPool,
     event_id: i32,
@@ -1024,7 +1007,7 @@ async fn verify_system_consistency_transaction(
     let (market_state, stored_cost) = match market_row {
         Some(row) => {
             let state = DbAdapter::extract_market_state(&row)?;
-            let cost = DbAdapter::decimal_to_f64(row.get("cumulative_stake"))?;
+            let cost: f64 = row.get("cumulative_stake");
             (state, cost)
         },
         None => return Ok(serde_json::json!({

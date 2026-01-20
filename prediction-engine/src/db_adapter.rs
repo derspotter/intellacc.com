@@ -1,63 +1,23 @@
 //! Database adapter layer for clean numeric conversions
 //! Eliminates scattered to_f64()/from_f64() calls throughout the codebase
 
-use rust_decimal::Decimal;
-use rust_decimal::RoundingStrategy;
-use rust_decimal::prelude::ToPrimitive;
 use anyhow::{Result, anyhow};
 use sqlx::Row;
 use chrono::{DateTime, Utc};
 use crate::lmsr_core::Side;
-use tracing::{debug, info, warn, error};
+use tracing::debug;
 
-/// Clean conversion functions between database Decimal and core f64 math
+/// Clean conversion helpers between database rows and core f64 math
 pub struct DbAdapter;
 
 impl DbAdapter {
-    /// Convert database Decimal to f64 for LMSR math
-    #[inline]
-    pub fn decimal_to_f64(decimal: Decimal) -> Result<f64> {
-        decimal.to_f64()
-            .ok_or_else(|| anyhow!("Failed to convert Decimal to f64: {}", decimal))
-    }
-    
-    /// Convert f64 result back to Decimal for database storage
-    #[inline]
-    pub fn f64_to_decimal(value: f64) -> Result<Decimal> {
-        if !value.is_finite() {
-            return Err(anyhow!("Cannot convert non-finite f64 to Decimal: {}", value));
-        }
-        Decimal::from_f64_retain(value)
-            .ok_or_else(|| anyhow!("Failed to convert f64 to Decimal: {}", value))
-    }
-    
-    /// Convert f64 to Decimal with explicit decimal places (quantized to match DB column scale)
-    #[inline]
-    pub fn f64_to_decimal_dp(value: f64, dp: u32) -> Result<Decimal> {
-        if !value.is_finite() {
-            return Err(anyhow!("Cannot convert non-finite f64 to Decimal: {}", value));
-        }
-        let dec = Decimal::from_f64_retain(value)
-            .ok_or_else(|| anyhow!("Failed to convert f64 to Decimal: {}", value))?;
-        Ok(dec.round_dp_with_strategy(dp, RoundingStrategy::MidpointAwayFromZero))
-    }
-    
     /// Extract market state from database row as f64 values
     pub fn extract_market_state(row: &sqlx::postgres::PgRow) -> Result<MarketState> {
         Ok(MarketState {
-            market_prob: Self::decimal_to_f64(row.get("market_prob"))?,
-            liquidity_b: Self::decimal_to_f64(row.get("liquidity_b"))?,
-            q_yes: Self::decimal_to_f64(row.get("q_yes"))?,
-            q_no: Self::decimal_to_f64(row.get("q_no"))?,
-        })
-    }
-    
-    /// Extract user shares from database row as f64 values
-    pub fn extract_user_shares(row: &sqlx::postgres::PgRow) -> Result<UserShares> {
-        Ok(UserShares {
-            yes_shares: Self::decimal_to_f64(row.get("yes_shares"))?,
-            no_shares: Self::decimal_to_f64(row.get("no_shares"))?,
-            total_staked: crate::lmsr_core::from_ledger_units(row.get::<i64, _>("total_staked_ledger") as i128),
+            market_prob: row.get("market_prob"),
+            liquidity_b: row.get("liquidity_b"),
+            q_yes: row.get("q_yes"),
+            q_no: row.get("q_no"),
         })
     }
 }
@@ -69,14 +29,6 @@ pub struct MarketState {
     pub liquidity_b: f64,
     pub q_yes: f64,
     pub q_no: f64,
-}
-
-/// Clean user shares structure for f64 math
-#[derive(Debug)]
-pub struct UserShares {
-    pub yes_shares: f64,
-    pub no_shares: f64, 
-    pub total_staked: f64,
 }
 
 /// Database update operations with clean conversions
@@ -98,38 +50,15 @@ impl DbAdapter {
                 q_no = $4
              WHERE id = $5"
         )
-        .bind(Self::f64_to_decimal_dp(new_prob, 10)?)
-        .bind(Self::f64_to_decimal_dp(new_cost, 6)?)
-        .bind(Self::f64_to_decimal_dp(q_yes, 6)?)
-        .bind(Self::f64_to_decimal_dp(q_no, 6)?)
+        .bind(new_prob)
+        .bind(new_cost)
+        .bind(q_yes)
+        .bind(q_no)
         .bind(event_id)
         .execute(&mut **tx)
         .await?;
         
         Ok(())
-    }
-    
-    /// Update user balance from f64 values
-    pub async fn update_user_balance(
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        user_id: i32,
-        balance_delta: f64,
-        staked_delta: f64,
-    ) -> Result<u64> {
-        let rows_affected = sqlx::query(
-            "UPDATE users SET 
-                rp_balance = rp_balance + $1,
-                rp_staked = rp_staked + $2
-             WHERE id = $3 AND (rp_balance + $1) >= 0"
-        )
-        .bind(Self::f64_to_decimal_dp(balance_delta, 2)?)
-        .bind(Self::f64_to_decimal_dp(staked_delta, 2)?)
-        .bind(user_id)
-        .execute(&mut **tx)
-        .await?
-        .rows_affected();
-        
-        Ok(rows_affected)
     }
     
     /// Update user balance from ledger units (bypasses f64 conversion for single rounding boundary)
@@ -141,15 +70,11 @@ impl DbAdapter {
     ) -> Result<u64> {
         let rows_affected = sqlx::query(
             "UPDATE users SET
-                rp_balance         = rp_balance         + ($1::NUMERIC / 1000000.0),
-                rp_staked          = rp_staked          + ($2::NUMERIC / 1000000.0),
-                rp_balance_ledger  = rp_balance_ledger  + $1,
-                rp_staked_ledger   = rp_staked_ledger   + $2
+                rp_balance_ledger = rp_balance_ledger + $1,
+                rp_staked_ledger  = rp_staked_ledger  + $2
              WHERE id = $3
                AND (rp_balance_ledger + $1) >= 0
-               AND (rp_staked_ledger  + $2) >= 0
-               AND (rp_balance + ($1::NUMERIC / 1000000.0)) >= 0
-               AND (rp_staked  + ($2::NUMERIC / 1000000.0)) >= 0"
+               AND (rp_staked_ledger  + $2) >= 0"
         )
         .bind(balance_delta_ledger)
         .bind(staked_delta_ledger)
@@ -169,13 +94,11 @@ impl DbAdapter {
     ) -> Result<bool> {
         let rows_affected = sqlx::query(
             "UPDATE users SET 
-                rp_balance        = rp_balance        - ($1::NUMERIC / 1000000.0),
-                rp_staked         = rp_staked         + ($1::NUMERIC / 1000000.0),
                 rp_balance_ledger = rp_balance_ledger - $1,
                 rp_staked_ledger  = rp_staked_ledger  + $1
              WHERE id = $2
                AND (rp_balance_ledger - $1) >= 0
-               AND (rp_balance - ($1::NUMERIC / 1000000.0)) >= 0"
+               AND (rp_staked_ledger  + $1) >= 0"
         )
         .bind(cost_ledger)
         .bind(user_id)
@@ -210,10 +133,10 @@ impl DbAdapter {
         )
         .bind(user_id)
         .bind(event_id)
-        .bind(Self::f64_to_decimal_dp(prev_prob, 10)?)
-        .bind(Self::f64_to_decimal_dp(new_prob, 10)?)
-        .bind(Self::f64_to_decimal_dp(cost, 6)?)
-        .bind(Self::f64_to_decimal_dp(shares, 6)?)
+        .bind(prev_prob)
+        .bind(new_prob)
+        .bind(cost)
+        .bind(shares)
         .bind(share_type)
         .bind(hold_until)
         .bind(cost_ledger)
@@ -252,7 +175,7 @@ impl DbAdapter {
                 )
                 .bind(user_id)
                 .bind(event_id)
-                .bind(Self::f64_to_decimal_dp(shares_delta, 6)?)
+                .bind(shares_delta)
                 .bind(cost_ledger)
                 .execute(&mut **tx)
                 .await?;
@@ -271,7 +194,7 @@ impl DbAdapter {
                 )
                 .bind(user_id)
                 .bind(event_id)
-                .bind(Self::f64_to_decimal_dp(shares_delta, 6)?)
+                .bind(shares_delta)
                 .bind(cost_ledger)
                 .execute(&mut **tx)
                 .await?;
@@ -303,7 +226,7 @@ impl DbAdapter {
                 )
                 .bind(user_id)
                 .bind(event_id)
-                .bind(Self::f64_to_decimal_dp(shares_delta, 6)?)
+                .bind(shares_delta)
                 .bind(stake_unwind_ledger)
                 .execute(&mut **tx)
                 .await?;
@@ -320,7 +243,7 @@ impl DbAdapter {
                 )
                 .bind(user_id)
                 .bind(event_id)
-                .bind(Self::f64_to_decimal_dp(shares_delta, 6)?)
+                .bind(shares_delta)
                 .bind(stake_unwind_ledger)
                 .execute(&mut **tx)
                 .await?;

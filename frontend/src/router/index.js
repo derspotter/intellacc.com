@@ -9,6 +9,8 @@ import { getStore } from '../store';
 // Import all components directly
 import LoginForm from '../components/auth/LoginForm';
 import SignUpForm from '../components/auth/SignUpForm';
+import ForgotPasswordPage from '../components/auth/ForgotPasswordPage';
+import ResetPasswordPage from '../components/auth/ResetPasswordPage';
 import PostsList from '../components/posts/PostsList';
 import CreatePostForm from '../components/posts/CreatePostForm';
 // Replace PredictionsList with ProfilePredictions
@@ -108,6 +110,8 @@ export default function Router() {
     
     login: () => LoginForm(),
     signup: () => SignUpForm(),
+    'forgot-password': () => ForgotPasswordPage(),
+    'reset-password': () => ResetPasswordPage(),
     'verify-email': () => VerifyEmailPage(),
     settings: () => SettingsPage(),
     
@@ -174,7 +178,7 @@ export default function Router() {
     const page = currentPageState.val;
 
     // Special case for login, signup, and verify-email (no layout)
-    if (page === 'login' || page === 'signup' || page === 'verify-email') {
+    if (page === 'login' || page === 'signup' || page === 'verify-email' || page === 'forgot-password' || page === 'reset-password') {
       return pages[page] ? pages[page]() : pages.notFound();
     }
 
