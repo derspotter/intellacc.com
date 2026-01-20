@@ -15,40 +15,6 @@ struct MetaculusResponse {
 
 #[derive(Debug, Deserialize, Clone)]
 struct MetaculusPost {
-    id: i32,
-    title: String,
-    short_title: String,
-    #[serde(default)]
-    slug: String,
-    #[serde(default)]
-    url_title: String,
-    author_id: i32,
-    author_username: String,
-    #[serde(default)]
-    coauthors: Vec<serde_json::Value>,
-    created_at: String,
-    published_at: Option<String>,
-    edited_at: String,
-    curation_status: String,
-    #[serde(default)]
-    curation_status_updated_at: Option<String>,
-    comment_count: i32,
-    status: String,
-    #[serde(default)]
-    resolved: bool,
-    #[serde(default)]
-    actual_close_time: Option<String>,
-    #[serde(default)]
-    scheduled_close_time: Option<String>,
-    #[serde(default)]
-    scheduled_resolve_time: Option<String>,
-    #[serde(default)]
-    open_time: Option<String>,
-    nr_forecasters: i32,
-    #[serde(default)]
-    html_metadata_json: Option<serde_json::Value>,
-    #[serde(default)]
-    projects: Option<serde_json::Value>,
     #[serde(default)]
     categories: Vec<String>,
     question: Option<MetaculusQuestion>,
@@ -58,64 +24,14 @@ struct MetaculusPost {
 struct MetaculusQuestion {
     id: i32,
     title: String,
-    created_at: String,
-    #[serde(default)]
-    open_time: Option<String>,
-    #[serde(default)]
-    cp_reveal_time: Option<String>,
-    #[serde(default)]
-    spot_scoring_time: Option<String>,
-    #[serde(default)]
-    scheduled_resolve_time: Option<String>,
-    #[serde(default)]
-    actual_resolve_time: Option<String>,
-    #[serde(default)]
-    resolution_set_time: Option<String>,
     #[serde(default)]
     scheduled_close_time: Option<String>,
-    #[serde(default)]
-    actual_close_time: Option<String>,
     #[serde(rename = "type")]
     question_type: String,
-    #[serde(default)]
-    options: Option<serde_json::Value>,
-    #[serde(default)]
-    group_variable: String,
     status: String,
     #[serde(default)]
-    possibilities: Option<serde_json::Value>,
-    #[serde(default)]
-    resolution: Option<serde_json::Value>,
-    #[serde(default)]
-    include_bots_in_aggregates: bool,
-    #[serde(default)]
-    question_weight: Option<serde_json::Value>,
-    #[serde(default)]
-    label: String,
-    #[serde(default)]
-    unit: String,
-    #[serde(default)]
-    open_upper_bound: bool,
-    #[serde(default)]
-    open_lower_bound: bool,
-    #[serde(default)]
-    inbound_outcome_count: Option<i32>,
-    #[serde(default)]
-    scaling: Option<serde_json::Value>,
-    #[serde(default)]
-    group_rank: Option<i32>,
-    #[serde(default)]
     description: Option<String>,
-    #[serde(default)]
-    resolution_criteria: Option<String>,
-    #[serde(default)]
-    fine_print: Option<String>,
-    post_id: i32,
-    #[serde(default)]
-    aggregations: Option<serde_json::Value>,
 }
-
-// Simplified structures - using serde_json::Value for complex nested objects
 
 // Our internal event structure
 #[derive(Debug)]
@@ -125,7 +41,6 @@ struct PredictionEvent {
     metaculus_id: i32,
     metaculus_url: String,
     close_time: Option<DateTime<Utc>>,
-    resolve_time: Option<DateTime<Utc>>,
     category: String,
     event_type: String,
     status: String,
@@ -175,7 +90,7 @@ impl MetaculusClient {
     }
 
     // Fetch open questions from Metaculus with proper pagination
-    pub async fn fetch_open_questions(&self, limit: Option<u32>) -> Result<Vec<(MetaculusQuestion, MetaculusPost)>> {
+    async fn fetch_open_questions(&self, limit: Option<u32>) -> Result<Vec<(MetaculusQuestion, MetaculusPost)>> {
         let mut all_questions = Vec::new();
         let mut url = format!("{}/posts/?status=open&order_by=-id", self.base_url);
         
@@ -221,7 +136,7 @@ impl MetaculusClient {
     }
 
     // Fetch questions by category
-    pub async fn fetch_questions_by_category(&self, category: &str, limit: Option<u32>) -> Result<Vec<(MetaculusQuestion, MetaculusPost)>> {
+    async fn fetch_questions_by_category(&self, category: &str, limit: Option<u32>) -> Result<Vec<(MetaculusQuestion, MetaculusPost)>> {
         let mut url = format!("{}/posts/?status=open&categories={}&order_by=-created_time", 
                             self.base_url, category);
         
@@ -236,10 +151,6 @@ impl MetaculusClient {
     // Convert Metaculus question to our internal event format
     fn convert_to_event(&self, question: &MetaculusQuestion, post: &MetaculusPost) -> PredictionEvent {
         let close_time = question.scheduled_close_time.as_ref()
-            .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
-            .map(|dt| dt.with_timezone(&Utc));
-
-        let resolve_time = question.scheduled_resolve_time.as_ref()
             .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
             .map(|dt| dt.with_timezone(&Utc));
 
@@ -260,7 +171,6 @@ impl MetaculusClient {
             metaculus_id: question.id,
             metaculus_url: format!("https://www.metaculus.com/questions/{}/", question.id),
             close_time,
-            resolve_time,
             category,
             event_type: question.question_type.clone(),
             status: question.status.clone(),
@@ -268,7 +178,7 @@ impl MetaculusClient {
     }
 
     // Store fetched questions in our database
-    pub async fn store_questions_in_db(&self, pool: &PgPool, questions_with_posts: Vec<(MetaculusQuestion, MetaculusPost)>) -> Result<usize> {
+    async fn store_questions_in_db(&self, pool: &PgPool, questions_with_posts: Vec<(MetaculusQuestion, MetaculusPost)>) -> Result<usize> {
         let mut stored_count = 0;
 
         // First, ensure we have a default topic for Metaculus imports
@@ -462,33 +372,6 @@ impl MetaculusClient {
         println!("💾 Total stored across all categories: {}", total_stored);
         Ok(total_stored)
     }
-}
-
-// Function to start the daily sync job
-pub async fn start_daily_sync_job(pool: PgPool) -> Result<()> {
-    use tokio_cron_scheduler::{Job, JobScheduler};
-
-    let scheduler = JobScheduler::new().await?;
-    let client = MetaculusClient::new();
-
-    // Run daily at 6 AM UTC
-    let job = Job::new_async("0 0 6 * * *", move |_uuid, _l| {
-        let pool = pool.clone();
-        let client = client.clone();
-        
-        Box::pin(async move {
-            match client.daily_sync(&pool).await {
-                Ok(count) => println!("✅ Daily sync completed: {} new questions", count),
-                Err(e) => eprintln!("❌ Daily sync failed: {}", e),
-            }
-        })
-    })?;
-
-    scheduler.add(job).await?;
-    scheduler.start().await?;
-
-    println!("⏰ Daily Metaculus sync job started (runs at 6 AM UTC)");
-    Ok(())
 }
 
 // Manual bulk import function for initial setup

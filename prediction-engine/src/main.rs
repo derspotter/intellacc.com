@@ -8,8 +8,7 @@ use axum::{
 use tower_http::cors::CorsLayer;
 use serde_json::{json, Value};
 use sqlx::PgPool;
-use rust_decimal::Decimal;
-use rust_decimal::prelude::{ToPrimitive, FromPrimitive};
+use rust_decimal::prelude::ToPrimitive;
 use std::net::SocketAddr;
 use std::collections::HashMap;
 use axum::extract::ws::{WebSocket, Message};
@@ -30,7 +29,6 @@ mod lmsr_api;  // Clean LMSR API using lmsr_core directly
 mod lmsr_core;
 mod db_adapter;
 mod config;  // Configuration management
-mod stress;  // Comprehensive stress tests
 
 #[cfg(test)]
 mod integration_tests;
@@ -106,7 +104,8 @@ fn map_user_accuracy_to_json(accuracy: &database::UserAccuracy) -> Value {
         "correct_predictions": accuracy.correct_predictions,
         "accuracy_rate": accuracy.accuracy_rate,
         "weighted_accuracy": accuracy.weighted_accuracy,
-        "log_loss": accuracy.log_loss
+        "log_loss": accuracy.log_loss,
+        "calibration_score": accuracy.calibration_score
     })
 }
 
@@ -200,9 +199,6 @@ async fn main() -> anyhow::Result<()> {
         auth_token,
     };
 
-    // Clone pool for background task before moving app_state
-    let pool_clone = app_state.db.clone();
-
     // Create our web application routes with shared state - UNIFIED LOG SCORING ONLY
     let app = Router::new()
         .route("/", get(hello_world))
@@ -287,13 +283,6 @@ async fn main() -> anyhow::Result<()> {
     println!("  POST /lmsr/verify-staked-invariant - Verify staked invariant");
     println!("  POST /lmsr/verify-post-resolution - Verify post-resolution invariant");
     println!("  POST /lmsr/verify-consistency - Verify system consistency");
-
-    // Start the daily Metaculus sync job (disabled for testing)
-    // tokio::spawn(async move {
-    //     if let Err(e) = metaculus::start_daily_sync_job(pool_clone).await {
-    //         eprintln!("❌ Failed to start daily sync job: {}", e);
-    //     }
-    // });
 
     // Start the server
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -858,28 +847,28 @@ async fn kelly_suggestion_endpoint(
     }
 
     // Get current market probability
-    let market_prob_decimal: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
+    let market_prob_result: Result<f64, sqlx::Error> = sqlx::query_scalar(
         "SELECT market_prob FROM events WHERE id = $1"
     )
     .bind(event_id)
     .fetch_one(&app_state.db)
     .await;
 
-    let market_prob = match market_prob_decimal {
-        Ok(prob) => prob.to_f64().unwrap_or(0.5),
+    let market_prob = match market_prob_result {
+        Ok(prob) => prob,
         Err(_) => return Err(not_found_error("Event"))
     };
 
-    // Get user balance
-    let balance_decimal: Result<Decimal, sqlx::Error> = sqlx::query_scalar(
-        "SELECT rp_balance FROM users WHERE id = $1"
+    // Get user balance from ledger
+    let balance_ledger_result: Result<i64, sqlx::Error> = sqlx::query_scalar(
+        "SELECT rp_balance_ledger FROM users WHERE id = $1"
     )
     .bind(user_id)
     .fetch_one(&app_state.db)
     .await;
 
-    let balance = match balance_decimal {
-        Ok(bal) => bal.to_f64().unwrap_or(0.0),
+    let balance = match balance_ledger_result {
+        Ok(bal) => lmsr_core::from_ledger_units(bal as i128),
         Err(_) => return Err(not_found_error("User"))
     };
 
