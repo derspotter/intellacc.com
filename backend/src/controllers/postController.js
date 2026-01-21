@@ -1,5 +1,6 @@
 const db = require('../db');
 const notificationService = require('../services/notificationService');
+const pangramService = require('../services/pangramService');
 
 // Create a new post or comment
 exports.createPost = async (req, res) => {
@@ -54,6 +55,18 @@ exports.createPost = async (req, res) => {
       // Handle case where user might not be found (optional, but good practice)
       newPost.username = 'Unknown User';
     }
+
+    const contentType = isComment ? 'comment' : 'post';
+
+    // Trigger AI analysis asynchronously
+    pangramService.analyzeContent({
+      text: content,
+      contentType,
+      contentId: newPost.id,
+      userId
+    }).catch(err => {
+      console.error('[Pangram] Analysis failed:', err.message || err);
+    });
 
     // If this is a comment, increment the parent's comment_count and create notifications
     if (parentId) {
@@ -127,10 +140,20 @@ exports.getPosts = async (req, res) => {
               COALESCE(ur.rep_points, 1.0) as user_rep_points,
               -- Calculate visibility multiplier: higher reputation = more visibility
               -- Use GREATEST to ensure we never take LN of a negative number
-              (1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) as visibility_multiplier
+              (1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) as visibility_multiplier,
+              ai.ai_probability,
+              ai.detected_model as ai_detected_model,
+              ai.is_flagged as ai_is_flagged
        FROM posts p
        JOIN users u ON p.user_id = u.id
        LEFT JOIN user_reputation ur ON u.id = ur.user_id
+       LEFT JOIN LATERAL (
+         SELECT ai_probability, detected_model, is_flagged
+         FROM content_ai_analysis
+         WHERE content_type = 'post' AND content_id = p.id
+         ORDER BY analyzed_at DESC
+         LIMIT 1
+       ) ai ON true
        WHERE p.parent_id IS NULL AND p.is_comment = FALSE
        ORDER BY 
          -- Sort by visibility multiplier (reputation-weighted) and recency
@@ -163,7 +186,20 @@ exports.getPostById = async (req, res) => {
   const postId = req.params.id;
   try {
     const result = await db.query(
-      'SELECT * FROM posts WHERE id = $1',
+      `SELECT p.*,
+              ai.ai_probability,
+              ai.detected_model as ai_detected_model,
+              ai.is_flagged as ai_is_flagged
+       FROM posts p
+       LEFT JOIN LATERAL (
+         SELECT ai_probability, detected_model, is_flagged
+         FROM content_ai_analysis
+         WHERE content_type = CASE WHEN p.is_comment THEN 'comment' ELSE 'post' END
+           AND content_id = p.id
+         ORDER BY analyzed_at DESC
+         LIMIT 1
+       ) ai ON true
+       WHERE p.id = $1`,
       [postId]
     );
     if (result.rows.length === 0) {
@@ -190,7 +226,7 @@ exports.updatePost = async (req, res) => {
 
     // First, check if the post exists and get its owner
     const postCheck = await db.query(
-      'SELECT user_id FROM posts WHERE id = $1',
+      'SELECT user_id, is_comment FROM posts WHERE id = $1',
       [postId]
     );
 
@@ -200,6 +236,7 @@ exports.updatePost = async (req, res) => {
 
     // Check if the current user owns the post
     const postOwnerId = postCheck.rows[0].user_id;
+    const isComment = postCheck.rows[0].is_comment;
     if (postOwnerId !== userId) {
       return res.status(403).json({ message: 'You can only edit your own posts' });
     }
@@ -222,6 +259,16 @@ exports.updatePost = async (req, res) => {
     }
 
     res.status(200).json(result.rows[0]);
+
+    const updatedContentType = isComment ? 'comment' : 'post';
+    pangramService.analyzeContent({
+      text: content,
+      contentType: updatedContentType,
+      contentId: postId,
+      userId
+    }).catch(err => {
+      console.error('[Pangram] Analysis failed:', err.message || err);
+    });
   } catch (err) {
     console.error('Error updating post:', err);
     res.status(500).json({ message: 'Error updating the post' });
@@ -264,10 +311,20 @@ exports.getFeed = async (req, res) => {
               COALESCE(ur.rep_points, 1.0) as user_rep_points,
               -- Calculate visibility multiplier: higher reputation = more visibility
               -- Use GREATEST to ensure we never take LN of a negative number
-              (1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) as visibility_multiplier
+              (1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) as visibility_multiplier,
+              ai.ai_probability,
+              ai.detected_model as ai_detected_model,
+              ai.is_flagged as ai_is_flagged
        FROM posts p
        JOIN users u ON p.user_id = u.id
        LEFT JOIN user_reputation ur ON u.id = ur.user_id
+       LEFT JOIN LATERAL (
+         SELECT ai_probability, detected_model, is_flagged
+         FROM content_ai_analysis
+         WHERE content_type = 'post' AND content_id = p.id
+         ORDER BY analyzed_at DESC
+         LIMIT 1
+       ) ai ON true
        WHERE (p.user_id IN (
          SELECT following_id 
          FROM follows 
@@ -324,9 +381,19 @@ exports.getComments = async (req, res) => {
 
     try {
       const result = await db.query(
-        `SELECT p.*, u.username 
+        `SELECT p.*, u.username,
+                ai.ai_probability,
+                ai.detected_model as ai_detected_model,
+                ai.is_flagged as ai_is_flagged
          FROM posts p
          JOIN users u ON p.user_id = u.id
+         LEFT JOIN LATERAL (
+           SELECT ai_probability, detected_model, is_flagged
+           FROM content_ai_analysis
+           WHERE content_type = 'comment' AND content_id = p.id
+           ORDER BY analyzed_at DESC
+           LIMIT 1
+         ) ai ON true
          WHERE p.parent_id = $1
          ORDER BY p.created_at ASC`,
         [postId]
@@ -382,7 +449,18 @@ exports.getCommentTree = async (req, res) => {
          JOIN comment_tree ct ON p.parent_id = ct.id
          WHERE ct.level < $2
        )
-       SELECT * FROM comment_tree
+       SELECT ct.*,
+              ai.ai_probability,
+              ai.detected_model as ai_detected_model,
+              ai.is_flagged as ai_is_flagged
+       FROM comment_tree ct
+       LEFT JOIN LATERAL (
+         SELECT ai_probability, detected_model, is_flagged
+         FROM content_ai_analysis
+         WHERE content_type = 'comment' AND content_id = ct.id
+         ORDER BY analyzed_at DESC
+         LIMIT 1
+       ) ai ON true
        ORDER BY level ASC, created_at ASC`,
       [postId, maxDepth]
     );

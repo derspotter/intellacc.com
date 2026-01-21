@@ -4,6 +4,8 @@
  */
 const db = require('../db');
 const emailVerificationService = require('../services/emailVerificationService');
+const phoneVerificationService = require('../services/phoneVerificationService');
+const paymentVerificationService = require('../services/paymentVerificationService');
 
 /**
  * Send verification email
@@ -134,5 +136,103 @@ exports.resendVerificationEmail = async (req, res) => {
     } catch (err) {
         console.error('[VerificationController] Resend email error:', err);
         res.status(500).json({ error: 'Failed to resend verification email' });
+    }
+};
+
+/**
+ * Start phone verification (Tier 2)
+ * POST /api/verification/phone/start
+ */
+exports.startPhoneVerification = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { phoneNumber } = req.body;
+
+        if (!phoneNumber) {
+            return res.status(400).json({ error: 'Phone number required' });
+        }
+
+        const result = await phoneVerificationService.startPhoneVerification(userId, phoneNumber);
+
+        res.json({
+            success: true,
+            provider: result.provider,
+            dev_code: result.devCode || undefined
+        });
+    } catch (err) {
+        console.error('[VerificationController] Start phone error:', err);
+        res.status(400).json({ error: err.message || 'Failed to start phone verification' });
+    }
+};
+
+/**
+ * Confirm phone verification (Tier 2)
+ * POST /api/verification/phone/confirm
+ */
+exports.confirmPhoneVerification = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { phoneNumber, code } = req.body;
+
+        if (!phoneNumber || !code) {
+            return res.status(400).json({ error: 'Phone number and code required' });
+        }
+
+        await phoneVerificationService.confirmPhoneVerification(userId, phoneNumber, code);
+
+        res.json({
+            success: true,
+            message: 'Phone verified successfully'
+        });
+    } catch (err) {
+        console.error('[VerificationController] Confirm phone error:', err);
+        res.status(400).json({ error: err.message || 'Phone verification failed' });
+    }
+};
+
+/**
+ * Create payment verification session (Tier 3)
+ * POST /api/verification/payment/setup
+ */
+exports.createPaymentSetup = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const result = await paymentVerificationService.createVerificationSession(userId);
+
+        res.json({
+            clientSecret: result.clientSecret,
+            publishableKey: result.publishableKey
+        });
+    } catch (err) {
+        console.error('[VerificationController] Payment setup error:', err);
+        res.status(400).json({ error: err.message || 'Failed to create payment verification' });
+    }
+};
+
+/**
+ * Stripe webhook handler
+ * POST /api/webhooks/stripe
+ */
+exports.handleStripeWebhook = async (req, res) => {
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    const signature = req.headers['stripe-signature'];
+
+    let event = req.body;
+
+    try {
+        if (webhookSecret) {
+            event = paymentVerificationService.constructWebhookEvent(req.rawBody, signature, webhookSecret);
+        } else if (process.env.NODE_ENV === 'production') {
+            return res.status(400).json({ error: 'Stripe webhook secret not configured' });
+        }
+
+        if (event.type === 'setup_intent.succeeded') {
+            await paymentVerificationService.handleSetupIntentSucceeded(event.data.object);
+        }
+
+        res.json({ received: true });
+    } catch (err) {
+        console.error('[VerificationController] Stripe webhook error:', err);
+        res.status(400).json({ error: err.message || 'Webhook error' });
     }
 };

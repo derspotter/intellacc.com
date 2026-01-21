@@ -192,7 +192,7 @@ describe('Password reset flow', () => {
     const passwordMatches = await bcrypt.compare('newpass123', userRow.rows[0].password_hash);
     expect(passwordMatches).toBe(true);
 
-    const masterKeys = await db.query('SELECT id FROM user_master_keys WHERE user_id = $1', [user.id]);
+    const masterKeys = await db.query('SELECT 1 FROM user_master_keys WHERE user_id = $1', [user.id]);
     expect(masterKeys.rows.length).toBe(0);
 
     const mlsKeyPackages = await db.query('SELECT id FROM mls_key_packages WHERE user_id = $1', [user.id]);

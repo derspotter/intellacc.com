@@ -133,12 +133,16 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
       const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
       
       try {
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
         const positionResponse = await fetch(url, {
           signal: controller.signal,
-          headers: {
-            'Content-Type': 'application/json'
-            // Explicitly no Authorization header to avoid expired token issues
-          }
+          headers
         });
         
         clearTimeout(timeoutId);
@@ -178,8 +182,16 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
             console.log('🔄 WITHDRAWAL TRIGGER incremented to:', withdrawalTrigger.val);
           }
         } else {
-          const errorText = await positionResponse.text();
-          console.log('❌ Position API error:', positionResponse.status, errorText);
+          let errorData = {};
+          try {
+            errorData = await positionResponse.json();
+          } catch (e) {
+            errorData = { message: await positionResponse.text() };
+          }
+          console.log('❌ Position API error:', positionResponse.status, errorData);
+          if (positionResponse.status === 403) {
+            error.val = errorData.message || errorData.error || 'Verification required to view positions';
+          }
           userPosition.val = null;
         }
         

@@ -118,7 +118,11 @@ io.on('connection', (socket) => {
 });
 
 // Middleware
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 
 // Background worker for delayed password resets
 passwordResetService.startResetWorker();

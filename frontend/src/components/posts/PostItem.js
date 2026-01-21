@@ -7,6 +7,7 @@ import postsStore from '../../store/posts';
 import auth from '../../services/auth';
 import LikeButton from './LikeButton';
 import EditPostForm from './EditPostForm';
+import AiContentBadge from '../common/AiContentBadge';
 
 // LikeButton is now in a completely separate file for better isolation
 
@@ -195,7 +196,14 @@ export default function PostItem({ post }) {
             }, post.username || 'Anonymous') :
             span(post.username || 'Anonymous')
         ]),
-        div({ class: "post-date" }, new Date(post.created_at).toLocaleDateString())
+        div({ class: "post-meta" }, [
+          div({ class: "post-date" }, new Date(post.created_at).toLocaleDateString()),
+          AiContentBadge({
+            aiProbability: post.ai_probability,
+            aiFlagged: post.ai_is_flagged,
+            detectedModel: post.ai_detected_model
+          })
+        ])
       ]),
       div({ class: "post-content" }, post.content),
       post.image_url ? div({ class: "post-image" },

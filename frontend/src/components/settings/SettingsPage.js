@@ -3,8 +3,11 @@ import VaultSettings from '../vault/VaultSettings.js';
 import PasskeyManager from './PasskeyManager.js';
 import DeviceManager from './DeviceManager.js';
 import NotificationSettings from './NotificationSettings.js';
+import VerificationSettings from '../verification/VerificationSettings.js';
+import AiFlaggedContent from '../admin/AiFlaggedContent.js';
+import { isAdminState } from '../../services/auth';
 
-const { div, h1, h2, p, button, label, input, span } = van.tags;
+const { div, h1, label, input } = van.tags;
 
 // Dark mode state
 const isDarkMode = van.state(false);
@@ -48,6 +51,12 @@ export default function SettingsPage() {
 
     // Device Management
     DeviceManager(),
+
+    // Verification
+    VerificationSettings(),
+
+    // Admin AI moderation
+    () => isAdminState.val ? AiFlaggedContent() : null,
 
     // Push Notification Settings
     NotificationSettings(),

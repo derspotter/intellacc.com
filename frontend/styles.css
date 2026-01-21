@@ -541,6 +541,7 @@ button:disabled,
 .post-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 0.75rem;
 }
 
@@ -551,6 +552,32 @@ button:disabled,
 .post-date {
   color: var(--secondary-text);
   font-size: 0.875rem;
+}
+
+.post-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ai-content-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+body.dark-mode .ai-content-badge {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.4);
 }
 
 .post-title {
@@ -4724,6 +4751,94 @@ body.dark-mode .device-link-modal .instructions {
   font-size: inherit;
 }
 
+/* Phone Verification Component */
+.phone-verification {
+  text-align: center;
+  padding: 2rem;
+}
+
+.phone-verification .verification-icon {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  letter-spacing: 0.15em;
+  color: var(--secondary-text);
+}
+
+.phone-verification .description,
+.payment-verification .description {
+  color: var(--secondary-text);
+  margin-bottom: 1rem;
+}
+
+.phone-verification .success-icon,
+.payment-verification .success-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: var(--success-color);
+  color: white;
+  border-radius: 50%;
+  font-size: 0.9rem;
+  letter-spacing: 0.1em;
+  margin-bottom: 1rem;
+}
+
+.phone-verification .success-message,
+.payment-verification .success-message {
+  color: var(--success-color);
+  margin-bottom: 0.5rem;
+}
+
+.phone-verification .instructions,
+.payment-verification .instructions {
+  color: var(--secondary-text);
+  font-size: 0.875rem;
+}
+
+.phone-verification .form-group,
+.phone-verification .code-section {
+  margin: 1rem 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.phone-verification .resend-link {
+  margin-top: 0.5rem;
+}
+
+.phone-verification .dev-code {
+  font-size: 0.8rem;
+  color: var(--warning-color);
+}
+
+/* Payment Verification Component */
+.payment-verification {
+  text-align: center;
+  padding: 2rem;
+}
+
+.payment-verification .verification-icon {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  letter-spacing: 0.1em;
+  color: var(--secondary-text);
+}
+
+.payment-verification .payment-form-body {
+  margin-top: 1rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.payment-element {
+  padding: 1rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
 /* Verify Email Page */
 .verify-email-page {
   min-height: 100vh;
@@ -4865,4 +4980,60 @@ body.dark-mode .verification-card {
 
 body.dark-mode .verification-card .error-help {
   background: var(--card-bg);
+}
+
+/* Verification settings layout */
+.verification-settings .verification-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.verification-refresh {
+  align-self: flex-start;
+}
+
+.verification-settings .success-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: var(--success-color);
+  color: white;
+  border-radius: 50%;
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
+}
+
+.verification-settings .success-message {
+  color: var(--success-color);
+  margin-bottom: 0;
+}
+
+/* AI moderation */
+.ai-flagged-content .ai-flags-toolbar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.ai-flags-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.ai-flags-table th,
+.ai-flags-table td {
+  border-bottom: 1px solid var(--border-color);
+  padding: 0.5rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ai-flags-table th {
+  font-weight: 600;
 }

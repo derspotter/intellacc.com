@@ -36,7 +36,10 @@ const { div, h1, h2, p, button } = van.tags;
 export const updatePageFromHash = async () => {
   // Extract page name, handling query params (e.g., #verify-email?token=abc → verify-email)
   const hashValue = window.location.hash.slice(1) || 'home';
-  const page = hashValue.split('?')[0] || 'home';
+  let page = hashValue.split('?')[0] || 'home';
+  if (page.startsWith('settings')) {
+    page = 'settings';
+  }
   
   // Update the reactive state so the router re-renders
   currentPageState.val = page;

@@ -532,26 +532,26 @@ const VerificationStatus = ({ user }) => {
 - [x] Gate posting behind Tier 1 (`requireEmailVerified` middleware)
 - [x] Add verification banner (component created)
 
-### Phase 2: Phone Verification (2-3 days)
-- [ ] Set up Twilio Verify
-- [ ] Implement phoneVerificationService
-- [ ] Add phone hash table + uniqueness check
-- [ ] Create PhoneVerification component
-- [ ] Gate prediction markets behind Tier 2
+### Phase 2: Phone Verification ✅ COMPLETE (code; provider config pending)
+- [ ] Set up Twilio Verify (env config)
+- [x] Implement phoneVerificationService
+- [x] Add phone hash table + uniqueness check
+- [x] Create PhoneVerification component
+- [x] Gate prediction markets behind Tier 2
 
-### Phase 3: Payment Verification (2-3 days)
-- [ ] Set up Stripe (test mode)
-- [ ] Implement paymentVerificationService
-- [ ] Add Stripe webhook handler
-- [ ] Create PaymentVerification component
-- [ ] Gate market creation behind Tier 3
+### Phase 3: Payment Verification ✅ COMPLETE (code; provider config pending)
+- [ ] Set up Stripe (test mode) (env config)
+- [x] Implement paymentVerificationService
+- [x] Add Stripe webhook handler
+- [x] Create PaymentVerification component
+- [x] Gate market creation behind Tier 3
 
-### Phase 4: Pangram Integration (1-2 days)
-- [ ] Implement pangramService
-- [ ] Add content_ai_analysis table
-- [ ] Integrate into post/comment creation
-- [ ] Create AiContentBadge component
-- [ ] Add admin view for flagged content
+### Phase 4: Pangram Integration ✅ COMPLETE (code)
+- [x] Implement pangramService
+- [x] Add content_ai_analysis table
+- [x] Integrate into post/comment creation
+- [x] Create AiContentBadge component
+- [x] Add admin view for flagged content
 
 ---
 
@@ -570,14 +570,39 @@ TWILIO_SID=your_twilio_sid
 TWILIO_AUTH_TOKEN=your_twilio_auth_token
 TWILIO_VERIFY_SID=your_verify_service_sid
 PHONE_HASH_SALT=random_salt_for_hashing
+DEV_PHONE_CODE=000000
 
 # Payment
 STRIPE_SECRET_KEY=sk_test_...
+STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
 # AI Detection
 PANGRAM_API_KEY=your_pangram_api_key
+PANGRAM_API_URL=https://api.pangram.com/v1/detect
+AI_FLAG_THRESHOLD=0.85
+AI_MIN_CONTENT_LENGTH=50
 ```
+
+### Provider Config Steps
+
+#### Twilio Verify (Phone)
+1. Create a Verify Service in Twilio Console.
+2. Add the Service SID to `TWILIO_VERIFY_SID`.
+3. Set `TWILIO_SID` + `TWILIO_AUTH_TOKEN` (account credentials).
+4. Set `PHONE_HASH_SALT` (random string).
+5. (Dev only) Optionally set `DEV_PHONE_CODE` to override SMS.
+
+#### Stripe (Payment)
+1. Create a Stripe account + obtain test keys.
+2. Set `STRIPE_SECRET_KEY` + `STRIPE_PUBLISHABLE_KEY`.
+3. Create a webhook endpoint for `setup_intent.succeeded`.
+4. Set `STRIPE_WEBHOOK_SECRET` from the webhook signing secret.
+
+#### Pangram (AI Detection)
+1. Create a Pangram API key.
+2. Set `PANGRAM_API_KEY` (+ optional `PANGRAM_API_URL` if custom).
+3. Adjust `AI_FLAG_THRESHOLD` / `AI_MIN_CONTENT_LENGTH` if needed.
 
 ---
 
