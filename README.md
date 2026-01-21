@@ -77,6 +77,11 @@ Intellacc is a social network platform that combines prediction markets with tra
 - Enhance the API and integrate more prediction market features.
 - Implement a comprehensive UI layout with improved user experience.
 
+## Project Docs
+
+- Unified backlog: `docs/unified-backlog.md`
+- MLS status: `docs/mls-status.md`
+
 ## Licensing Notes
 
 - The MLS prototype depends on `@wireapp/core-crypto` (GPL-3.0). Install it via npm and keep Wire's GPL attribution visible in downstream distributions.
