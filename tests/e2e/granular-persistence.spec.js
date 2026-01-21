@@ -8,7 +8,7 @@ const USER1 = { email: 'user1@example.com', password: 'password123', name: 'test
  */
 async function clearBrowserStorage(page) {
     // Navigate to the app first so we have access to storage
-    await page.goto('http://localhost:5173/#login');
+    await page.goto('/#login');
     await page.waitForTimeout(500);
 
     await page.evaluate(async () => {
@@ -36,17 +36,38 @@ async function clearBrowserStorage(page) {
 }
 
 /**
- * Login a user and wait for MLS initialization
+ * Login a user and wait for MLS initialization (staged login flow)
  */
 async function loginUser(page, user) {
     await page.goto('/#login');
     await page.waitForTimeout(500);
     await page.fill('#email', user.email);
+    await page.getByRole('button', { name: 'Continue' }).click();
+
+    // Wait for password stage (device should be auto-verified or prompt will appear)
+    await expect(page.locator('#password')).toBeVisible({ timeout: 15000 });
     await page.fill('#password', user.password);
-    await page.click('button[type="submit"]');
+    await page.getByRole('button', { name: 'Sign In' }).click();
+
     await expect(page.locator('.home-page')).toBeVisible({ timeout: 15000 });
-    // Wait for MLS bootstrap and vault setup
-    await page.waitForTimeout(3000);
+    await page.waitForFunction(() => window.__vaultStore?.userId, null, { timeout: 15000 });
+    await page.waitForFunction(() => window.__vaultStore?.userId, null, { timeout: 15000 });
+}
+
+async function ensureMessagesUnlocked(page, password) {
+  await page.goto('/#messages');
+  await page.waitForSelector('.messages-page', { timeout: 15000 });
+
+    const lockedState = page.locator('.messages-locked');
+    if (await lockedState.isVisible()) {
+        const unlockButton = page.getByRole('button', { name: 'Unlock Messaging' });
+        await unlockButton.click();
+        await expect(page.getByPlaceholder('Login Password')).toBeVisible({ timeout: 10000 });
+        await page.getByPlaceholder('Login Password').fill(password);
+        await page.locator('.unlock-modal').getByRole('button', { name: 'Unlock' }).click();
+        await expect(page.locator('.unlock-modal')).toBeHidden({ timeout: 15000 });
+        await expect(page.locator('.messages-locked')).toBeHidden({ timeout: 15000 });
+    }
 }
 
 /**
@@ -250,9 +271,7 @@ test.describe('Granular MLS Persistence', () => {
         // Login first
         await loginUser(page, USER1);
 
-        // Navigate to messages to ensure MLS is loaded
-        await page.goto('/#messages');
-        await page.waitForTimeout(2000);
+        await ensureMessagesUnlocked(page, USER1.password);
 
         // Check MLS client exists
         const beforeLogout = await page.evaluate(() => ({

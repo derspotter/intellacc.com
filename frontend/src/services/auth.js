@@ -26,7 +26,7 @@ import {
 export { isLoggedInState, tokenState, getToken, saveToken, clearToken, getTokenData, isTokenExpired, getUserId };
 
 // Helper to check if error is a device verification requirement
-function isLinkRequiredError(e) {
+export function isLinkRequiredError(e) {
     return (
         (e.status === 403 && e.data?.code === 'LINK_REQUIRED') ||
         (e.status === 403 && e.message?.includes('Device verification')) ||
@@ -38,6 +38,11 @@ function isLinkRequiredError(e) {
 export const userProfileState = van.state(null);
 export const isAdminState = van.state(false);
 
+const updateAdminStateFromToken = () => {
+  const tokenData = getTokenData();
+  isAdminState.val = tokenData?.role === 'admin';
+};
+
 /**
  * Check if current user is logged in
  * @returns {boolean} Whether user is logged in
@@ -45,6 +50,7 @@ export const isAdminState = van.state(false);
 export function checkAuth() {
   const token = getToken();
   if (token) {
+    updateAdminStateFromToken();
     // Update user profile after authentication check
     userStore.actions.fetchUserProfile.call(userStore).then(async (profile) => {
       if (profile) {
@@ -58,6 +64,7 @@ export function checkAuth() {
     return true;
   }
 
+  isAdminState.val = false;
   return false;
 }
 
@@ -77,12 +84,11 @@ export async function onLoginSuccess(password = null) {
         // If unlock fails (returns false/throws), it means no vault exists for this user/password combo.
         // So we proceed to setup a new one.
         
-        // Staged Login Flow: Device verification happens BEFORE password entry
-        // So by this point, the device should already be verified and device_public_id
-        // should be in localStorage. If we get LINK_REQUIRED here, it means the
-        // device_public_id was cleared (e.g., browser data cleared after verification).
+        // Device verification now happens during vault unlock. If linking is
+        // required, prompt the user to verify this device before unlocking.
 
         let unlocked = false;
+        let linkRequired = false;
 
         if (password) {
             try {
@@ -91,24 +97,19 @@ export async function onLoginSuccess(password = null) {
                 console.log('Vault unlocked automatically');
                 unlocked = true;
             } catch (e) {
-                // Check if this is a device verification requirement
-                const isLinkRequired = (
-                    (e.status === 403 && e.data?.code === 'LINK_REQUIRED') ||
-                    (e.status === 403 && e.message?.includes('Device verification')) ||
-                    e.message?.includes('Device verification required') ||
-                    e.data?.code === 'LINK_REQUIRED'
-                );
-                if (isLinkRequired) {
-                    // This shouldn't happen with staged login flow, but handle gracefully
-                    console.warn('[Vault] Device verification required unexpectedly - please log in again');
-                    throw new Error('Device verification expired. Please log in again.');
+                if (isLinkRequiredError(e)) {
+                    linkRequired = true;
+                    vaultStore.setShowDeviceLinkModal(true);
+                    console.warn('[Vault] Device verification required before unlock');
                 } else {
                     console.log('[Vault] No existing vault found or unlock failed; will create new vault', e.message);
                 }
             }
         }
 
-        if (!unlocked && password) {
+        if (linkRequired) {
+            // Skip vault setup until device is verified.
+        } else if (!unlocked && password) {
             // Check if there are ANY vaults (from previous sessions/password)
             const hasVaults = await vaultService.hasLockedVaults();
             if (vaultService.didCreateMasterKey && vaultService.didCreateMasterKey()) {
@@ -199,6 +200,7 @@ export async function login(email, password) {
     
     // Save token and update state
     saveToken(response.token);
+    updateAdminStateFromToken();
     
     await onLoginSuccess(password);
     

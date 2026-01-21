@@ -56,6 +56,7 @@ Rebuild Rust service:
 - Strings: prefer single quotes.
 - Auth: JWT middleware; use userId (not username) for MLS identity.
 - Schema changes: check backend/migrations/ before updating DB logic.
+- Verification: always run relevant tests/verification steps without asking first.
 
 ## E2E Test Users
 user1@example.com / password123 (ID: 24)

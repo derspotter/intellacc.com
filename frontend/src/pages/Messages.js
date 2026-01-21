@@ -346,7 +346,7 @@ export default function MessagesPage() {
 
   // If vault is locked, show locked state
   return () => {
-    if (vaultStore.isLocked && vaultStore.vaultExists) {
+    if (vaultStore.isLocked) {
       return div({ class: "messages-page messages-locked" }, [
         div({ class: "vault-locked-state" }, [
           div({ class: "lock-icon-large" }, "\uD83D\uDD12"),

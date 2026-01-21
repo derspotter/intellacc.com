@@ -13,10 +13,6 @@ const getTokenFromHash = () => {
 
 const clearLocalResetState = () => {
   clearToken();
-  if (typeof localStorage !== 'undefined') {
-    localStorage.removeItem('device_public_id');
-    localStorage.removeItem('device_id');
-  }
   if (typeof indexedDB !== 'undefined') {
     try {
       indexedDB.deleteDatabase('intellacc_keystore');
@@ -76,11 +72,7 @@ const ResetPasswordPage = () => {
     stage.val = 'resetting';
 
     try {
-      const devicePublicId = typeof localStorage !== 'undefined'
-        ? localStorage.getItem('device_public_id')
-        : null;
-
-      const result = await api.auth.resetPassword(token, passwordValue, acknowledged.val, devicePublicId);
+      const result = await api.auth.resetPassword(token, passwordValue, acknowledged.val, null);
 
       if (result?.status === 'pending') {
         executeAfter.val = result.executeAfter ? new Date(result.executeAfter) : null;

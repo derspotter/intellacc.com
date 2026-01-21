@@ -17,10 +17,6 @@ export default function DeviceManager() {
     const isApproving = van.state(false);
     const approveError = van.state('');
 
-    // Pre-login verification code approval states
-    const preLoginCode = van.state('');
-    const isApprovingPreLogin = van.state(false);
-    const preLoginError = van.state('');
 
     const loadDevices = async () => {
         try {
@@ -119,34 +115,6 @@ export default function DeviceManager() {
         }
     };
 
-    // Handle pre-login verification code approval (for staged login flow)
-    const handleApprovePreLogin = async () => {
-        if (!preLoginCode.val || preLoginCode.val.length < 4) {
-            preLoginError.val = 'Please enter a valid verification code';
-            return;
-        }
-        isApprovingPreLogin.val = true;
-        preLoginError.val = '';
-        try {
-            // Include current device ID for security validation
-            const approvingDeviceId = vaultService.getDeviceId();
-            const result = await api.auth.approvePreLoginLink(preLoginCode.val.toUpperCase(), approvingDeviceId);
-
-            if (result.success) {
-                preLoginCode.val = '';
-                alert('Device approved! The new device can now complete login.');
-                loadDevices();
-            } else {
-                preLoginError.val = result.error || 'Approval failed';
-            }
-        } catch (e) {
-            console.error('[DeviceManager] Pre-login approval error:', e);
-            preLoginError.val = e.message || 'Approval failed. Check the code and try again.';
-        } finally {
-            isApprovingPreLogin.val = false;
-        }
-    };
-
     return div({ class: 'settings-section device-manager' },
         h3({ class: 'settings-section-title' },
             span({ class: 'section-icon' }, '📱'),
@@ -176,35 +144,7 @@ export default function DeviceManager() {
                 ))
             ),
 
-            // Pre-login verification code approval (primary method for new logins)
-            div({ class: 'linking-actions', style: 'margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;' },
-                h3('Approve New Device Login'),
-                p({ style: 'font-size: 0.9em; color: #666; margin-bottom: 15px;' },
-                    'If someone is trying to log in from a new device, they will see a verification code. Enter it here to approve their login:'
-                ),
-                div({ style: 'display: flex; gap: 10px; align-items: center;' },
-                    input({
-                        type: 'text',
-                        placeholder: 'Enter 6-character code (e.g., ABC123)',
-                        value: preLoginCode,
-                        oninput: e => {
-                            preLoginCode.val = e.target.value.toUpperCase();
-                            preLoginError.val = '';
-                        },
-                        class: 'form-input verification-code-input',
-                        style: 'flex: 1; font-family: monospace; font-size: 1.1em; letter-spacing: 2px; text-transform: uppercase;',
-                        maxlength: 6
-                    }),
-                    button({
-                        class: 'button button-primary',
-                        onclick: handleApprovePreLogin,
-                        disabled: () => !preLoginCode.val || preLoginCode.val.length < 6 || isApprovingPreLogin.val
-                    }, () => isApprovingPreLogin.val ? 'Approving...' : 'Approve Login')
-                ),
-                () => preLoginError.val ? p({ class: 'error-message', style: 'color: #e74c3c; margin-top: 10px;' }, preLoginError.val) : null
-            ),
-
-            // Legacy linking UI (for authenticated device-to-device linking)
+            // Device linking UI (for authenticated device-to-device linking)
             div({ class: 'linking-actions', style: 'margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;' },
                 h3('Link Another Logged-In Device'),
                 p({ style: 'font-size: 0.9em; color: #666; margin-bottom: 15px;' },

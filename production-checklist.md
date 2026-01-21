@@ -107,15 +107,6 @@ Acceptance:
 - Non-admin requests receive 403.
 - Admin requests succeed.
 
-### 6) Device-link notifications
-Why: device linking is silent for existing devices.
-Files: `backend/src/controllers/deviceController.js`, `backend/src/services/pushNotificationService.js`.
-Work:
-- On pre-login link request, push a notification to existing devices for the user.
-- Provide in-app fallback if push not enabled.
-Acceptance:
-- Existing device receives a link request prompt within seconds.
-
 ---
 
 ## Medium

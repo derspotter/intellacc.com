@@ -7,8 +7,6 @@
 #   27, 28: alice_test, bob_test (manually registered)
 
 docker exec intellacc_db psql -U intellacc_user -d intellaccdb -c "
--- Clear pre-login link requests (unauthenticated staging flow)
-DELETE FROM pre_login_link_requests WHERE email IN ('user1@example.com', 'user2@example.com', 'alice_test@example.com', 'bob_test@example.com');
 -- Clear device linking tokens FIRST (has FK to user_devices)
 DELETE FROM device_linking_tokens WHERE user_id IN (24, 25, 27, 28);
 -- Clear user devices

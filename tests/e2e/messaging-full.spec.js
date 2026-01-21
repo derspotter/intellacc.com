@@ -24,7 +24,7 @@ async function resetServerState() {
  * Clear all browser storage (IndexedDB, localStorage, sessionStorage)
  */
 async function clearBrowserStorage(page) {
-    await page.goto('http://localhost:5173/#login');
+    await page.goto('/#login');
     await page.waitForTimeout(500);
 
     await page.evaluate(async () => {
@@ -48,16 +48,20 @@ async function clearBrowserStorage(page) {
 }
 
 /**
- * Helper to log in a user
+ * Helper to log in a user (staged login flow)
  */
 async function loginUser(page, user) {
   await page.goto('/#login');
   await page.fill('#email', user.email);
+  await page.getByRole('button', { name: 'Continue' }).click();
+
+  const passwordInput = page.locator('#password');
+  await expect(passwordInput).toBeVisible({ timeout: 15000 });
   await page.fill('#password', user.password);
-  await page.click('button[type="submit"]');
+  await page.getByRole('button', { name: 'Sign In' }).click();
+
   await expect(page.locator('.home-page')).toBeVisible({ timeout: 10000 });
-  // Allow time for MLS initialization and key upload
-  await page.waitForTimeout(3000);
+  await page.waitForFunction(() => window.__vaultStore?.userId, null, { timeout: 15000 });
 }
 
 test.describe('E2E Messaging', () => {
@@ -95,7 +99,7 @@ test.describe('E2E Messaging', () => {
     pageAlice.on('console', msg => aliceConsoleLogs.push(`${msg.type()}: ${msg.text()}`));
 
     await pageAlice.goto('/#messages');
-    await pageAlice.waitForTimeout(2000);
+    await pageAlice.waitForSelector('.messages-page', { timeout: 15000 });
 
     // Debug: Check MLS state after navigating to messages
     const mlsInitState = await pageAlice.evaluate(() => {
@@ -125,9 +129,6 @@ test.describe('E2E Messaging', () => {
     // Start DM
     const startDmBtn = pageAlice.locator('button:has-text("Start DM"), button:has-text("Start"), button:has-text("Message")');
     await startDmBtn.click();
-
-    // Wait for DM creation and check state
-    await pageAlice.waitForTimeout(3000);
 
     // Debug: Check MLS state after starting DM
     const mlsAfterDm = await pageAlice.evaluate(() => {
@@ -181,7 +182,6 @@ test.describe('E2E Messaging', () => {
     pageAlice.on('console', msg => consoleLogs.push(`${msg.type()}: ${msg.text()}`));
 
     // Verify Alice sees her own message (wait a bit for encryption/send)
-    await pageAlice.waitForTimeout(3000);
     console.log('Browser console logs:', consoleLogs.slice(-10));
 
     // Debug: take screenshot
@@ -194,7 +194,7 @@ test.describe('E2E Messaging', () => {
     // --- 5. Bob receives message ---
     console.log('Bob checking for message...');
     await pageBob.goto('/#messages');
-    await pageBob.waitForTimeout(2000);
+    await pageBob.waitForSelector('.messages-page', { timeout: 15000 });
 
     // Bob needs to accept the welcome first (welcome holdback mechanism)
     console.log('Bob accepting welcome...');
@@ -215,7 +215,6 @@ test.describe('E2E Messaging', () => {
       }
     });
     console.log('Accept result:', acceptResult);
-    await pageBob.waitForTimeout(1000);
 
     // Bob should now see the DM in sidebar
     const convItem = pageBob.locator('.conversation-item, .chat-item, .dm-item').filter({ hasText: USER1.name });
@@ -230,12 +229,10 @@ test.describe('E2E Messaging', () => {
     const msgFromBob = `Hello Alice ${Date.now()}`;
     await pageBob.locator('.message-textarea').fill(msgFromBob);
     await pageBob.locator('.send-button').click();
-    await pageBob.waitForTimeout(2000);
     await expect(pageBob.locator('.message-item.sent .message-text')).toContainText(msgFromBob, { timeout: 15000 });
 
     // --- 7. Alice receives reply ---
     console.log('Alice checking for reply...');
-    await pageAlice.waitForTimeout(3000);
     await expect(pageAlice.locator('.message-item.received .message-text')).toContainText(msgFromBob, { timeout: 15000 });
 
     // --- 8. Persistence Test (Alice Logout/Login) ---
@@ -249,15 +246,11 @@ test.describe('E2E Messaging', () => {
     await pageAlice.waitForURL('**/#login');
 
     // Alice Logs In Again
-    await pageAlice.fill('#email', USER1.email);
-    await pageAlice.fill('#password', USER1.password);
-    await pageAlice.click('button[type="submit"]');
-    await expect(pageAlice.locator('.home-page')).toBeVisible({ timeout: 10000 });
-    await pageAlice.waitForTimeout(3000);
+    await loginUser(pageAlice, USER1);
 
     // Check Messages
     await pageAlice.goto('/#messages');
-    await pageAlice.waitForTimeout(2000);
+    await pageAlice.waitForSelector('.messages-page', { timeout: 15000 });
 
     const convItemAlice = pageAlice.locator('.conversation-item, .chat-item, .dm-item').filter({ hasText: USER2.name });
     await expect(convItemAlice).toBeVisible({ timeout: 10000 });

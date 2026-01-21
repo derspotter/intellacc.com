@@ -11,6 +11,12 @@ import coreCryptoClient from './mls/coreCryptoClient.js';
 import messagingStore from '../stores/messagingStore.js';
 import { initIdleAutoLock, stopIdleAutoLock, loadIdleLockConfig } from './idleLock.js';
 import { api } from './api.js';
+import {
+    clearDeviceId as clearDeviceIdStore,
+    clearPendingDeviceId,
+    getPendingDeviceId,
+    setDeviceId as setDeviceIdStore
+} from './deviceIdStore.js';
 
 let wasmInitialized = false;
 
@@ -49,17 +55,15 @@ class VaultService {
 
     setDeviceId(deviceId) {
         this.deviceId = deviceId;
-        try {
-            if (deviceId) {
-                localStorage.setItem('device_id', deviceId);
-            } else {
-                localStorage.removeItem('device_id');
-            }
-        } catch {}
+        setDeviceIdStore(deviceId);
+        if (deviceId) {
+            clearPendingDeviceId();
+        }
     }
 
     clearDeviceId() {
-        this.setDeviceId(null);
+        this.deviceId = null;
+        clearDeviceIdStore();
     }
 
     async initDB() {
@@ -102,25 +106,26 @@ class VaultService {
         });
     }
 
-    async getLocalDeviceIds() {
+    async getLocalDeviceIds({ includePending = true } = {}) {
         await this.initDB();
         return new Promise((resolve) => {
             const tx = this.db.transaction([KEYSTORE_STORE_NAME], 'readonly');
             const req = tx.objectStore(KEYSTORE_STORE_NAME).getAllKeys();
             req.onsuccess = () => {
-                const ids = req.result || [];
-                // Also include device_public_id from localStorage (used for device linking)
-                // This is set by DeviceLinkModal when a new device starts the linking process
-                const linkedDeviceId = localStorage.getItem('device_public_id');
-                if (linkedDeviceId && !ids.includes(linkedDeviceId)) {
-                    ids.push(linkedDeviceId);
+                const ids = new Set((req.result || []).map((id) => String(id)));
+                if (includePending) {
+                    const pendingId = getPendingDeviceId();
+                    if (pendingId) ids.add(pendingId);
                 }
-                resolve(ids);
+                resolve(Array.from(ids));
             };
             req.onerror = () => {
-                // Still try localStorage even if IndexedDB fails
-                const linkedDeviceId = localStorage.getItem('device_public_id');
-                resolve(linkedDeviceId ? [linkedDeviceId] : []);
+                if (includePending) {
+                    const pendingId = getPendingDeviceId();
+                    resolve(pendingId ? [pendingId] : []);
+                } else {
+                    resolve([]);
+                }
             };
         });
     }
@@ -244,7 +249,7 @@ class VaultService {
                     const mlsState = JSON.parse(new TextDecoder().decode(plainBuffer));
 
                     if (String(mlsState.identityName) === String(userId)) {
-                        this.setDeviceId(record.deviceId);
+                        this.setDeviceId(recordId);
                         vaultStore.setVaultExists(true);
                         vaultStore.setLocked(false);
                         vaultStore.setUserId(userId);
@@ -307,7 +312,6 @@ class VaultService {
 
         const keystoreRecord = {
             id: deviceId,
-            deviceId: deviceId,
             version: 2,
             deviceKeyWrapped: {
                 password: {
@@ -949,7 +953,7 @@ class VaultService {
 
     async hasLockedVaults() {
         await this.initDB();
-        const deviceIds = await this.getLocalDeviceIds();
+        const deviceIds = await this.getLocalDeviceIds({ includePending: false });
         return deviceIds.length > 0;
     }
 
@@ -1144,7 +1148,7 @@ class VaultService {
                     const mlsState = JSON.parse(new TextDecoder().decode(plainBuffer));
 
                     if (String(mlsState.identityName) === String(userId)) {
-                        this.setDeviceId(record.deviceId);
+                        this.setDeviceId(recordId);
                         vaultStore.setVaultExists(true);
                         vaultStore.setLocked(false);
                         vaultStore.setUserId(userId);

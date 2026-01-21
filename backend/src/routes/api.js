@@ -17,7 +17,8 @@ const rateLimit = require('express-rate-limit');
 const attachmentsController = require('../controllers/attachmentsController');
 const verificationController = require('../controllers/verificationController');
 const passwordResetController = require('../controllers/passwordResetController');
-const { requireTier, requireEmailVerified } = require('../middleware/verification');
+const aiModerationController = require('../controllers/aiModerationController');
+const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
 const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
 const predictionEngineHeaders = {
     'Content-Type': 'application/json',
@@ -61,24 +62,46 @@ router.post('/auth/verify-email/confirm', verificationController.confirmEmailVer
 router.get('/verification/status', authenticateJWT, verificationController.getVerificationStatus);
 router.post('/verification/email/resend', authenticateJWT, emailResendRateLimit, verificationController.resendVerificationEmail);
 
-// Pre-login device verification (staged login flow - unauthenticated)
-// Rate limiting to prevent abuse of unauthenticated endpoints
-// Higher limits in development/test for E2E testing
+// Phone Verification Routes (Tier 2)
+const normalizePhoneForLimit = (phoneNumber) => (phoneNumber || '').replace(/\D/g, '');
+const phoneIpRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 10,
+    message: { error: 'Too many verification attempts from this IP. Try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+const phoneUserRateLimit = rateLimit({
+    windowMs: 24 * 60 * 60 * 1000, // 24 hours
+    max: 5,
+    keyGenerator: (req) => String(req.user?.id || req.ip),
+    message: { error: 'Too many verification attempts for this account. Try again tomorrow.' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+const phoneNumberRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 3,
+    keyGenerator: (req) => normalizePhoneForLimit(req.body?.phoneNumber) || req.ip,
+    message: { error: 'Too many verification attempts for this phone number. Try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+router.post(
+    '/verification/phone/start',
+    authenticateJWT,
+    phoneIpRateLimit,
+    phoneUserRateLimit,
+    phoneNumberRateLimit,
+    verificationController.startPhoneVerification
+);
+router.post('/verification/phone/confirm', authenticateJWT, verificationController.confirmPhoneVerification);
+
+// Payment Verification Routes (Tier 3)
+router.post('/verification/payment/setup', authenticateJWT, verificationController.createPaymentSetup);
+router.post('/webhooks/stripe', verificationController.handleStripeWebhook);
+
 const isProduction = process.env.NODE_ENV === 'production';
-const preLoginRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: isProduction ? 10 : 100, // 10 in prod, 100 in dev/test
-    message: { error: 'Too many requests, please try again later' },
-    standardHeaders: true,
-    legacyHeaders: false,
-});
-const linkStatusRateLimit = rateLimit({
-    windowMs: 1 * 60 * 1000, // 1 minute
-    max: isProduction ? 30 : 300, // 30 in prod, 300 in dev/test
-    message: { error: 'Too many requests, please try again later' },
-    standardHeaders: true,
-    legacyHeaders: false,
-});
 const passwordResetRateLimit = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: isProduction ? 5 : 50,
@@ -87,10 +110,6 @@ const passwordResetRateLimit = rateLimit({
     legacyHeaders: false,
 });
 const deviceController = require('../controllers/deviceController');
-router.post('/auth/check-device-status', preLoginRateLimit, deviceController.checkDeviceStatus);
-router.post('/auth/start-pre-login-link', preLoginRateLimit, deviceController.startPreLoginLink);
-router.get('/auth/link-status/:sessionToken', linkStatusRateLimit, deviceController.getPreLoginLinkStatus);
-router.post('/auth/approve-pre-login-link', authenticateJWT, deviceController.approvePreLoginLink);
 
 // Password reset routes
 router.post('/auth/forgot-password', passwordResetRateLimit, passwordResetController.forgotPassword);
@@ -115,8 +134,8 @@ router.get("/users/:id/positions", (req, res, next) => {
 }, authenticateJWT, userController.getUserPositions);
 
 // Prediction/Events Routes
-router.post("/predict", authenticateJWT, predictionsController.createPrediction);
-router.post("/events", authenticateJWT, predictionsController.createEvent);
+router.post("/predict", authenticateJWT, requirePhoneVerified, predictionsController.createPrediction);
+router.post("/events", authenticateJWT, requirePaymentVerified, predictionsController.createEvent);
 router.get("/events", predictionsController.getEvents); // Temporarily no auth for testing
 router.get("/categories", predictionsController.getCategories); // Get available categories
 router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
@@ -128,7 +147,7 @@ router.delete("/predictions/all", authenticateJWT, predictionsController.deleteA
 // Assigned Predictions & Betting System
 router.post("/predictions/assign", authenticateJWT, predictionsController.assignPredictions);
 router.get("/predictions/assigned", authenticateJWT, predictionsController.getAssignedPredictions);
-router.post("/assignments/:id/bet", authenticateJWT, predictionsController.placeBet);
+router.post("/assignments/:id/bet", authenticateJWT, requirePhoneVerified, predictionsController.placeBet);
 router.get("/bets/stats", authenticateJWT, predictionsController.getMonthlyBettingStats);
 
 // Post Routes (require email verification - Tier 1)
@@ -185,6 +204,9 @@ router.get("/scoring/user/:userId/brier", authenticateJWT, scoringController.get
 router.post("/scoring/calculate", authenticateJWT, scoringController.calculateLogScores);
 router.post("/scoring/time-weights", authenticateJWT, scoringController.calculateTimeWeights);
 
+// Admin AI moderation routes
+router.get('/admin/ai-flags', authenticateJWT, aiModerationController.getFlaggedContent);
+
 // Weekly Assignment Routes
 router.post("/weekly/assign", weeklyAssignmentController.assignWeeklyPredictions);
 router.post("/weekly/process-completed", weeklyAssignmentController.processCompletedAssignments);
@@ -201,12 +223,12 @@ router.post('/attachments/presign-upload', authenticateJWT, attachmentsControlle
 router.get('/attachments/presign-download', authenticateJWT, attachmentsController.presignDownload);
 
 // LMSR Market API proxy routes (bypass CORS issues)
-router.get("/events/:eventId/shares", async (req, res) => {
+router.get("/events/:eventId/shares", authenticateJWT, requirePhoneVerified, async (req, res) => {
     try {
         const { eventId } = req.params;
-        const { user_id } = req.query;
+        const userId = req.user.id;
 
-        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/shares?user_id=${user_id}`, {
+        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/shares?user_id=${userId}`, {
             headers: predictionEngineHeaders
         });
         const data = await response.json();
@@ -218,12 +240,13 @@ router.get("/events/:eventId/shares", async (req, res) => {
     }
 });
 
-router.get("/events/:eventId/kelly", async (req, res) => {
+router.get("/events/:eventId/kelly", authenticateJWT, requirePhoneVerified, async (req, res) => {
     try {
         const { eventId } = req.params;
-        const { belief, user_id } = req.query;
+        const { belief } = req.query;
+        const userId = req.user.id;
 
-        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/kelly?belief=${belief}&user_id=${user_id}`, {
+        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/kelly?belief=${belief}&user_id=${userId}`, {
             headers: predictionEngineHeaders
         });
         const data = await response.json();
@@ -235,15 +258,16 @@ router.get("/events/:eventId/kelly", async (req, res) => {
     }
 });
 
-router.post("/events/:eventId/sell", async (req, res) => {
+router.post("/events/:eventId/sell", authenticateJWT, requirePhoneVerified, async (req, res) => {
     try {
         const { eventId } = req.params;
-        const { user_id, share_type, amount } = req.body;
+        const { share_type, amount } = req.body;
+        const userId = req.user.id;
 
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/sell`, {
             method: 'POST',
             headers: predictionEngineHeaders,
-            body: JSON.stringify({ user_id, share_type, amount })
+            body: JSON.stringify({ user_id: userId, share_type, amount })
         });
 
         const data = await response.json();
@@ -258,7 +282,7 @@ router.post("/events/:eventId/sell", async (req, res) => {
                         market_prob: parseFloat(data.new_prob),
                         cumulative_stake: data.cumulative_stake,
                         action: 'sell',
-                        user_id,
+                        user_id: userId,
                         share_type,
                         amount,
                         timestamp: new Date().toISOString()
@@ -277,15 +301,16 @@ router.post("/events/:eventId/sell", async (req, res) => {
     }
 });
 
-router.post("/events/:eventId/update", async (req, res) => {
+router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, async (req, res) => {
     try {
         const { eventId } = req.params;
-        const { user_id, stake, target_prob } = req.body;
+        const { stake, target_prob } = req.body;
+        const userId = req.user.id;
 
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/update`, {
             method: 'POST',
             headers: predictionEngineHeaders,
-            body: JSON.stringify({ user_id, stake, target_prob })
+            body: JSON.stringify({ user_id: userId, stake, target_prob })
         });
 
         const data = await response.json();
@@ -299,7 +324,7 @@ router.post("/events/:eventId/update", async (req, res) => {
                     market_prob: parseFloat(data.new_prob),
                     cumulative_stake: data.cumulative_stake,
                     action: 'stake',
-                    user_id,
+                    user_id: userId,
                     stake,
                     target_prob,
                     timestamp: new Date().toISOString()

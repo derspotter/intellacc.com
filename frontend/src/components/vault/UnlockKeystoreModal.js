@@ -1,6 +1,7 @@
 import van from 'vanjs-core';
 import vaultStore from '../../stores/vaultStore.js';
 import vaultService from '../../services/vaultService.js';
+import { isLinkRequiredError } from '../../services/auth.js';
 
 const { div, h2, p, form, input, button, span } = van.tags;
 
@@ -24,16 +25,29 @@ export default function UnlockKeystoreModal() {
             // Successfully unlocked, modal will be hidden by reactive state
         } catch (err) {
             console.error('[UnlockModal] Error:', err);
-            error.val = err.message || 'Incorrect password';
+            if (isLinkRequiredError(err)) {
+                vaultStore.setShowUnlockModal(false);
+                vaultStore.setShowDeviceLinkModal(true);
+            } else {
+                const hasVaults = await vaultService.hasLockedVaults();
+                if (!hasVaults) {
+                    try {
+                        await vaultService.setupKeystoreWithPassword(password.val);
+                        vaultStore.setShowUnlockModal(false);
+                    } catch (setupError) {
+                        error.val = setupError.message || 'Failed to set up vault';
+                    }
+                } else {
+                    error.val = err.message || 'Incorrect password';
+                }
+            }
         } finally {
             isLoading.val = false;
         }
     };
 
-    return () => {
-        if (!vaultStore.showUnlockModal) return null;
-
-        return div({ class: 'modal-overlay' },
+    return () => div({ class: 'unlock-modal-wrapper' },
+        vaultStore.showUnlockModal ? div({ class: 'modal-overlay' },
             div({ class: 'modal-content unlock-modal' },
                 h2('Unlock Messaging'),
                 p('Please enter your login password to unlock your encrypted messages on this device.'),
@@ -76,6 +90,6 @@ export default function UnlockKeystoreModal() {
                     )
                 )
             )
-        );
-    };
+        ) : null
+    );
 }

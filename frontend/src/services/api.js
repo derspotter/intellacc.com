@@ -1,5 +1,6 @@
 // src/services/api.js
 import { getToken, clearToken } from './tokenService';
+import { getDeviceId } from './deviceIdStore';
 
 // Base API URL
 const API_BASE = '/api';
@@ -40,11 +41,6 @@ async function request(endpoint, options = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // Add Device ID if available (read directly from localStorage to avoid circular dependency)
-  const deviceId = typeof localStorage !== 'undefined' ? localStorage.getItem('device_id') : null;
-  if (deviceId) {
-    headers['x-device-id'] = deviceId;
-  }
   
   // Configure request
   const config = {
@@ -137,6 +133,17 @@ async function request(endpoint, options = {}) {
   }
 }
 
+function mlsRequest(endpoint, options = {}) {
+  const deviceId = getDeviceId();
+  if (!deviceId) return request(endpoint, options);
+
+  const headers = {
+    ...(options.headers || {}),
+    'x-device-id': deviceId
+  };
+  return request(endpoint, { ...options, headers });
+}
+
 /**
  * API client methods
  */
@@ -149,32 +156,14 @@ export const api = {
     register: (username, email, password) =>
       request('/users/register', { method: 'POST', body: { username, email, password } }),
 
-    // Pre-login device verification (staged login flow)
-    checkDeviceStatus: (email, deviceFingerprint) =>
-      request('/auth/check-device-status', { method: 'POST', body: { email, deviceFingerprint } }),
-
-    startPreLoginLink: (sessionToken, email, deviceFingerprint, deviceName) =>
-      request('/auth/start-pre-login-link', { method: 'POST', body: { sessionToken, email, deviceFingerprint, deviceName } }),
-
-    getPreLoginLinkStatus: (sessionToken) =>
-      request(`/auth/link-status/${sessionToken}`),
-
-    approvePreLoginLink: (verificationCode, approvingDeviceId) =>
-      request('/auth/approve-pre-login-link', { method: 'POST', body: { verificationCode, approvingDeviceId } }),
-
     requestPasswordReset: (email) =>
       request('/auth/forgot-password', { method: 'POST', body: { email } }),
 
-    resetPassword: (token, newPassword, acknowledged, devicePublicId) =>
-      request('/auth/reset-password', {
-        method: 'POST',
-        body: {
-          token,
-          newPassword,
-          acknowledged,
-          device_public_id: devicePublicId
-        }
-      }),
+    resetPassword: (token, newPassword, acknowledged, devicePublicId) => {
+      const body = { token, newPassword, acknowledged };
+      if (devicePublicId) body.device_public_id = devicePublicId;
+      return request('/auth/reset-password', { method: 'POST', body });
+    },
 
     cancelPasswordReset: () =>
       request('/auth/reset-password/cancel', { method: 'POST' })
@@ -388,57 +377,57 @@ export const api = {
   // MLS / Core Crypto endpoints
   mls: {
     publishKeyPackages: (body) =>
-      request('/mls/key-packages', { method: 'POST', body }),
+      mlsRequest('/mls/key-packages', { method: 'POST', body }),
     sendCommitBundle: (body) =>
-      request('/mls/commit', { method: 'POST', body }),
+      mlsRequest('/mls/commit', { method: 'POST', body }),
     sendMessage: (body) =>
-      request('/mls/message', { method: 'POST', body }),
+      mlsRequest('/mls/message', { method: 'POST', body }),
     sendHistorySecret: (body) =>
-      request('/mls/history-secret', { method: 'POST', body }),
+      mlsRequest('/mls/history-secret', { method: 'POST', body }),
     migrateConversation: (body) =>
-      request('/mls/migrate', { method: 'POST', body }),
+      mlsRequest('/mls/migrate', { method: 'POST', body }),
     getKeyPackages: (userId, { ciphersuite, limit } = {}) => {
       const search = new URLSearchParams();
       if (ciphersuite != null) search.set('ciphersuite', String(ciphersuite));
       if (limit != null) search.set('limit', String(limit));
       const suffix = search.size ? `?${search.toString()}` : '';
-      return request(`/mls/key-packages/${userId}${suffix}`);
+      return mlsRequest(`/mls/key-packages/${userId}${suffix}`);
     },
     createCredentialRequest: (body) =>
-      request('/mls/credentials/request', { method: 'POST', body }),
+      mlsRequest('/mls/credentials/request', { method: 'POST', body }),
     completeCredential: (body) =>
-      request('/mls/credentials/complete', { method: 'POST', body }),
+      mlsRequest('/mls/credentials/complete', { method: 'POST', body }),
     listCredentials: (status) => {
       const suffix = status ? `?status=${encodeURIComponent(status)}` : '';
-      return request(`/mls/credentials${suffix}`);
+      return mlsRequest(`/mls/credentials${suffix}`);
     },
     upsertConversation: (body) =>
-      request('/mls/conversations', { method: 'POST', body }),
+      mlsRequest('/mls/conversations', { method: 'POST', body }),
     updateGroupInfo: (conversationId, body) =>
-      request(`/mls/conversations/${conversationId}/group-info`, { method: 'PUT', body }),
+      mlsRequest(`/mls/conversations/${conversationId}/group-info`, { method: 'PUT', body }),
     setHistorySharing: (conversationId, body) =>
-      request(`/mls/conversations/${conversationId}/history-sharing`, { method: 'PUT', body }),
+      mlsRequest(`/mls/conversations/${conversationId}/history-sharing`, { method: 'PUT', body }),
     getConversation: (conversationId) =>
-      request(`/mls/conversations/${conversationId}`),
+      mlsRequest(`/mls/conversations/${conversationId}`),
     getMessages: (conversationId, { limit, before } = {}) => {
       const search = new URLSearchParams();
       if (limit != null) search.set('limit', String(limit));
       if (before) search.set('before', before);
       const suffix = search.size ? `?${search.toString()}` : '';
-      return request(`/mls/messages/${conversationId}${suffix}`);
+      return mlsRequest(`/mls/messages/${conversationId}${suffix}`);
     },
     // Direct Messages (DM)
     getDirectMessages: () =>
-      request('/mls/direct-messages'),
+      mlsRequest('/mls/direct-messages'),
     createDirectMessage: (targetUserId) =>
-      request(`/mls/direct-messages/${targetUserId}`, { method: 'POST' }),
+      mlsRequest(`/mls/direct-messages/${targetUserId}`, { method: 'POST' }),
     getPendingMessages: () =>
-      request('/mls/queue/pending'),
+      mlsRequest('/mls/queue/pending'),
     ackMessages: (messageIds) =>
-      request('/mls/queue/ack', { method: 'POST', body: { messageIds } })
+      mlsRequest('/mls/queue/ack', { method: 'POST', body: { messageIds } })
     ,
     syncGroupMembers: (groupId, memberIds) =>
-      request(`/mls/groups/${encodeURIComponent(groupId)}/members/sync`, { method: 'POST', body: { memberIds } })
+      mlsRequest(`/mls/groups/${encodeURIComponent(groupId)}/members/sync`, { method: 'POST', body: { memberIds } })
   },
   
   // Leaderboard endpoints (direct database queries for performance)
@@ -589,7 +578,19 @@ export const api = {
     getStatus: () => request('/verification/status'),
     sendEmailVerification: () => request('/auth/verify-email/send', { method: 'POST' }),
     confirmEmailVerification: (token) => request('/auth/verify-email/confirm', { method: 'POST', body: { token } }),
-    resendEmailVerification: () => request('/verification/email/resend', { method: 'POST' })
+    resendEmailVerification: () => request('/verification/email/resend', { method: 'POST' }),
+    startPhoneVerification: (phoneNumber) => request('/verification/phone/start', { method: 'POST', body: { phoneNumber } }),
+    confirmPhoneVerification: (phoneNumber, code) => request('/verification/phone/confirm', { method: 'POST', body: { phoneNumber, code } }),
+    createPaymentSetup: () => request('/verification/payment/setup', { method: 'POST' })
+  },
+
+  // Admin moderation endpoints
+  admin: {
+    getAiFlags: (params = {}) => {
+      const search = new URLSearchParams(params);
+      const query = search.toString();
+      return request(`/admin/ai-flags${query ? `?${query}` : ''}`);
+    }
   },
 
   // Device management

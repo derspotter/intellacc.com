@@ -1,7 +1,7 @@
 import van from 'vanjs-core';
 import vaultStore from '../../stores/vaultStore.js';
-import vaultService from '../../services/vaultService.js';
 import api from '../../services/api.js';
+import { clearPendingDeviceId, getPendingDeviceId, setPendingDeviceId } from '../../services/deviceIdStore.js';
 
 const { div, h2, h3, p, button, span, code, strong } = van.tags;
 
@@ -21,22 +21,13 @@ let moduleState = {
     countdownTimer: null  // Track countdown timer for cleanup
 };
 
-// Generate a device ID for this new device (module-level, generated once)
-// Note: We always re-sync to localStorage in case it was cleared after module load
-const devicePublicId = (() => {
-    let id = localStorage.getItem('device_public_id');
+const getDevicePublicId = () => {
+    let id = getPendingDeviceId();
     if (!id) {
         id = window.crypto?.randomUUID ? window.crypto.randomUUID() : `dev-${Date.now()}`;
-        localStorage.setItem('device_public_id', id);
+        setPendingDeviceId(id);
     }
     return id;
-})();
-
-// Ensure device_public_id is in localStorage (re-sync if cleared)
-const ensureDeviceIdInStorage = () => {
-    if (localStorage.getItem('device_public_id') !== devicePublicId) {
-        localStorage.setItem('device_public_id', devicePublicId);
-    }
 };
 
 /**
@@ -51,10 +42,8 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
         status.val = 'loading';
         error.val = '';
 
-        // Ensure device_public_id is in localStorage (may have been cleared after module load)
-        ensureDeviceIdInStorage();
-
         try {
+            const devicePublicId = getDevicePublicId();
             console.log('[DeviceLink] Calling API with device:', devicePublicId);
             const result = await api.devices.startLinking(devicePublicId, getDeviceName());
             console.log('[DeviceLink] Got token:', result.token);
@@ -160,6 +149,7 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
     // Cancel and close
     const handleCancel = () => {
         cleanupTimers();
+        clearPendingDeviceId();
         vaultStore.setShowDeviceLinkModal(false);
     };
 
@@ -226,12 +216,8 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
         });
     }
 
-    return () => {
-        if (!vaultStore.showDeviceLinkModal) {
-            return null;
-        }
-
-        return div({ class: 'modal-overlay' },
+    return () => div({ class: 'device-link-modal-wrapper' },
+        vaultStore.showDeviceLinkModal ? div({ class: 'modal-overlay' },
             div({ class: 'modal-content device-link-modal' },
                 div({ class: 'modal-header' },
                     span({ class: 'modal-icon' }, '\uD83D\uDD10'),
@@ -340,6 +326,6 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                     )
                 )
             )
-        );
-    };
+        ) : null
+    );
 }

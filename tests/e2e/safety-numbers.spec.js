@@ -34,7 +34,7 @@ async function resetServerState() {
  * Clear all browser storage (IndexedDB, localStorage, sessionStorage)
  */
 async function clearBrowserStorage(page) {
-  await page.goto('http://localhost:5173/#login');
+  await page.goto('/#login');
   await page.waitForTimeout(500);
 
   await page.evaluate(async () => {
@@ -58,24 +58,43 @@ async function clearBrowserStorage(page) {
 }
 
 /**
- * Helper to log in a user
+ * Helper to log in a user (staged login flow)
  */
 async function loginUser(page, user) {
   await page.goto('/#login');
   await page.fill('#email', user.email);
+  await page.getByRole('button', { name: 'Continue' }).click();
+
+  // Wait for password stage (device should be auto-verified or prompt will appear)
+  await expect(page.locator('#password')).toBeVisible({ timeout: 15000 });
   await page.fill('#password', user.password);
-  await page.click('button[type="submit"]');
+  await page.getByRole('button', { name: 'Sign In' }).click();
+
   await expect(page.locator('.home-page')).toBeVisible({ timeout: 10000 });
-  // Allow time for MLS initialization and key upload
-  await page.waitForTimeout(3000);
+  await page.waitForFunction(() => window.__vaultStore?.userId, null, { timeout: 15000 });
+}
+
+async function ensureMessagesUnlocked(page, password) {
+  await page.goto('/#messages');
+  await page.waitForSelector('.messages-page', { timeout: 15000 });
+
+  const lockedState = page.locator('.messages-locked');
+  if (await lockedState.isVisible()) {
+    const unlockButton = page.getByRole('button', { name: 'Unlock Messaging' });
+    await unlockButton.click();
+    await expect(page.getByPlaceholder('Login Password')).toBeVisible({ timeout: 10000 });
+    await page.getByPlaceholder('Login Password').fill(password);
+    await page.locator('.unlock-modal').getByRole('button', { name: 'Unlock' }).click();
+    await expect(page.locator('.unlock-modal')).toBeHidden({ timeout: 15000 });
+    await expect(page.locator('.messages-locked')).toBeHidden({ timeout: 15000 });
+  }
 }
 
 /**
  * Helper to start a DM between two users
  */
 async function startDmWithUser(page, targetUser) {
-  await page.goto('/#messages');
-  await page.waitForTimeout(2000);
+  await ensureMessagesUnlocked(page, USER1.password);
 
   // Click new message button
   const newBtn = page.locator('button:has-text("+ New"), button:has-text("New")');
@@ -94,14 +113,12 @@ async function startDmWithUser(page, targetUser) {
   const startDmBtn = page.locator('button:has-text("Start DM"), button:has-text("Start"), button:has-text("Message")');
   await startDmBtn.click();
 
-  // Wait for DM creation
-  await page.waitForTimeout(3000);
   await expect(page.locator('.chat-title').first()).toContainText(targetUser.name, { timeout: 10000 });
 }
 
 test.describe('Safety Numbers / TOFU Verification', () => {
 
-  test.beforeAll(async () => {
+  test.beforeEach(async () => {
     await resetServerState();
   });
 
@@ -131,28 +148,11 @@ test.describe('Safety Numbers / TOFU Verification', () => {
       await pageAlice.locator('.message-textarea').click();
       await pageAlice.locator('.message-textarea').pressSequentially(testMessage, { delay: 10 });
       await pageAlice.locator('.send-button').click();
-      await pageAlice.waitForTimeout(3000);
-
-      // Verify Alice's vault has Bob's fingerprint stored
-      const aliceFingerprintData = await pageAlice.evaluate(async () => {
-        // Access vaultService through window or import
-        const vaultService = window.vaultService;
-        if (!vaultService) return { error: 'vaultService not available' };
-
-        // Try to get Bob's fingerprint (userId: 25)
-        try {
-          const fingerprint = await vaultService.getContactFingerprint(25);
-          return fingerprint || { status: 'not_found' };
-        } catch (e) {
-          return { error: e.message };
-        }
-      });
-
-      console.log('Alice fingerprint data for Bob:', aliceFingerprintData);
+      await expect(pageAlice.locator('.message-item.sent .message-text'))
+        .toContainText(testMessage, { timeout: 15000 });
 
       // Bob accepts welcome and receives message
-      await pageBob.goto('/#messages');
-      await pageBob.waitForTimeout(2000);
+      await ensureMessagesUnlocked(pageBob, USER2.password);
 
       // Bob accepts the pending welcome
       await pageBob.evaluate(async () => {
@@ -174,10 +174,31 @@ test.describe('Safety Numbers / TOFU Verification', () => {
 
       await pageBob.waitForTimeout(2000);
 
+      // Verify Alice's vault has Bob's fingerprint stored
+      const aliceFingerprintData = await pageAlice.evaluate(async () => {
+        const coreCryptoClient = window.coreCryptoClient;
+        if (!coreCryptoClient?.getVaultService) return { status: 'vault_unavailable' };
+
+        const vaultService = await coreCryptoClient.getVaultService();
+        if (!vaultService) return { status: 'vault_unavailable' };
+
+        try {
+          const fingerprint = await vaultService.getContactFingerprint(25);
+          return fingerprint || { status: 'not_found' };
+        } catch (e) {
+          return { error: e.message };
+        }
+      });
+
+      console.log('Alice fingerprint data for Bob:', aliceFingerprintData);
+
       // Verify Bob's vault has Alice's fingerprint stored
       const bobFingerprintData = await pageBob.evaluate(async () => {
-        const vaultService = window.vaultService;
-        if (!vaultService) return { error: 'vaultService not available' };
+        const coreCryptoClient = window.coreCryptoClient;
+        if (!coreCryptoClient?.getVaultService) return { status: 'vault_unavailable' };
+
+        const vaultService = await coreCryptoClient.getVaultService();
+        if (!vaultService) return { status: 'vault_unavailable' };
 
         try {
           const fingerprint = await vaultService.getContactFingerprint(24); // Alice's userId
@@ -207,8 +228,7 @@ test.describe('Safety Numbers / TOFU Verification', () => {
 
     try {
       await loginUser(page, USER1);
-      await page.goto('/#messages');
-      await page.waitForTimeout(2000);
+      await ensureMessagesUnlocked(page, USER1.password);
 
       // Select an existing conversation (if any)
       const convItem = page.locator('.conversation-item, .chat-item').first();
@@ -235,8 +255,7 @@ test.describe('Safety Numbers / TOFU Verification', () => {
 
     try {
       await loginUser(page, USER1);
-      await page.goto('/#messages');
-      await page.waitForTimeout(2000);
+      await ensureMessagesUnlocked(page, USER1.password);
 
       // Select a conversation
       const convItem = page.locator('.conversation-item, .chat-item').first();
@@ -278,8 +297,7 @@ test.describe('Safety Numbers / TOFU Verification', () => {
 
     try {
       await loginUser(page, USER1);
-      await page.goto('/#messages');
-      await page.waitForTimeout(2000);
+      await ensureMessagesUnlocked(page, USER1.password);
 
       // Look for verification badges in conversation list
       const verifiedBadge = page.locator('.verification-badge.verified, .verified-badge');
@@ -312,8 +330,7 @@ test.describe('Safety Numbers / TOFU Verification', () => {
 
     try {
       await loginUser(pageAlice, USER1);
-      await page.goto('/#messages');
-      await page.waitForTimeout(2000);
+      await ensureMessagesUnlocked(pageAlice, USER1.password);
 
       // Select DM with Bob
       const convItem = pageAlice.locator('.conversation-item, .chat-item').filter({ hasText: USER2.name });
@@ -385,8 +402,7 @@ test.describe('Safety Numbers / TOFU Verification', () => {
       console.log('Warning triggered:', warningTriggered);
 
       // Navigate to messages
-      await page.goto('/#messages');
-      await page.waitForTimeout(2000);
+      await ensureMessagesUnlocked(page, USER1.password);
 
       // Look for fingerprint warning banner
       const warningBanner = page.locator('.fingerprint-warning-banner, .key-change-warning');
@@ -435,11 +451,7 @@ test.describe('Safety Numbers / TOFU Verification', () => {
       await page.waitForURL('**/#login');
 
       // Login again
-      await page.fill('#email', USER1.email);
-      await page.fill('#password', USER1.password);
-      await page.click('button[type="submit"]');
-      await expect(page.locator('.home-page')).toBeVisible({ timeout: 10000 });
-      await page.waitForTimeout(3000);
+      await loginUser(page, USER1);
 
       // Check verification status is preserved
       const statusAfter = await page.evaluate(async () => {
@@ -512,6 +524,10 @@ test.describe('Safety Numbers / TOFU Verification', () => {
 
 test.describe('Safety Numbers Integration with Messaging', () => {
 
+  test.beforeEach(async () => {
+    await resetServerState();
+  });
+
   test('should capture fingerprint from welcome message', async ({ browser }) => {
     // Clear and setup fresh
     const tempContext = await browser.newContext();
@@ -533,9 +549,7 @@ test.describe('Safety Numbers Integration with Messaging', () => {
       // Alice starts DM
       await startDmWithUser(pageAlice, USER2);
 
-      // Bob navigates to messages
-      await pageBob.goto('/#messages');
-      await pageBob.waitForTimeout(2000);
+      await ensureMessagesUnlocked(pageBob, USER2.password);
 
       // Check for pending welcomes
       const welcomeInfo = await pageBob.evaluate(async () => {
@@ -577,6 +591,11 @@ test.describe('Safety Numbers Integration with Messaging', () => {
     const pageBob = await contextBob.newPage();
 
     try {
+      const tempContext = await browser.newContext();
+      const tempPage = await tempContext.newPage();
+      await clearBrowserStorage(tempPage);
+      await tempContext.close();
+
       await loginUser(pageAlice, USER1);
       await loginUser(pageBob, USER2);
 
@@ -594,8 +613,7 @@ test.describe('Safety Numbers Integration with Messaging', () => {
       });
 
       // Alice should still be able to send messages
-      await pageAlice.goto('/#messages');
-      await pageAlice.waitForTimeout(2000);
+      await ensureMessagesUnlocked(pageAlice, USER1.password);
 
       const convItem = pageAlice.locator('.conversation-item').filter({ hasText: USER2.name });
       if (await convItem.isVisible()) {
@@ -605,8 +623,9 @@ test.describe('Safety Numbers Integration with Messaging', () => {
         // Warning might be shown, but messaging should work
         const testMessage = `Test message after warning ${Date.now()}`;
         await pageAlice.locator('.message-textarea').fill(testMessage);
-        await pageAlice.locator('.send-button').click();
-        await pageAlice.waitForTimeout(3000);
+      await pageAlice.locator('.send-button').click();
+      await expect(pageAlice.locator('.message-item.sent .message-text'))
+        .toContainText(testMessage, { timeout: 15000 });
 
         // Message should be sent successfully
         await expect(pageAlice.locator('.message-item.sent .message-text')).toContainText(testMessage, { timeout: 15000 });

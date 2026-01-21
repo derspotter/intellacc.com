@@ -167,3 +167,4 @@ const Input = ({id, cwd}) => {
 3. **Use arrow functions** `() => value` for reactive text display
 4. **State updates trigger re-renders** of any arrow function that accesses the state
 5. **Create elements once** and control visibility, don't recreate them
+6. **Never return `null` for UI that must reappear** (tutorial: “Removing a DOM node” says it won't come back). Keep a wrapper node or mount once via `van.add`, then toggle visibility inside it.
