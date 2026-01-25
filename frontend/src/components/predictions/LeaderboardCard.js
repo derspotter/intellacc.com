@@ -196,7 +196,7 @@ export default function LeaderboardCard() {
             th({ class: 'rank-header' }, 'Rank'),
             th({ class: 'user-header' }, 'User'),
             th({ class: 'points-header' }, 'Rep Points'),
-            th({ class: 'predictions-header' }, 'Predictions'),
+            th({ class: 'predictions-col-header' }, 'Predictions'),
             th({ class: 'accuracy-header' }, 'Avg Log Loss')
           ])
         ]),
