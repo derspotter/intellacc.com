@@ -3,27 +3,31 @@
  * Tests that the push notification service correctly integrates with messaging
  */
 const request = require('supertest');
-const { app } = require('../src/index');
 const db = require('../src/db');
 const pushService = require('../src/services/pushNotificationService');
+const { getTestServer, releaseTestServer } = require('./testServer');
 
 jest.setTimeout(30000);
 
 describe('Messaging + Push Notification Integration', () => {
+  let api;
   let sender, recipient;
   let senderToken, recipientToken;
 
   beforeAll(async () => {
+    const { baseUrl } = await getTestServer();
+    api = request(baseUrl);
+
     // Create sender user
     const senderEmail = `sender_${Date.now()}@test.com`;
     const senderUsername = `sender_${Date.now()}`;
-    await request(app).post('/api/users/register').send({
+    await api.post('/api/users/register').send({
       username: senderUsername,
       email: senderEmail,
       password: 'testpass123'
     });
 
-    const senderLogin = await request(app).post('/api/login').send({
+    const senderLogin = await api.post('/api/login').send({
       email: senderEmail,
       password: 'testpass123'
     });
@@ -35,13 +39,13 @@ describe('Messaging + Push Notification Integration', () => {
     // Create recipient user
     const recipientEmail = `recipient_${Date.now()}@test.com`;
     const recipientUsername = `recipient_${Date.now()}`;
-    await request(app).post('/api/users/register').send({
+    await api.post('/api/users/register').send({
       username: recipientUsername,
       email: recipientEmail,
       password: 'testpass123'
     });
 
-    const recipientLogin = await request(app).post('/api/login').send({
+    const recipientLogin = await api.post('/api/login').send({
       email: recipientEmail,
       password: 'testpass123'
     });
@@ -61,6 +65,7 @@ describe('Messaging + Push Notification Integration', () => {
       await db.query('DELETE FROM push_subscriptions WHERE user_id = $1', [recipient.id]);
       await db.query('DELETE FROM notification_preferences WHERE user_id = $1', [recipient.id]);
     }
+    await releaseTestServer();
   });
 
   describe('Push subscription flow', () => {
@@ -73,7 +78,7 @@ describe('Messaging + Push Notification Integration', () => {
         }
       };
 
-      const res = await request(app)
+      const res = await api
         .post('/api/push/subscribe')
         .set('Authorization', `Bearer ${recipientToken}`)
         .send(subscription);

@@ -13,6 +13,108 @@ import { NewConversationPanel } from '../components/UserSearch.js';
 
 // Pending fetch promises (not sensitive data, just coordination)
 const pendingFetches = new Map();
+const attachmentCache = van.state({});
+
+const base64UrlEncode = (bytes) => {
+  let binary = '';
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+};
+
+const base64UrlDecode = (str) => {
+  const padded = str.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = '='.repeat((4 - (padded.length % 4)) % 4);
+  const b64 = padded + pad;
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+};
+
+const formatBytes = (bytes = 0) => {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / Math.pow(1024, idx);
+  return `${value.toFixed(value >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+};
+
+const parseAttachmentDescriptor = (plaintext) => {
+  if (!plaintext || typeof plaintext !== 'string') return null;
+  if (!plaintext.trim().startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(plaintext);
+    if (parsed?.type === 'attachment' && parsed?.attachmentId) return parsed;
+  } catch {}
+  return null;
+};
+
+const setAttachmentCache = (attachmentId, patch) => {
+  const current = attachmentCache.val[attachmentId] || {};
+  attachmentCache.val = {
+    ...attachmentCache.val,
+    [attachmentId]: { ...current, ...patch }
+  };
+};
+
+const decryptAttachment = async (descriptor) => {
+  const entry = attachmentCache.val[descriptor.attachmentId];
+  if (entry?.status === 'loading' || entry?.status === 'ready') return entry;
+
+  setAttachmentCache(descriptor.attachmentId, { status: 'loading', error: '' });
+
+  try {
+    const ciphertextBlob = await api.attachments.download(descriptor.attachmentId);
+    const ciphertextBuffer = await ciphertextBlob.arrayBuffer();
+
+    if (descriptor.hash) {
+      const hashBuffer = await crypto.subtle.digest('SHA-256', ciphertextBuffer);
+      const hashBytes = new Uint8Array(hashBuffer);
+      const hashB64 = base64UrlEncode(hashBytes);
+      if (hashB64 !== descriptor.hash) {
+        throw new Error('Attachment integrity check failed');
+      }
+    }
+
+    const keyBytes = base64UrlDecode(descriptor.cipher?.key || '');
+    const ivBytes = base64UrlDecode(descriptor.cipher?.iv || '');
+    if (!keyBytes.length || !ivBytes.length) {
+      throw new Error('Missing attachment decryption keys');
+    }
+
+    const key = await crypto.subtle.importKey(
+      'raw',
+      keyBytes,
+      { name: 'AES-GCM' },
+      false,
+      ['decrypt']
+    );
+
+    const plaintextBuffer = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: ivBytes },
+      key,
+      ciphertextBuffer
+    );
+
+    const mime = descriptor.mime || 'application/octet-stream';
+    const blob = new Blob([plaintextBuffer], { type: mime });
+    const url = URL.createObjectURL(blob);
+
+    setAttachmentCache(descriptor.attachmentId, {
+      status: 'ready',
+      url,
+      mime,
+      name: descriptor.name || 'attachment',
+      size: descriptor.size || blob.size
+    });
+  } catch (err) {
+    console.error('[Messages] Attachment decrypt failed:', err);
+    setAttachmentCache(descriptor.attachmentId, {
+      status: 'error',
+      error: err.message || 'Failed to decrypt attachment'
+    });
+  }
+};
 
 async function getUserName(userId) {
   if (!userId) return 'Unknown';
@@ -83,6 +185,8 @@ export default function MessagesPage() {
   const showNewConvoPanel = van.state(false);
   // Local state for fingerprint verification modal (userId to verify, null if closed)
   const verifyingUserId = van.state(null);
+  const attachmentFile = van.state(null);
+  const attachmentPreview = van.state(null);
 
   // Initialize MLS messaging
   const initialize = async () => {
@@ -240,9 +344,67 @@ export default function MessagesPage() {
     const text = messagingStore.newMessage.trim();
     const groupId = messagingStore.selectedMlsGroupId;
 
-    if (!text || !groupId) return;
+    if ((!text && !attachmentFile.val) || !groupId) return;
 
     try {
+      if (attachmentFile.val) {
+        const file = attachmentFile.val;
+        const plaintextBuffer = await file.arrayBuffer();
+        const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+        const ivBytes = crypto.getRandomValues(new Uint8Array(12));
+        const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt']);
+        const ciphertextBuffer = await crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv: ivBytes },
+          key,
+          plaintextBuffer
+        );
+        const hashBuffer = await crypto.subtle.digest('SHA-256', ciphertextBuffer);
+        const hashBytes = new Uint8Array(hashBuffer);
+
+        const encryptedFile = new File(
+          [ciphertextBuffer],
+          `${file.name}.enc`,
+          { type: 'application/octet-stream' }
+        );
+
+        const uploadResult = await api.attachments.uploadMessage(encryptedFile, groupId);
+
+        const descriptor = {
+          type: 'attachment',
+          v: 1,
+          attachmentId: uploadResult.attachmentId,
+          name: file.name,
+          mime: file.type || 'application/octet-stream',
+          size: file.size,
+          hash: base64UrlEncode(hashBytes),
+          cipher: {
+            alg: 'AES-GCM',
+            key: base64UrlEncode(keyBytes),
+            iv: base64UrlEncode(ivBytes)
+          }
+        };
+        if (text) descriptor.caption = text;
+
+        const payload = JSON.stringify(descriptor);
+        const result = await coreCryptoClient.sendMessage(groupId, payload);
+
+        messagingStore.addMlsMessage(groupId, {
+          id: result.id || Date.now(),
+          senderId: messagingStore.currentUserId,
+          plaintext: payload,
+          timestamp: new Date().toISOString(),
+          type: 'sent'
+        });
+
+        attachmentFile.val = null;
+        if (attachmentPreview.val) {
+          URL.revokeObjectURL(attachmentPreview.val);
+          attachmentPreview.val = null;
+        }
+        messagingStore.setNewMessage('');
+        return;
+      }
+
       const result = await coreCryptoClient.sendMessage(groupId, text);
       console.log('[Messages] MLS message sent:', result);
 
@@ -260,6 +422,28 @@ export default function MessagesPage() {
       console.error('[Messages] MLS send error:', err);
       messagingStore.setError(err.message || 'Failed to send encrypted message');
     }
+  };
+
+  const clearAttachment = (inputEl) => {
+    attachmentFile.val = null;
+    if (attachmentPreview.val) {
+      URL.revokeObjectURL(attachmentPreview.val);
+      attachmentPreview.val = null;
+    }
+    if (inputEl) inputEl.value = '';
+  };
+
+  const handleAttachmentAction = async (descriptor) => {
+    const entry = attachmentCache.val[descriptor.attachmentId];
+    if (!entry || entry.status !== 'ready') {
+      await decryptAttachment(descriptor);
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = entry.url;
+    link.download = descriptor.name || 'attachment';
+    link.rel = 'noopener';
+    link.click();
   };
 
   // Create a new MLS group
@@ -604,7 +788,44 @@ export default function MessagesPage() {
                     class: `message-item ${msg.type === 'sent' || msg.senderId === messagingStore.currentUserId ? 'sent' : 'received'}`
                   }, [
                     div({ class: "message-content" }, [
-                      div({ class: "message-text" }, msg.plaintext),
+                      (() => {
+                        const attachment = parseAttachmentDescriptor(msg.plaintext);
+                        if (!attachment) {
+                          return div({ class: "message-text" }, msg.plaintext);
+                        }
+
+                        const entry = attachmentCache.val[attachment.attachmentId] || {};
+                        const status = entry.status || 'idle';
+                        const mime = entry.mime || attachment.mime || 'application/octet-stream';
+
+                        return div({ class: "message-attachment" }, [
+                          div({ class: "attachment-info" }, [
+                            span({ class: "attachment-name" }, attachment.name || 'attachment'),
+                            span({ class: "attachment-size" }, formatBytes(attachment.size || 0))
+                          ]),
+                          attachment.caption ? div({ class: "attachment-caption" }, attachment.caption) : null,
+                          div({ class: "attachment-actions" }, [
+                            button({
+                              type: 'button',
+                              class: 'attachment-button',
+                              onclick: () => handleAttachmentAction(attachment),
+                              disabled: status === 'loading'
+                            }, status === 'loading' ? 'Decrypting…' : 'Download')
+                          ]),
+                          () => {
+                            const updated = attachmentCache.val[attachment.attachmentId] || {};
+                            if (updated.status === 'error') {
+                              return div({ class: 'attachment-error' }, updated.error);
+                            }
+                            if (updated.status === 'ready' && updated.url && mime.startsWith('image/')) {
+                              return div({ class: 'attachment-preview' }, [
+                                van.tags.img({ src: updated.url, alt: attachment.name || 'attachment' })
+                              ]);
+                            }
+                            return null;
+                          }
+                        ]);
+                      })(),
                       div({ class: "message-meta" }, [
                         SenderName(msg.senderId),
                         span({ class: "message-time" }, formatTime(msg.timestamp))
@@ -622,6 +843,45 @@ export default function MessagesPage() {
             div({ class: "message-input-area" }, [
               form({ onsubmit: sendMessage }, [
                 div({ class: "input-group" }, [
+                  div({ class: "message-attachment-picker" }, [
+                    input({
+                      type: 'file',
+                      class: 'message-attachment-input',
+                      onchange: (e) => {
+                        const file = e.target.files && e.target.files[0];
+                        if (!file) {
+                          clearAttachment(e.target);
+                          return;
+                        }
+                        attachmentFile.val = file;
+                        if (file.type && file.type.startsWith('image/')) {
+                          if (attachmentPreview.val) {
+                            URL.revokeObjectURL(attachmentPreview.val);
+                          }
+                          attachmentPreview.val = URL.createObjectURL(file);
+                        } else {
+                          if (attachmentPreview.val) {
+                            URL.revokeObjectURL(attachmentPreview.val);
+                            attachmentPreview.val = null;
+                          }
+                        }
+                      }
+                    }),
+                    () => attachmentFile.val ? div({ class: 'attachment-selected' }, [
+                      span({ class: 'attachment-selected-name' }, attachmentFile.val.name),
+                      button({
+                        type: 'button',
+                        class: 'attachment-remove',
+                        onclick: (e) => {
+                          const inputEl = e.target.closest('.message-attachment-picker')?.querySelector('input[type=\"file\"]');
+                          clearAttachment(inputEl);
+                        }
+                      }, 'Remove')
+                    ]) : null,
+                    () => attachmentPreview.val ? div({ class: 'attachment-inline-preview' }, [
+                      van.tags.img({ src: attachmentPreview.val, alt: 'Attachment preview' })
+                    ]) : null
+                  ]),
                   textarea({
                     placeholder: "Type an encrypted message...",
                     value: () => messagingStore.newMessage,
@@ -638,7 +898,7 @@ export default function MessagesPage() {
                   button({
                     type: "submit",
                     class: "send-button",
-                    disabled: () => !messagingStore.newMessage.trim()
+                    disabled: () => !messagingStore.newMessage.trim() && !attachmentFile.val
                   }, [
                     i({ class: "icon-send" }),
                     "Send"

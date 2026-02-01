@@ -11,8 +11,8 @@ const { test, expect } = require('@playwright/test');
  */
 
 // Test users (from test environment)
-const USER1 = { email: 'user1@example.com', password: 'password123', name: 'testuser1', id: 24 };
-const USER2 = { email: 'user2@example.com', password: 'password123', name: 'testuser2', id: 25 };
+const USER1 = { email: 'user1@example.com', password: 'password123', name: 'testuser1' };
+const USER2 = { email: 'user2@example.com', password: 'password123', name: 'testuser2' };
 
 /**
  * Reset server-side state for test users via shell script
@@ -90,6 +90,40 @@ async function ensureMessagesUnlocked(page, password) {
   }
 }
 
+async function getAuthedUserId(page) {
+  return await page.evaluate(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return null;
+      const res = await fetch('/api/me', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.id ?? null;
+    } catch (e) {
+      return null;
+    }
+  });
+}
+
+async function getUserIdByUsername(page, username) {
+  return await page.evaluate(async (targetUsername) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return null;
+      const res = await fetch(`/api/users/username/${encodeURIComponent(targetUsername)}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.id ?? null;
+    } catch (e) {
+      return null;
+    }
+  }, username);
+}
+
 /**
  * Helper to start a DM between two users
  */
@@ -140,6 +174,11 @@ test.describe('Safety Numbers / TOFU Verification', () => {
       await loginUser(pageAlice, USER1);
       await loginUser(pageBob, USER2);
 
+      const aliceId = await getAuthedUserId(pageAlice);
+      const bobId = await getAuthedUserId(pageBob);
+      expect(aliceId).toBeTruthy();
+      expect(bobId).toBeTruthy();
+
       // Alice starts DM with Bob
       await startDmWithUser(pageAlice, USER2);
 
@@ -175,7 +214,7 @@ test.describe('Safety Numbers / TOFU Verification', () => {
       await pageBob.waitForTimeout(2000);
 
       // Verify Alice's vault has Bob's fingerprint stored
-      const aliceFingerprintData = await pageAlice.evaluate(async () => {
+      const aliceFingerprintData = await pageAlice.evaluate(async (contactId) => {
         const coreCryptoClient = window.coreCryptoClient;
         if (!coreCryptoClient?.getVaultService) return { status: 'vault_unavailable' };
 
@@ -183,17 +222,18 @@ test.describe('Safety Numbers / TOFU Verification', () => {
         if (!vaultService) return { status: 'vault_unavailable' };
 
         try {
-          const fingerprint = await vaultService.getContactFingerprint(25);
+          if (!contactId) return { status: 'not_found' };
+          const fingerprint = await vaultService.getContactFingerprint(contactId);
           return fingerprint || { status: 'not_found' };
         } catch (e) {
           return { error: e.message };
         }
-      });
+      }, bobId);
 
       console.log('Alice fingerprint data for Bob:', aliceFingerprintData);
 
       // Verify Bob's vault has Alice's fingerprint stored
-      const bobFingerprintData = await pageBob.evaluate(async () => {
+      const bobFingerprintData = await pageBob.evaluate(async (contactId) => {
         const coreCryptoClient = window.coreCryptoClient;
         if (!coreCryptoClient?.getVaultService) return { status: 'vault_unavailable' };
 
@@ -201,12 +241,13 @@ test.describe('Safety Numbers / TOFU Verification', () => {
         if (!vaultService) return { status: 'vault_unavailable' };
 
         try {
-          const fingerprint = await vaultService.getContactFingerprint(24); // Alice's userId
+          if (!contactId) return { status: 'not_found' };
+          const fingerprint = await vaultService.getContactFingerprint(contactId);
           return fingerprint || { status: 'not_found' };
         } catch (e) {
           return { error: e.message };
         }
-      });
+      }, aliceId);
 
       console.log('Bob fingerprint data for Alice:', bobFingerprintData);
 
@@ -429,17 +470,18 @@ test.describe('Safety Numbers / TOFU Verification', () => {
       // ... verification flow ...
 
       // Store the verification status before logout
-      const statusBefore = await page.evaluate(async () => {
+      const bobId = await getUserIdByUsername(page, USER2.name);
+      const statusBefore = await page.evaluate(async (contactId) => {
         const vaultService = window.vaultService;
-        if (!vaultService) return null;
+        if (!vaultService || !contactId) return null;
 
         try {
-          const fp = await vaultService.getContactFingerprint(25);
+          const fp = await vaultService.getContactFingerprint(contactId);
           return fp?.status;
         } catch (e) {
           return null;
         }
-      });
+      }, bobId);
 
       console.log('Status before logout:', statusBefore);
 
@@ -454,17 +496,17 @@ test.describe('Safety Numbers / TOFU Verification', () => {
       await loginUser(page, USER1);
 
       // Check verification status is preserved
-      const statusAfter = await page.evaluate(async () => {
+      const statusAfter = await page.evaluate(async (contactId) => {
         const vaultService = window.vaultService;
-        if (!vaultService) return null;
+        if (!vaultService || !contactId) return null;
 
         try {
-          const fp = await vaultService.getContactFingerprint(25);
+          const fp = await vaultService.getContactFingerprint(contactId);
           return fp?.status;
         } catch (e) {
           return null;
         }
-      });
+      }, bobId);
 
       console.log('Status after login:', statusAfter);
 
@@ -476,7 +518,9 @@ test.describe('Safety Numbers / TOFU Verification', () => {
     }
   });
 
-  test('should copy fingerprint to clipboard', async ({ browser }) => {
+  test('should copy fingerprint to clipboard', async ({ browser, browserName }) => {
+    test.skip(browserName === 'firefox', 'Clipboard permissions not supported in Firefox');
+
     const context = await browser.newContext({
       permissions: ['clipboard-read', 'clipboard-write']
     });
@@ -600,17 +644,20 @@ test.describe('Safety Numbers Integration with Messaging', () => {
       await loginUser(pageBob, USER2);
 
       // Simulate Alice having a changed fingerprint for Bob
-      await pageAlice.evaluate(async () => {
+      const bobId = await getAuthedUserId(pageBob);
+      await pageAlice.evaluate(async (contactId) => {
         const vaultService = window.vaultService;
         if (!vaultService || !vaultService.updateContactFingerprint) return;
 
         // Mark Bob's fingerprint as changed
         try {
-          await vaultService.updateContactFingerprint(25, 'new_fp', 'old_fp');
+          if (contactId) {
+            await vaultService.updateContactFingerprint(contactId, 'new_fp', 'old_fp');
+          }
         } catch (e) {
           // Feature not yet implemented
         }
-      });
+      }, bobId);
 
       // Alice should still be able to send messages
       await ensureMessagesUnlocked(pageAlice, USER1.password);

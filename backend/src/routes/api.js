@@ -46,8 +46,8 @@ router.post("/users/register", userController.createUser); // Alias for registra
 router.get("/users/search", authenticateJWT, userController.searchUsers); // User search (before :id to avoid conflict)
 router.get('/users/master-key', authenticateJWT, userController.getMasterKey);
 router.post('/users/master-key', authenticateJWT, userController.setMasterKey);
-router.get("/users/:id", authenticateJWT, userController.getUser);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
+router.get("/users/:id", authenticateJWT, userController.getUser);
 router.post('/login', userController.loginUser);
 
 // Email Verification Routes (Tier 1)
@@ -118,6 +118,7 @@ router.post('/auth/reset-password/cancel', authenticateJWT, passwordResetControl
 
 router.post('/users/change-password', authenticateJWT, userController.changePassword);
 router.get("/me", authenticateJWT, userController.getUserProfile);
+router.delete("/me", authenticateJWT, userController.deleteAccount);
 router.patch("/users/profile", authenticateJWT, userController.editUserProfile);
 
 // Follow System Routes
@@ -221,6 +222,9 @@ router.use('/mls', mlsRoutes);
 // Attachments (pre-signed URL scaffold)
 router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);
 router.get('/attachments/presign-download', authenticateJWT, attachmentsController.presignDownload);
+router.post('/attachments/post', authenticateJWT, requireEmailVerified, attachmentsController.uploadPostImage);
+router.post('/attachments/message', authenticateJWT, attachmentsController.uploadMessageAttachment);
+router.get('/attachments/:id', authenticateJWT, attachmentsController.downloadAttachment);
 
 // LMSR Market API proxy routes (bypass CORS issues)
 router.get("/events/:eventId/shares", authenticateJWT, requirePhoneVerified, async (req, res) => {

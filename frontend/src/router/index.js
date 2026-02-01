@@ -106,7 +106,6 @@ export default function Router() {
               p("Log in to create posts and see personalized content"),
               button({ onclick: () => { window.location.hash = 'login' }}, "Log In")
             ]),
-        h2("Recent Posts"),
         PostsList()
       ]);
     },

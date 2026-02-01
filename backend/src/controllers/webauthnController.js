@@ -16,7 +16,7 @@ const ORIGIN = process.env.FRONTEND_URL || 'http://localhost:5173';
 const challengeStore = new Map();
 
 // Cleanup every minute
-setInterval(() => {
+const cleanupInterval = setInterval(() => {
   const now = Date.now();
   for (const [challenge, data] of challengeStore.entries()) {
     if (data.expires < now) {
@@ -24,6 +24,7 @@ setInterval(() => {
     }
   }
 }, 60000);
+cleanupInterval.unref();
 
 const storeChallenge = (challenge, userId = null) => {
   challengeStore.set(challenge, {

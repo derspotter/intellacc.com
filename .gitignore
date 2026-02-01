@@ -66,3 +66,7 @@ recherche/2504.01781v2.pdf
 
 # Test output
 /test-results/
+/frontend/test-results/
+
+# Uploads
+/backend/uploads/

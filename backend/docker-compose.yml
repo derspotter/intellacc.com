@@ -29,8 +29,12 @@ services:
     volumes:
       - ./src:/usr/src/app/src    # Only mount source code for live updates
       - ./test:/usr/src/app/test  # for testing
+      - ./package.json:/usr/src/app/package.json
+      - ./package-lock.json:/usr/src/app/package-lock.json
+      - ./.npmrc:/usr/src/app/.npmrc
       - ./.env:/usr/src/app/.env  # mount .env for live updates
       - ./migrations:/usr/src/app/migrations  # mount migrations for auto-run
+      - ./uploads:/usr/src/app/uploads
     working_dir: /usr/src/app
     ports:
       - "${NODE_PORT}:3000"
@@ -48,6 +52,7 @@ services:
       - EMAIL=${CADDY_EMAIL}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./uploads:/uploads
       - caddy_data:/data
       - caddy_config:/config
     ports:

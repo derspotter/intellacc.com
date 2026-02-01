@@ -1,11 +1,25 @@
 const db = require('../db');
+const fs = require('fs');
+const path = require('path');
 const notificationService = require('../services/notificationService');
 const pangramService = require('../services/pangramService');
+
+const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
+
+const removeAttachmentFile = (storagePath) => {
+  if (!storagePath) return;
+  const filePath = path.join(UPLOADS_DIR, storagePath);
+  fs.unlink(filePath, (err) => {
+    if (err && err.code !== 'ENOENT') {
+      console.error('Failed to remove attachment file:', err);
+    }
+  });
+};
 
 // Create a new post or comment
 exports.createPost = async (req, res) => {
   try {
-    const { content, image_url, parent_id } = req.body;
+    const { content, image_url, image_attachment_id, parent_id } = req.body;
 
     // Input validation
     if (!content || content.trim() === '') {
@@ -37,15 +51,35 @@ exports.createPost = async (req, res) => {
       postId = parentPost.id;
     }
 
-    console.log('Creating post/comment with:', { userId, content, image_url, parentId, depth, isComment });
+    console.log('Creating post/comment with:', { userId, content, image_url, image_attachment_id, parentId, depth, isComment });
+
+    if (image_attachment_id) {
+      const attachCheck = await db.query(
+        `SELECT id FROM attachments
+         WHERE id = $1 AND owner_id = $2 AND scope = 'post' AND post_id IS NULL`,
+        [image_attachment_id, userId]
+      );
+      if (attachCheck.rows.length === 0) {
+        return res.status(400).json({ message: 'Invalid image attachment' });
+      }
+    }
 
     // Insert the post or comment
     const result = await db.query(
-      'INSERT INTO posts (user_id, content, image_url, parent_id, depth, is_comment, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) RETURNING *',
-      [userId, content, image_url, parentId, depth, isComment]
+      'INSERT INTO posts (user_id, content, image_url, image_attachment_id, parent_id, depth, is_comment, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) RETURNING *',
+      [userId, content, image_url || null, image_attachment_id || null, parentId, depth, isComment]
     );
 
     const newPost = result.rows[0];
+
+    if (image_attachment_id) {
+      await db.query(
+        `UPDATE attachments
+         SET post_id = $1
+         WHERE id = $2 AND owner_id = $3 AND scope = 'post' AND post_id IS NULL`,
+        [newPost.id, image_attachment_id, userId]
+      );
+    }
 
     // Fetch the username to include in the response
     const userResult = await db.query('SELECT username FROM users WHERE id = $1', [newPost.user_id]);
@@ -215,22 +249,29 @@ exports.getPostById = async (req, res) => {
 // Update an existing post
 exports.updatePost = async (req, res) => {
   const postId = req.params.id;
-  const { content, image_url } = req.body;
+  const { content, image_url, image_attachment_id } = req.body;
   const userId = req.user.id;
+  const pool = db.getPool();
+  const client = await pool.connect();
 
   try {
     // Input validation
     if (!content || content.trim() === '') {
+      client.release();
       return res.status(400).json({ message: 'Content is required' });
     }
 
+    await client.query('BEGIN');
+
     // First, check if the post exists and get its owner
-    const postCheck = await db.query(
-      'SELECT user_id, is_comment FROM posts WHERE id = $1',
+    const postCheck = await client.query(
+      'SELECT user_id, is_comment, image_attachment_id, image_url FROM posts WHERE id = $1 FOR UPDATE',
       [postId]
     );
 
     if (postCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      client.release();
       return res.status(404).json({ message: 'Post not found' });
     }
 
@@ -238,14 +279,67 @@ exports.updatePost = async (req, res) => {
     const postOwnerId = postCheck.rows[0].user_id;
     const isComment = postCheck.rows[0].is_comment;
     if (postOwnerId !== userId) {
+      await client.query('ROLLBACK');
+      client.release();
       return res.status(403).json({ message: 'You can only edit your own posts' });
     }
 
-    // Update the post
-    const result = await db.query(
-      'UPDATE posts SET content = $1, image_url = $2, updated_at = NOW() WHERE id = $3 RETURNING *',
-      [content, image_url, postId]
+    const hasImageAttachmentId = Object.prototype.hasOwnProperty.call(req.body, 'image_attachment_id');
+    const hasImageUrl = Object.prototype.hasOwnProperty.call(req.body, 'image_url');
+    const currentAttachmentId = postCheck.rows[0].image_attachment_id;
+    const currentImageUrl = postCheck.rows[0].image_url;
+    const nextImageAttachmentId = hasImageAttachmentId
+      ? (image_attachment_id || null)
+      : currentAttachmentId;
+    const nextImageUrl = hasImageUrl
+      ? (image_url || null)
+      : currentImageUrl;
+    const isNewAttachment = hasImageAttachmentId && image_attachment_id && image_attachment_id !== currentAttachmentId;
+
+    if (isNewAttachment) {
+      const attachmentCheck = await client.query(
+        `SELECT id FROM attachments
+         WHERE id = $1 AND owner_id = $2 AND scope = 'post' AND post_id IS NULL`,
+        [image_attachment_id, userId]
+      );
+      if (attachmentCheck.rows.length === 0) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ message: 'Invalid attachment id' });
+      }
+    }
+
+    const result = await client.query(
+      'UPDATE posts SET content = $1, image_url = $2, image_attachment_id = $3, updated_at = NOW() WHERE id = $4 RETURNING *',
+      [content, nextImageUrl, nextImageAttachmentId, postId]
     );
+
+    if (isNewAttachment) {
+      await client.query(
+        `UPDATE attachments
+         SET post_id = $1
+         WHERE id = $2 AND owner_id = $3 AND scope = 'post' AND post_id IS NULL`,
+        [postId, image_attachment_id, userId]
+      );
+    }
+
+    let removedAttachmentPath = null;
+    if (hasImageAttachmentId && currentAttachmentId && currentAttachmentId !== nextImageAttachmentId) {
+      const deleteResult = await client.query(
+        `DELETE FROM attachments
+         WHERE id = $1 AND owner_id = $2 AND scope = 'post' AND post_id = $3
+         RETURNING storage_path`,
+        [currentAttachmentId, userId, postId]
+      );
+      removedAttachmentPath = deleteResult.rows[0]?.storage_path || null;
+    }
+
+    await client.query('COMMIT');
+    client.release();
+
+    if (removedAttachmentPath) {
+      removeAttachmentFile(removedAttachmentPath);
+    }
 
     // Fetch the username to include in the response
     const userResult = await db.query('SELECT username FROM users WHERE id = $1', [result.rows[0].user_id]);
@@ -270,6 +364,10 @@ exports.updatePost = async (req, res) => {
       console.error('[Pangram] Analysis failed:', err.message || err);
     });
   } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
+    client.release();
     console.error('Error updating post:', err);
     res.status(500).json({ message: 'Error updating the post' });
   }
@@ -278,16 +376,44 @@ exports.updatePost = async (req, res) => {
 // Delete a post
 exports.deletePost = async (req, res) => {
   const postId = req.params.id;
+  const pool = db.getPool();
+  const client = await pool.connect();
   try {
-    const result = await db.query(
+    await client.query('BEGIN');
+
+    const attachmentsResult = await client.query(
+      `SELECT storage_path FROM attachments WHERE post_id = $1 AND scope = 'post'`,
+      [postId]
+    );
+
+    const result = await client.query(
       'DELETE FROM posts WHERE id = $1 RETURNING *',
       [postId]
     );
     if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      client.release();
       return res.status(404).send('Post not found');
     }
+
+    await client.query(
+      `DELETE FROM attachments WHERE post_id = $1 AND scope = 'post'`,
+      [postId]
+    );
+
+    await client.query('COMMIT');
+    client.release();
+
+    for (const row of attachmentsResult.rows) {
+      removeAttachmentFile(row.storage_path);
+    }
+
     res.status(200).json({ message: 'Post deleted successfully' });
   } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
+    client.release();
     console.error(err);
     res.status(500).send('Error deleting the post');
   }

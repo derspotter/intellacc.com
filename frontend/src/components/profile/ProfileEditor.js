@@ -1,5 +1,5 @@
 import van from 'vanjs-core';
-const { div, form, textarea, label, button } = van.tags;
+const { div, form, textarea, label, button, input } = van.tags;
 import Button from '../common/Button';
 import Card from '../common/Card';
 import userStore from '../../store/user';
@@ -16,17 +16,33 @@ export default function ProfileEditor({ onCancel }) {
   });
   
   const bioTextareaId = "profile-bio-textarea"; // ID for the textarea
+  const usernameInputId = "profile-username-input";
+  const usernameInputState = van.state(userStore.state.profile.val?.username || '');
   const bioInputState = van.state(userStore.state.profile.val?.bio || '');
 
   const handleSubmit = async () => { // No 'e' needed if called directly
     
+    const currentUsername = usernameInputState.val.trim();
     const currentBio = bioInputState.val;
+
+    if (!currentUsername) {
+      editState.val = {
+        ...editState.val,
+        submitting: false,
+        error: 'Username cannot be empty',
+        success: ''
+      };
+      return;
+    }
 
     editState.val = {...editState.val, submitting: true, error: '', success: ''};
 
     try {
       // Use the 'currentBio' obtained from the textarea for the update
-      const success = await userStore.actions.updateUserProfile.call(userStore, currentBio);
+      const success = await userStore.actions.updateUserProfile.call(userStore, {
+        bio: currentBio,
+        username: currentUsername
+      });
 
       if (success) {
         onCancel(); // Call the passed-in onCancel function
@@ -58,16 +74,37 @@ export default function ProfileEditor({ onCancel }) {
     className: "profile-editor",
     children: [
       // Error/success message
-      () => editState.val.error ? 
-        div({ class: "error-message" }, editState.val.error) : null,
-      () => editState.val.success ? 
-        div({ class: "success-message" }, editState.val.success) : null,
+      div(
+        {
+          class: "error-message",
+          style: () => editState.val.error ? '' : 'display: none;'
+        },
+        () => editState.val.error || ''
+      ),
+      div(
+        {
+          class: "success-message",
+          style: () => editState.val.success ? '' : 'display: none;'
+        },
+        () => editState.val.success || ''
+      ),
       
       // Edit form
       form({ 
         // No onsubmit for now
         class: "profile-form" 
       }, [
+        div({ class: "form-group" }, [
+          label({ for: usernameInputId }, "Username:"),
+          input({
+            id: usernameInputId,
+            type: "text",
+            class: "username-input",
+            disabled: editState.val.submitting,
+            value: usernameInputState,
+            oninput: e => usernameInputState.val = e.target.value
+          })
+        ]),
         div({ class: "form-group" }, [
           label({ for: bioTextareaId }, "Bio:"), // Use id for 'for'
           textarea({

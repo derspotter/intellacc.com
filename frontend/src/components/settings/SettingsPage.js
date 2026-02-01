@@ -5,6 +5,7 @@ import DeviceManager from './DeviceManager.js';
 import NotificationSettings from './NotificationSettings.js';
 import VerificationSettings from '../verification/VerificationSettings.js';
 import AiFlaggedContent from '../admin/AiFlaggedContent.js';
+import DangerZone from './DangerZone.js';
 import { isAdminState } from '../../services/auth';
 
 const { div, h1, label, input } = van.tags;
@@ -62,6 +63,9 @@ export default function SettingsPage() {
     NotificationSettings(),
 
     // Vault encryption settings
-    VaultSettings()
+    VaultSettings(),
+
+    // Account deletion
+    DangerZone()
   );
 }

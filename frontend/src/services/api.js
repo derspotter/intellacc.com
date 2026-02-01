@@ -133,6 +133,151 @@ async function request(endpoint, options = {}) {
   }
 }
 
+async function requestForm(endpoint, formData, options = {}) {
+  const token = getToken();
+  const headers = {
+    ...options.headers
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const config = {
+    ...options,
+    headers,
+    body: formData,
+    cache: 'no-store'
+  };
+
+  try {
+    const response = await fetch(`${API_BASE}${endpoint}`, config);
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        try {
+          const errorData = await response.json();
+          clearToken();
+          if (window.showNotification) {
+            window.showNotification('Session expired. Please log in again.', 'error');
+          }
+          window.location.hash = 'login';
+          throw new ApiError(
+            response.status,
+            errorData.message || 'Session expired. Please log in again.',
+            errorData
+          );
+        } catch (e) {
+          clearToken();
+          window.location.hash = 'login';
+          throw new ApiError(response.status, 'Session expired. Please log in again.');
+        }
+      }
+
+      let errorMessage = 'An error occurred';
+      let errorData = {};
+
+      try {
+        const errorResponse = await response.json();
+        errorMessage = errorResponse.message || errorResponse.error || errorMessage;
+        errorData = errorResponse;
+      } catch (e) {
+        try {
+          errorMessage = await response.text() || errorMessage;
+        } catch {
+        }
+      }
+
+      throw new ApiError(response.status, errorMessage, errorData);
+    }
+
+    try {
+      return await response.json();
+    } catch (e) {
+      return null;
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    throw new ApiError(
+      0,
+      error.message || 'Network error',
+      { originalError: error }
+    );
+  }
+}
+
+async function requestBlob(endpoint, options = {}) {
+  const token = getToken();
+  const headers = {
+    ...options.headers
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const config = {
+    ...options,
+    headers,
+    cache: 'no-store'
+  };
+
+  try {
+    const response = await fetch(`${API_BASE}${endpoint}`, config);
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        try {
+          const errorData = await response.json();
+          clearToken();
+          if (window.showNotification) {
+            window.showNotification('Session expired. Please log in again.', 'error');
+          }
+          window.location.hash = 'login';
+          throw new ApiError(
+            response.status,
+            errorData.message || 'Session expired. Please log in again.',
+            errorData
+          );
+        } catch (e) {
+          clearToken();
+          window.location.hash = 'login';
+          throw new ApiError(response.status, 'Session expired. Please log in again.');
+        }
+      }
+
+      let errorMessage = 'An error occurred';
+      let errorData = {};
+
+      try {
+        const errorResponse = await response.json();
+        errorMessage = errorResponse.message || errorResponse.error || errorMessage;
+        errorData = errorResponse;
+      } catch (e) {
+        try {
+          errorMessage = await response.text() || errorMessage;
+        } catch {
+        }
+      }
+
+      throw new ApiError(response.status, errorMessage, errorData);
+    }
+
+    return await response.blob();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    throw new ApiError(
+      0,
+      error.message || 'Network error',
+      { originalError: error }
+    );
+  }
+}
+
 function mlsRequest(endpoint, options = {}) {
   const deviceId = getDeviceId();
   if (!deviceId) return request(endpoint, options);
@@ -174,8 +319,12 @@ export const api = {
     getProfile: () =>
       request('/me'),
 
-    updateProfile: (bio) =>
-      request('/users/profile', { method: 'PATCH', body: { bio } }),
+    updateProfile: ({ bio, username } = {}) => {
+      const body = {};
+      if (typeof bio !== 'undefined') body.bio = bio;
+      if (typeof username !== 'undefined') body.username = username;
+      return request('/users/profile', { method: 'PATCH', body });
+    },
 
     getUser: (id) =>
       request(`/users/${id}`),
@@ -188,6 +337,9 @@ export const api = {
 
     changePassword: (oldPassword, newPassword) =>
       request('/users/change-password', { method: 'POST', body: { oldPassword, newPassword } }),
+
+    deleteAccount: (password) =>
+      request('/me', { method: 'DELETE', body: { password } }),
 
     getMasterKey: (deviceIds) =>
       request('/users/master-key', { 
@@ -221,11 +373,29 @@ export const api = {
     getById: (id) => 
       request(`/posts/${id}`),
       
-    create: (content, image_url) => 
-      request('/posts', { method: 'POST', body: { content, image_url } }),
+    create: (content, image_attachment_id, image_url = null) => 
+      request('/posts', { method: 'POST', body: { content, image_attachment_id, image_url } }),
       
-    update: (id, content, image_url) => 
-      request(`/posts/${id}`, { method: 'PATCH', body: { content, image_url } }),
+    update: (id, content, image_attachment_id, image_url) => {
+      let body = { content };
+      if (image_attachment_id && typeof image_attachment_id === 'object' && image_url === undefined) {
+        const options = image_attachment_id;
+        if (Object.prototype.hasOwnProperty.call(options, 'image_attachment_id')) {
+          body.image_attachment_id = options.image_attachment_id;
+        }
+        if (Object.prototype.hasOwnProperty.call(options, 'image_url')) {
+          body.image_url = options.image_url;
+        }
+      } else {
+        if (image_attachment_id !== undefined) {
+          body.image_attachment_id = image_attachment_id;
+        }
+        if (image_url !== undefined) {
+          body.image_url = image_url;
+        }
+      }
+      return request(`/posts/${id}`, { method: 'PATCH', body });
+    },
       
     delete: (id) => 
       request(`/posts/${id}`, { method: 'DELETE' }),
@@ -278,6 +448,22 @@ export const api = {
       
     getLikesCount: (postId) => 
       request(`/posts/${postId}/likes`, { method: 'GET' })
+  },
+
+  attachments: {
+    uploadPost: (file) => {
+      const form = new FormData();
+      form.append('file', file);
+      return requestForm('/attachments/post', form, { method: 'POST' });
+    },
+    uploadMessage: (file, mlsGroupId) => {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('mls_group_id', mlsGroupId);
+      return requestForm('/attachments/message', form, { method: 'POST' });
+    },
+    download: (attachmentId) =>
+      requestBlob(`/attachments/${attachmentId}`)
   },
   
   // Events endpoints

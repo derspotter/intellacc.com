@@ -25,6 +25,7 @@ const postsStore = {
     error: van.state(null),
     // Use reactive object to manage individual like statuses
     likeStatus: vanX.reactive({}),
+    attachmentUrls: vanX.reactive({}),
     comments: van.state({}),      // Store comments by postId
     commentLoading: van.state({}), // Track loading state by postId
     commentListVisible: van.state({}), // Track comment list visibility by postId
@@ -106,7 +107,7 @@ const postsStore = {
       return this.state.posts.val;
     },
 
-    async createPost(content, image_url = null) {
+    async createPost(content, image_attachment_id = null, image_url = null) {
       try {
         this.state.loading.val = true;
         this.state.error.val = null;
@@ -114,7 +115,7 @@ const postsStore = {
           throw new Error('Post content cannot be empty');
         }
         try {
-          const post = await api.posts.create(content, image_url);
+          const post = await api.posts.create(content, image_attachment_id, image_url);
           const updatedPosts = [post, ...this.state.posts.val];
           this.state.posts.val = updatedPosts;
           return post;
@@ -130,6 +131,44 @@ const postsStore = {
       } finally {
         this.state.loading.val = false;
       }
+    },
+
+    async uploadPostImage(file) {
+      try {
+        this.state.error.val = null;
+        if (!file) {
+          throw new Error('No file selected');
+        }
+        const result = await api.attachments.uploadPost(file);
+        return result;
+      } catch (error) {
+        console.error('Error uploading image:', error);
+        this.state.error.val = error.message;
+        throw error;
+      }
+    },
+
+    async ensureAttachmentUrl(attachmentId) {
+      if (!attachmentId) return null;
+      if (this.state.attachmentUrls[attachmentId]) {
+        return this.state.attachmentUrls[attachmentId];
+      }
+      if (!this._attachmentUrlPromises) this._attachmentUrlPromises = {};
+      if (this._attachmentUrlPromises[attachmentId]) {
+        return this._attachmentUrlPromises[attachmentId];
+      }
+
+      this._attachmentUrlPromises[attachmentId] = api.attachments.download(attachmentId)
+        .then(blob => {
+          const url = URL.createObjectURL(blob);
+          this.state.attachmentUrls[attachmentId] = url;
+          return url;
+        })
+        .finally(() => {
+          delete this._attachmentUrlPromises[attachmentId];
+        });
+
+      return this._attachmentUrlPromises[attachmentId];
     },
 
     async deletePost(postId) {
@@ -403,10 +442,12 @@ const postsStore = {
      * Update an existing post
      * @param {number} postId - The ID of the post to update
      * @param {string} content - The new content for the post
-     * @param {string|null} image_url - The new image URL (optional)
+     * @param {Object} options - Optional update fields
+     * @param {number|null} options.image_attachment_id - New attachment id or null to remove
+     * @param {string|null} options.image_url - The new image URL (optional)
      * @returns {Promise<Object>} Updated post
      */
-    async updatePost(postId, content, image_url = null) {
+    async updatePost(postId, content, options = {}) {
       try {
         if (!auth.isLoggedInState.val) {
           throw new Error('You must be logged in to edit posts');
@@ -419,6 +460,9 @@ const postsStore = {
         this.state.loading.val = true;
         this.state.error.val = null;
 
+        const hasImageAttachmentId = Object.prototype.hasOwnProperty.call(options, 'image_attachment_id');
+        const hasImageUrl = Object.prototype.hasOwnProperty.call(options, 'image_url');
+
         // Find the post in the current state for optimistic update
         const postIndex = this.state.posts.val.findIndex(post => post.id === postId);
         let originalPost = null;
@@ -430,9 +474,17 @@ const postsStore = {
           const optimisticPost = {
             ...originalPost,
             content: content.trim(),
-            image_url,
             updated_at: new Date().toISOString()
           };
+          if (hasImageUrl) {
+            optimisticPost.image_url = options.image_url;
+          }
+          if (hasImageAttachmentId) {
+            optimisticPost.image_attachment_id = options.image_attachment_id;
+            if (originalPost.image_attachment_id && originalPost.image_attachment_id !== options.image_attachment_id) {
+              delete this.state.attachmentUrls[originalPost.image_attachment_id];
+            }
+          }
 
           const newPosts = [...this.state.posts.val];
           newPosts[postIndex] = optimisticPost;
@@ -441,7 +493,7 @@ const postsStore = {
 
         try {
           // Make API call
-          const updatedPost = await api.posts.update(postId, content.trim(), image_url);
+          const updatedPost = await api.posts.update(postId, content.trim(), options);
           
           // Update with actual server response
           if (postIndex !== -1) {

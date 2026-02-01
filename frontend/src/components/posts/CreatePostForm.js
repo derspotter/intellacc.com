@@ -10,6 +10,34 @@ export default function CreatePostForm() {
   const text = van.state("");
   const error = van.state("");
   const debugInfo = van.state("");
+  const imageFile = van.state(null);
+  const imagePreview = van.state(null);
+
+  const clearImage = (inputEl) => {
+    imageFile.val = null;
+    if (imagePreview.val) {
+      URL.revokeObjectURL(imagePreview.val);
+    }
+    imagePreview.val = null;
+    if (inputEl) inputEl.value = '';
+  };
+  
+  const fileInput = van.tags.input({
+    type: 'file',
+    accept: 'image/*',
+    onchange: (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) {
+        clearImage(e.target);
+        return;
+      }
+      if (imagePreview.val) {
+        URL.revokeObjectURL(imagePreview.val);
+      }
+      imageFile.val = file;
+      imagePreview.val = URL.createObjectURL(file);
+    }
+  });
   
   return Card({
     title: "Create Post",
@@ -27,6 +55,18 @@ export default function CreatePostForm() {
         rows: 3,
         className: "comment-input"
       }),
+
+      div({ class: "create-post-attachments" }, [
+        fileInput,
+        () => imagePreview.val ? div({ class: "attachment-preview" }, [
+          van.tags.img({ src: imagePreview.val, alt: "Selected upload" }),
+          van.tags.button({
+            type: 'button',
+            className: 'attachment-remove',
+            onclick: () => clearImage(fileInput)
+          }, "Remove")
+        ]) : null
+      ]),
       
       // Action buttons
       div({ class: "form-actions" }, [
@@ -43,8 +83,15 @@ export default function CreatePostForm() {
             debugInfo.val = "Sending post...";
             
             try {
-              await postsStore.actions.createPost.call(postsStore, text.val, null);
+              let imageAttachmentId = null;
+              if (imageFile.val) {
+                debugInfo.val = "Uploading image...";
+                const uploadResult = await postsStore.actions.uploadPostImage.call(postsStore, imageFile.val);
+                imageAttachmentId = uploadResult?.attachmentId || null;
+              }
+              await postsStore.actions.createPost.call(postsStore, text.val, imageAttachmentId);
               text.val = "";
+              clearImage(fileInput);
               debugInfo.val = "Post created successfully!";
             } catch (err) {
               // Detailed error information

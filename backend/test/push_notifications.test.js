@@ -1,19 +1,23 @@
 const request = require('supertest');
-const { app } = require('../src/index');
 const db = require('../src/db');
+const { getTestServer, releaseTestServer } = require('./testServer');
 
 jest.setTimeout(30000);
 
 describe('Push Notifications API', () => {
+  let api;
   let authToken;
   let testUserId;
 
   beforeAll(async () => {
+    const { baseUrl } = await getTestServer();
+    api = request(baseUrl);
+
     // Create a test user and get auth token
     const uniqueEmail = `pushtest_${Date.now()}@example.com`;
     const uniqueUsername = `pushtest_${Date.now()}`;
 
-    const registerRes = await request(app)
+    const registerRes = await api
       .post('/api/users/register')
       .send({
         username: uniqueUsername,
@@ -26,7 +30,7 @@ describe('Push Notifications API', () => {
     }
 
     // Login to get token
-    const loginRes = await request(app)
+    const loginRes = await api
       .post('/api/login')
       .send({ email: uniqueEmail, password: 'testpass123' });
 
@@ -41,11 +45,12 @@ describe('Push Notifications API', () => {
       await db.query('DELETE FROM push_subscriptions WHERE user_id = $1', [testUserId]);
       await db.query('DELETE FROM notification_preferences WHERE user_id = $1', [testUserId]);
     }
+    await releaseTestServer();
   });
 
   describe('GET /api/push/vapid-public-key', () => {
     test('should return VAPID public key (no auth required)', async () => {
-      const res = await request(app).get('/api/push/vapid-public-key');
+      const res = await api.get('/api/push/vapid-public-key');
 
       // May return 503 if VAPID not configured, or 200 with key
       expect([200, 503]).toContain(res.statusCode);
@@ -59,7 +64,7 @@ describe('Push Notifications API', () => {
 
   describe('POST /api/push/subscribe', () => {
     test('should require authentication', async () => {
-      const res = await request(app)
+      const res = await api
         .post('/api/push/subscribe')
         .send({
           endpoint: 'https://example.com/push/test',
@@ -72,7 +77,7 @@ describe('Push Notifications API', () => {
     test('should validate subscription data', async () => {
       if (!authToken) return;
 
-      const res = await request(app)
+      const res = await api
         .post('/api/push/subscribe')
         .set('Authorization', `Bearer ${authToken}`)
         .send({ endpoint: 'https://test.com' }); // Missing keys
@@ -92,7 +97,7 @@ describe('Push Notifications API', () => {
         }
       };
 
-      const res = await request(app)
+      const res = await api
         .post('/api/push/subscribe')
         .set('Authorization', `Bearer ${authToken}`)
         .send(subscription);
@@ -104,7 +109,7 @@ describe('Push Notifications API', () => {
 
   describe('DELETE /api/push/subscribe', () => {
     test('should require authentication', async () => {
-      const res = await request(app)
+      const res = await api
         .delete('/api/push/subscribe')
         .send({ endpoint: 'https://test.com' });
 
@@ -116,7 +121,7 @@ describe('Push Notifications API', () => {
 
       // First subscribe
       const endpoint = `https://example.com/push/unsub_${Date.now()}`;
-      await request(app)
+      await api
         .post('/api/push/subscribe')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
@@ -125,7 +130,7 @@ describe('Push Notifications API', () => {
         });
 
       // Then unsubscribe
-      const res = await request(app)
+      const res = await api
         .delete('/api/push/subscribe')
         .set('Authorization', `Bearer ${authToken}`)
         .send({ endpoint });
@@ -137,14 +142,14 @@ describe('Push Notifications API', () => {
 
   describe('GET /api/push/preferences', () => {
     test('should require authentication', async () => {
-      const res = await request(app).get('/api/push/preferences');
+      const res = await api.get('/api/push/preferences');
       expect(res.statusCode).toBe(401);
     });
 
     test('should return default preferences', async () => {
       if (!authToken) return;
 
-      const res = await request(app)
+      const res = await api
         .get('/api/push/preferences')
         .set('Authorization', `Bearer ${authToken}`);
 
@@ -158,7 +163,7 @@ describe('Push Notifications API', () => {
 
   describe('PUT /api/push/preferences', () => {
     test('should require authentication', async () => {
-      const res = await request(app)
+      const res = await api
         .put('/api/push/preferences')
         .send({ push_replies: false });
 
@@ -168,7 +173,7 @@ describe('Push Notifications API', () => {
     test('should update preferences', async () => {
       if (!authToken) return;
 
-      const res = await request(app)
+      const res = await api
         .put('/api/push/preferences')
         .set('Authorization', `Bearer ${authToken}`)
         .send({

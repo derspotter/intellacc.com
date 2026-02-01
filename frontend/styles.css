@@ -5,6 +5,9 @@
 /* Import modal styles */
 @import url('./src/styles/modal.css');
 
+/* Fonts */
+@import url('https://fonts.googleapis.com/css2?family=League+Spartan:wght@300;400;500;600;700&display=swap');
+
 /* CSS Custom Properties */
 :root {
   --blue-bg: rgb(255, 255, 255);
@@ -44,7 +47,7 @@ body.dark-mode {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  font-family: 'Avenir', sans-serif;
+  font-family: 'League Spartan', sans-serif;
 }
 
 html {
@@ -591,6 +594,43 @@ body.dark-mode .ai-content-badge {
   word-break: break-word;
 }
 
+.create-post-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.create-post-attachments input[type="file"] {
+  font-size: 0.85rem;
+}
+
+.attachment-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.attachment-preview img {
+  max-height: 120px;
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
+}
+
+.attachment-remove {
+  background-color: #f8f9fa;
+  color: #495057;
+  border: 1px solid #dee2e6;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.attachment-remove:hover {
+  background-color: #e9ecef;
+}
+
 .post-image {
   margin-bottom: 1rem;
 }
@@ -657,13 +697,18 @@ body.dark-mode .ai-content-badge {
 }
 
 /* Predictions */
+.predictions-page > h1 {
+  text-align: center;
+  margin: 0 0 1rem 0;
+}
+
 .predictions-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .predictions-header h3 {
@@ -2305,8 +2350,12 @@ body.dark-mode .weekly-assignment-badge.pending {
   color: var(--text-color);
   font-size: 0.95rem;
   height: 40px;
+  min-height: 40px;
   line-height: 1.5;
   box-sizing: border-box;
+  width: 100%;
+  display: block;
+  min-width: 0;
 }
 
 .events-filters input:focus, .events-filters select:focus {
@@ -2630,11 +2679,11 @@ body.dark-mode .trades-table th {
   align-items: stretch;
   flex-wrap: nowrap;
   padding: 1rem 1.5rem;
-  background-color: var(--card-bg);
-  border-radius: var(--border-radius);
-  border: 1px solid var(--border-color);
-  box-shadow: var(--box-shadow);
-  margin-bottom: 1.5rem;
+  background-color: transparent;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  margin-bottom: 1rem;
 }
 
 .user-stats-horizontal .stat-item {
@@ -3906,10 +3955,22 @@ select {
   /* Adjust page containers */
   .login-page,
   .signup-page,
-  .settings-page {
-    max-width: 100%;
-    padding: 1rem;
-  }
+.settings-page {
+  max-width: 100%;
+  padding: 1rem;
+}
+
+.danger-zone {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid #f3b0b0;
+  background: #fff5f5;
+  border-radius: 8px;
+}
+
+.danger-zone .form-group {
+  margin-top: 10px;
+}
   
   /* Posts and cards */
   .post-card,

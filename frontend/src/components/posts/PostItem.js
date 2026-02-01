@@ -15,6 +15,16 @@ import AiContentBadge from '../common/AiContentBadge';
  * Single post component with optimized rendering
  */
 export default function PostItem({ post }) {
+  const attachmentUrl = van.state(postsStore.state.attachmentUrls[post.image_attachment_id] || null);
+  if (post.image_attachment_id && !attachmentUrl.val) {
+    postsStore.actions.ensureAttachmentUrl.call(postsStore, post.image_attachment_id)
+      .then((url) => {
+        attachmentUrl.val = url;
+      })
+      .catch((err) => {
+        console.error('Failed to load attachment:', err);
+      });
+  }
   // State for comment input
   const commentInput = van.state('');
   
@@ -206,8 +216,11 @@ export default function PostItem({ post }) {
         ])
       ]),
       div({ class: "post-content" }, post.content),
-      post.image_url ? div({ class: "post-image" },
-        van.tags.img({ src: post.image_url, alt: "Post image" })
+      (post.image_attachment_id || post.image_url) ? div({ class: "post-image" },
+        van.tags.img({
+          src: () => attachmentUrl.val || post.image_url,
+          alt: "Post image"
+        })
       ) : null,
       div({ class: "post-stats" }, [
         span({ class: "post-stat" }, `${post.like_count || 0} likes`),

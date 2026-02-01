@@ -7,7 +7,8 @@ const userStore = {
     profile: van.state(null),
     followers: van.state([]),
     following: van.state([]),
-    loading: van.state(false)
+    loading: van.state(false),
+    error: van.state('')
   },
   
   actions: {
@@ -56,12 +57,13 @@ const userStore = {
       }
     },
     
-    async updateUserProfile(bio) {
+    async updateUserProfile({ bio, username } = {}) {
       if (!isLoggedInState.val) {
         return false;
       }
       try {
-        const updatedProfile = await api.users.updateProfile({ bio });
+        this.state.error.val = '';
+        const updatedProfile = await api.users.updateProfile({ bio, username });
         let rawBio = '';
         try {
           const parsedBio = JSON.parse(updatedProfile.bio); // updatedProfile.bio is '{"bio":"text"}'
@@ -80,6 +82,13 @@ const userStore = {
         };
         return true;
       } catch (error) {
+        if (error && error.status === 409) {
+          this.state.error.val = 'Username is already taken';
+        } else if (error && error.status === 400) {
+          this.state.error.val = error?.message || 'Invalid profile update';
+        } else {
+          this.state.error.val = error?.message || 'Failed to update profile. Please try again.';
+        }
         return false;
       }
     },

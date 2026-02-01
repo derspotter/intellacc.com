@@ -198,6 +198,86 @@
   justify-content: flex-start;
 }
 
+.message-attachment {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.attachment-info {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.attachment-name {
+  font-size: 0.9rem;
+}
+
+.attachment-size {
+  font-size: 0.75rem;
+  color: var(--secondary-text);
+}
+
+.attachment-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.attachment-button {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  color: #1d4ed8;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.attachment-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.attachment-error {
+  color: var(--error-color);
+  font-size: 0.8rem;
+}
+
+.attachment-preview img {
+  max-width: 220px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.message-attachment-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.message-attachment-input {
+  font-size: 0.8rem;
+}
+
+.attachment-selected {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.attachment-selected-name {
+  font-weight: 600;
+}
+
+.attachment-inline-preview img {
+  max-height: 120px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
 .message-content {
   max-width: 250px;
   min-width: 80px;

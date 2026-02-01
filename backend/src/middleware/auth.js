@@ -2,6 +2,28 @@
 const db = require('../db');
 const { verifyToken, getUserFromToken } = require('../utils/jwt');
 
+let supportsDeletedAt = null;
+
+const loadAuthUserRow = async (userId) => {
+  if (supportsDeletedAt === false) {
+    const res = await db.query('SELECT password_changed_at FROM users WHERE id = $1', [userId]);
+    return res.rows[0];
+  }
+
+  try {
+    const res = await db.query('SELECT password_changed_at, deleted_at FROM users WHERE id = $1', [userId]);
+    supportsDeletedAt = true;
+    return res.rows[0];
+  } catch (err) {
+    if (err.code === '42703') {
+      supportsDeletedAt = false;
+      const res = await db.query('SELECT password_changed_at FROM users WHERE id = $1', [userId]);
+      return res.rows[0];
+    }
+    throw err;
+  }
+};
+
 const authenticateJWT = async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
@@ -37,12 +59,16 @@ const authenticateJWT = async (req, res, next) => {
   
   try {
     const userId = decoded.userId;
-    const result = await db.query('SELECT password_changed_at FROM users WHERE id = $1', [userId]);
-    if (result.rows.length === 0) {
+    const userRow = await loadAuthUserRow(userId);
+    if (!userRow) {
       return res.status(401).json({ message: 'Authentication failed: User not found' });
     }
 
-    const passwordChangedAt = result.rows[0].password_changed_at;
+    if (userRow.deleted_at) {
+      return res.status(403).json({ message: 'Account has been deleted' });
+    }
+
+    const passwordChangedAt = userRow.password_changed_at;
     if (passwordChangedAt && decoded.iat) {
       const tokenIssuedAt = new Date(decoded.iat * 1000);
       if (tokenIssuedAt < new Date(passwordChangedAt)) {
