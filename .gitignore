@@ -58,6 +58,15 @@ recherche/2504.01781v2.pdf
 # Documentation PDFs
 *.pdf
 
+# Markdown (keep core docs tracked)
+*.md
+!/README.md
+!/AGENTS.md
+!/CLAUDE.md
+!/GEMINI.md
+!/docs/**/*.md
+!/backend/migrations/README.md
+
 # Playwright MCP screenshots
 .playwright-mcp/
 
