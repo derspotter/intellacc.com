@@ -1,9 +1,0 @@
-# Intellacc Licensing Notice
-
-This repository incorporates third-party software whose licenses require attribution.
-
-## Third-Party Components
-
-- `@wireapp/core-crypto` (Wire Swiss GmbH) – distributed under the GNU GPL v3.0. Install it via the npm registry and preserve the upstream NOTICE/LICENSE files when redistributing.
-
-Please review the upstream project at https://github.com/wireapp/core-crypto for the canonical source and full licensing details.
