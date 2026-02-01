@@ -37,6 +37,10 @@ const vaultStore = vanX.reactive({
     // Methods
     setLocked(locked) {
         vaultStore.isLocked = locked;
+        if (!locked) {
+            vaultStore.showUnlockModal = false;
+            vaultStore.unlockError = '';
+        }
     },
 
     setVaultExists(exists) {
