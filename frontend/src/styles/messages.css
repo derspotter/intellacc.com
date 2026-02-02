@@ -14,7 +14,7 @@
 /* Conversations Sidebar */
 .conversations-sidebar {
   width: 320px;
-  background: var(--card-bg);
+  background: var(--blue-bg);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
@@ -23,7 +23,7 @@
 
 .sidebar-header {
   padding: 1rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -52,8 +52,31 @@
 }
 
 .search-box {
-  padding: 1rem;
-  border-bottom: 1px solid var(--border-color);
+  padding: 0 1rem;
+  border-bottom: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.messages-page .search-box .form-input,
+.messages-page .search-box input {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  border-radius: 0;
+  padding: 0.75rem 1rem;
+  margin: 0;
+}
+
+.messages-page .search-box .form-input:focus,
+.messages-page .search-box input:focus {
+  box-shadow: none;
+  border-color: var(--border-color);
 }
 
 .conversations-list {
@@ -230,7 +253,7 @@
   border: 1px solid #c7d2fe;
   color: #1d4ed8;
   padding: 0.2rem 0.6rem;
-  border-radius: 6px;
+  border-radius: 0;
   font-size: 0.8rem;
   cursor: pointer;
 }
@@ -418,12 +441,14 @@
   background: var(--primary-color);
   color: white;
   border: none;
-  border-radius: var(--border-radius);
+  border-radius: 0;
   padding: 0.75rem 1rem;
   cursor: pointer;
   font-weight: 600;
   display: flex;
   align-items: center;
+  justify-content: center;
+  text-align: center;
   gap: 0.25rem;
   transition: background-color var(--transition);
 }
@@ -508,6 +533,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* Sharp-edged buttons on Messages page */
+.messages-page button,
+.messages-page .btn,
+.messages-page .button,
+.messages-page .btn-link,
+.messages-page .attachment-button,
+.messages-page .send-button {
+  border-radius: 0;
 }
 
 /* MLS E2EE Styles */
@@ -1255,7 +1290,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--card-bg);
+  background: var(--blue-bg);
 }
 
 .panel-header {
@@ -1263,7 +1298,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
   background: var(--blue-bg);
 }
 
@@ -1273,22 +1308,7 @@
   color: var(--text-color);
 }
 
-.btn-cancel {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--secondary-text);
-  padding: 0.375rem 0.75rem;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.btn-cancel:hover {
-  background: var(--blue-bg);
-  border-color: var(--error-color);
-  color: var(--error-color);
-}
+/* btn-cancel inherits global button style */
 
 /* Selected users chips */
 .selected-users {
@@ -1296,7 +1316,7 @@
   flex-wrap: wrap;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
   background: var(--blue-bg);
 }
 
@@ -1336,13 +1356,13 @@
 /* Group name input row */
 .group-name-row {
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
 }
 
 /* Search row */
 .search-row {
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
 }
 
 /* Panel error display */
@@ -1383,7 +1403,7 @@
   gap: 0.75rem;
   padding: 0.75rem 1rem;
   cursor: pointer;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
   transition: background 0.15s;
 }
 
@@ -1433,7 +1453,7 @@
 /* Panel actions (Start button) */
 .panel-actions {
   padding: 0.75rem 1rem;
-  border-top: 1px solid var(--border-color);
+  border-top: none;
   background: var(--blue-bg);
 }
 
@@ -1442,11 +1462,13 @@
 }
 
 /* Sidebar content wrapper */
-.sidebar-content {
+.messages-page .sidebar-content {
   display: flex;
   flex-direction: column;
   flex: 1;
   overflow: hidden;
+  padding: 0;
+  align-items: stretch;
 }
 
 /* Mobile responsive adjustments for inline panel */

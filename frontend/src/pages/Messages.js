@@ -552,18 +552,11 @@ export default function MessagesPage() {
       div({ class: "conversations-sidebar" }, [
         div({ class: "sidebar-header" }, [
           h2("E2EE Messages"),
-          () => !showNewConvoPanel.val ? button({
-            class: "btn btn-primary btn-sm",
-            onclick: () => { showNewConvoPanel.val = true; }
-          }, "+ New") : null
+          button({
+            class: "btn",
+            onclick: () => { showNewConvoPanel.val = !showNewConvoPanel.val; }
+          }, () => showNewConvoPanel.val ? "Cancel" : "+ New")
         ]),
-
-        // MLS status indicator
-        () => !showNewConvoPanel.val ? div({ class: "mode-toggle" }, [
-          messagingStore.mlsInitialized ?
-            span({ class: "mls-status active" }, "MLS Ready") :
-            span({ class: "mls-status" }, "Initializing MLS...")
-        ]) : null,
 
         // Inline New Conversation Panel OR Conversations List
         () => {

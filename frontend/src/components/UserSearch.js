@@ -103,10 +103,16 @@ export function NewConversationPanel({ onClose }) {
     };
 
     return div({ class: "new-conversation-panel" }, [
-        // Header with cancel button
-        div({ class: "panel-header" }, [
-            span({ class: "panel-title" }, "New Conversation"),
-            button({ class: "btn-cancel", onclick: onClose }, "Cancel")
+        // Search input (matches conversations search bar)
+        div({ class: "search-box" }, [
+            input({
+                type: "text",
+                class: "form-input",
+                placeholder: "Search users...",
+                value: searchQuery,
+                oninput: handleInputChange,
+                autofocus: true
+            })
         ]),
 
         // Selected users as chips
@@ -134,18 +140,6 @@ export function NewConversationPanel({ onClose }) {
                 })
             );
         },
-
-        // Search input
-        div({ class: "search-row" }, [
-            input({
-                type: "text",
-                class: "form-input",
-                placeholder: "Search users...",
-                value: searchQuery,
-                oninput: handleInputChange,
-                autofocus: true
-            })
-        ]),
 
         // Error display
         () => error.val ? div({ class: "panel-error" }, error.val) : div({ class: "panel-error-placeholder" }),
