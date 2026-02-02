@@ -884,6 +884,50 @@ body.dark-mode .ai-content-badge {
   margin: 0 0 1rem 0;
 }
 
+.predictions-page {
+  --predictions-radius: 2px;
+}
+
+.predictions-page button,
+.predictions-page .button,
+.predictions-page input[type="button"],
+.predictions-page input[type="submit"],
+.predictions-page select {
+  border-radius: var(--predictions-radius);
+}
+
+.predictions-page .events-list-card,
+.predictions-page .events-simple-list,
+.predictions-page .selected-event-container,
+.predictions-page .event-card,
+.predictions-page .weekly-assignment-card,
+.predictions-page .market-stakes-card,
+.predictions-page .current-market-stats,
+.predictions-page .recent-activity,
+.predictions-page .stat-item,
+.predictions-page .events-loading,
+.predictions-page .events-error,
+.predictions-page .no-events,
+.predictions-page .market-stakes-loading,
+.predictions-page .market-stakes-error,
+.predictions-page .no-event,
+.predictions-page .no-market-data,
+.predictions-page .events-filters input,
+.predictions-page .events-filters select,
+.predictions-page .balance-display,
+.predictions-page .balance-info,
+.predictions-page .balance-note,
+.predictions-page .login-section,
+.predictions-page .legacy-section,
+.predictions-page .event-list-item,
+.predictions-page .event-category,
+.predictions-page .weekly-assignment-active,
+.predictions-page .assignment-status,
+.predictions-page .kelly-suggestion,
+.predictions-page .event-placeholder {
+  border-radius: var(--predictions-radius);
+}
+
 .predictions-header {
   display: flex;
   justify-content: space-between;
@@ -2512,6 +2556,7 @@ body.dark-mode .weekly-assignment-badge.pending {
 
 .events-list-header {
   flex-shrink: 0;
+  text-align: center;
 }
 
 .events-list-header h2 {
@@ -3555,7 +3600,7 @@ body.dark-mode .belief-slider::-moz-range-thumb {
 
 .event-card-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
 }
 
