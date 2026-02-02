@@ -1,6 +1,6 @@
 import van from 'vanjs-core';
 const { button } = van.tags;
-import messagingService from '../../services/messaging/index.js';
+import messagingService from '../../services/messaging.js';
 import messagingStore from '../../stores/messagingStore.js';
 
 /**

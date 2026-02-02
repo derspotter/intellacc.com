@@ -329,7 +329,7 @@ button:disabled,
   max-width: 400px;
   padding: 2rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
+  border-radius: 2px;
   background-color: white;
 }
 
@@ -357,12 +357,23 @@ button:disabled,
   width: 100%;
 }
 
+.login-page .form-group input,
+.login-page .form-actions button,
+.login-page .form-actions .button {
+  border-radius: 2px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
 .error-message {
   background-color: var(--error-color);
   color: white;
   padding: 0.75rem;
   margin-bottom: 1.5rem;
-  border-radius: var(--border-radius);
+  border-radius: 2px;
   font-size: 0.9rem;
 }
 
@@ -917,6 +928,7 @@ body.dark-mode .ai-content-badge {
 .predictions-page .current-market-stats,
 .predictions-page .recent-activity,
 .predictions-page .stat-item,
+.predictions-page .stat,
 .predictions-page .events-loading,
 .predictions-page .events-error,
 .predictions-page .no-events,
@@ -2444,12 +2456,14 @@ body.dark-mode .weekly-assignment-badge.pending {
   border: 2px solid var(--border-color);
   background-color: var(--blue-bg);
   color: var(--text-color);
-  border-radius: var(--border-radius);
+  border-radius: 2px;
   font-weight: 600;
   font-size: 0.9rem;
   cursor: pointer;
   transition: var(--transition);
   box-sizing: border-box;
+  height: 38px;
+  line-height: 1;
 }
 
 .direction-btn:hover {
@@ -3343,7 +3357,7 @@ body.dark-mode .balance-note {
   color: white !important;
   border: none !important;
   padding: 0.4rem 0.8rem !important;
-  border-radius: 6px !important;
+  border-radius: 2px !important;
   font-size: 0.8rem !important;
   cursor: pointer;
   transition: background-color 0.2s ease;
@@ -3380,6 +3394,28 @@ body.dark-mode .balance-note {
 
 .stake-input {
   width: 100% !important;
+  border-radius: 2px;
+  border: 2px solid var(--border-color);
+  background-color: var(--blue-bg);
+  color: var(--text-color);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  height: 38px;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+/* Force betting row alignment + sharp edges */
+.predictions-page .direction-btn {
+  border-radius: 2px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+}
+
+.predictions-page .stake-input {
+  border-radius: 2px !important;
+  height: 38px !important;
+  min-height: 38px !important;
 }
 
 .kelly-details {
@@ -3493,10 +3529,10 @@ body.dark-mode .belief-slider::-moz-range-thumb {
 }
 
 .event-list-item.selected {
-  background-color: #007bff;
+  background-color: #0000ff;
   color: white;
-  border: 2px solid #0056b3;
-  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.3);
+  border: 2px solid #0000cc;
+  box-shadow: 0 2px 8px rgba(0, 0, 255, 0.3);
 }
 
 .event-list-item.resolved {
@@ -3958,16 +3994,28 @@ body.dark-mode .market-link:hover {
 }
 
 .profile-actions button {
-  flex: 1;
+  flex: 0 0 auto;
 }
 
-.message-button {
-  background-color: var(--info-color);
+.profile-page button,
+.profile-page .btn,
+.profile-page .btn-link {
+  border-radius: 2px;
+}
+
+.message-button,
+.message-button.btn,
+.message-button.btn.btn-secondary {
+  background-color: #0000ff;
+  border-color: #0000ff;
   color: white;
 }
 
-.message-button:hover {
-  background-color: var(--primary-color);
+.message-button:hover,
+.message-button.btn:hover,
+.message-button.btn.btn-secondary:hover {
+  background-color: #0000cc;
+  border-color: #0000cc;
 }
 
 /* Responsive Layout */

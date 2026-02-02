@@ -9,7 +9,7 @@ import auth from '../../services/auth';
 /**
  * User profile card component - reusable for current user and public profiles
  */
-export default function ProfileCard({ onEdit, user, followButton }) {
+export default function ProfileCard({ onEdit, user, followButton, title = 'Profile', showUsername = true }) {
   // If no user prop provided, use current user data (existing behavior)
   const isCurrentUser = !user;
   const userData = user || userStore.state.profile.val;
@@ -47,15 +47,18 @@ export default function ProfileCard({ onEdit, user, followButton }) {
   setTimeout(fetchReputation, 0);
   
   return Card({
-    title: "Profile",
+    title,
     className: "profile-card",
     children: [
       // Loading state
       () => !userData ? 
         p("Loading profile...") :
         div({ class: "profile-content" }, [
-          h3({ class: "username" }, userData.username),
-          userData.email ? p({ class: "email" }, userData.email) : null,
+          showUsername ? h3({ class: "username" }, userData.username) : null,
+          userData.email ? div({ class: "email-section" }, [
+            h4("Email"),
+            p({ class: "email" }, userData.email)
+          ]) : null,
           
           // Reputation section for all users
           div({ class: "reputation-section" }, [

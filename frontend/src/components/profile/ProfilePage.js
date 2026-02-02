@@ -19,7 +19,7 @@ export default function ProfilePage({ userId } = {}) {
   const editMode = van.state(false);
 
   const ProfileContent = (user) => {
-    const displayName = isCurrentUser ? "My Profile" : `${user.username}'s Profile`;
+    const displayName = isCurrentUser ? "My Profile" : (user?.username || 'Profile');
     
     return div({ class: "profile-page" }, [
       // Back button only for public profiles, positioned at top
@@ -37,6 +37,8 @@ export default function ProfilePage({ userId } = {}) {
             : ProfileCard({ 
                 user: isCurrentUser ? null : user, // Pass null for current user to use store data
                 onEdit: isCurrentUser ? () => editMode.val = true : null,
+                title: isCurrentUser ? 'Profile' : null,
+                showUsername: isCurrentUser,
                 followButton: isCurrentUser ? null : div({ class: "profile-actions" }, [
                   FollowButton({ user }),
                   MessageButton({ user })

@@ -26,11 +26,13 @@ import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
 import ProfilePredictions from '../components/profile/ProfilePredictions';
 import NetworkTabs from '../components/profile/NetworkTabs';
+import ProfilePage from '../components/profile/ProfilePage';
 import SettingsPage from '../components/settings/SettingsPage';
 import VerifyEmailPage from '../components/verification/VerifyEmailPage';
 
 // Use shorthand for tag functions
 const { div, h1, h2, p, button } = van.tags;
+const publicProfileUserId = van.state(null);
 
 // Update page from hash (now async to handle store loading and initial fetch)
 export const updatePageFromHash = async () => {
@@ -39,6 +41,16 @@ export const updatePageFromHash = async () => {
   let page = hashValue.split('?')[0] || 'home';
   if (page.startsWith('settings')) {
     page = 'settings';
+  }
+  if (page.startsWith('user/')) {
+    const [, userId] = page.split('/');
+    publicProfileUserId.val = userId || null;
+    page = userId ? 'user' : 'notFound';
+  } else if (page === 'user') {
+    publicProfileUserId.val = null;
+    page = 'notFound';
+  } else {
+    publicProfileUserId.val = null;
   }
   
   // Update the reactive state so the router re-renders
@@ -178,6 +190,8 @@ export default function Router() {
         ])
       ])
     },
+
+    user: () => ProfilePage({ userId: publicProfileUserId.val }),
     
   notifications: () => NotificationsPage(),
   messages: () => MessagesPage(),
