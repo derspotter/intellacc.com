@@ -14,6 +14,7 @@ const predictionsStore = {
     loadingAssigned: van.state(false), // Added specific loading state for assigned predictions
     error: van.state(null),
     verificationNotice: van.state(null),
+    verificationNoticeLoaded: van.state(false),
     userPredictions: van.state([]),
     initialFetchDone: van.state(false) // Flag to track if initial fetch has been attempted
   },
@@ -360,6 +361,31 @@ const predictionsStore = {
       }
     },
 
+    async fetchVerificationNotice() {
+      if (this.state.verificationNoticeLoaded.val) {
+        return;
+      }
+      if (!isLoggedInState.val) {
+        this.state.verificationNotice.val = null;
+        this.state.verificationNoticeLoaded.val = true;
+        return;
+      }
+
+      try {
+        const status = await api.verification.getStatus();
+        if (status && typeof status.current_tier === 'number' && status.current_tier < 2) {
+          this.state.verificationNotice.val = 'Verify your phone number to unlock this feature';
+        } else {
+          this.state.verificationNotice.val = null;
+        }
+      } catch (error) {
+        console.error('Error fetching verification status:', error);
+        this.state.verificationNotice.val = null;
+      } finally {
+        this.state.verificationNoticeLoaded.val = true;
+      }
+    },
+
     reset() {
       this.state.predictions.val = [];
       this.state.assignedPredictions.val = [];
@@ -370,6 +396,7 @@ const predictionsStore = {
       this.state.loadingAssigned.val = false;
       this.state.error.val = null;
       this.state.verificationNotice.val = null;
+      this.state.verificationNoticeLoaded.val = false;
       this.state.userPredictions.val = [];
       this.state.initialFetchDone.val = false;
     }

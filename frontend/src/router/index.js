@@ -67,6 +67,9 @@ export const updatePageFromHash = async () => {
            console.log("Router: Fetching initial assigned predictions...");
            store.actions.fetchAssignedPredictions.call(store);
         }
+        if (store.actions.fetchVerificationNotice) {
+          store.actions.fetchVerificationNotice.call(store);
+        }
         // Optional: Fetch general predictions list if needed by PredictionsList component
         if (store.actions.fetchPredictions && store.state.predictions?.val?.length === 0 && !store.state.loading?.val) {
            console.log("Router: Fetching initial predictions list...");
