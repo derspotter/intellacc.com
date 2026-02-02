@@ -46,3 +46,22 @@ Intellacc is a sophisticated prediction market and social platform featuring:
 - **E2EE Stability**: Strengthening OpenMLS integration and persistence.
 - **Authentication**: Implementing WebAuthn/Passkeys (see `authn-plan.md`).
 - **Performance**: Optimizing LMSR calculations and social feed loading.
+- **Verification**: ALWAYS check if your changes are working and the page is working after you finish a job. Use playwright screenshot and browser console for that.
+
+## Consulting External AI (Claude/Codex)
+
+Claude Code and Codex CLI are available. DO NOT HESITATE to call them when the conditions below apply.
+
+- **Claude Code (Anthropic)**
+  - Invoke: `claude -p "<prompt>"` for non-interactive output.
+  - Permissions: Use `--permission-mode bypassPermissions` or `--dangerously-skip-permissions` for "full auto" (bypass approval prompts).
+  - Reference files: `claude -p "review @frontend/src/app.js"` (auto-reads file context).
+  - Best for: General architectural reasoning, detailed code reviews, planning, and tasks requiring extensive context window.
+  - Project instructions: `CLAUDE.md`
+
+- **Codex CLI (OpenAI)**
+  - Invoke: `codex exec "<prompt>"` or `codex exec --full-auto "<prompt>"` for coding tasks.
+  - Full Auto: `--full-auto` skips confirmation prompts and enables workspace-write sandbox.
+  - Reference files: Use `@` syntax: `codex exec "refactor @backend/src/db.js"`
+  - Best for: Difficult code optimizations, WASM builds, math-heavy code, complex refactors, performance tuning.
+  - Project instructions: `AGENTS.md`
