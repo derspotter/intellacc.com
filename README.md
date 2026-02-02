@@ -1,92 +1,76 @@
 # Intellacc
 
-Intellacc is a social network platform that combines prediction markets with traditional social media features. Users make predictions on various topics, and their visibility is determined by the accuracy and confidence of their predictions.
+Intellacc is a prediction-market social network that combines a social feed, LMSR-based markets, and end-to-end encrypted messaging.
 
-## Features
+## Current Features
 
-- User authentication and profiles
-- Create and manage posts with text and images
-- Participate in prediction markets
-- Leaderboards based on prediction accuracy
+- Social feed with posts, comments, and media attachments
+- Prediction markets powered by a Rust LMSR engine
+- End-to-end encrypted messaging (DMs and groups) via OpenMLS (WASM)
+- User profiles with accuracy tracking and leaderboards
+- Realtime updates over Socket.IO
 
-## Technologies
+## Architecture
 
-- **Frontend**: VanJS, Vite
-- **Backend**: Node.js, Express
-- **Database**: PostgreSQL
-- **Real-Time Communication**: Socket.IO
-- **Reverse Proxy**: Caddy
-- **Containerization**: Docker, Docker Compose
+- Frontend: VanJS + Vite (port 5173)
+- Backend: Express + Socket.IO, with Caddy as reverse proxy (port 3000, Caddy on 80/443)
+- Prediction engine: Rust (Axum) service for LMSR markets (port 3001)
+- Database: PostgreSQL (container: `intellacc_db`)
 
-## Implemented Functions (So Far)
+## Repository Layout
 
-- **Reactive Frontend with VanJS**  
-  The frontend is built with VanJS to provide a lightweight, reactive user interface. A reactive state mechanism is implemented to update the UI seamlessly when data changes. For example, the main application creates a message state that updates after fetching data from the backend.
+- `frontend/` VanJS client and styles
+- `backend/` Express API, Socket.IO, DB migrations, uploads
+- `prediction-engine/` Rust LMSR service
+- `openmls-wasm/` OpenMLS WASM package
+- `docs/` Product and technical docs
+- `tests/` E2E and integration tests
 
-- **Real-Time Communication via Socket.IO**  
-  The frontend connects to the backend using Socket.IO. This connection allows real-time features such as:
-  - Emitting a `test-message` upon connection to verify communication.
-  - Listening for broadcast events and new posts from the backend.
-  - Displaying real-time updates in the UI.
-  
-- **API Integration**  
-  The frontend fetches data from the `/api/` endpoint (proxied by Caddy) to display dynamic content. This basic API integration sets the stage for more advanced interactions as the project develops.
+## Getting Started (Docker)
 
-## Getting Started
-
-### Prerequisites
-
-- Docker and Docker Compose installed on your machine
-
-### Installation
-
-1. **Clone the repository:**
+1. Create the shared Docker network (one time).
 
    ```sh
-   git clone https://github.com/yourusername/intellacc.git
-   cd intellacc
+   docker network create intellacc-network
    ```
 
-2. **Set up your environment variables:**  
-   Create the necessary `.env` files for backend configuration (e.g., database credentials).
-
-3. **Start the services with Docker Compose:**
-
-   For the backend:
+2. Review environment files.
 
    ```sh
-   cd backend
+   # Backend + DB + Caddy
+   backend/.env
+   # Prediction engine
+   prediction-engine/.env
+   ```
+
+3. Start the stack.
+
+   ```sh
    docker compose up -d
    ```
 
-   For the frontend:
+4. Open the app.
 
-   ```sh
-   cd frontend
-   docker compose up --build -d
-   ```
+   Frontend: http://localhost:5173  
+   Backend API: http://localhost:3000  
+   Prediction engine: http://localhost:3001
 
-4. **Access the application:**  
-   - Frontend: [http://localhost:5173](http://localhost:5173)
-   - Backend API (proxied by Caddy): [http://localhost:80](http://localhost:80) (if configured)
+## Useful Commands
 
-## Future Development
+- Logs: `docker logs -f intellacc_backend`
+- Logs: `docker logs -f intellacc_frontend`
+- Logs: `docker logs -f intellacc_prediction_engine`
+- DB shell: `docker exec -it intellacc_db psql -U intellacc_user -d intellaccdb`
+- Backend tests: `docker exec intellacc_backend npm test`
+- Frontend tests: `docker exec intellacc_frontend npm test`
+- Rebuild Rust service: `docker compose up -d --build prediction-engine`
 
-- Extend the real-time communication to update posts and predictions live.
-- Build out user authentication and profile management.
-- Enhance the API and integrate more prediction market features.
-- Implement a comprehensive UI layout with improved user experience.
+## Test Users
+
+- `user1@example.com` / `password123`
+- `user2@example.com` / `password123`
 
 ## Project Docs
 
 - Unified backlog: `docs/unified-backlog.md`
 - MLS status: `docs/mls-status.md`
-
-## Licensing Notes
-
-- The MLS prototype depends on `@wireapp/core-crypto` (GPL-3.0). Install it via npm and keep Wire's GPL attribution visible in downstream distributions.
-
-## MLS Feature Flagging
-
-- Enable the experimental MLS bootstrap by defining `VITE_ENABLE_MLS=true` in the frontend environment.
-- Override the WASM asset location (e.g., for CDN hosting) with `VITE_CORE_CRYPTO_WASM_BASE=https://cdn.example.com/crypto`.
