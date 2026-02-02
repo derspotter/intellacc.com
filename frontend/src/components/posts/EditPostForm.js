@@ -35,7 +35,10 @@ export default function EditPostForm({ post, onCancel }) {
     if (inputEl) inputEl.value = '';
   };
 
+  const fileInputId = `edit-post-file-${post.id}`;
   const fileInput = input({
+    id: fileInputId,
+    class: 'file-input',
     type: 'file',
     accept: 'image/*',
     onchange: (e) => {
@@ -132,6 +135,15 @@ export default function EditPostForm({ post, onCancel }) {
         ]),
 
         div({ class: "create-post-attachments" }, [
+          div({ class: "file-row" }, [
+            button({
+              type: 'button',
+              class: 'file-button',
+              onclick: () => fileInput.click(),
+              disabled: isSubmitting
+            }, () => imageFile.val ? "Change File" : "Browse..."),
+            () => imageFile.val ? van.tags.span({ class: "file-name" }, imageFile.val.name) : null
+          ]),
           fileInput,
           () => imagePreview.val ? div({ class: "attachment-preview" }, [
             img({ src: imagePreview.val, alt: "Selected upload" }),

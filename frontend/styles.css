@@ -134,11 +134,12 @@ button,
   font-family: inherit;
   background: white;
   border: 1px solid var(--border-color);
-  padding: 0.5rem 1rem;
+  padding: 0.2rem 0.5rem;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 0.8rem;
   color: var(--text-color);
   border-radius: var(--border-radius);
+  line-height: 1;
   transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
 }
 
@@ -152,6 +153,17 @@ button:disabled,
   background-color: #cccccc;
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+.predictions-page button,
+.predictions-page .button,
+.predictions-page input[type="button"],
+.predictions-page input[type="submit"],
+.predictions-page select {
+  min-height: 44px;
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  line-height: 1.2;
 }
 
 .button-primary {
@@ -601,8 +613,28 @@ body.dark-mode .ai-content-badge {
   margin-bottom: 0.75rem;
 }
 
-.create-post-attachments input[type="file"] {
-  font-size: 0.85rem;
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.file-name {
+  font-size: 0.75rem;
+  color: var(--secondary-text);
 }
 
 .attachment-preview {
@@ -649,6 +681,16 @@ body.dark-mode .ai-content-badge {
 
 .post-stat {
   margin-right: 1rem;
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+}
+
+.post-stat.like-count {
+  min-width: 8ch;
+}
+
+.post-stat.comment-count {
+  min-width: 10ch;
 }
 
 .post-actions {
@@ -662,13 +704,25 @@ body.dark-mode .ai-content-badge {
   background-color: #f8f9fa;
   color: #495057;
   border: 1px solid #dee2e6;
-  padding: 0.25rem 0.5rem;
-  border-radius: var(--border-radius);
+  padding-top: 0.19rem;
+  padding-bottom: 0.14rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  border-radius: 2px;
   cursor: pointer;
   font-size: 0.8rem;
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  line-height: 1;
+  min-height: 0;
+  height: auto;
+  white-space: nowrap;
   transition: background-color var(--transition);
+}
+
+.post-action.like-button {
+  min-width: 4.6rem;
 }
 
 .post-action:hover {
@@ -3839,7 +3893,7 @@ button,
 input[type="button"],
 input[type="submit"],
 select {
-  min-height: 44px;
+  min-height: 0;
   touch-action: manipulation;
 }
 

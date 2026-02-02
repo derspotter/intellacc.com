@@ -223,7 +223,7 @@ export default function PostItem({ post }) {
         })
       ) : null,
       div({ class: "post-stats" }, [
-        span({ class: "post-stat" }, `${post.like_count || 0} likes`),
+        span({ class: "post-stat like-count" }, `${post.like_count || 0} likes`),
         () => span({ // Comment count - clicking shows list
           class: "post-stat comment-count",
           style: "cursor: pointer;",

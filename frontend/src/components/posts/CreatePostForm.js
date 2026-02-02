@@ -22,7 +22,10 @@ export default function CreatePostForm() {
     if (inputEl) inputEl.value = '';
   };
   
+  const fileInputId = 'create-post-file';
   const fileInput = van.tags.input({
+    id: fileInputId,
+    class: 'file-input',
     type: 'file',
     accept: 'image/*',
     onchange: (e) => {
@@ -57,6 +60,14 @@ export default function CreatePostForm() {
       }),
 
       div({ class: "create-post-attachments" }, [
+        div({ class: "file-row" }, [
+          van.tags.button({
+            type: 'button',
+            className: 'file-button',
+            onclick: () => fileInput.click()
+          }, () => imageFile.val ? "Change File" : "Browse..."),
+          () => imageFile.val ? van.tags.span({ class: "file-name" }, imageFile.val.name) : null
+        ]),
         fileInput,
         () => imagePreview.val ? div({ class: "attachment-preview" }, [
           van.tags.img({ src: imagePreview.val, alt: "Selected upload" }),
