@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: #000000;
+  color: #e0e0e0;
+  font-family: 'Inter', sans-serif;
+  overflow: hidden; /* Prevent body scroll, let panels scroll */
+}
+
+/* Custom Scrollbar for 'Bloomberg' feel */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #111; 
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #333; 
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #FF9800; 
+}
