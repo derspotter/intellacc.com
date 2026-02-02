@@ -13,7 +13,7 @@ const predictionsStore = {
     loadingEvents: van.state(false), // Added specific loading state for events
     loadingAssigned: van.state(false), // Added specific loading state for assigned predictions
     error: van.state(null),
-    verificationNotice: van.state(null),
+    verificationNotice: van.state(localStorage.getItem('verificationNotice') || null),
     verificationNoticeLoaded: van.state(false),
     userPredictions: van.state([]),
     initialFetchDone: van.state(false) // Flag to track if initial fetch has been attempted
@@ -367,6 +367,7 @@ const predictionsStore = {
       }
       if (!isLoggedInState.val) {
         this.state.verificationNotice.val = null;
+        localStorage.removeItem('verificationNotice');
         this.state.verificationNoticeLoaded.val = true;
         return;
       }
@@ -375,14 +376,14 @@ const predictionsStore = {
         const status = await api.verification.getStatus();
         if (status && typeof status.current_tier === 'number' && status.current_tier < 2) {
           this.state.verificationNotice.val = 'Verify your phone number to unlock this feature';
+          localStorage.setItem('verificationNotice', this.state.verificationNotice.val);
         } else {
           this.state.verificationNotice.val = null;
+          localStorage.removeItem('verificationNotice');
         }
+        this.state.verificationNoticeLoaded.val = true;
       } catch (error) {
         console.error('Error fetching verification status:', error);
-        this.state.verificationNotice.val = null;
-      } finally {
-        this.state.verificationNoticeLoaded.val = true;
       }
     },
 
@@ -397,6 +398,7 @@ const predictionsStore = {
       this.state.error.val = null;
       this.state.verificationNotice.val = null;
       this.state.verificationNoticeLoaded.val = false;
+      localStorage.removeItem('verificationNotice');
       this.state.userPredictions.val = [];
       this.state.initialFetchDone.val = false;
     }

@@ -16,17 +16,19 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
 
   const isPhoneVerificationMessage = (msg) =>
     typeof msg === 'string' && msg.toLowerCase().includes('verify your phone');
+  const shouldUseVerificationNotice = (msg, requiredTier) =>
+    requiredTier === 2 || isPhoneVerificationMessage(msg);
   const setVerificationNotice = (msg) => {
     predictionsStore.state.verificationNotice.val = msg;
+    localStorage.setItem('verificationNotice', msg);
   };
   const clearVerificationNotice = () => {
     predictionsStore.state.verificationNotice.val = null;
+    localStorage.removeItem('verificationNotice');
   };
-  const setError = (msg) => {
-    if (isPhoneVerificationMessage(msg)) {
+  const setError = (msg, options = {}) => {
+    if (shouldUseVerificationNotice(msg, options.requiredTier)) {
       setVerificationNotice(msg);
-      error.val = null;
-      return;
     }
     error.val = msg;
   };
@@ -209,7 +211,10 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
           }
           console.log('❌ Position API error:', positionResponse.status, errorData);
           if (positionResponse.status === 403) {
-            setError(errorData.message || errorData.error || 'Verification required to view positions');
+            setError(
+              errorData.message || errorData.error || 'Verification required to view positions',
+              { requiredTier: errorData.required_tier }
+            );
           }
           userPosition.val = null;
         }
@@ -345,7 +350,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
         onStakeUpdate?.(result);
       } else {
         const errorData = await response.json();
-        setError(errorData.message || 'Failed to place stake');
+        setError(errorData.message || 'Failed to place stake', { requiredTier: errorData.required_tier });
       }
       
     } catch (err) {
@@ -433,7 +438,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
         console.log('❌ Sell API error:', response.status, errorText);
         try {
           const errorData = JSON.parse(errorText);
-          setError(errorData.message || 'Failed to sell shares');
+          setError(errorData.message || 'Failed to sell shares', { requiredTier: errorData.required_tier });
         } catch (e) {
           setError(`Failed to sell shares: ${response.status} ${errorText}`);
         }
@@ -741,7 +746,12 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
             ])
           ]),
           
-          () => error.val ? div({ class: 'error-message' }, error.val) : null,
+          () => {
+            if (!error.val) return null;
+            const hideInline = shouldUseVerificationNotice(error.val) && predictionsStore.state.verificationNotice.val;
+            if (hideInline) return null;
+            return div({ class: 'error-message' }, error.val);
+          },
           
           div({ class: 'form-actions' }, [
             Button({

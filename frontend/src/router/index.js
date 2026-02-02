@@ -120,7 +120,13 @@ export default function Router() {
     'verify-email': () => VerifyEmailPage(),
     settings: () => SettingsPage(),
     
-    predictions: () => div({ class: "predictions-page" }, [
+    predictions: () => {
+      van.derive(() => {
+        if (isLoggedInState.val && predictionsStore.actions.fetchVerificationNotice) {
+          predictionsStore.actions.fetchVerificationNotice.call(predictionsStore);
+        }
+      });
+      return div({ class: "predictions-page" }, [
       h1("Predictions & Betting"),
       () => {
         const msg = predictionsStore.state.verificationNotice?.val;
@@ -143,7 +149,8 @@ export default function Router() {
       ]),
       () => isAdminState.val ? AdminEventManagement() : null,
       // Deprecated "Make a New Prediction" card removed from Predictions page
-    ]),
+    ]);
+    },
     
     profile: () => {
       // Fetching logic is now handled by updatePageFromHash on route change
