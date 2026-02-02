@@ -20,7 +20,6 @@ import MarketStakes from '../components/predictions/MarketStakes.js';
 import LeaderboardCard from '../components/predictions/LeaderboardCard.js';
 import RPBalance from '../components/predictions/RPBalance.js';
 import WeeklyAssignment from '../components/predictions/WeeklyAssignment.js';
-import CreatePredictionForm from '../components/predictions/CreatePredictionForm.js';
 import AdminEventManagement from '../components/predictions/AdminEventManagement.js';
 import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
@@ -134,9 +133,7 @@ export default function Router() {
         ])
       ]),
       () => isAdminState.val ? AdminEventManagement() : null,
-      div({ class: "create-prediction-column" }, [
-        CreatePredictionForm()
-      ])
+      // Deprecated "Make a New Prediction" card removed from Predictions page
     ]),
     
     profile: () => {
