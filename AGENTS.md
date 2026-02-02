@@ -57,6 +57,11 @@ Rebuild Rust service:
 - Auth: JWT middleware; use userId (not username) for MLS identity.
 - Schema changes: check backend/migrations/ before updating DB logic.
 - Verification: always run relevant tests/verification steps without asking first.
+- Safety: never run possibly destructive commands without explicit user approval. This includes (non-exhaustive):
+  - Git: `git checkout -- ...`, `git restore`, `git reset --hard`, `git clean -fdx`, `git revert` on user work
+  - File ops: `rm -rf`, `rm -f`, `mv`/`cp` that overwrite, `truncate`, shell redirection `> file`
+  - Docker/system: `docker system prune`, `docker volume rm`, `docker image rm`
+  - Database: `DROP`, `TRUNCATE`, destructive migrations
 
 ## E2E Test Users
 user1@example.com / password123 (ID: 24)

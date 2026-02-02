@@ -43,7 +43,6 @@ export default function CreatePostForm() {
   });
   
   return Card({
-    title: "Create Post",
     className: "create-post-card",
     children: [
       // Error display
@@ -116,11 +115,12 @@ export default function CreatePostForm() {
             color: white;
             font-weight: bold;
             border: none;
-            padding: 8px 16px;
-            font-size: 16px;
-            min-width: 100px;
+            border-radius: 0;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+            width: 11rem;
             cursor: pointer;
-            font-family: 'Courier New', monospace;
+            font-family: inherit;
           `
         }, "POST"),
       ]),
