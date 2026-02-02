@@ -3,6 +3,7 @@ import Button from '../common/Button.js';
 import api from '../../services/api.js';
 import { registerSocketEventHandler } from '../../services/socket.js';
 import { getUserId } from '../../services/auth.js';
+import predictionsStore from '../../store/predictions.js';
 
 const { div, h3, p, span, small, input, label, form, button } = van.tags;
 
@@ -12,6 +13,23 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
   const kellyData = van.state(null);
   const loading = van.state(false);
   const error = van.state(null);
+
+  const isPhoneVerificationMessage = (msg) =>
+    typeof msg === 'string' && msg.toLowerCase().includes('verify your phone');
+  const setVerificationNotice = (msg) => {
+    predictionsStore.state.verificationNotice.val = msg;
+  };
+  const clearVerificationNotice = () => {
+    predictionsStore.state.verificationNotice.val = null;
+  };
+  const setError = (msg) => {
+    if (isPhoneVerificationMessage(msg)) {
+      setVerificationNotice(msg);
+      error.val = null;
+      return;
+    }
+    error.val = msg;
+  };
   
   // Betting form state
   const stakeAmount = van.state('');
@@ -171,6 +189,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
             
             console.log('🔄 SETTING NEW POSITION:', newPosition);
             userPosition.val = newPosition;
+            clearVerificationNotice();
             withdrawalTrigger.val++; // Force withdrawal buttons to re-render
             console.log('✅ POSITION SET! userPosition.val:', userPosition.val);
             console.log('✅ This should trigger withdrawal button render!');
@@ -190,7 +209,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
           }
           console.log('❌ Position API error:', positionResponse.status, errorData);
           if (positionResponse.status === 403) {
-            error.val = errorData.message || errorData.error || 'Verification required to view positions';
+            setError(errorData.message || errorData.error || 'Verification required to view positions');
           }
           userPosition.val = null;
         }
@@ -294,7 +313,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
       // Get userId efficiently with caching
       const userId = getUserId();
       if (!userId) {
-        error.val = 'User not authenticated';
+        setError('User not authenticated');
         return;
       }
       
@@ -326,12 +345,12 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
         onStakeUpdate?.(result);
       } else {
         const errorData = await response.json();
-        error.val = errorData.message || 'Failed to place stake';
+        setError(errorData.message || 'Failed to place stake');
       }
       
     } catch (err) {
       console.error('Error placing stake:', err);
-      error.val = err.message;
+      setError(err.message);
     } finally {
       submitting.val = false;
     }
@@ -393,7 +412,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
         
         // Validate new LMSR response format
         if (!result.success) {
-          error.val = result.message || 'Failed to sell shares';
+          setError(result.message || 'Failed to sell shares');
           return;
         }
         
@@ -401,6 +420,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
         const successMsg = `Successfully sold ${amount.toFixed(2)} ${shareType.toUpperCase()} shares for ${payout.toFixed(2)} RP`;
         console.log(successMsg);
         
+        clearVerificationNotice();
         // Refresh user position
         console.log('🔄 Refreshing position after withdrawal...');
         await loadUserPosition();
@@ -413,15 +433,15 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
         console.log('❌ Sell API error:', response.status, errorText);
         try {
           const errorData = JSON.parse(errorText);
-          error.val = errorData.message || 'Failed to sell shares';
+          setError(errorData.message || 'Failed to sell shares');
         } catch (e) {
-          error.val = `Failed to sell shares: ${response.status} ${errorText}`;
+          setError(`Failed to sell shares: ${response.status} ${errorText}`);
         }
       }
       
     } catch (err) {
       console.error('Error selling shares:', err);
-      error.val = err.message;
+      setError(err.message);
     } finally {
       submitting.val = false;
     }
@@ -469,13 +489,14 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
       }
       
       console.log(`Full withdrawal completed. Total payout: ${totalPayout.toFixed(2)} RP`);
-      
+
+      clearVerificationNotice();
       // Refresh user position
       await loadUserPosition();
       
     } catch (err) {
       console.error('Error during full withdrawal:', err);
-      error.val = err.message;
+      setError(err.message);
     } finally {
       submitting.val = false;
     }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import EditPostForm from '../src/components/posts/EditPostForm.js';
+import PostItem from '../src/components/posts/PostItem.js';
 import postsStore from '../src/store/posts.js';
 
 describe('EditPostForm legacy image_url removal', () => {
@@ -32,6 +32,7 @@ describe('EditPostForm legacy image_url removal', () => {
     postsStore.actions.updatePost = originalUpdatePost;
     postsStore.actions.uploadPostImage = originalUploadPostImage;
     postsStore.actions.ensureAttachmentUrl = originalEnsureAttachmentUrl;
+    postsStore.state.editingPostId.val = null;
     if (originalCreateObjectURL) {
       global.URL.createObjectURL = originalCreateObjectURL;
     } else {
@@ -53,17 +54,19 @@ describe('EditPostForm legacy image_url removal', () => {
       image_attachment_id: null
     };
 
-    const onCancel = vi.fn();
-    const form = EditPostForm({ post, onCancel });
-    document.body.appendChild(form);
+    postsStore.state.editingPostId.val = post.id;
+    const item = PostItem({ post });
+    document.body.appendChild(item);
 
     const removeButton = Array.from(document.querySelectorAll('button'))
       .find(btn => btn.textContent === 'Remove');
     expect(removeButton).toBeTruthy();
     removeButton.click();
 
-    const submitForm = document.querySelector('form.edit-form');
-    submitForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    const saveButton = Array.from(document.querySelectorAll('button'))
+      .find(btn => btn.textContent === 'Save');
+    expect(saveButton).toBeTruthy();
+    saveButton.click();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(postsStore.actions.updatePost).toHaveBeenCalledTimes(1);
@@ -79,17 +82,19 @@ describe('EditPostForm legacy image_url removal', () => {
       image_attachment_id: null
     };
 
-    const onCancel = vi.fn();
-    const form = EditPostForm({ post, onCancel });
-    document.body.appendChild(form);
+    postsStore.state.editingPostId.val = post.id;
+    const item = PostItem({ post });
+    document.body.appendChild(item);
 
     const fileInput = document.querySelector('input[type="file"]');
     const file = new File(['data'], 'new.png', { type: 'image/png' });
     Object.defineProperty(fileInput, 'files', { value: [file] });
     fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 
-    const submitForm = document.querySelector('form.edit-form');
-    submitForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    const saveButton = Array.from(document.querySelectorAll('button'))
+      .find(btn => btn.textContent === 'Save');
+    expect(saveButton).toBeTruthy();
+    saveButton.click();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(postsStore.actions.uploadPostImage).toHaveBeenCalledTimes(1);

@@ -13,6 +13,7 @@ const predictionsStore = {
     loadingEvents: van.state(false), // Added specific loading state for events
     loadingAssigned: van.state(false), // Added specific loading state for assigned predictions
     error: van.state(null),
+    verificationNotice: van.state(null),
     userPredictions: van.state([]),
     initialFetchDone: van.state(false) // Flag to track if initial fetch has been attempted
   },
@@ -368,6 +369,7 @@ const predictionsStore = {
       this.state.loadingEvents.val = false;
       this.state.loadingAssigned.val = false;
       this.state.error.val = null;
+      this.state.verificationNotice.val = null;
       this.state.userPredictions.val = [];
       this.state.initialFetchDone.val = false;
     }

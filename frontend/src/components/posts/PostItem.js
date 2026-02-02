@@ -305,8 +305,10 @@ export default function PostItem({ post }) {
                   e.target.style.height = (e.target.scrollHeight + 2) + 'px'; // +2 for borders (box-sizing: border-box)
                 },
                 created: (el) => {
+                  if (!el) return;
                   // Ensure height is correct on mount
                   setTimeout(() => {
+                    if (!el?.style) return;
                     el.style.height = 'auto';
                     el.style.height = (el.scrollHeight + 2) + 'px'; // +2 for borders
                   }, 0);

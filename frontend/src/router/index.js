@@ -21,6 +21,7 @@ import LeaderboardCard from '../components/predictions/LeaderboardCard.js';
 import RPBalance from '../components/predictions/RPBalance.js';
 import WeeklyAssignment from '../components/predictions/WeeklyAssignment.js';
 import AdminEventManagement from '../components/predictions/AdminEventManagement.js';
+import predictionsStore from '../store/predictions.js';
 import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
 import ProfilePredictions from '../components/profile/ProfilePredictions';
@@ -118,6 +119,11 @@ export default function Router() {
     
     predictions: () => div({ class: "predictions-page" }, [
       h1("Predictions & Betting"),
+      () => {
+        const msg = predictionsStore.state.verificationNotice?.val;
+        if (!msg) return null;
+        return div({ class: 'predictions-phone-banner' }, msg);
+      },
       div({ class: "predictions-header" }, [
         RPBalance({ horizontal: true })
       ]),
