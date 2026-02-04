@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "context7": {
+      "type": "stdio",
+      "command": "/home/jay/.nvm/versions/node/v22.17.1/bin/npx",
+      "args": ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-e4b6ff99-5fe2-4b80-9c5b-082174239d1d"]
+    },
+    "playwright": {
+      "type": "stdio", 
+      "command": "/home/jay/.nvm/versions/node/v22.17.1/bin/npx",
+      "args": ["-y", "@playwright/mcp", "--isolated"]
+    }
+  }
+}
