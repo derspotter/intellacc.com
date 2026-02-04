@@ -6,6 +6,7 @@ import NotificationSettings from './NotificationSettings.js';
 import VerificationSettings from '../verification/VerificationSettings.js';
 import AiFlaggedContent from '../admin/AiFlaggedContent.js';
 import DangerZone from './DangerZone.js';
+import PasswordResetCancel from './PasswordResetCancel.js';
 import { isAdminState } from '../../services/auth';
 
 const { div, h1, label, input } = van.tags;
@@ -64,6 +65,9 @@ export default function SettingsPage() {
 
     // Vault encryption settings
     VaultSettings(),
+
+    // Password reset cancellation
+    PasswordResetCancel(),
 
     // Account deletion
     DangerZone()
