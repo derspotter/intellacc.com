@@ -37,7 +37,13 @@ export default function PasswordResetCancel() {
       onclick: handleCancel,
       disabled: () => isSubmitting.val
     }, () => isSubmitting.val ? 'Cancelling...' : 'Cancel pending reset'),
-    () => status.val ? p({ class: 'success-message' }, status.val) : null,
-    () => error.val ? p({ class: 'error-message' }, error.val) : null
+    p({
+      class: 'success-message',
+      style: () => status.val ? '' : 'display: none;'
+    }, () => status.val),
+    p({
+      class: 'error-message',
+      style: () => error.val ? '' : 'display: none;'
+    }, () => error.val)
   );
 }
