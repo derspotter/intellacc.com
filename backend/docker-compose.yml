@@ -1,4 +1,15 @@
 services:
+  postfix:
+    image: boky/postfix:latest
+    container_name: postfix
+    environment:
+      HOSTNAME: mail.intellacc.com
+      ALLOWED_SENDER_DOMAINS: intellacc.com
+    volumes:
+      - ./postfix/keys:/etc/opendkim/keys
+    networks:
+      - intellacc-network
+
   db:
     image: postgres:17-alpine
     container_name: intellacc_db
@@ -23,6 +34,19 @@ services:
       PORT: ${NODE_PORT}
       DATABASE_URL: ${DATABASE_URL}
       JWT_SECRET: ${JWT_SECRET}
+      FRONTEND_URL: ${FRONTEND_URL}
+      EMAIL_TOKEN_SECRET: ${EMAIL_TOKEN_SECRET}
+      PASSWORD_RESET_SECRET: ${PASSWORD_RESET_SECRET}
+      PASSWORD_RESET_EXPIRY: ${PASSWORD_RESET_EXPIRY}
+      PASSWORD_RESET_DELAY_HOURS: ${PASSWORD_RESET_DELAY_HOURS}
+      PASSWORD_RESET_POLL_INTERVAL_MS: ${PASSWORD_RESET_POLL_INTERVAL_MS}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_SECURE: ${SMTP_SECURE}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
+      PREDICTION_ENGINE_AUTH_TOKEN: ${PREDICTION_ENGINE_AUTH_TOKEN}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
       VAPID_EMAIL: ${VAPID_EMAIL}
@@ -44,24 +68,24 @@ services:
     networks:
       - intellacc-network
 
-  caddy:
-    image: caddy:latest
-    container_name: intellacc_caddy
-    environment:
-      - ACME_AGREE=true
-      - EMAIL=${CADDY_EMAIL}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - ./uploads:/uploads
-      - caddy_data:/data
-      - caddy_config:/config
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      - backend
-    networks:
-      - intellacc-network
+  # caddy:
+  #   image: caddy:latest
+  #   container_name: intellacc_caddy
+  #   environment:
+  #     - ACME_AGREE=true
+  #     - EMAIL=${CADDY_EMAIL}
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile
+  #     - ./uploads:/uploads
+  #     - caddy_data:/data
+  #     - caddy_config:/config
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - intellacc-network
 
 networks:
   intellacc-network:
@@ -69,5 +93,5 @@ networks:
 
 volumes:
   db-data:
-  caddy_data:
-  caddy_config:
+  # caddy_data:
+  # caddy_config:

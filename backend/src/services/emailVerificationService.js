@@ -21,15 +21,19 @@ const initTransporter = () => {
     // Use environment variables for SMTP config
     // In dev, you can use Ethereal (ethereal.email) for testing
     if (process.env.SMTP_HOST) {
-        transporter = nodemailer.createTransport({
+        const transportOptions = {
             host: process.env.SMTP_HOST,
             port: parseInt(process.env.SMTP_PORT || '587'),
-            secure: process.env.SMTP_SECURE === 'true',
-            auth: {
-                user: process.env.SMTP_USER,
-                pass: process.env.SMTP_PASS
-            }
-        });
+            secure: process.env.SMTP_SECURE === 'true'
+        };
+
+        const smtpUser = process.env.SMTP_USER;
+        const smtpPass = process.env.SMTP_PASS;
+        if (smtpUser || smtpPass) {
+            transportOptions.auth = { user: smtpUser, pass: smtpPass };
+        }
+
+        transporter = nodemailer.createTransport(transportOptions);
     } else {
         // Development fallback - log to console instead of sending
         console.log('[EmailVerification] No SMTP config, using console transport');

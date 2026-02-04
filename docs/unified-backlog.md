@@ -6,7 +6,7 @@ This backlog consolidates open work from `next-steps.md`, `production-checklist.
 `Intellacc Feature Roadmap.md` into a single prioritized view.
 
 ## Priority 0 - Critical (launch blockers)
-- Password reset + recovery flow: apply migrations, configure env vars, verify worker job and cancellation flow.
+- Password reset + recovery flow: status (2026-02-04) backend + frontend flow implemented; SMTP env wiring done; Postfix container added (direct-to-MX). Remaining: apply migrations in prod DB, set strong secrets, DNS/rDNS + DKIM/DMARC, verify worker job, and add cancellation UX.
 - Account deletion (GDPR/CCPA): soft delete + delayed purge with password confirmation.
 - Prediction engine access control: set `PREDICTION_ENGINE_AUTH_TOKEN` in backend + engine configs.
 - Admin auth guard for weekly assignment routes (backend middleware + route gating).

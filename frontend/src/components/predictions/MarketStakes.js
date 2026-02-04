@@ -18,14 +18,14 @@ const MarketStakes = ({ eventId, title = "Market Stakes", showTitle = true }) =>
       error.val = null;
       
       // Get market state
-      const marketResponse = await fetch(`http://localhost:3001/events/${eventId}/market`);
+      const marketResponse = await fetch(`/api/events/${eventId}/market`);
       if (marketResponse.ok) {
         const market = await marketResponse.json();
         marketState.val = market;
       }
       
       // Get recent trades from prediction engine
-      const tradesResponse = await fetch(`http://localhost:3001/events/${eventId}/trades?limit=20`);
+      const tradesResponse = await fetch(`/api/events/${eventId}/trades?limit=20`);
       if (tradesResponse.ok) {
         const tradesData = await tradesResponse.json();
         // Convert ISO timestamps to Date objects for formatting

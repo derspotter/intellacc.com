@@ -227,6 +227,35 @@ router.post('/attachments/message', authenticateJWT, attachmentsController.uploa
 router.get('/attachments/:id', authenticateJWT, attachmentsController.downloadAttachment);
 
 // LMSR Market API proxy routes (bypass CORS issues)
+router.get("/events/:eventId/market", async (req, res) => {
+    try {
+        const { eventId } = req.params;
+        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/market`, {
+            headers: predictionEngineHeaders
+        });
+        const data = await response.json();
+        res.status(response.status).json(data);
+    } catch (error) {
+        console.error('Market proxy error:', error);
+        res.status(500).json({ error: 'Failed to fetch market state' });
+    }
+});
+
+router.get("/events/:eventId/trades", async (req, res) => {
+    try {
+        const { eventId } = req.params;
+        const limit = req.query.limit || 20;
+        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/trades?limit=${limit}`, {
+            headers: predictionEngineHeaders
+        });
+        const data = await response.json();
+        res.status(response.status).json(data);
+    } catch (error) {
+        console.error('Trades proxy error:', error);
+        res.status(500).json({ error: 'Failed to fetch recent trades' });
+    }
+});
+
 router.get("/events/:eventId/shares", authenticateJWT, requirePhoneVerified, async (req, res) => {
     try {
         const { eventId } = req.params;
