@@ -11,6 +11,7 @@
   align-items: center;
   z-index: 10000;
   backdrop-filter: blur(2px);
+  padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
 }
 
 .modal-content {
@@ -23,6 +24,8 @@
   width: 90%;
   position: relative;
   z-index: 10001;
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow: auto;
 }
 
 .modal-content h2 {

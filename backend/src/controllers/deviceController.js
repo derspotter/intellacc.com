@@ -134,8 +134,14 @@ exports.registerInitialDevice = async (userId, devicePublicId, name) => {
     const countRes = await db.query('SELECT count(*) FROM user_devices WHERE user_id = $1', [userId]);
     const isFirst = parseInt(countRes.rows[0].count) === 0;
 
+    // First device is implicitly trusted because it creates the user's first master key on this account.
+    // Subsequent devices must go through explicit linking/approval.
     const result = await db.query(
-        'INSERT INTO user_devices (user_id, device_public_id, name, is_primary) VALUES ($1, $2, $3, $4) ON CONFLICT (device_public_id) DO UPDATE SET last_seen_at = NOW() RETURNING *',
+        `INSERT INTO user_devices (user_id, device_public_id, name, is_primary, last_verified_at)
+         VALUES ($1, $2, $3, $4, CASE WHEN $4 THEN NOW() ELSE NULL END)
+         ON CONFLICT (device_public_id)
+         DO UPDATE SET last_seen_at = NOW()
+         RETURNING *`,
         [userId, devicePublicId, name || 'Primary Device', isFirst]
     );
     return result.rows[0];

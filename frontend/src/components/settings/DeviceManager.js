@@ -162,7 +162,7 @@ export default function DeviceManager() {
 
                 div({ style: 'margin-top: 20px;' },
                     p({ style: 'font-size: 0.9em;' }, 'Have a linking token from another logged-in device? Enter it here:'),
-                    div({ style: 'display: flex; gap: 10px;' },
+                    div({ class: 'linking-approve-row' },
                         input({
                             type: 'text',
                             placeholder: 'Enter linking token',

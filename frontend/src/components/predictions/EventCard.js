@@ -627,6 +627,17 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
     }, 100);
   }
 
+  let stakeInputEl = null;
+  const flashStakeInput = () => {
+    if (!stakeInputEl) return;
+    stakeInputEl.classList.remove('kelly-flash');
+    // Force a reflow so the animation restarts even on rapid clicks.
+    // eslint-disable-next-line no-unused-expressions
+    stakeInputEl.offsetWidth;
+    stakeInputEl.classList.add('kelly-flash');
+    setTimeout(() => stakeInputEl?.classList.remove('kelly-flash'), 500);
+  };
+
   return () => div({ class: 'event-card' }, [
       // Main content wrapper that grows to push position info to bottom
       div({ style: 'flex: 1 1 auto;' }, [
@@ -697,7 +708,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
             ]),
             div({ class: 'form-field' }, [
               label('Stake Amount (RP):'),
-              input({
+              (stakeInputEl = input({
                 type: 'number',
                 step: '0.01',
                 min: '0.01',
@@ -707,7 +718,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
                 oninput: (e) => {
                   stakeAmount.val = e.target.value; // Direct state update
                 }
-              })
+              }))
             ])
           ]),
           
@@ -726,6 +737,8 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
                   onclick: () => {
                     if (kellyData.val && !isNaN(kellyData.val.kelly_optimal)) {
                       stakeAmount.val = Math.max(0, kellyData.val.kelly_optimal).toFixed(2);
+                      // Give the user a quick visual confirmation of where the value landed.
+                      flashStakeInput();
                     }
                   },
                   children: 'Apply Kelly'

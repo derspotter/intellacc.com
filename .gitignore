@@ -70,6 +70,17 @@ recherche/2504.01781v2.pdf
 # Playwright MCP screenshots
 .playwright-mcp/
 
+# Playwright CLI session data / logs
+.playwright-cli/
+
+# Local scratch dirs
+.tmp/
+.cache/
+
+# Root-level local snapshots/artifacts
+/*.yaml
+/*.png
+
 # Build artifacts
 /frontend/dist/
 

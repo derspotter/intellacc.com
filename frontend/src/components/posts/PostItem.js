@@ -258,7 +258,7 @@ export default function PostItem({ post }) {
             style: "cursor: pointer;",
             onclick: () => handleShowComments(post.id)
           }, `${post.comment_count || 0} comment${(post.comment_count === 1) ? '' : 's'}`),
-          div({ style: "margin-left: auto;" },
+          div({ class: "post-header-expand-wrap" },
             () => {
               if (!(post.comment_count > 0)) return null;
               const isExpanded = postsStore.state.allCommentsExpanded.val[post.id] || false;

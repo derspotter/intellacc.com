@@ -10,7 +10,7 @@ import socketService from '../../services/socket';
  * @param {Function} props.onClick - Function to call when bell is clicked
  * @returns {HTMLElement} Notification bell element
  */
-export default function NotificationBell({ onClick }) {
+export default function NotificationBell({ onClick } = {}) {
   const unreadCount = van.state(0);
   const loading = van.state(false);
 
