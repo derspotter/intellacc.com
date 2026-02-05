@@ -9,6 +9,9 @@ services:
     environment:
       - API_BASE=http://backend:3000/api
       - WEEKLY_WEBHOOK_URL=${WEEKLY_WEBHOOK_URL:-}
+      - WEEKLY_ADMIN_TOKEN=${WEEKLY_ADMIN_TOKEN:-}
+      - WEEKLY_ADMIN_EMAIL=${WEEKLY_ADMIN_EMAIL:-}
+      - WEEKLY_ADMIN_PASSWORD=${WEEKLY_ADMIN_PASSWORD:-}
     networks:
       - intellacc-network
     volumes:

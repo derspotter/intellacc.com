@@ -106,6 +106,22 @@ const getUserWeeklyStatus = async (req, res) => {
         error: 'Invalid user ID'
       });
     }
+
+    const requester = req.user;
+    if (!requester) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+    }
+
+    const isAdmin = requester.role === 'admin';
+    if (!isAdmin && requester.id !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden'
+      });
+    }
     
     const status = await weeklyAssignmentService.getUserWeeklyStatus(userId);
     

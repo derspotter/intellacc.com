@@ -2,7 +2,7 @@
 
 This document explains how to set up and run the weekly assignment cron job that handles:
 
-1. **Weekly Assignment Rewards**: +50 RP for users who complete assigned predictions with sufficient Kelly stake
+1. **Weekly Assignment Rewards**: +50 RP for users who place a minimum stake on their assigned event
 2. **Weekly RP Decay**: 1% decay applied to all user RP balances
 3. **New Weekly Assignments**: Random event assignment for all active users
 
@@ -41,6 +41,17 @@ Add to your `.env` file:
 ```bash
 # Optional: Webhook URL for notifications (Slack/Discord)
 WEEKLY_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+
+# Admin auth (choose one option)
+# 1) Preferred: long-lived admin token for cron
+WEEKLY_ADMIN_TOKEN=your_admin_jwt
+# 2) Or login credentials (cron will fetch a token)
+WEEKLY_ADMIN_EMAIL=admin@example.com
+WEEKLY_ADMIN_PASSWORD=strongpassword
+
+# Minimum stake required to earn the weekly bonus (RP)
+WEEKLY_MIN_STAKE_RP=1
+
 ```
 
 ### 3. Monitor Cron Logs
@@ -62,9 +73,9 @@ docker exec intellacc_weekly_cron tail -f /var/log/weekly_cron.log
   2. Apply 1% RP decay to all users
   3. Assign new weekly predictions
 
-## 🔧 Manual API Endpoints
+## 🔧 Manual API Endpoints (Admin Only)
 
-You can also trigger individual processes via API:
+You can also trigger individual processes via API (requires admin auth):
 
 ```bash
 # Process completed assignments
@@ -88,18 +99,8 @@ curl http://localhost:3000/api/weekly/stats
 ### Assignment Rewards (+50 RP)
 
 Users receive +50 RP bonus if they:
-1. Complete their assigned weekly prediction
-2. Stake at least **1/4 of Kelly optimal amount**
-
-Kelly calculation:
-```javascript
-const edge = belief > marketProb 
-  ? (belief - marketProb) / (1 - marketProb)
-  : (marketProb - belief) / marketProb;
-
-const kellyOptimal = edge * balance * 0.25; // Conservative 25% Kelly
-const requiredStake = kellyOptimal / 4.0;   // 1/4 of Kelly optimal
-```
+1. Have an assigned weekly event
+2. Place total stakes of at least **WEEKLY_MIN_STAKE_RP** on that event during the week
 
 ### RP Decay (1% Weekly)
 

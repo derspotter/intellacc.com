@@ -54,10 +54,10 @@ export default function WeeklyAssignment() {
       }, '✅ Completed');
     }
     
-    if (assignment.has_prediction) {
+    if (assignment.has_stake) {
       return span({
         class: 'weekly-assignment-badge in-progress'
-      }, '⏳ Prediction Made');
+      }, '⏳ Stake Placed');
     }
     
     return span({
@@ -66,11 +66,12 @@ export default function WeeklyAssignment() {
   };
 
   const getRewardInfo = (assignment) => {
-    if (!assignment || !assignment.has_prediction) {
+    const minStake = assignment?.min_stake_rp ?? 1;
+    if (!assignment || !assignment.has_stake) {
       return p({
         class: 'weekly-assignment-reward-info'
       }, [
-        '💰 Make a prediction and stake at least 1/4 Kelly optimal amount to earn ',
+        `💰 Place a stake of at least ${minStake} RP to earn `,
         span({ class: 'reward-amount' }, '+50 RP'),
         ' bonus!'
       ]);
@@ -89,9 +90,9 @@ export default function WeeklyAssignment() {
     return p({
       class: 'weekly-assignment-reward-info'
     }, [
-      '⚠️ Prediction made but stake amount was insufficient for ',
+      `⚠️ Stake placed but below minimum ${minStake} RP for `,
       span({ class: 'reward-amount' }, '+50 RP'),
-      ' bonus. Need ≥1/4 Kelly optimal stake.'
+      ' bonus.'
     ]);
   };
 
@@ -140,21 +141,19 @@ export default function WeeklyAssignment() {
             ]),
             
             div({ class: 'assignment-details' }, [
-              assign.has_prediction ? 
+              assign.has_stake ? 
                 div({ class: 'prediction-made' }, [
                   p([
-                    '✅ Your prediction: ',
-                    span({ class: 'prediction-value' }, `${assign.prediction_value}%`),
-                    ' confidence: ',
-                    span({ class: 'confidence-value' }, `${assign.confidence}%`)
+                    '✅ Stake this week: ',
+                    span({ class: 'prediction-value' }, `${Number(assign.stake_amount || 0).toFixed(2)} RP`)
                   ])
                 ]) :
                 div({ class: 'no-prediction' }, [
-                  p('❌ No prediction made yet'),
+                  p('❌ No stake placed yet'),
                   a({
                     href: `#predictions`,
                     class: 'make-prediction-link'
-                  }, 'Make Prediction →')
+                  }, 'Place Stake →')
                 ])
             ]),
             
@@ -164,7 +163,7 @@ export default function WeeklyAssignment() {
               Button({
                 onclick: () => window.location.hash = '#predictions',
                 className: 'primary',
-                children: assign.has_prediction ? 'View Predictions' : 'Make Prediction'
+                children: assign.has_stake ? 'View Market' : 'Place Stake'
               }),
               Button({
                 onclick: loadAssignment,

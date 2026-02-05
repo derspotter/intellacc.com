@@ -1,5 +1,5 @@
 # Unified Backlog
-Updated: 2026-01-22
+Updated: 2026-02-05
 
 This backlog consolidates open work from `next-steps.md`, `production-checklist.md`,
 `mobile-pwa-plan.md`, `e2ee-next-steps.md`, `docs/mls-status.md`, and
@@ -7,12 +7,12 @@ This backlog consolidates open work from `next-steps.md`, `production-checklist.
 
 ## Priority 0 - Critical (launch blockers)
 - Password reset + recovery flow: status (2026-02-04) backend + frontend flow implemented; SMTP env wiring done; Postfix container added (direct-to-MX); cancellation UX added in settings. Remaining: apply migrations in prod DB, set strong secrets, DNS/rDNS + DKIM/DMARC, verify worker job.
-- Account deletion (GDPR/CCPA): soft delete + delayed purge with password confirmation.
+- Account deletion (GDPR/CCPA): implemented (soft delete + anonymize + password confirmation UI).
 - Prediction engine access control: set `PREDICTION_ENGINE_AUTH_TOKEN` in backend + engine configs.
-- Admin auth guard for weekly assignment routes (backend middleware + route gating).
+- Admin auth guard for weekly assignment routes: implemented (admin-only ops + self-only status).
 
 ## Priority 1 - High impact
-- Attachments storage: presigned upload/download + metadata table + create-post UI and rendering.
+- Attachments storage: implemented (local disk + JWT-gated download). Optional follow-up: presigned/object storage.
 - Tiered verification (phone + payment): ship SMS (Twilio) + Stripe SetupIntent verification flows,
   wire `VerificationSettings` UI, and confirm webhook + env config readiness.
 - PWA foundation: manifest, offline caching, install prompt, offline page.

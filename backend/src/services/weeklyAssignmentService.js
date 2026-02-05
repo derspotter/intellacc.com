@@ -2,6 +2,12 @@ const db = require('../db');
 
 const LEDGER_SCALE = 1_000_000n;
 const LEDGER_SCALE_NUMBER = 1_000_000;
+const WEEKLY_REWARD_RP = 50.0;
+const WEEKLY_MIN_STAKE_RP_RAW = Number(process.env.WEEKLY_MIN_STAKE_RP || '1');
+const WEEKLY_MIN_STAKE_RP = Number.isFinite(WEEKLY_MIN_STAKE_RP_RAW) && WEEKLY_MIN_STAKE_RP_RAW > 0
+  ? WEEKLY_MIN_STAKE_RP_RAW
+  : 1;
+const WEEKLY_MIN_STAKE_LEDGER = BigInt(Math.round(WEEKLY_MIN_STAKE_RP * LEDGER_SCALE_NUMBER));
 
 const formatLedgerToRp2 = (ledgerValue) => {
   const negative = ledgerValue < 0n;
@@ -16,12 +22,43 @@ class WeeklyAssignmentService {
   /**
    * Get current week in YYYY-WXX format
    */
-  getCurrentWeek() {
-    const now = new Date();
-    const year = now.getFullYear();
-    const startOfYear = new Date(year, 0, 1);
-    const days = Math.floor((now - startOfYear) / (24 * 60 * 60 * 1000));
-    const week = Math.ceil((days + startOfYear.getDay() + 1) / 7);
+  async getCurrentWeek(client = null) {
+    try {
+      const runner = client || db;
+      const result = await runner.query('SELECT get_current_week() AS week');
+      return result.rows[0]?.week;
+    } catch (error) {
+      console.warn('Failed to fetch current week from DB, using JS fallback:', error.message);
+      return this.getCurrentWeekFallback(new Date());
+    }
+  }
+
+  /**
+   * Get previous week in YYYY-WXX format
+   */
+  async getPreviousWeek(client = null) {
+    try {
+      const runner = client || db;
+      const result = await runner.query('SELECT get_previous_week() AS week');
+      return result.rows[0]?.week;
+    } catch (error) {
+      console.warn('Failed to fetch previous week from DB, using JS fallback:', error.message);
+      const prev = new Date();
+      prev.setDate(prev.getDate() - 7);
+      return this.getCurrentWeekFallback(prev);
+    }
+  }
+
+  getCurrentWeekFallback(date) {
+    // ISO week number fallback
+    const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNr = (target.getUTCDay() + 6) % 7;
+    target.setUTCDate(target.getUTCDate() - dayNr + 3);
+    const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+    const firstDayNr = (firstThursday.getUTCDay() + 6) % 7;
+    firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNr + 3);
+    const week = 1 + Math.round((target - firstThursday) / (7 * 24 * 60 * 60 * 1000));
+    const year = target.getUTCFullYear();
     return `${year}-W${week.toString().padStart(2, '0')}`;
   }
 
@@ -34,7 +71,7 @@ class WeeklyAssignmentService {
     try {
       await client.query('BEGIN');
       
-      const currentWeek = this.getCurrentWeek();
+      const currentWeek = await this.getCurrentWeek(client);
       console.log(`🗓️ Starting weekly assignment for week: ${currentWeek}`);
       
       // Get all users who don't have a weekly assignment for current week
@@ -42,7 +79,8 @@ class WeeklyAssignmentService {
         SELECT id, username 
         FROM users 
         WHERE (weekly_assignment_week != $1 OR weekly_assignment_week IS NULL)
-        AND id IN (SELECT DISTINCT user_id FROM predictions)  -- Only active users
+        AND id IN (SELECT DISTINCT user_id FROM market_updates)  -- Only active traders
+        AND deleted_at IS NULL
         ORDER BY id
       `, [currentWeek]);
       
@@ -137,7 +175,7 @@ class WeeklyAssignmentService {
     try {
       await client.query('BEGIN');
       
-      const currentWeek = this.getCurrentWeek();
+      const previousWeek = await this.getPreviousWeek(client);
       
       // Find users who completed their weekly assignment but haven't been rewarded
       const completedResult = await client.query(`
@@ -148,53 +186,31 @@ class WeeklyAssignmentService {
           u.weekly_assignment_week, 
           u.rp_balance_ledger,
           e.title as event_title,
-          e.market_prob,
-          p.prediction_value,
-          NULL::NUMERIC AS confidence,
-          mu.stake_amount
+          COALESCE(SUM(mu.stake_amount_ledger), 0) as stake_amount_ledger,
+          COALESCE(SUM(mu.stake_amount), 0) as stake_amount,
+          MAX(mu.created_at) as last_stake_at
         FROM users u
         JOIN events e ON u.weekly_assigned_event_id = e.id
-        JOIN predictions p ON u.id = p.user_id AND u.weekly_assigned_event_id = p.event_id
-        LEFT JOIN market_updates mu ON u.id = mu.user_id AND u.weekly_assigned_event_id = mu.event_id
+        LEFT JOIN market_updates mu 
+          ON u.id = mu.user_id 
+          AND u.weekly_assigned_event_id = mu.event_id
+          AND mu.created_at >= date_trunc('week', NOW() - INTERVAL '1 week')
+          AND mu.created_at < date_trunc('week', NOW())
         WHERE u.weekly_assignment_week = $1
         AND u.weekly_assignment_completed = false
-        AND p.prediction_value != 'pending'
-      `, [currentWeek]);
+        GROUP BY u.id, u.username, u.weekly_assigned_event_id, u.weekly_assignment_week, u.rp_balance_ledger, e.title
+      `, [previousWeek]);
       
       let rewardCount = 0;
       let skipCount = 0;
-      const rewardAmount = 50.0;
       let totalRewards = 0;
       
       for (const user of completedResult.rows) {
-        // Calculate Kelly optimal amount for this user's belief
-        const belief = user.confidence !== null ? parseFloat(user.confidence) / 100.0 : null;
-        const marketProb = parseFloat(user.market_prob);
-        const balanceLedger = BigInt(user.rp_balance_ledger);
-        const balance = Number(balanceLedger) / LEDGER_SCALE_NUMBER;
+        const stakeLedger = BigInt(user.stake_amount_ledger || 0);
+        const stakeAmount = Number(stakeLedger) / LEDGER_SCALE_NUMBER;
 
-        if (belief === null || Number.isNaN(belief) || Number.isNaN(marketProb) || Number.isNaN(balance)) {
-          skipCount++;
-          console.log(`⚠️ ${user.username} completed "${user.event_title}" but no confidence available - no reward`);
-          continue;
-        }
-
-        // Kelly edge calculation
-        const edge = belief > marketProb 
-          ? (belief - marketProb) / (1 - marketProb)
-          : (marketProb - belief) / marketProb;
-
-        // Conservative Kelly (25% of full Kelly)
-        const kellyFraction = 0.25;
-        const kellyOptimal = edge * balance * kellyFraction;
-        const quarterKelly = kellyOptimal / 4.0; // 1/4 of Kelly optimal
-
-        // Check if user staked at least 1/4 Kelly optimal
-        const userStake = user.stake_amount ? parseFloat(user.stake_amount) : 0;
-
-        if (userStake >= quarterKelly && quarterKelly > 0) {
-          // User staked enough - award the bonus
-          const rewardLedger = BigInt(Math.round(rewardAmount * LEDGER_SCALE_NUMBER));
+        if (stakeLedger >= WEEKLY_MIN_STAKE_LEDGER) {
+          const rewardLedger = BigInt(Math.round(WEEKLY_REWARD_RP * LEDGER_SCALE_NUMBER));
           await client.query(`
             UPDATE users 
             SET weekly_assignment_completed = true,
@@ -204,20 +220,15 @@ class WeeklyAssignmentService {
           `, [rewardLedger.toString(), user.id]);
           
           rewardCount++;
-          totalRewards += rewardAmount;
+          totalRewards += WEEKLY_REWARD_RP;
           
-          console.log(`💰 Rewarded ${user.username} with ${rewardAmount} RP for staking ${userStake} RP (≥${quarterKelly.toFixed(2)} required) on "${user.event_title}"`);
+          console.log(`💰 Rewarded ${user.username} with ${WEEKLY_REWARD_RP} RP for staking ${stakeAmount.toFixed(2)} RP (≥${WEEKLY_MIN_STAKE_RP} required) on "${user.event_title}"`);
         } else {
-          // User didn't stake enough - mark as completed but no reward
-          await client.query(`
-            UPDATE users 
-            SET weekly_assignment_completed = true,
-                weekly_assignment_completed_at = NOW()
-            WHERE id = $1
-          `, [user.id]);
-          
+          // User did not meet minimum stake for reward
           skipCount++;
-          console.log(`⚠️ ${user.username} completed "${user.event_title}" but only staked ${userStake} RP (needed ${quarterKelly.toFixed(2)}) - no reward`);
+          if (stakeLedger > 0n) {
+            console.log(`⚠️ ${user.username} staked ${stakeAmount.toFixed(2)} RP on "${user.event_title}" (needed ≥${WEEKLY_MIN_STAKE_RP}) - no reward`);
+          }
         }
       }
       
@@ -227,7 +238,7 @@ class WeeklyAssignmentService {
         rewarded: rewardCount,
         skipped: skipCount,
         totalRewards,
-        week: currentWeek,
+        week: previousWeek,
         message: `Rewarded ${rewardCount} users, skipped ${skipCount} users (insufficient stake) - ${totalRewards} total RP awarded`
       };
       
@@ -249,7 +260,7 @@ class WeeklyAssignmentService {
     try {
       await client.query('BEGIN');
       
-      const currentWeek = this.getCurrentWeek();
+      const currentWeek = await this.getCurrentWeek(client);
       
       // Check if decay already applied for this week
       const existingDecay = await client.query(`
@@ -371,7 +382,7 @@ class WeeklyAssignmentService {
     const client = await db.getPool().connect();
     
     try {
-      const week = weekYear || this.getCurrentWeek();
+      const week = weekYear || await this.getCurrentWeek(client);
       
       const result = await client.query(`
         SELECT * FROM weekly_assignment_stats 
@@ -403,30 +414,46 @@ class WeeklyAssignmentService {
     const client = await db.getPool().connect();
     
     try {
-      const currentWeek = this.getCurrentWeek();
+      const currentWeek = await this.getCurrentWeek(client);
       
       const result = await client.query(`
         SELECT 
-          u.weekly_assigned_event_id,
+          u.weekly_assigned_event_id as event_id,
           u.weekly_assignment_week,
           u.weekly_assignment_completed,
           u.weekly_assignment_completed_at,
           e.title as event_title,
           e.closing_date,
-          p.prediction_value,
-          NULL::NUMERIC AS confidence,
-          p.outcome,
+          COALESCE(SUM(mu.stake_amount), 0) as stake_amount,
+          COALESCE(SUM(mu.stake_amount_ledger), 0) as stake_amount_ledger,
+          MAX(mu.created_at) as last_stake_at,
           CASE 
-            WHEN p.id IS NOT NULL THEN true 
+            WHEN COALESCE(SUM(mu.stake_amount_ledger), 0) > 0 THEN true 
             ELSE false 
-          END as has_prediction
+          END as has_stake
         FROM users u
         LEFT JOIN events e ON u.weekly_assigned_event_id = e.id
-        LEFT JOIN predictions p ON u.id = p.user_id AND u.weekly_assigned_event_id = p.event_id
+        LEFT JOIN market_updates mu 
+          ON u.id = mu.user_id 
+          AND u.weekly_assigned_event_id = mu.event_id
+          AND mu.created_at >= date_trunc('week', NOW())
+          AND mu.created_at < date_trunc('week', NOW()) + INTERVAL '1 week'
         WHERE u.id = $1 AND u.weekly_assignment_week = $2
+        GROUP BY u.weekly_assigned_event_id, u.weekly_assignment_week, u.weekly_assignment_completed, u.weekly_assignment_completed_at, e.title, e.closing_date
       `, [userId, currentWeek]);
-      
-      return result.rows.length > 0 ? result.rows[0] : null;
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      const assignment = result.rows[0];
+      const stakeLedger = BigInt(assignment.stake_amount_ledger || 0);
+
+      return {
+        ...assignment,
+        stake_amount_ledger: stakeLedger.toString(),
+        has_prediction: assignment.has_stake, // Back-compat for UI
+        min_stake_rp: WEEKLY_MIN_STAKE_RP
+      };
       
     } finally {
       client.release();

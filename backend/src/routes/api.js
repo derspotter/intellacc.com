@@ -13,6 +13,7 @@ const pushController = require('../controllers/pushController');
 const weeklyAssignmentController = require('../controllers/weeklyAssignmentController');
 const mlsRoutes = require('./mls');
 const authenticateJWT = require("../middleware/auth");
+const { requireAdmin } = require("../middleware/auth");
 const rateLimit = require('express-rate-limit');
 const attachmentsController = require('../controllers/attachmentsController');
 const verificationController = require('../controllers/verificationController');
@@ -208,12 +209,12 @@ router.post("/scoring/time-weights", authenticateJWT, scoringController.calculat
 // Admin AI moderation routes
 router.get('/admin/ai-flags', authenticateJWT, aiModerationController.getFlaggedContent);
 
-// Weekly Assignment Routes
-router.post("/weekly/assign", weeklyAssignmentController.assignWeeklyPredictions);
-router.post("/weekly/process-completed", weeklyAssignmentController.processCompletedAssignments);
-router.post("/weekly/apply-decay", weeklyAssignmentController.applyWeeklyDecay);
-router.post("/weekly/run-all", weeklyAssignmentController.runWeeklyProcesses);
-router.get("/weekly/stats", weeklyAssignmentController.getWeeklyStats);
+// Weekly Assignment Routes (admin-only for ops)
+router.post("/weekly/assign", authenticateJWT, requireAdmin, weeklyAssignmentController.assignWeeklyPredictions);
+router.post("/weekly/process-completed", authenticateJWT, requireAdmin, weeklyAssignmentController.processCompletedAssignments);
+router.post("/weekly/apply-decay", authenticateJWT, requireAdmin, weeklyAssignmentController.applyWeeklyDecay);
+router.post("/weekly/run-all", authenticateJWT, requireAdmin, weeklyAssignmentController.runWeeklyProcesses);
+router.get("/weekly/stats", authenticateJWT, requireAdmin, weeklyAssignmentController.getWeeklyStats);
 router.get("/weekly/user/:userId/status", authenticateJWT, weeklyAssignmentController.getUserWeeklyStatus);
 
 // MLS Routes (Messaging Layer Security - E2EE)

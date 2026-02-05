@@ -89,3 +89,21 @@ const authenticateJWT = async (req, res, next) => {
 };
 
 module.exports = authenticateJWT;
+
+// Admin-only guard
+module.exports.requireAdmin = async (req, res, next) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    if (req.user.role === 'admin') {
+      return next();
+    }
+
+    return res.status(403).json({ error: 'Admin access required' });
+  } catch (err) {
+    console.error('Admin auth error:', err);
+    return res.status(500).json({ error: 'Failed to verify admin access' });
+  }
+};

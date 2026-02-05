@@ -20,6 +20,13 @@ echo "📋 Copying weekly script to backend container..."
 docker cp scripts/weekly_cron.js intellacc_backend:/usr/src/app/
 
 echo "🚀 Running weekly processes inside backend container..."
+if [ -n "$WEEKLY_ADMIN_TOKEN" ]; then
+  echo "Using WEEKLY_ADMIN_TOKEN for auth"
+elif [ -n "$WEEKLY_ADMIN_EMAIL" ] && [ -n "$WEEKLY_ADMIN_PASSWORD" ]; then
+  echo "Using WEEKLY_ADMIN_EMAIL/WEEKLY_ADMIN_PASSWORD for auth"
+else
+  echo "⚠️  Admin auth missing. Set WEEKLY_ADMIN_TOKEN or WEEKLY_ADMIN_EMAIL/WEEKLY_ADMIN_PASSWORD."
+fi
 docker exec intellacc_backend node weekly_cron.js
 
 echo "🎉 Manual weekly process completed!"
