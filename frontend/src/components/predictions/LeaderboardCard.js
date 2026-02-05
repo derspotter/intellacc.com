@@ -1,5 +1,5 @@
 import van from 'vanjs-core';
-const { div, span, button, h3, p, a, table, thead, tbody, tr, th, td } = van.tags;
+const { div, span, button, h3, p, a, ul, li } = van.tags;
 import Card from '../common/Card';
 import api from '../../services/api';
 import { getTokenData } from '../../services/auth';
@@ -16,9 +16,9 @@ export default function LeaderboardCard() {
 
   // Tab configuration - simplified to 3 toggleable options
   const tabs = [
-    { key: 'global', label: 'Global', icon: '🌍' },
-    { key: 'followers', label: 'Followers', icon: '👥' },
-    { key: 'following', label: 'Following', icon: '👤' }
+    { key: 'global', label: 'Global' },
+    { key: 'followers', label: 'Followers' },
+    { key: 'following', label: 'Following' }
   ];
 
   // Fetch leaderboard data based on current selections
@@ -113,10 +113,7 @@ export default function LeaderboardCard() {
         return button({
           class: () => `tab-button ${isActive() ? 'active' : ''}`,
           onclick: () => toggleTab(tab.key)
-        }, [
-          span({ class: 'tab-icon' }, tab.icon),
-          span({ class: 'tab-label' }, tab.label)
-        ]);
+        }, tab.label);
       })
     );
   };
@@ -135,33 +132,40 @@ export default function LeaderboardCard() {
     };
   };
 
-  // Render leaderboard table row
-  const renderLeaderboardRow = (entry, index) => {
+  const formatLogLoss = (value) => {
+    if (value === null || value === undefined) return '-';
+    const n = Number(value);
+    return Number.isFinite(n) ? n.toFixed(3) : '-';
+  };
+
+  // Render compact leaderboard row (mobile-safe, no wide table)
+  const renderLeaderboardEntry = (entry, index) => {
     const currentUserId = getCurrentUserId();
     const isCurrentUser = entry.user_id === currentUserId;
     
-    return tr({ 
-      class: `leaderboard-row ${isCurrentUser ? 'current-user' : ''}` 
+    return li({
+      class: () => `leaderboard-entry ${isCurrentUser ? 'current-user' : ''}`
     }, [
-      td({ class: 'rank-cell' }, `${index + 1}`),
-      td({ class: 'user-cell' }, [
+      span({ class: 'leaderboard-rank' }, `${index + 1}`),
+      div({ class: 'leaderboard-user' }, [
         a({
           href: `#user/${entry.user_id}`,
-          class: 'username-link',
+          class: 'leaderboard-username',
           onclick: (e) => {
             e.preventDefault();
             window.location.hash = `user/${entry.user_id}`;
           }
         }, entry.username),
-        isCurrentUser ? span({ class: 'you-indicator' }, ' (you)') : null
+        isCurrentUser ? span({ class: 'you-indicator' }, 'you') : null,
+        div({ class: 'leaderboard-meta' }, [
+          span({ class: 'leaderboard-meta-item' }, `Pred: ${entry.total_predictions ?? '-'}`),
+          span({ class: 'leaderboard-meta-item' }, `LogLoss: ${formatLogLoss(entry.avg_log_loss)}`)
+        ])
       ]),
-      td({ class: 'points-cell' }, formatRepPoints(entry.rep_points)),
-      td({ class: 'predictions-cell' }, entry.total_predictions),
-      td({ class: 'accuracy-cell' }, 
-        entry.avg_log_loss ? 
-          parseFloat(entry.avg_log_loss).toFixed(3) : 
-          '-'
-      )
+      div({ class: 'leaderboard-points' }, [
+        span({ class: 'leaderboard-points-value' }, formatRepPoints(entry.rep_points)),
+        span({ class: 'leaderboard-points-label' }, 'RP')
+      ])
     ]);
   };
 
@@ -190,20 +194,9 @@ export default function LeaderboardCard() {
         );
       }
 
-      return table({ class: 'leaderboard-table' }, [
-        thead([
-          tr([
-            th({ class: 'rank-header' }, 'Rank'),
-            th({ class: 'user-header' }, 'User'),
-            th({ class: 'points-header' }, 'Rep Points'),
-            th({ class: 'predictions-col-header' }, 'Predictions'),
-            th({ class: 'accuracy-header' }, 'Avg Log Loss')
-          ])
-        ]),
-        tbody(
-          leaderboardData.val.map((entry, index) => renderLeaderboardRow(entry, index))
-        )
-      ]);
+      return ul({ class: 'leaderboard-list-compact' },
+        leaderboardData.val.map((entry, index) => renderLeaderboardEntry(entry, index))
+      );
     };
   };
 
@@ -211,8 +204,8 @@ export default function LeaderboardCard() {
     className: 'leaderboard-card',
     children: [
       div({ class: 'card-header' }, [
-        h3('🏆 Reputation Leaderboard'),
-        p({ class: 'header-subtitle' }, 'Based on unified log scoring (All-Log + PLL)')
+        h3('Reputation Leaderboard'),
+        p({ class: 'header-subtitle' }, 'Unified log scoring (All-Log + PLL)')
       ]),
       renderTabs(),
       renderUserRank(),

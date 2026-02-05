@@ -7,6 +7,7 @@ import BottomNav from '../mobile/BottomNav';
 import UnlockKeystoreModal from '../vault/UnlockKeystoreModal';
 import DeviceLinkModal from '../vault/DeviceLinkModal';
 import { isMobile } from '../../utils/deviceDetection';
+import { currentPageState } from '../../store';
 
 /**
  * Main layout component that provides the application shell
@@ -31,7 +32,12 @@ export default function MainLayout({ children }) {
       // Header(),
       div({ class: "content-container" }, [
         Sidebar({ isOpen: sidebarOpen }),
-        div({ class: "main-content" }, children)
+        div({
+          class: () => {
+            const page = (currentPageState.val || 'home').split('/')[0];
+            return `main-content page-${page}`;
+          }
+        }, children)
       ])
     ]),
 

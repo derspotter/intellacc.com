@@ -278,6 +278,11 @@ input[type="submit"]:disabled {
   opacity: 1;
 }
 
+/* Predictions page needs more horizontal room for the split layout */
+.main-content.page-predictions {
+  width: 75%;
+}
+
 body.dark-mode .main-content {
   background: var(--black-bg);
   color: var(--text-color);
@@ -1168,6 +1173,61 @@ body.dark-mode .post-action.liked:hover {
 
 .predictions-header h3 {
   margin: 0;
+}
+
+.predictions-main {
+  display: grid;
+  grid-template-columns: minmax(520px, 2.2fr) minmax(320px, 1fr) minmax(320px, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+  margin-top: 1rem;
+}
+
+.events-list-column,
+.market-stakes-column,
+.leaderboard-column {
+  min-width: 0; /* allow children to shrink instead of forcing overflow */
+}
+
+/* Medium screens: put Market Stakes + Leaderboard into a single sidebar column */
+@media (max-width: 1200px) {
+  .predictions-main {
+    grid-template-columns: 1fr minmax(320px, 420px);
+    grid-auto-rows: min-content;
+  }
+
+  .market-stakes-column {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .leaderboard-column {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  /* Avoid the nested 2-col layout inside EventsList when screen is already tight */
+  .events-container {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .events-simple-list,
+  .selected-event-container {
+    height: auto;
+  }
+}
+
+/* Small screens: stack everything */
+@media (max-width: 900px) {
+  .predictions-main {
+    grid-template-columns: 1fr;
+  }
+
+  .market-stakes-column,
+  .leaderboard-column {
+    grid-column: 1;
+  }
 }
 
 .refresh-button {
@@ -2308,6 +2368,162 @@ body.dark-mode .username-link:hover {
 
   .accuracy-cell {
     font-size: 0.75rem;
+  }
+}
+
+/* ==================== Predictions Leaderboard (Compact) ==================== */
+.leaderboard-card .card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.leaderboard-card .header-subtitle {
+  margin: 0;
+  color: var(--secondary-text);
+  font-size: 0.85rem;
+}
+
+.leaderboard-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0.5rem 0 0.75rem 0;
+}
+
+.leaderboard-tabs .tab-button {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: 1px solid var(--button-border);
+  border-radius: 2px;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.85rem;
+  line-height: 1;
+  justify-content: center;
+}
+
+.leaderboard-tabs .tab-button.active {
+  background: var(--text-color);
+  color: var(--blue-bg);
+  border-color: var(--text-color);
+}
+
+body.dark-mode .leaderboard-tabs .tab-button.active {
+  background: var(--blue-bg);
+  color: var(--text-color);
+  border-color: var(--border-color);
+}
+
+.user-rank-info {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color);
+  background: var(--blue-bg);
+  border-radius: 2px;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.user-rank-info .rank-value {
+  font-weight: 700;
+}
+
+.leaderboard-content {
+  /* Keep this from "breaking" the predictions page layout */
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  background: var(--card-bg);
+}
+
+.leaderboard-list-compact {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.leaderboard-entry {
+  display: grid;
+  grid-template-columns: 2.25rem 1fr auto;
+  gap: 0.75rem;
+  padding: 0.75rem 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  align-items: center;
+}
+
+.leaderboard-entry:last-child {
+  border-bottom: none;
+}
+
+.leaderboard-entry.current-user {
+  background: rgba(0, 136, 0, 0.10);
+}
+
+body.dark-mode .leaderboard-entry.current-user {
+  background: rgba(0, 136, 0, 0.18);
+}
+
+.leaderboard-rank {
+  font-weight: 700;
+  color: var(--secondary-text);
+  text-align: center;
+}
+
+.leaderboard-user {
+  min-width: 0;
+}
+
+.leaderboard-username {
+  color: var(--text-color);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.leaderboard-username:hover {
+  text-decoration: underline;
+}
+
+.leaderboard-meta {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.2rem;
+  color: var(--secondary-text);
+  font-size: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.you-indicator {
+  margin-left: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--success-color);
+  font-weight: 700;
+}
+
+.leaderboard-points {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.leaderboard-points-value {
+  font-weight: 800;
+  color: var(--success-color);
+  font-size: 1.05rem;
+}
+
+.leaderboard-points-label {
+  margin-left: 0.25rem;
+  color: var(--secondary-text);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  .leaderboard-content {
+    max-height: 260px;
   }
 }
 
