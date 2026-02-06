@@ -2,6 +2,8 @@
 
 This document outlines the operational plan to migrate Intellacc's frontend to SolidJS (`frontend-solid`) with a specific "Tmux meets Bloomberg Terminal" aesthetic.
 
+**Status: COMPLETE** — All 5 phases implemented on branch `agent/gemini-frontend`.
+
 ## Design Philosophy
 - **Aesthetic**: High-contrast, dark mode, monospace-first. Visually mimics a terminal multiplexer (tmux) combined with the data density of a financial terminal.
 - **Layout**: Strictly 3 parallel panes (columns) on desktop:
@@ -11,72 +13,75 @@ This document outlines the operational plan to migrate Intellacc's frontend to S
 - **Interaction**: Keyboard-centric navigation, sharp focus states, minimal "app-like" chrome.
 
 ## Core Strategy: Side-by-Side Development
-We will build `frontend-solid` on port `5174` alongside the existing `frontend` (`5173`).
+We built `frontend-solid` on port `5174` alongside the existing `frontend` (`5173`).
 
 ### 1. Infrastructure & Setup
-- [ ] Initialize `frontend-solid` (Vite + SolidJS).
-- [ ] **Tailwind Config**:
-    - Colors: `#000000` bg, `#1e1e1e` pane borders, `#00ff00`/`#ff9800`/`#00e5ff` for data.
-    - Fonts: `JetBrains Mono` for almost everything.
-- [ ] **Vite Proxy**: Route `/api` and `/socket.io` to `localhost:3000`.
-- [ ] **Docker**: Add `frontend-solid` service to `docker-compose.yml` (or a dedicated override).
+- [x] Initialize `frontend-solid` (Vite + SolidJS).
+- [x] **Tailwind Config**: Colors (`bb-bg`, `bb-panel`, `bb-accent`, `bb-border`, `bb-muted`, `market-up`, `market-down`), Fonts (JetBrains Mono).
+- [x] **Vite Proxy**: Route `/api` and `/socket.io` to `backend:3000`.
+- [x] **Docker**: `frontend-solid/docker-compose.yml` with dedicated container on port 5174.
 
 ### 2. The "Pane" System (Architecture)
-The app will be a grid of `<Pane>` components.
+Implemented as `ThreePaneLayout` with resizable dividers (pointer-based drag).
 ```jsx
-// Concept
-<div class="grid grid-cols-3 h-screen bg-black gap-px border-black">
-  <Pane title="[1] FEED" status="LIVE"> <Feed /> </Pane>
-  <Pane title="[2] MARKETS" status="ETH: $3200"> <Markets /> </Pane>
-  <Pane title="[3] COMMS" status="ENCRYPTED"> <Messaging /> </Pane>
-</div>
+<ThreePaneLayout
+  activePane={activePane()}
+  left={<FeedPanel />}
+  center={<MarketPanel />}
+  right={<ChatPanel />}
+/>
 ```
-- **Pane Component**: Renders a standard tmux-like header (status bar), content area with custom scrollbar, and keyboard shortcuts context.
+- **Panel Component**: Renders tmux-like header with title, content area with custom scrollbar, keyboard focus border.
 
 ### 3. Implementation Phases
 
-#### Phase 1: Skeleton & Styling
-- **Goal**: Rendering the 3-pane layout with mock data in the "Tmux" style.
-- **Tasks**:
-    - Implement `Pane.jsx` with header/status bar.
-    - Set up the 3-column grid.
-    - Apply global CSS (reset, custom scrollbars, monospace fonts).
+#### Phase 1: Skeleton & Styling — COMPLETE
+- [x] `Panel.jsx` with header/status bar.
+- [x] `ThreePaneLayout.jsx` with 3-column resizable grid.
+- [x] Global CSS (reset, custom scrollbars, monospace fonts, JetBrains Mono webfont).
 
-#### Phase 2: Feed Pane (Left)
-- **Goal**: Read-only social feed.
-- **Tasks**:
-    - `feedStore.js` (Solid).
-    - `PostItem` component (minimalist, text-heavy).
-    - Connect to `socket.io` for real-time post updates.
+#### Phase 2: Feed Pane (Left) — COMPLETE
+- [x] `feedStore.js` with createPost, likePost, unlikePost, addComment.
+- [x] `PostItem` component with like/unlike buttons and optimistic UI.
+- [x] `PostComposer` component for new posts (Enter to submit).
+- [x] Socket.IO: `new_post`, `post_updated`, `new_comment` realtime updates.
 
-#### Phase 3: Market Pane (Center)
-- **Goal**: Real-time market data visualization.
-- **Tasks**:
-    - `marketStore.js`.
-    - `MarketTicker` (scrolling top bar).
-    - `OrderBook` / `ProbabilityChart` visualizers (using HTML/Canvas, no heavy chart libs if possible).
+#### Phase 3: Market Pane (Center) — COMPLETE
+- [x] `marketStore.js` with prev_market_prob tracking for flash direction.
+- [x] `MarketTicker` with flash green/red animations on price changes.
+- [x] `MarketList` with ID, event name, probability, close date, outcome badges.
+- [x] `MarketDetail` with real `TradeTicket` (BUY YES/NO, stake input, estimated cost, PLACE TRADE via LMSR API).
 
-#### Phase 4: Messaging Pane (Right) - E2EE
-- **Goal**: Secure chat.
-- **Tasks**:
-    - Port `openmls-wasm` and `coreCryptoClient.js` logic.
-    - `ChatWindow` component (CLI-like message bubbles).
-    - `InputPrompt` component (blinking cursor style).
+#### Phase 4: Messaging Pane (Right) - E2EE — COMPLETE
+- [x] `openmls-wasm` and `coreCryptoClient.js` integrated via Vite WASM plugin.
+- [x] `ChatPanel` with conversation list, message display, real send via `/api/mls/messages/group`.
+- [x] New DM flow: debounced user search, create DM, auto-select conversation.
+- [x] Pending queue processing (`/api/mls/queue/pending` + `/api/mls/queue/ack`).
+- [x] Unread count badges per conversation.
+- [x] Vault unlock prompt for E2EE key management.
 
-#### Phase 5: Auth & Interactive Features
-- **Goal**: Full functionality.
-- **Tasks**:
-    - Login/Register screens (Terminal style prompts).
-    - Post creation / Trade execution / Message sending.
-    - Keyboard shortcuts (`Ctrl+b` style?) for navigation.
+#### Phase 5: Auth & Interactive Features — COMPLETE
+- [x] Login screen: staged email → password flow with terminal aesthetic.
+- [x] Registration screen: username/email/password with auto-login after register.
+- [x] Post creation with optimistic UI and rollback on error.
+- [x] Trade execution via LMSR (`/api/events/:id/update`).
+- [x] Message sending with `x-device-id` header from VaultService.
+- [x] Keyboard shortcuts: `1`/`2`/`3` (pane focus), `?` (help), `Ctrl+K` (command palette), `ESC` (close/unfocus).
+- [x] Command palette with action search and focus-trap.
+- [x] Notification status area + notification history modal.
+- [x] Socket auth failure handling (clearToken on 401).
 
 ### 4. Technical Stack
 - **Framework**: SolidJS (Signals/Store).
-- **Styling**: Tailwind CSS + `clsx`.
-- **State**: `solid-js/store`.
-- **Build**: Vite + `vite-plugin-wasm`.
+- **Styling**: Tailwind CSS + `clsx` + `tailwind-merge`.
+- **State**: `solid-js/store` + custom signal-based stores.
+- **Build**: Vite + `vite-plugin-solid` + `vite-plugin-wasm` + `vite-plugin-top-level-await`.
+- **Realtime**: Socket.IO client with pub/sub for MLS events.
+- **E2EE**: OpenMLS WASM with vault-based key management.
 
 ## Next Steps
-1. Create the `frontend-solid` project structure.
-2. Implement the `tailwind.config.js` with the specific palette.
-3. Build the static `Pane` layout to verify the aesthetic.
+All migration phases are complete. Potential future work:
+1. Mobile responsive breakpoints (currently desktop-only 3-pane layout).
+2. Deeper MLS group management (add/remove members, group settings).
+3. Prediction history charts and user accuracy tracking in Market pane.
+4. Replace the old VanJS frontend (`frontend/` on port 5173) with this SolidJS version.
