@@ -13,6 +13,7 @@ export default function LeaderboardCard() {
   const loading = van.state(false);
   const error = van.state(null);
   const userRank = van.state(null);
+  let leaderboardContentEl = null;
 
   // Tab configuration - simplified to 3 toggleable options
   const tabs = [
@@ -62,6 +63,11 @@ export default function LeaderboardCard() {
     }
   };
 
+  const scrollLeaderboardToTop = () => {
+    if (!leaderboardContentEl) return;
+    leaderboardContentEl.scrollTop = 0;
+  };
+
   // Handle tab toggling
   const toggleTab = (tabKey) => {
     if (tabKey === 'global') {
@@ -82,6 +88,7 @@ export default function LeaderboardCard() {
       userRank.val = null;
     }
     
+    scrollLeaderboardToTop();
     fetchLeaderboard();
   };
 
@@ -200,6 +207,9 @@ export default function LeaderboardCard() {
     };
   };
 
+  // Create this once so we can control its scroll position on refresh/tab changes.
+  leaderboardContentEl = div({ class: 'leaderboard-content' }, renderLeaderboardContent());
+
   return Card({
     className: 'leaderboard-card',
     children: [
@@ -209,7 +219,10 @@ export default function LeaderboardCard() {
           p({ class: 'header-subtitle' }, 'Unified log scoring (All-Log + PLL)')
         ]),
         button({
-          onclick: () => fetchLeaderboard(),
+          onclick: () => {
+            scrollLeaderboardToTop();
+            fetchLeaderboard();
+          },
           class: 'refresh-button leaderboard-refresh',
           disabled: () => loading.val,
           title: 'Refresh leaderboard'
@@ -217,7 +230,7 @@ export default function LeaderboardCard() {
       ]),
       renderTabs(),
       renderUserRank(),
-      div({ class: 'leaderboard-content' }, renderLeaderboardContent()),
+      leaderboardContentEl,
       div({ class: 'leaderboard-footer' })
     ]
   });
