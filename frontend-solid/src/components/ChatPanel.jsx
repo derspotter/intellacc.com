@@ -19,6 +19,7 @@ export const ChatPanel = () => {
     const [messages, setMessages] = createSignal([]);
     const [loadingConvs, setLoadingConvs] = createSignal(false);
     const [unreadCounts, setUnreadCounts] = createSignal({});
+    const [sidebarOpen, setSidebarOpen] = createSignal(false);
 
     // New DM flow state
     const [showNewDM, setShowNewDM] = createSignal(false);
@@ -27,6 +28,22 @@ export const ChatPanel = () => {
     const [searching, setSearching] = createSignal(false);
 
     const getConversationId = (conv) => String(conv?.group_id || conv?.groupId || conv?.id || '');
+    const normalizeArrayResult = (value, keys) => {
+        if (Array.isArray(value)) return value;
+        if (value && typeof value === 'object') {
+            for (const k of keys) {
+                if (Array.isArray(value[k])) return value[k];
+            }
+        }
+        return [];
+    };
+
+    const totalUnread = () => {
+        const counts = unreadCounts() || {};
+        let n = 0;
+        for (const k in counts) n += Number(counts[k] || 0);
+        return n;
+    };
 
     const bumpUnread = (convId) => {
         if (!convId) return;
@@ -107,6 +124,10 @@ export const ChatPanel = () => {
         if (pendingSyncPromise) return pendingSyncPromise;
         pendingSyncPromise = (async () => {
             try {
+                // Without an initialized MLS client, we cannot safely process/ack.
+                const client = coreCryptoClient?.client || null;
+                if (!client) return [];
+
                 const pending = await api.mls.getPendingMessages().catch((e) => {
                     console.warn('[ChatPanel] getPendingMessages failed:', e?.message || e);
                     return [];
@@ -114,7 +135,6 @@ export const ChatPanel = () => {
                 if (!Array.isArray(pending) || pending.length === 0) return [];
 
                 const processedIds = [];
-                const client = coreCryptoClient?.client || null;
                 for (const msg of pending) {
                     const messageId = msg?.id;
                     try {
@@ -147,7 +167,8 @@ export const ChatPanel = () => {
                                 try {
                                     client?.decrypt_message_with_aad?.(groupIdBytes, ciphertextBytes);
                                 } catch (e) {
-                                    // Decryption can fail for self-sent messages; don't block ack.
+                                    // If we can't decrypt, avoid acking so we can retry after state catches up.
+                                    throw e;
                                 }
                             }
                         }
@@ -155,8 +176,6 @@ export const ChatPanel = () => {
                         if (messageId != null) processedIds.push(messageId);
                     } catch (e) {
                         console.warn('[ChatPanel] Failed processing pending message:', msg?.id, e?.message || e);
-                        // If MLS client isn't ready yet (vault unlock race), still ack to prevent infinite backlog.
-                        if (!client && messageId != null) processedIds.push(messageId);
                     }
                 }
 
@@ -176,8 +195,9 @@ export const ChatPanel = () => {
     const refreshConversationMessages = async (convId) => {
         if (!convId) return;
         try {
-            const msgs = await api.mls.getMessages(convId, { limit: 50 });
-            setMessages(Array.isArray(msgs) ? msgs : []);
+            const res = await api.mls.getMessages(convId, { limit: 50 });
+            const msgs = normalizeArrayResult(res, ['messages', 'items', 'data', 'rows']);
+            setMessages(msgs);
         } catch (err) {
             console.error('[ChatPanel] Failed to load messages:', err);
         }
@@ -188,8 +208,10 @@ export const ChatPanel = () => {
     createEffect(() => {
         const locked = vaultStore.state.locked;
         if (wasLocked && !locked) {
-            loadConversations();
-            processPendingQueue();
+            (async () => {
+                await processPendingQueue().catch(() => {});
+                await loadConversations().catch(() => {});
+            })();
         }
         if (!wasLocked && locked) {
             setSelectedConversation(null);
@@ -199,28 +221,61 @@ export const ChatPanel = () => {
         wasLocked = locked;
     });
 
-    // MLS socket hints (unread badges + auto-refresh when selected).
+    // MLS socket hints: treat them as "new MLS data available".
+    // We must drain the pending queue (and ack) before GET /messages reflects new content.
+    let disposed = false;
+    let mlsSyncTimer = null;
+    const pendingHintGroupIds = new Set();
+    const scheduleMlsSync = (maybeGroupId, { forceReloadConversations = false } = {}) => {
+        if (maybeGroupId) pendingHintGroupIds.add(String(maybeGroupId));
+        if (mlsSyncTimer) return;
+
+        mlsSyncTimer = setTimeout(async () => {
+            const groupIds = Array.from(pendingHintGroupIds);
+            pendingHintGroupIds.clear();
+            mlsSyncTimer = null;
+            if (disposed) return;
+
+            // If vault is locked, we can't process MLS. Still keep unread counters.
+            if (vaultStore.state.locked) {
+                for (const gid of groupIds) bumpUnread(gid);
+                return;
+            }
+
+            await processPendingQueue().catch(() => {});
+
+            const convIdSet = new Set((conversations() || []).map((c) => getConversationId(c)).filter(Boolean).map(String));
+            const hasMissing = forceReloadConversations || groupIds.some((gid) => !convIdSet.has(String(gid)));
+            if (hasMissing) await loadConversations().catch(() => {});
+
+            const selectedId = getConversationId(selectedConversation());
+            for (const gid of groupIds) {
+                if (selectedId && String(selectedId) === String(gid)) {
+                    await refreshConversationMessages(String(gid));
+                    clearUnread(String(gid));
+                } else {
+                    bumpUnread(String(gid));
+                }
+            }
+        }, 150);
+    };
+
     const unsubMsg = onMlsMessage((payload) => {
         const groupId = payload?.groupId || payload?.group_id;
         if (!groupId) return;
-        const selectedId = getConversationId(selectedConversation());
-        if (selectedId && String(selectedId) === String(groupId)) {
-            refreshConversationMessages(String(groupId));
-            clearUnread(String(groupId));
-        } else {
-            bumpUnread(String(groupId));
-        }
+        scheduleMlsSync(groupId);
     });
     const unsubWelcome = onMlsWelcome((payload) => {
         const groupId = payload?.groupId || payload?.group_id;
-        // Welcome can create a new conversation; refresh list and process pending queue.
-        if (!vaultStore.state.locked) {
-            loadConversations();
-            processPendingQueue();
-        }
-        if (groupId) bumpUnread(String(groupId));
+        scheduleMlsSync(groupId, { forceReloadConversations: true });
     });
-    onCleanup(() => { try { unsubMsg?.(); } catch {} try { unsubWelcome?.(); } catch {} });
+
+    onCleanup(() => {
+        disposed = true;
+        if (mlsSyncTimer) clearTimeout(mlsSyncTimer);
+        try { unsubMsg?.(); } catch {}
+        try { unsubWelcome?.(); } catch {}
+    });
 
     const loadConversations = async () => {
         setLoadingConvs(true);
@@ -231,10 +286,13 @@ export const ChatPanel = () => {
                 api.mls.getDirectMessages().catch(() => [])
             ]);
 
+            const groupsArr = normalizeArrayResult(groups, ['groups', 'items', 'data', 'rows']);
+            const dmsArr = normalizeArrayResult(dms, ['directMessages', 'dms', 'items', 'data', 'rows']);
+
             // Combine and format
             const allConvs = [
-                ...groups.map(g => ({ ...g, type: 'group', displayName: g.name || g.group_id })),
-                ...dms.map(d => ({ ...d, type: 'dm', displayName: d.other_username || `User ${d.other_user_id}` }))
+                ...groupsArr.map(g => ({ ...g, type: 'group', displayName: g.name || g.group_id })),
+                ...dmsArr.map(d => ({ ...d, type: 'dm', displayName: d.other_username || `User ${d.other_user_id}` }))
             ];
 
             setConversations(allConvs);
@@ -250,11 +308,14 @@ export const ChatPanel = () => {
 
     const selectConversation = async (conv) => {
         setSelectedConversation(conv);
+        setSidebarOpen(false);
         setMessages([]);
 
         try {
             const convId = getConversationId(conv);
             clearUnread(convId);
+            // Ensure pending MLS messages are drained before we fetch history.
+            await processPendingQueue().catch(() => {});
             await refreshConversationMessages(convId);
         } catch (err) {
             console.error('[ChatPanel] Failed to load messages:', err);
@@ -331,7 +392,16 @@ export const ChatPanel = () => {
             searchReqId++;
 
             const all = await loadConversations();
-            const nextConv = (all || []).find(c => String(getConversationId(c)) === String(groupId));
+            let nextConv = null;
+            if (groupId) {
+                nextConv = (all || []).find(c => String(getConversationId(c)) === String(groupId));
+            }
+            // Some backends return only metadata and omit groupId; fall back to matching the DM peer.
+            if (!nextConv) {
+                nextConv = (all || []).find(c =>
+                    c?.type === 'dm' && String(c?.other_user_id ?? c?.otherUserId ?? '') === String(targetUserId)
+                );
+            }
             if (nextConv) await selectConversation(nextConv);
         } catch (e) {
             console.warn('[ChatPanel] createDirectMessage failed:', e?.message || e);
@@ -393,13 +463,33 @@ export const ChatPanel = () => {
             </Show>
 
             <Show when={!vaultStore.state.locked}>
-                <div class="flex flex-1 min-h-0 bg-bb-bg text-bb-text font-mono">
+                <div class="relative flex flex-1 min-h-0 bg-bb-bg text-bb-text font-mono">
+                    <Show when={sidebarOpen()}>
+                        <div
+                            class="md:hidden absolute inset-0 bg-black/70 z-30"
+                            onClick={() => setSidebarOpen(false)}
+                        ></div>
+                    </Show>
+
                     {/* === LEFT SIDEBAR === */}
-                    <div class="w-[200px] min-w-[160px] border-r border-bb-border flex flex-col bg-bb-panel/50">
+                    <div
+                        class={`border-r border-bb-border bg-bb-panel/50 flex flex-col z-40
+                            w-[85vw] max-w-[320px] md:w-[200px] md:max-w-none md:min-w-[160px]
+                            ${sidebarOpen() ? 'absolute inset-y-0 left-0 flex md:static md:flex' : 'hidden md:flex'}`}
+                    >
                         {/* Header */}
                         <div class="bg-bb-panel px-3 py-2 flex items-center justify-between border-b border-bb-border">
                             <span class="font-bold text-xs bg-bb-border px-2 py-0.5 text-bb-accent">IB MANAGER</span>
-                            <span class="text-bb-muted text-xs cursor-pointer hover:text-bb-text">[ALERTS]</span>
+                            <div class="flex items-center gap-3">
+                                <span class="hidden md:inline text-bb-muted text-xs cursor-pointer hover:text-bb-text">[ALERTS]</span>
+                                <button
+                                    type="button"
+                                    class="md:hidden text-bb-muted text-xs hover:text-bb-accent"
+                                    onClick={() => setSidebarOpen(false)}
+                                >
+                                    [X]
+                                </button>
+                            </div>
                         </div>
 
                         {/* Search/Add Bar */}
@@ -498,6 +588,13 @@ export const ChatPanel = () => {
                     <div class="flex-1 flex flex-col bg-bb-bg min-w-0">
                         {/* Chat Header */}
                         <div class="border-b border-bb-border px-4 py-2 flex items-center gap-3 bg-bb-panel">
+                            <button
+                                type="button"
+                                class="md:hidden bg-bb-bg border border-bb-border text-bb-text px-2 py-1 text-[10px] hover:bg-bb-border hover:text-bb-accent transition-colors"
+                                onClick={() => setSidebarOpen(true)}
+                            >
+                                CHATS{totalUnread() > 0 ? ` (${totalUnread()})` : ''}
+                            </button>
                             <Show when={selectedConversation()}>
                                 <div class="w-2 h-2 rounded-full bg-market-up shadow-glow-green"></div>
                                 <span class="font-bold text-bb-text text-sm uppercase">{selectedConversation()?.displayName}</span>
@@ -505,7 +602,7 @@ export const ChatPanel = () => {
                             <Show when={!selectedConversation()}>
                                 <span class="text-bb-muted text-xs uppercase">[SELECT CONVERSATION]</span>
                             </Show>
-                            <div class="ml-auto flex gap-4 text-bb-muted text-xs font-mono">
+                            <div class="ml-auto hidden sm:flex gap-4 text-bb-muted text-xs font-mono">
                                 <span class="cursor-pointer hover:text-bb-accent">[CALL]</span>
                                 <span class="cursor-pointer hover:text-bb-accent">[INFO]</span>
                                 <span class="cursor-pointer hover:text-bb-accent">[MENU]</span>
@@ -513,7 +610,7 @@ export const ChatPanel = () => {
                         </div>
 
                         {/* Messages Area */}
-                        <div class="flex-1 overflow-y-auto p-4 font-mono text-xs custom-scrollbar">
+                        <div class="flex-1 overflow-y-auto p-3 sm:p-4 font-mono text-xs custom-scrollbar">
                             <Show when={!selectedConversation()}>
                                 <div class="text-bb-muted text-center mt-12 text-xs">
                                     // AWAITING SELECTION...
@@ -560,7 +657,7 @@ export const ChatPanel = () => {
                                                 handleSendMessage(e);
                                             }
                                         }}
-                                        class="w-full bg-black text-bb-text placeholder-bb-muted/50 p-2 pt-5 text-sm font-mono outline-none resize-none h-20 border border-bb-border focus:border-bb-accent transition-colors"
+                                        class="w-full bg-black text-bb-text placeholder-bb-muted/50 p-2 pt-5 text-sm font-mono outline-none resize-none h-16 sm:h-20 border border-bb-border focus:border-bb-accent transition-colors"
                                         placeholder="// Type message..."
                                         disabled={!selectedConversation()}
                                     />
