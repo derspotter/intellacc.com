@@ -1177,11 +1177,10 @@ body.dark-mode .post-action.liked:hover {
 }
 
 .predictions-main {
-  display: grid;
-  /* 2-column layout for >= 900px */
-  grid-template-columns: 1fr minmax(280px, 360px);
+  display: flex;
+  flex-direction: column;
   gap: 1.25rem;
-  align-items: start;
+  align-items: stretch;
   margin-top: 1rem;
 }
 
@@ -1189,22 +1188,6 @@ body.dark-mode .post-action.liked:hover {
 .market-stakes-column,
 .leaderboard-column {
   min-width: 0; /* allow children to shrink instead of forcing overflow */
-}
-
-/* Default placement for 2-column layout (>= 900px) */
-.events-list-column {
-  grid-column: 1;
-  grid-row: 1 / span 2;
-}
-
-.market-stakes-column {
-  grid-column: 2;
-  grid-row: 1;
-}
-
-.leaderboard-column {
-  grid-column: 2;
-  grid-row: 2;
 }
 
 /* Medium screens: flatten inner events layout */
@@ -1223,17 +1206,6 @@ body.dark-mode .post-action.liked:hover {
 
 /* Mobile: stack everything (< 900px) */
 @media (max-width: 900px) {
-  .predictions-main {
-    grid-template-columns: 1fr;
-  }
-
-  .events-list-column,
-  .market-stakes-column,
-  .leaderboard-column {
-    grid-column: 1;
-    grid-row: auto; /* Reset row */
-  }
-
   /* Ensure events container is also stacked (redundant but safe) */
   .events-container {
     grid-template-columns: 1fr;
@@ -2957,6 +2929,16 @@ body.dark-mode .weekly-assignment-badge.pending {
   font-size: 0.9rem;
 }
 
+.kelly-and-stake {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.kelly-and-stake .form-actions {
+  margin-top: 0;
+}
+
 .form-actions {
   margin-top: 0.5rem;
 }
@@ -3007,6 +2989,23 @@ body.dark-mode .weekly-assignment-badge.pending {
   .stat-value {
     justify-self: end;
     white-space: nowrap;
+  }
+
+  /* On mobile, keep Kelly suggestion and Place Stake next to each other. */
+  .kelly-and-stake {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(120px, 160px);
+    align-items: start;
+    gap: 0.75rem;
+  }
+
+  .kelly-and-stake .form-actions {
+    display: flex;
+    align-items: stretch;
+  }
+
+  .kelly-and-stake .form-actions button {
+    width: 100%;
   }
 }
 
@@ -4722,6 +4721,10 @@ select {
     margin-left: 0;
   }
 
+  .main-content.page-predictions {
+    width: 100%;
+  }
+
   .content-container {
     padding-left: 0;
   }
@@ -4767,6 +4770,11 @@ select {
     margin-bottom: calc(60px + env(safe-area-inset-bottom));
     /* Space for bottom nav */
     box-shadow: none;
+  }
+
+  /* Ensure predictions page also uses full width on mobile. */
+  .main-content.page-predictions {
+    width: 100%;
   }
 
   .content-container {

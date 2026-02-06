@@ -16,7 +16,6 @@ import CreatePostForm from '../components/posts/CreatePostForm';
 // Replace PredictionsList with ProfilePredictions
 import EventsList from '../components/predictions/EventsList.js';
 import EventCard from '../components/predictions/EventCard.js';
-import MarketStakes from '../components/predictions/MarketStakes.js';
 import LeaderboardCard from '../components/predictions/LeaderboardCard.js';
 import RPBalance from '../components/predictions/RPBalance.js';
 import WeeklyAssignment from '../components/predictions/WeeklyAssignment.js';
@@ -152,12 +151,7 @@ export default function Router() {
         div({ class: "events-list-column" }, [
           EventsList()
         ]),
-        div({ class: "market-stakes-column" }, [
-          MarketStakes({ eventId: null }), // eventId should be set by selection logic
-        ]),
-        div({ class: "leaderboard-column" }, [
-          LeaderboardCard()
-        ])
+        div({ class: "leaderboard-column" }, [ LeaderboardCard() ])
       ]),
       () => isAdminState.val ? AdminEventManagement() : null,
       // Deprecated "Make a New Prediction" card removed from Predictions page

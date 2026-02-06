@@ -727,57 +727,59 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
             sliderElements.container
           ]),
           
-          div({ class: 'kelly-suggestion' }, [
-            div({ class: 'kelly-header' }, [
-              span('Kelly Optimal Suggestion'),
-              div({ class: 'kelly-buttons' }, [
-                Button({
-                  type: 'button',
-                  className: 'kelly-apply-btn primary',
-                  onclick: () => {
-                    if (kellyData.val && !isNaN(kellyData.val.kelly_optimal)) {
-                      stakeAmount.val = Math.max(0, kellyData.val.kelly_optimal).toFixed(2);
-                      // Give the user a quick visual confirmation of where the value landed.
-                      flashStakeInput();
-                    }
-                  },
-                  children: 'Apply Kelly'
-                })
+          div({ class: 'kelly-and-stake' }, [
+            div({ class: 'kelly-suggestion' }, [
+              div({ class: 'kelly-header' }, [
+                span('Kelly Optimal Suggestion'),
+                div({ class: 'kelly-buttons' }, [
+                  Button({
+                    type: 'button',
+                    className: 'kelly-apply-btn primary',
+                    onclick: () => {
+                      if (kellyData.val && !isNaN(kellyData.val.kelly_optimal)) {
+                        stakeAmount.val = Math.max(0, kellyData.val.kelly_optimal).toFixed(2);
+                        // Give the user a quick visual confirmation of where the value landed.
+                        flashStakeInput();
+                      }
+                    },
+                    children: 'Apply Kelly'
+                  })
+                ])
+              ]),
+              div({ class: 'kelly-details' }, [
+                div({ class: 'kelly-stat' }, [
+                  span({ class: 'kelly-label' }, 'Optimal Kelly:'),
+                  span({ class: 'kelly-amount' }, kellyData.val ? formatRP(kellyData.val.kelly_optimal) : '--')
+                ]),
+                div({ class: 'kelly-stat' }, [
+                  span({ class: 'kelly-label' }, 'Your Edge:'),
+                  span({
+                    class: `kelly-edge positive`
+                  }, kellyData.val ? `${Math.abs(kellyData.val.edge * 100).toFixed(1)}%` : '--')
+                ])
               ])
             ]),
-            div({ class: 'kelly-details' }, [
-              div({ class: 'kelly-stat' }, [
-                span({ class: 'kelly-label' }, 'Optimal Kelly:'),
-                span({ class: 'kelly-amount' }, kellyData.val ? formatRP(kellyData.val.kelly_optimal) : '--')
-              ]),
-              div({ class: 'kelly-stat' }, [
-                span({ class: 'kelly-label' }, 'Your Edge:'),
-                span({ 
-                  class: `kelly-edge positive` 
-                }, kellyData.val ? `${Math.abs(kellyData.val.edge * 100).toFixed(1)}%` : '--')
-              ])
+
+            div({ class: 'form-actions' }, [
+              Button({
+                type: 'submit',
+                className: 'primary',
+                disabled: () => {
+                  const disabled = !stakeAmount.val || submitting.val;
+                  console.log('Button disabled:', disabled, 'stakeAmount.val:', stakeAmount.val, 'submitting.val:', submitting.val);
+                  return disabled;
+                },
+                children: () => submitting.val ? 'Placing Stake...' : 'Place Stake'
+              })
             ])
           ]),
-          
+
           () => {
             if (!error.val) return null;
             const hideInline = shouldUseVerificationNotice(error.val) && predictionsStore.state.verificationNotice.val;
             if (hideInline) return null;
             return div({ class: 'error-message' }, error.val);
-          },
-          
-          div({ class: 'form-actions' }, [
-            Button({
-              type: 'submit',
-              className: 'primary',
-              disabled: () => {
-                const disabled = !stakeAmount.val || submitting.val;
-                console.log('Button disabled:', disabled, 'stakeAmount.val:', stakeAmount.val, 'submitting.val:', submitting.val);
-                return disabled;
-              },
-              children: () => submitting.val ? 'Placing Stake...' : 'Place Stake'
-            })
-          ])
+          }
         ])
       ]) : div({ class: 'login-prompt' }, [
         p('Log in to place stakes and participate in markets'),
