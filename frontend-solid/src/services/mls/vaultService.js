@@ -481,6 +481,16 @@ class VaultService {
             req.onerror = () => reject(req.error);
         });
     }
+
+    async persistMessage(message) {
+        if (!this.db) await this.initDB();
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction([MESSAGES_STORE_NAME], 'readwrite');
+            tx.objectStore(MESSAGES_STORE_NAME).put(message);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    }
 }
 
 const instance = new VaultService();
