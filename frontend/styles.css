@@ -279,9 +279,9 @@ input[type="submit"]:disabled {
   opacity: 1;
 }
 
-/* Predictions page needs more horizontal room for the split layout */
+/* Predictions page: keep the same width as home/feed (mobile overrides below still apply). */
 .main-content.page-predictions {
-  width: 75%;
+  width: 50%;
 }
 
 body.dark-mode .main-content {
