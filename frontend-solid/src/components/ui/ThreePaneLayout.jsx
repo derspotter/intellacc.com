@@ -11,6 +11,9 @@ export const ThreePaneLayout = (props) => {
     let moveHandler = null;
     let upHandler = null;
 
+    const tabletShowLeft = () => props.activePane !== 3;
+    const tabletShowRight = () => props.activePane === 3;
+
     const stopDrag = () => {
         setIsDragging(null);
         document.body.style.cursor = "";
@@ -63,62 +66,115 @@ export const ThreePaneLayout = (props) => {
     });
 
     return (
-        <div
-            ref={(el) => (containerEl = el)}
-            class="flex h-full w-full overflow-hidden bg-bb-border select-none"
-        >
-            {/* Left Pane */}
-            <div 
-                style={{ width: `${leftWidth()}%` }} 
-                class="h-full bg-bb-bg min-w-0 relative transition-all duration-200"
-            >
-                {props.left}
+        <div class="h-full w-full overflow-hidden bg-bb-border">
+            {/* Mobile (< md): show ONE pane at a time */}
+            <div class="md:hidden h-full w-full overflow-hidden">
                 <Show when={props.activePane === 1}>
-                    <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                    <div class="h-full w-full bg-bb-bg min-w-0 relative">
+                        {props.left}
+                        <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                    </div>
                 </Show>
-            </div>
-
-            {/* Left Handle */}
-            <div
-                onPointerDown={startDrag("left")}
-                class={clsx(
-                    "w-px h-full relative z-50 bg-bb-border transition-colors hover:bg-bb-accent",
-                    isDragging() === "left" ? "bg-bb-accent" : ""
-                )}
-            >
-                <div class="absolute inset-y-0 -left-1 w-3 cursor-col-resize z-50 touch-none"></div>
-            </div>
-
-            {/* Center Pane (Flex 1 fills remaining space) */}
-            <div 
-                class="flex-1 h-full bg-bb-bg min-w-0 relative transition-all duration-200"
-            >
-                {props.center}
                 <Show when={props.activePane === 2}>
-                    <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                    <div class="h-full w-full bg-bb-bg min-w-0 relative">
+                        {props.center}
+                        <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                    </div>
                 </Show>
-            </div>
-
-            {/* Right Handle */}
-            <div
-                onPointerDown={startDrag("right")}
-                class={clsx(
-                    "w-px h-full relative z-50 bg-bb-border transition-colors hover:bg-bb-accent",
-                    isDragging() === "right" ? "bg-bb-accent" : ""
-                )}
-            >
-                <div class="absolute inset-y-0 -left-1 w-3 cursor-col-resize z-50 touch-none"></div>
-            </div>
-
-            {/* Right Pane */}
-            <div 
-                style={{ width: `${rightWidth()}%` }} 
-                class="h-full bg-bb-bg min-w-0 relative transition-all duration-200"
-            >
-                {props.right}
                 <Show when={props.activePane === 3}>
-                    <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                    <div class="h-full w-full bg-bb-bg min-w-0 relative">
+                        {props.right}
+                        <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                    </div>
                 </Show>
+            </div>
+
+            {/* Tablet (md..lg): show TWO panes, hide the third */}
+            <div class="hidden md:flex lg:hidden h-full w-full overflow-hidden">
+                <Show when={tabletShowLeft()}>
+                    <div class="w-[340px] min-w-[280px] max-w-[380px] h-full bg-bb-bg min-w-0 relative">
+                        {props.left}
+                        <Show when={props.activePane === 1}>
+                            <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                        </Show>
+                    </div>
+                    <div class="w-px h-full bg-bb-border"></div>
+                </Show>
+
+                <div class="flex-1 h-full bg-bb-bg min-w-0 relative">
+                    {props.center}
+                    <Show when={props.activePane === 2}>
+                        <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                    </Show>
+                </div>
+
+                <Show when={tabletShowRight()}>
+                    <div class="w-px h-full bg-bb-border"></div>
+                    <div class="w-[340px] min-w-[280px] max-w-[380px] h-full bg-bb-bg min-w-0 relative">
+                        {props.right}
+                        <Show when={props.activePane === 3}>
+                            <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                        </Show>
+                    </div>
+                </Show>
+            </div>
+
+            {/* Desktop (>= lg): existing resizable 3-pane layout */}
+            <div
+                ref={(el) => (containerEl = el)}
+                class="hidden lg:flex h-full w-full overflow-hidden bg-bb-border select-none"
+            >
+                {/* Left Pane */}
+                <div
+                    style={{ width: `${leftWidth()}%` }}
+                    class="h-full bg-bb-bg min-w-0 relative transition-all duration-200"
+                >
+                    {props.left}
+                    <Show when={props.activePane === 1}>
+                        <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                    </Show>
+                </div>
+
+                {/* Left Handle */}
+                <div
+                    onPointerDown={startDrag("left")}
+                    class={clsx(
+                        "w-px h-full relative z-50 bg-bb-border transition-colors hover:bg-bb-accent",
+                        isDragging() === "left" ? "bg-bb-accent" : ""
+                    )}
+                >
+                    <div class="absolute inset-y-0 -left-1 w-3 cursor-col-resize z-50 touch-none"></div>
+                </div>
+
+                {/* Center Pane (Flex 1 fills remaining space) */}
+                <div class="flex-1 h-full bg-bb-bg min-w-0 relative transition-all duration-200">
+                    {props.center}
+                    <Show when={props.activePane === 2}>
+                        <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                    </Show>
+                </div>
+
+                {/* Right Handle */}
+                <div
+                    onPointerDown={startDrag("right")}
+                    class={clsx(
+                        "w-px h-full relative z-50 bg-bb-border transition-colors hover:bg-bb-accent",
+                        isDragging() === "right" ? "bg-bb-accent" : ""
+                    )}
+                >
+                    <div class="absolute inset-y-0 -left-1 w-3 cursor-col-resize z-50 touch-none"></div>
+                </div>
+
+                {/* Right Pane */}
+                <div
+                    style={{ width: `${rightWidth()}%` }}
+                    class="h-full bg-bb-bg min-w-0 relative transition-all duration-200"
+                >
+                    {props.right}
+                    <Show when={props.activePane === 3}>
+                        <div class="absolute inset-0 border-2 border-bb-accent pointer-events-none z-20 shadow-[inset_0_0_15px_rgba(255,152,0,0.1)]"></div>
+                    </Show>
+                </div>
             </div>
         </div>
     );

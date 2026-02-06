@@ -191,8 +191,19 @@ export const MarketDetail = () => {
     const market = marketStore.getSelectedMarket;
 
     return (
-        <div class="h-full flex flex-col p-4 font-mono overflow-auto custom-scrollbar">
+        <div class="h-full flex flex-col p-3 md:p-4 font-mono overflow-auto custom-scrollbar">
             <Show when={market()} fallback={<div class="text-center text-bb-muted mt-20">SELECT A MARKET DATA STREAM</div>}>
+                <div class="md:hidden mb-3 flex items-center justify-between gap-2">
+                    <button
+                        type="button"
+                        class="bg-bb-bg border border-bb-border text-bb-text px-2 py-1 text-xs hover:bg-bb-border hover:text-bb-accent transition-colors"
+                        onClick={() => marketStore.selectMarket(null)}
+                    >
+                        &lt; LIST
+                    </button>
+                    <div class="text-[10px] text-bb-muted uppercase truncate">MARKET DETAIL</div>
+                </div>
+
                 <div class="border-b border-bb-border pb-2 mb-4">
                     <h2 class="text-lg font-bold text-bb-accent mb-1">{market().title}</h2>
                     <div class="flex justify-between text-xs text-bb-muted">

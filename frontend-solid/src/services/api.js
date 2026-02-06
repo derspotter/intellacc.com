@@ -128,7 +128,7 @@ export const api = {
             if (options.limit) params.set('limit', String(options.limit));
             if (options.before) params.set('before', options.before);
             const suffix = params.toString() ? `?${params.toString()}` : '';
-            return request(`/mls/messages/${conversationId}${suffix}`);
+            return request(`/mls/messages/group/${conversationId}${suffix}`);
         },
         getPendingMessages: () => request('/mls/queue/pending', { headers: getDeviceIdHeader() }),
         ackMessages: (messageIds) => request('/mls/queue/ack', { method: 'POST', headers: getDeviceIdHeader(), body: { messageIds } }),

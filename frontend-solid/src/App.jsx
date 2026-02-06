@@ -289,8 +289,8 @@ function App() {
 	          </div>
 	      </Show>
 
-	      {/* Top Bar (Tmux Style) */}
-	      <header class="h-6 shrink-0 flex items-stretch text-xs font-mono z-20 relative select-none bg-bb-tmux text-bb-bg font-bold">
+      {/* Top Bar (Tmux Style) */}
+      <header class="min-h-6 shrink-0 flex items-stretch text-xs font-mono z-20 relative select-none bg-bb-tmux text-bb-bg font-bold overflow-x-auto no-scrollbar whitespace-nowrap">
         {/* Left Block */}
         <div class="px-3 flex items-center border-r border-bb-bg/20 gap-2">
           <span>[INTELLACC] USER: @{userData()?.username || 'GUEST'}</span>
@@ -311,7 +311,7 @@ function App() {
 	          <span>SYS: {socketState.connected ? 'ONLINE' : 'OFFLINE'}</span>
 	          <button
 	            type="button"
-	            class="max-w-[50vw] truncate hover:text-bb-accent cursor-pointer"
+	            class="max-w-[40vw] sm:max-w-[50vw] truncate hover:text-bb-accent cursor-pointer"
 	            title={socketState.lastNotification || ''}
 	            onClick={() => setShowNotifications(true)}
 	          >
@@ -334,6 +334,42 @@ function App() {
           right={<ChatPanel isActive={activePane() === 3} />}
         />
       </div>
+
+      {/* Mobile Bottom Tabs (< md) */}
+      <Show when={isLoggedIn()}>
+        <nav class="md:hidden shrink-0 h-12 bg-bb-panel border-t border-bb-border flex font-mono text-xs select-none">
+          <button
+            type="button"
+            onClick={() => setActivePane(1)}
+            class={`flex-1 flex items-center justify-center gap-2 border-r border-bb-border ${
+              activePane() === 1 ? "bg-bb-accent/15 text-bb-accent font-bold" : "text-bb-muted hover:text-bb-text hover:bg-white/5"
+            }`}
+          >
+            <span class="text-[10px] opacity-80">[1]</span>
+            <span>FEED</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActivePane(2)}
+            class={`flex-1 flex items-center justify-center gap-2 border-r border-bb-border ${
+              activePane() === 2 ? "bg-bb-accent/15 text-bb-accent font-bold" : "text-bb-muted hover:text-bb-text hover:bg-white/5"
+            }`}
+          >
+            <span class="text-[10px] opacity-80">[2]</span>
+            <span>MARKET</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActivePane(3)}
+            class={`flex-1 flex items-center justify-center gap-2 ${
+              activePane() === 3 ? "bg-bb-accent/15 text-bb-accent font-bold" : "text-bb-muted hover:text-bb-text hover:bg-white/5"
+            }`}
+          >
+            <span class="text-[10px] opacity-80">[3]</span>
+            <span>CHAT</span>
+          </button>
+        </nav>
+      </Show>
     </div>
   );
 }
