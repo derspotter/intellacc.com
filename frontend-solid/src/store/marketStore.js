@@ -1,6 +1,5 @@
 import { createStore } from "solid-js/store";
 import { api } from "../services/api";
-import { useSocket } from "../services/socket";
 import { getToken } from "../services/tokenService";
 
 const [state, setState] = createStore({
@@ -11,14 +10,15 @@ const [state, setState] = createStore({
 });
 
 const loadMarkets = async () => {
-    // Skip fetch if not authenticated
+    // Skip fetch if not authenticated (consistent with other panels)
     if (!getToken()) {
         setState({ markets: [], loading: false, error: null });
         return;
     }
     setState({ loading: true, error: null });
     try {
-        const markets = await api.predictions.getAll();
+        // "Markets" are events with attached market fields (market_prob, cumulative_stake, etc).
+        const markets = await api.events.getAll();
         setState({
             markets: Array.isArray(markets) ? markets : [],
             loading: false
@@ -38,20 +38,44 @@ const getSelectedMarket = () => {
     return state.markets.find(m => m.id === state.selectedMarketId);
 };
 
-// Socket integration can be called from App or here if we pass the socket instance
-// For simplicity, we'll expose a setup function
-const setupSocketListeners = (socket) => {
-    if (!socket) return;
+const applyMarketUpdate = (update) => {
+    if (!update || update.eventId == null) return;
+    const marketProb = update.market_prob != null ? Number(update.market_prob) : null;
+    const cumulativeStake = update.cumulative_stake != null ? Number(update.cumulative_stake) : null;
 
-    socket.on('newPrediction', (market) => {
-        setState("markets", (prev) => [market, ...prev]);
-    });
+    setState("markets", (markets) =>
+        markets.map(m => {
+            if (m.id !== Number(update.eventId)) return m;
 
-    socket.on('marketUpdate', (update) => {
-        setState("markets", (markets) =>
-            markets.map(m => m.id === update.id ? { ...m, ...update } : m)
-        );
-    });
+            // Prepare updates
+            const updates = {};
+            
+            if (marketProb != null) {
+                updates.market_prob = marketProb;
+                // Track previous probability if it existed
+                if (m.market_prob != null) {
+                    updates.prev_market_prob = m.market_prob;
+                }
+            }
+            
+            if (cumulativeStake != null) {
+                updates.cumulative_stake = cumulativeStake;
+                // Track previous stake if it existed
+                if (m.cumulative_stake != null) {
+                    updates.prev_cumulative_stake = m.cumulative_stake;
+                }
+            }
+
+            return {
+                ...m,
+                ...updates
+            };
+        })
+    );
+};
+
+const clear = () => {
+    setState({ markets: [], loading: false, error: null, selectedMarketId: null });
 };
 
 export const marketStore = {
@@ -59,5 +83,6 @@ export const marketStore = {
     loadMarkets,
     selectMarket,
     getSelectedMarket,
-    setupSocketListeners
+    applyMarketUpdate,
+    clear
 };

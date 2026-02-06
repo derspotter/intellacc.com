@@ -1,97 +1,151 @@
 import { createStore } from "solid-js/store";
 import io from "socket.io-client";
-import { getToken } from "./tokenService";
+import { getToken, clearToken } from "./tokenService";
+import { feedStore } from "../store/feedStore";
+import { marketStore } from "../store/marketStore";
 
 const [state, setState] = createStore({
     connected: false,
-    messages: [],
-    lastMarketUpdate: null,
-    lastMarketUpdate: null,
     lastNotification: null,
-    latency: 0 // ms
+    notifications: []
 });
 
-let socket;
+let socket = null;
 
-export const useSocket = () => {
-    const connect = () => {
-        if (socket?.connected) return;
+const MAX_NOTIFICATIONS = 50;
 
-        const token = getToken();
-        const socketUrl = window.location.origin;
+// Simple pub/sub for MLS socket events (ChatPanel subscribes here).
+const mlsMessageSubscribers = new Set();
+const mlsWelcomeSubscribers = new Set();
 
-        socket = io(socketUrl, {
-            path: '/socket.io',
-            auth: token ? { token } : undefined,
-            transports: ['websocket'],
-            reconnection: true
-        });
-
-        socket.on('connect', () => {
-            console.log('Socket connected');
-            setState('connected', true);
-        });
-
-        socket.on('disconnect', () => {
-            console.log('Socket disconnected');
-            setState('connected', false);
-        });
-
-        socket.on('marketUpdate', (data) => {
-            setState('lastMarketUpdate', data);
-        });
-
-        socket.on('notification', (data) => {
-            setState('lastNotification', data);
-        });
-
-        socket.on('chat:message', (data) => {
-            console.log('[Socket] Received message:', data);
-            setState('messages', (prev) => [...prev, data]);
-        });
-
-        // Latency Loop
-        const pingInterval = setInterval(() => {
-            if (socket && socket.connected) {
-                const start = Date.now();
-                socket.volatile.emit('ping', () => {
-                    const latency = Date.now() - start;
-                    setState('latency', latency);
-                });
-            }
-        }, 2000); // Ping every 2s
-
-        socket.on('disconnect', () => {
-            console.log('Socket disconnected');
-            setState('connected', false);
-            clearInterval(pingInterval);
-            // Duplicate disconnect handler inside connect is redundant/confusing, removing it.
-            // We already have a top-level disconnect handler below.
-        });
-    };
-
-    const disconnect = () => {
-        if (socket) {
-            socket.disconnect();
-            socket = null;
-            setState('connected', false);
-        }
-    };
-
-    const sendMessage = (content) => {
-        if (socket && socket.connected) {
-            // TODO: E2EE Encryption here before emit
-            const payload = {
-                id: Date.now(),
-                content, // plaintext for dev/debug
-                timestamp: new Date().toISOString(),
-                sender: getToken() ? 'me' : 'anon'
-            };
-            // Optimistic update
-            // setState('messages', (prev) => [...prev, payload]); 
-            socket.emit('chat:message', payload);
-        }
-    };
-
-    return { state, connect, disconnect, sendMessage, socket };
+export const onMlsMessage = (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    mlsMessageSubscribers.add(handler);
+    return () => mlsMessageSubscribers.delete(handler);
 };
+
+export const onMlsWelcome = (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    mlsWelcomeSubscribers.add(handler);
+    return () => mlsWelcomeSubscribers.delete(handler);
+};
+
+const emitToSubscribers = (subs, payload) => {
+    for (const fn of subs) {
+        try {
+            fn(payload);
+        } catch (e) {
+            console.warn('[Socket] MLS subscriber error:', e);
+        }
+    }
+};
+
+const normalizeNotificationText = (data) => {
+    if (typeof data === 'string') return data;
+    if (data?.text != null) return String(data.text);
+    if (data?.message != null) return String(data.message);
+    if (data?.title != null) return String(data.title);
+    try {
+        return JSON.stringify(data);
+    } catch {
+        return String(data);
+    }
+};
+
+const isAuthConnectError = (err) => {
+    const msgRaw = err?.message ?? err?.data?.message ?? err?.description ?? '';
+    const msg = String(msgRaw).toLowerCase();
+    const status = err?.status ?? err?.statusCode ?? err?.data?.status ?? err?.data?.statusCode;
+    const code = err?.code ?? err?.data?.code;
+
+    if (status === 401 || code === 401) return true;
+    return msg.includes('unauthorized') || msg.includes('authentication') || msg.includes('auth');
+};
+
+const connect = () => {
+    if (socket?.connected) return;
+
+    const token = getToken();
+    const socketUrl = window.location.origin;
+
+    socket = io(socketUrl, {
+        path: '/socket.io',
+        auth: token ? { token } : undefined,
+        transports: ['websocket'],
+        reconnection: true
+    });
+
+    socket.on('connect', () => {
+        console.log('[Socket] connected');
+        setState('connected', true);
+        socket.emit('join-predictions');
+        socket.emit('authenticate');
+        socket.emit('join-mls');
+    });
+
+    socket.on('disconnect', () => {
+        console.log('[Socket] disconnected');
+        setState('connected', false);
+    });
+
+    socket.on('connect_error', (err) => {
+        console.warn('[Socket] connect_error', err?.message || err);
+        setState('connected', false);
+
+        if (isAuthConnectError(err)) {
+            try {
+                socket?.disconnect();
+            } catch {}
+            socket = null;
+            clearToken(); // forces re-login flow
+        }
+    });
+
+    socket.on('new_post', (post) => {
+        feedStore.addPost(post);
+    });
+
+    socket.on('new_comment', (comment) => {
+        feedStore.addComment(comment);
+    });
+
+    socket.on('post_updated', (post) => {
+        feedStore.updatePost(post);
+    });
+
+    socket.on('marketUpdate', (update) => {
+        marketStore.applyMarketUpdate(update);
+    });
+
+    socket.on('notification', (data) => {
+        const text = normalizeNotificationText(data);
+        const entry = { ts: Date.now(), text, raw: data };
+
+        setState('lastNotification', text);
+        setState('notifications', (prev) => {
+            const next = [...(prev || []), entry];
+            return next.length > MAX_NOTIFICATIONS ? next.slice(-MAX_NOTIFICATIONS) : next;
+        });
+    });
+
+    // MLS realtime hints: "new messages available" + "new welcome available".
+    socket.on('mls-message', (payload) => {
+        emitToSubscribers(mlsMessageSubscribers, payload);
+    });
+
+    socket.on('mls-welcome', (payload) => {
+        emitToSubscribers(mlsWelcomeSubscribers, payload);
+    });
+};
+
+const disconnect = () => {
+    if (socket) {
+        socket.disconnect();
+        socket = null;
+        setState('connected', false);
+    }
+};
+
+const getSocket = () => socket;
+
+export const useSocket = () => ({ state, connect, disconnect, getSocket });

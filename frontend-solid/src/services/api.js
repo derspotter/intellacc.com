@@ -2,6 +2,16 @@ import { getToken, clearToken } from './tokenService';
 
 const API_BASE = '/api';
 
+function getDeviceIdHeader() {
+    try {
+        const v = localStorage.getItem('device_id') || localStorage.getItem('device_public_id');
+        if (!v) return {};
+        return { 'x-device-id': v };
+    } catch {
+        return {};
+    }
+}
+
 export class ApiError extends Error {
     constructor(status, message, data = {}) {
         super(message);
@@ -89,9 +99,9 @@ export const api = {
         getAssigned: () => request('/predictions/assigned'),
         getBettingStats: () => request('/predictions/betting-stats'),
         placeBet: (assignmentId, confidenceLevel, betOn) =>
-            request('/predictions/bet', {
+            request(`/assignments/${assignmentId}/bet`, {
                 method: 'POST',
-                body: { assignmentId, confidenceLevel, betOn }
+                body: { confidenceLevel, betOn }
             }),
         getByUser: (userId) => request(`/predictions/user/${userId}`),
     },
@@ -99,12 +109,20 @@ export const api = {
         getAll: (search) => request(search ? `/events?search=${search}` : '/events'),
         create: (data) => request('/events', { method: 'POST', body: data }),
         resolve: (eventId, outcome) => request(`/events/${eventId}/resolve`, { method: 'POST', body: { outcome } }),
+        // LMSR market trade (proxy to prediction-engine via backend)
+        updateMarket: (eventId, stake, target_prob) =>
+            request(`/events/${eventId}/update`, { method: 'POST', body: { stake, target_prob } }),
     },
     // MLS Messaging endpoints
     mls: {
         getGroups: () => request('/mls/groups'),
         getDirectMessages: () => request('/mls/direct-messages'),
         createDirectMessage: (targetUserId) => request(`/mls/direct-messages/${targetUserId}`, { method: 'POST' }),
+        sendMessage: (groupId, messageType, data, epoch, excludeUserIds) => request('/mls/messages/group', {
+            method: 'POST',
+            body: { groupId, messageType, data, epoch, excludeUserIds },
+            // Headers for device ID are handled by the caller or request interceptor if added later
+        }),
         getMessages: (conversationId, options = {}) => {
             const params = new URLSearchParams();
             if (options.limit) params.set('limit', String(options.limit));
@@ -112,8 +130,8 @@ export const api = {
             const suffix = params.toString() ? `?${params.toString()}` : '';
             return request(`/mls/messages/${conversationId}${suffix}`);
         },
-        getPendingMessages: () => request('/mls/queue/pending'),
-        ackMessages: (messageIds) => request('/mls/queue/ack', { method: 'POST', body: { messageIds } }),
+        getPendingMessages: () => request('/mls/queue/pending', { headers: getDeviceIdHeader() }),
+        ackMessages: (messageIds) => request('/mls/queue/ack', { method: 'POST', headers: getDeviceIdHeader(), body: { messageIds } }),
     },
     // Users search
     usersSearch: (query) => request(`/users/search?q=${encodeURIComponent(query)}`),

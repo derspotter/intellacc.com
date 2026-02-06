@@ -4,10 +4,13 @@ import { saveToken, userData } from "../../services/tokenService";
 import vaultService from "../../services/mls/vaultService";
 
 export const LoginModal = () => {
-    // Stage: 'email' | 'password' | 'loading'
+    // Stage: 'email' | 'password' | 'register' | 'loading'
     const [stage, setStage] = createSignal("email");
     const [email, setEmail] = createSignal("");
     const [password, setPassword] = createSignal("");
+    const [registerUsername, setRegisterUsername] = createSignal("");
+    const [registerEmail, setRegisterEmail] = createSignal("");
+    const [registerPassword, setRegisterPassword] = createSignal("");
     const [error, setError] = createSignal(null);
 
     // Handle email submit - just move to password stage (client-side only)
@@ -56,9 +59,66 @@ export const LoginModal = () => {
         }
     };
 
+    const handleRegisterSubmit = async (e) => {
+        e.preventDefault();
+
+        const username = registerUsername().trim();
+        const regEmail = registerEmail().trim();
+        const regPassword = registerPassword();
+
+        if (!username || !regEmail || !regPassword) return;
+
+        setError(null);
+        setStage("loading");
+
+        try {
+            await api.auth.register(username, regEmail, regPassword);
+            const result = await api.auth.login(regEmail, regPassword);
+
+            if (result && result.token) {
+                saveToken(result.token);
+
+                // Try to auto-unlock/setup vault after login
+                try {
+                    const user = userData();
+                    const userId = user?.username || String(user?.userId);
+                    if (userId) {
+                        const success = await vaultService.findAndUnlock(regPassword, userId);
+                        if (!success) {
+                            await vaultService.setupKeystoreWithPassword(regPassword, userId);
+                        }
+                    }
+                } catch (vaultErr) {
+                    console.warn('[LoginModal] Vault auto-unlock failed:', vaultErr);
+                }
+            } else {
+                setError("Login failed: No token received");
+                setStage("register");
+            }
+        } catch (err) {
+            console.error(err);
+            setError(err.message || "Registration failed");
+            setStage("register");
+        }
+    };
+
     // Go back to email stage
     const handleBack = () => {
         setError(null);
+        setPassword("");
+        setStage("email");
+    };
+
+    const handleGoToRegister = () => {
+        setError(null);
+        setRegisterEmail(email());
+        setRegisterPassword(password());
+        setStage("register");
+    };
+
+    const handleGoToLogin = () => {
+        setError(null);
+        setEmail(registerEmail());
         setPassword("");
         setStage("email");
     };
@@ -102,7 +162,13 @@ export const LoginModal = () => {
                             </button>
                             <div class="text-center text-xs text-bb-muted">
                                 Don't have an account?{" "}
-                                <a href="#signup" class="text-bb-accent hover:underline">Register here</a>
+                                <button
+                                    type="button"
+                                    onClick={handleGoToRegister}
+                                    class="text-bb-accent hover:underline"
+                                >
+                                    Register here
+                                </button>
                             </div>
                         </form>
                     </Show>
@@ -135,6 +201,59 @@ export const LoginModal = () => {
                             >
                                 Use a different email
                             </button>
+                        </form>
+                    </Show>
+
+                    {/* === REGISTER STAGE === */}
+                    <Show when={stage() === "register"}>
+                        <form onSubmit={handleRegisterSubmit} class="flex flex-col gap-4 font-mono text-sm">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-bb-muted text-xs uppercase">Identity // Username</label>
+                                <input
+                                    type="text"
+                                    value={registerUsername()}
+                                    onInput={(e) => setRegisterUsername(e.target.value)}
+                                    class="bg-bb-bg border border-bb-border p-2 text-bb-text focus:border-bb-accent focus:outline-none"
+                                    placeholder="Choose handle..."
+                                    required
+                                    autofocus
+                                />
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-bb-muted text-xs uppercase">Credentials // Email</label>
+                                <input
+                                    type="email"
+                                    value={registerEmail()}
+                                    onInput={(e) => setRegisterEmail(e.target.value)}
+                                    class="bg-bb-bg border border-bb-border p-2 text-bb-text focus:border-bb-accent focus:outline-none"
+                                    placeholder="Enter system address..."
+                                    required
+                                />
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-bb-muted text-xs uppercase">Security // Password</label>
+                                <input
+                                    type="password"
+                                    value={registerPassword()}
+                                    onInput={(e) => setRegisterPassword(e.target.value)}
+                                    class="bg-bb-bg border border-bb-border p-2 text-bb-text focus:border-bb-accent focus:outline-none"
+                                    placeholder="Create access key..."
+                                    required
+                                />
+                            </div>
+                            <button type="submit" class="mt-2 bg-bb-accent text-bb-bg font-bold py-2 hover:bg-bb-accent/90 uppercase tracking-widest">
+                                &gt; REGISTER
+                            </button>
+                            <div class="text-center text-xs text-bb-muted">
+                                Already have an account?{" "}
+                                <button
+                                    type="button"
+                                    onClick={handleGoToLogin}
+                                    class="text-bb-accent hover:underline"
+                                >
+                                    Login here
+                                </button>
+                            </div>
                         </form>
                     </Show>
 

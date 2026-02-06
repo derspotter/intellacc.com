@@ -1,21 +1,11 @@
-import { onMount, Show } from "solid-js";
+import { Show } from "solid-js";
 import { Panel } from "./ui/Panel";
 import { MarketList } from "./market/MarketList";
 import { MarketDetail } from "./market/MarketDetail";
 import { MarketTicker } from "./market/MarketTicker";
 import { marketStore } from "../store/marketStore";
-import { useSocket } from "../services/socket";
 
-export const MarketPanel = (props) => {
-    const { socket } = useSocket();
-
-    onMount(() => {
-        marketStore.loadMarkets();
-        if (socket) {
-            marketStore.setupSocketListeners(socket);
-        }
-    });
-
+export const MarketPanel = () => {
     return (
         <div class="flex flex-col gap-px h-full">
             {/* Top Half: List & Ticker */}
