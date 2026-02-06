@@ -4,7 +4,8 @@ const [vaultState, setVaultState] = createStore({
     exists: false,
     locked: true,
     userId: null,
-    lastActivity: Date.now()
+    lastActivity: Date.now(),
+    showDeviceLinkModal: false
 });
 
 export const vaultStore = {
@@ -26,9 +27,14 @@ export const vaultStore = {
         setVaultState('lastActivity', Date.now());
     },
 
+    setShowDeviceLinkModal(show) {
+        setVaultState('showDeviceLinkModal', show);
+    },
+
     // Getters for compatibility
     get userId() { return vaultState.userId; },
-    get isLocked() { return vaultState.locked; }
+    get isLocked() { return vaultState.locked; },
+    get showDeviceLinkModal() { return vaultState.showDeviceLinkModal; }
 };
 
 export default vaultStore;
