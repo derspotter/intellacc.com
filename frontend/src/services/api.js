@@ -369,6 +369,20 @@ export const api = {
       
     getFeed: () => 
       request('/feed'),
+
+    getPage: ({ cursor = null, limit = 20 } = {}) => {
+      const params = new URLSearchParams();
+      params.set('limit', String(limit));
+      if (cursor) params.set('cursor', cursor);
+      return request(`/posts?${params.toString()}`);
+    },
+
+    getFeedPage: ({ cursor = null, limit = 20 } = {}) => {
+      const params = new URLSearchParams();
+      params.set('limit', String(limit));
+      if (cursor) params.set('cursor', cursor);
+      return request(`/feed?${params.toString()}`);
+    },
       
     getById: (id) => 
       request(`/posts/${id}`),

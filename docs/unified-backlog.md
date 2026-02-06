@@ -1,5 +1,5 @@
 # Unified Backlog
-Updated: 2026-02-05
+Updated: 2026-02-06
 
 This backlog consolidates open work from `next-steps.md`, `production-checklist.md`,
 `mobile-pwa-plan.md`, `e2ee-next-steps.md`, `docs/mls-status.md`, and
@@ -13,6 +13,7 @@ This backlog consolidates open work from `next-steps.md`, `production-checklist.
 
 ## Priority 1 - High impact
 - Attachments storage: implemented (local disk + JWT-gated download). Optional follow-up: presigned/object storage.
+- Home feed infinite scroll: implemented (cursor pagination + frontend virtualization/windowing).
 - Tiered verification (phone + payment): ship SMS (Twilio) + Stripe SetupIntent verification flows,
   wire `VerificationSettings` UI, and confirm webhook + env config readiness.
 - PWA foundation: manifest, offline caching, install prompt, offline page.

@@ -164,6 +164,21 @@ exports.getPosts = async (req, res) => {
   try {
     console.log("getPosts called with userId:", userId);
 
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10) || 20, 1), 50);
+    const cursorRaw = req.query.cursor;
+    let cursor = null;
+    if (cursorRaw) {
+      try {
+        const decoded = JSON.parse(Buffer.from(String(cursorRaw), 'base64url').toString('utf8'));
+        const createdAt = new Date(decoded.createdAt);
+        const id = Number(decoded.id);
+        if (!Number.isFinite(createdAt.getTime()) || !Number.isInteger(id)) throw new Error('Invalid cursor');
+        cursor = { createdAt, id };
+      } catch {
+        return res.status(400).json({ message: 'Invalid cursor' });
+      }
+    }
+
     const result = await db.query(
       `SELECT p.*, u.username,
               CASE WHEN EXISTS (SELECT 1 FROM likes 
@@ -188,13 +203,12 @@ exports.getPosts = async (req, res) => {
          ORDER BY analyzed_at DESC
          LIMIT 1
        ) ai ON true
-       WHERE p.parent_id IS NULL AND p.is_comment = FALSE
-       ORDER BY 
-         -- Sort by visibility multiplier (reputation-weighted) and recency
-         -- Use GREATEST to ensure we never take LN of a negative number
-         ((1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) * EXTRACT(EPOCH FROM (NOW() - p.created_at)) / -3600) DESC,
-         p.created_at DESC`,
-      [userId] // Pass userId for the subquery
+       WHERE p.parent_id IS NULL
+         AND p.is_comment = FALSE
+         ${cursor ? 'AND (p.created_at, p.id) < ($3, $4)' : ''}
+       ORDER BY p.created_at DESC, p.id DESC
+       LIMIT $2`,
+      cursor ? [userId, limit + 1, cursor.createdAt, cursor.id] : [userId, limit + 1]
     );
 
     // Log the raw result which should now include reputation data
@@ -207,8 +221,16 @@ exports.getPosts = async (req, res) => {
       liked_by_user: post.liked_by_user
     })));
 
-    // Send the direct query result
-    res.status(200).json(result.rows);
+    // Cursor pagination response (always, for performance).
+    const rows = result.rows || [];
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    const last = items[items.length - 1];
+    const nextCursor = hasMore && last
+      ? Buffer.from(JSON.stringify({ createdAt: new Date(last.created_at).toISOString(), id: last.id })).toString('base64url')
+      : null;
+
+    res.status(200).json({ items, hasMore, nextCursor });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Error fetching posts' });
@@ -427,6 +449,21 @@ exports.getFeed = async (req, res) => {
   try {
     console.log("getFeed called with userId:", userId);
 
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10) || 20, 1), 50);
+    const cursorRaw = req.query.cursor;
+    let cursor = null;
+    if (cursorRaw) {
+      try {
+        const decoded = JSON.parse(Buffer.from(String(cursorRaw), 'base64url').toString('utf8'));
+        const createdAt = new Date(decoded.createdAt);
+        const id = Number(decoded.id);
+        if (!Number.isFinite(createdAt.getTime()) || !Number.isInteger(id)) throw new Error('Invalid cursor');
+        cursor = { createdAt, id };
+      } catch {
+        return res.status(400).json({ message: 'Invalid cursor' });
+      }
+    }
+
     const result = await db.query(
       `SELECT p.*, u.username,
               CASE WHEN EXISTS (SELECT 1 FROM likes 
@@ -459,12 +496,10 @@ exports.getFeed = async (req, res) => {
        OR p.user_id = $1)
        AND p.parent_id IS NULL
        AND p.is_comment = FALSE
-       ORDER BY 
-         -- Sort by visibility multiplier (reputation-weighted) and recency
-         -- Use GREATEST to ensure we never take LN of a negative number
-         ((1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) * EXTRACT(EPOCH FROM (NOW() - p.created_at)) / -3600) DESC,
-         p.created_at DESC`,
-      [userId]
+       ${cursor ? 'AND (p.created_at, p.id) < ($3, $4)' : ''}
+       ORDER BY p.created_at DESC, p.id DESC
+       LIMIT $2`,
+      cursor ? [userId, limit + 1, cursor.createdAt, cursor.id] : [userId, limit + 1]
     );
 
     // Log the raw result which should include reputation data
@@ -476,8 +511,15 @@ exports.getFeed = async (req, res) => {
       liked_by_user: post.liked_by_user
     })));
 
-    // Send the direct query result with reputation data
-    res.status(200).json(result.rows);
+    const rows = result.rows || [];
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    const last = items[items.length - 1];
+    const nextCursor = hasMore && last
+      ? Buffer.from(JSON.stringify({ createdAt: new Date(last.created_at).toISOString(), id: last.id })).toString('base64url')
+      : null;
+
+    res.status(200).json({ items, hasMore, nextCursor });
   } catch (err) {
     console.error("Error getting feed:", err);
     res.status(500).json({ message: "Internal server error" });

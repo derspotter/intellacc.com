@@ -22,7 +22,12 @@ const postsStore = {
   state: {
     posts: van.state([]),
     loading: van.state(false),
+    loadingMore: van.state(false),
     error: van.state(null),
+    nextCursor: van.state(null),
+    hasMore: van.state(true),
+    // Tracks whether we're showing real API data or a logged-out placeholder feed.
+    feedMode: van.state('unknown'),
     // Use reactive object to manage individual like statuses
     likeStatus: vanX.reactive({}),
     attachmentUrls: vanX.reactive({}),
@@ -67,16 +72,27 @@ const postsStore = {
      * Fetch all posts
      * @returns {Promise<Array>} Posts
      */
-    async fetchPosts() {
+    async fetchPosts({ reset = true } = {}) {
       this.state.initialFetchAttempted.val = true; // Mark that an attempt to fetch is being made
+      if (this.state.loading.val) return this.state.posts.val;
       try {
         this.state.loading.val = true;
         this.state.error.val = null;
         if (!auth.isLoggedInState.val) {
           return this.actions.loadMockPosts.call(this);
         }
-        const posts = await api.posts.getAll();
-        this.state.posts.val = Array.isArray(posts) ? posts : [];
+        if (reset) {
+          this.state.nextCursor.val = null;
+          this.state.hasMore.val = true;
+        }
+
+        // Home timeline should use the personalized feed endpoint.
+        const page = await api.posts.getFeedPage({ cursor: null, limit: 20 });
+        const items = Array.isArray(page?.items) ? page.items : [];
+        this.state.posts.val = items;
+        this.state.nextCursor.val = page?.nextCursor ?? null;
+        this.state.hasMore.val = !!page?.hasMore;
+        this.state.feedMode.val = 'real';
         if (auth.isLoggedInState.val && this.state.posts.val.length > 0) {
           // Initialize reactive like statuses for posts
           const statuses = {};
@@ -98,12 +114,60 @@ const postsStore = {
       }
     },
 
+    async fetchMorePosts() {
+      if (!auth.isLoggedInState.val) return [];
+      if (this.state.loadingMore.val || this.state.loading.val) return [];
+      if (!this.state.hasMore.val) return [];
+
+      try {
+        this.state.loadingMore.val = true;
+        this.state.error.val = null;
+
+        const page = await api.posts.getFeedPage({ cursor: this.state.nextCursor.val, limit: 20 });
+        const items = Array.isArray(page?.items) ? page.items : [];
+        if (items.length === 0) {
+          this.state.hasMore.val = false;
+          this.state.nextCursor.val = null;
+          return [];
+        }
+
+        // Dedup by id in case of retries/races.
+        const seen = new Set(this.state.posts.val.map(p => p.id));
+        const merged = [...this.state.posts.val];
+        for (const p of items) {
+          if (!seen.has(p.id)) merged.push(p);
+        }
+        this.state.posts.val = merged;
+        this.state.nextCursor.val = page?.nextCursor ?? null;
+        this.state.hasMore.val = !!page?.hasMore;
+        this.state.feedMode.val = 'real';
+
+        // Like status init for new posts
+        const statuses = {};
+        items.forEach(post => {
+          if (post.liked_by_user !== undefined) statuses[post.id] = post.liked_by_user;
+        });
+        Object.assign(this.state.likeStatus, statuses);
+
+        return items;
+      } catch (error) {
+        console.error('Error fetching more posts:', error);
+        this.state.error.val = error.message;
+        return [];
+      } finally {
+        this.state.loadingMore.val = false;
+      }
+    },
+
     loadMockPosts() {
       this.state.posts.val = [
         { id: 1, title: "First Post", content: "This is the first post content.", username: "user1", created_at: new Date().toISOString() },
         { id: 2, title: "Second Post", content: "This is the second post with more content.", username: "user2", created_at: new Date(Date.now() - 86400000).toISOString() }
       ];
+      this.state.hasMore.val = false;
+      this.state.nextCursor.val = null;
       this.state.loading.val = false;
+      this.state.feedMode.val = 'mock';
       return this.state.posts.val;
     },
 
@@ -541,5 +605,16 @@ const postsStore = {
     }
   } // End actions
 };
+
+// If we rendered a logged-out placeholder feed, refresh to the real API feed
+// as soon as the user logs in. This prevents the mock feed from "sticking".
+van.derive(() => {
+  // Some tests mock auth in a way that can make the default import undefined.
+  if (!auth?.isLoggedInState?.val) return;
+  if (postsStore.state.feedMode.val !== 'mock') return;
+  // Avoid starting a second request if something else already triggered a fetch.
+  if (postsStore.state.loading.val || postsStore.state.loadingMore.val) return;
+  postsStore.actions.fetchPosts.call(postsStore, { reset: true });
+});
 
 export default postsStore;
