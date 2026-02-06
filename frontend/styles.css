@@ -2360,6 +2360,21 @@ body.dark-mode .username-link:hover {
 }
 
 /* ==================== Predictions Leaderboard (Compact) ==================== */
+.leaderboard-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.leaderboard-refresh {
+  flex: 0 0 auto;
+  min-height: 36px;
+  width: 40px;
+  padding: 0.25rem 0.25rem;
+  line-height: 1;
+}
+
 .leaderboard-card .card-header {
   display: flex;
   flex-direction: column;

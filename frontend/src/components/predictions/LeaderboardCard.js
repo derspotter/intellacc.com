@@ -203,20 +203,22 @@ export default function LeaderboardCard() {
   return Card({
     className: 'leaderboard-card',
     children: [
-      div({ class: 'card-header' }, [
-        h3('Reputation Leaderboard'),
-        p({ class: 'header-subtitle' }, 'Unified log scoring (All-Log + PLL)')
+      div({ class: 'leaderboard-header-row' }, [
+        div({ class: 'card-header' }, [
+          h3('Reputation Leaderboard'),
+          p({ class: 'header-subtitle' }, 'Unified log scoring (All-Log + PLL)')
+        ]),
+        button({
+          onclick: () => fetchLeaderboard(),
+          class: 'refresh-button leaderboard-refresh',
+          disabled: () => loading.val,
+          title: 'Refresh leaderboard'
+        }, () => loading.val ? 'Refreshing...' : '🔄')
       ]),
       renderTabs(),
       renderUserRank(),
       div({ class: 'leaderboard-content' }, renderLeaderboardContent()),
-      div({ class: 'leaderboard-footer' }, [
-        button({
-          onclick: () => fetchLeaderboard(),
-          class: 'refresh-button',
-          disabled: () => loading.val
-        }, () => loading.val ? 'Refreshing...' : '🔄 Refresh')
-      ])
+      div({ class: 'leaderboard-footer' })
     ]
   });
 }
