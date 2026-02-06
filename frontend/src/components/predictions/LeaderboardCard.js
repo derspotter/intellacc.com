@@ -13,7 +13,6 @@ export default function LeaderboardCard() {
   const loading = van.state(false);
   const error = van.state(null);
   const userRank = van.state(null);
-  let leaderboardContentEl = null;
 
   // Tab configuration - simplified to 3 toggleable options
   const tabs = [
@@ -57,15 +56,10 @@ export default function LeaderboardCard() {
     } catch (err) {
       console.error('Error fetching leaderboard:', err);
       error.val = err.message || 'Failed to load leaderboard';
-      leaderboardData.val = [];
+      // Keep the previous data visible so refresh doesn't "jump" the scroll position.
     } finally {
       loading.val = false;
     }
-  };
-
-  const scrollLeaderboardToTop = () => {
-    if (!leaderboardContentEl) return;
-    leaderboardContentEl.scrollTop = 0;
   };
 
   // Handle tab toggling
@@ -88,7 +82,6 @@ export default function LeaderboardCard() {
       userRank.val = null;
     }
     
-    scrollLeaderboardToTop();
     fetchLeaderboard();
   };
 
@@ -179,36 +172,41 @@ export default function LeaderboardCard() {
   // Render leaderboard content
   const renderLeaderboardContent = () => {
     return () => {
-      if (loading.val) {
+      const hasData = leaderboardData.val.length > 0;
+
+      // Initial load: show a placeholder when there's nothing to render yet.
+      if (loading.val && !hasData && !error.val) {
         return div({ class: 'leaderboard-loading' }, 'Loading leaderboard...');
       }
 
-      if (error.val) {
-        return div({ class: 'leaderboard-error' }, [
-          p(`Error: ${error.val}`),
-          button({ 
-            onclick: () => fetchLeaderboard(),
-            class: 'retry-button'
-          }, 'Retry')
-        ]);
-      }
+      const errorBanner = error.val
+        ? div({ class: 'leaderboard-error-banner' }, [
+            span(`Error: ${error.val}`),
+            button({
+              onclick: () => fetchLeaderboard(),
+              class: 'retry-button'
+            }, 'Retry')
+          ])
+        : null;
 
-      if (leaderboardData.val.length === 0) {
-        return div({ class: 'leaderboard-empty' }, 
-          showGlobal.val ? 
-            'No users with predictions yet.' :
-            'No users in your network have made predictions yet.'
-        );
-      }
+      const listOrEmpty = hasData
+        ? ul({ class: 'leaderboard-list-compact' },
+            leaderboardData.val.map((entry, index) => renderLeaderboardEntry(entry, index))
+          )
+        : div(
+            { class: 'leaderboard-empty' },
+            showGlobal.val
+              ? 'No users with predictions yet.'
+              : 'No users in your network have made predictions yet.'
+          );
 
-      return ul({ class: 'leaderboard-list-compact' },
-        leaderboardData.val.map((entry, index) => renderLeaderboardEntry(entry, index))
-      );
+      return div({ class: 'leaderboard-body' }, [
+        errorBanner,
+        listOrEmpty,
+        loading.val && hasData ? div({ class: 'leaderboard-loading-overlay' }, 'Refreshing...') : null
+      ]);
     };
   };
-
-  // Create this once so we can control its scroll position on refresh/tab changes.
-  leaderboardContentEl = div({ class: 'leaderboard-content' }, renderLeaderboardContent());
 
   return Card({
     className: 'leaderboard-card',
@@ -219,8 +217,9 @@ export default function LeaderboardCard() {
           p({ class: 'header-subtitle' }, 'Unified log scoring (All-Log + PLL)')
         ]),
         button({
-          onclick: () => {
-            scrollLeaderboardToTop();
+          onclick: (e) => {
+            // Avoid leaving focus on the icon button (looks like a "jump" on mobile).
+            e?.currentTarget?.blur?.();
             fetchLeaderboard();
           },
           class: 'refresh-button leaderboard-refresh',
@@ -230,7 +229,7 @@ export default function LeaderboardCard() {
       ]),
       renderTabs(),
       renderUserRank(),
-      leaderboardContentEl,
+      div({ class: 'leaderboard-content' }, renderLeaderboardContent()),
       div({ class: 'leaderboard-footer' })
     ]
   });
