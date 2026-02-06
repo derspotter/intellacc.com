@@ -6,6 +6,7 @@ import { userData, getToken } from "../services/tokenService";
 import { api } from "../services/api";
 import coreCryptoClient from "../services/mls/coreCryptoClient";
 import { onMlsMessage, onMlsWelcome } from "../services/socket";
+import { DeviceLinkModal } from "./vault/DeviceLinkModal";
 
 export const ChatPanel = () => {
     const [password, setPassword] = createSignal("");
@@ -408,26 +409,62 @@ export const ChatPanel = () => {
         }
     };
 
+    const isLinkRequiredError = (err) =>
+        err && err.status === 403 && err.data?.code === "LINK_REQUIRED";
+
+    // Closure variable for pending password (not in global store for security)
+    let pendingVaultPassword = null;
+
+    const attemptVaultUnlock = async (pw) => {
+        const user = userData();
+        const userId = user?.username || (user?.userId ? String(user.userId) : null);
+        if (!userId) throw new Error("Wait for login...");
+
+        const success = await vaultService.findAndUnlock(pw, userId);
+        if (!success) {
+            await vaultService.setupKeystoreWithPassword(pw, userId);
+        }
+    };
+
     const handleUnlock = async (e) => {
         e.preventDefault();
         setUnlocking(true);
         setError("");
 
         try {
-            const user = userData();
-            const userId = user?.username || (user?.userId ? String(user.userId) : null);
-            if (!userId) throw new Error("Wait for login...");
-
-            const success = await vaultService.findAndUnlock(password(), userId);
-            if (!success) {
-                await vaultService.setupKeystoreWithPassword(password(), userId);
-            }
+            await attemptVaultUnlock(password());
         } catch (err) {
             console.error(err);
+            if (isLinkRequiredError(err)) {
+                pendingVaultPassword = password();
+                vaultStore.setShowDeviceLinkModal(true);
+            } else {
+                setError(err.message);
+            }
+        } finally {
+            setUnlocking(false);
+        }
+    };
+
+    const handleDeviceLinkSuccess = async () => {
+        const pw = pendingVaultPassword;
+        pendingVaultPassword = null;
+        if (!pw) return;
+
+        setUnlocking(true);
+        setError("");
+        try {
+            await attemptVaultUnlock(pw);
+        } catch (err) {
+            console.error("[ChatPanel] Post-link unlock failed:", err);
             setError(err.message);
         } finally {
             setUnlocking(false);
         }
+    };
+
+    const handleDeviceLinkCancel = () => {
+        pendingVaultPassword = null;
     };
 
     return (
@@ -707,6 +744,8 @@ export const ChatPanel = () => {
                     </div>
                 </div>
             </Show>
+
+            <DeviceLinkModal onSuccess={handleDeviceLinkSuccess} onCancel={handleDeviceLinkCancel} />
         </Panel>
     );
 };
