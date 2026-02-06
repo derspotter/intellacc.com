@@ -1218,17 +1218,9 @@ body.dark-mode .post-action.liked:hover {
   }
 }
 
+/* Refresh buttons: keep interaction snappy, no gimmicky rotation. */
 .refresh-button {
-  transition: transform 0.3s var(--transition);
-}
-
-.refresh-button:hover {
-  transform: rotate(180deg);
-  color: var(--blue-bg);
-}
-
-.refresh-button:active {
-  transform: rotate(360deg);
+  transition: background-color var(--transition), color var(--transition), border-color var(--transition);
 }
 
 .prediction-form {
