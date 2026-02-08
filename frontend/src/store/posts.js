@@ -79,7 +79,7 @@ const postsStore = {
       this._hoverTimers.set(postId, setTimeout(() => {
         this.actions.setHoverExpandedContent.call(this, postId, true);
         this._hoverTimers?.delete(postId);
-      }, 3000));
+      }, 1500));
     },
 
     clearAllHoverExpanded() {

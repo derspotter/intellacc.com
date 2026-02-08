@@ -825,10 +825,6 @@ body.dark-mode .ai-content-badge {
 
 .post-content {
   margin-bottom: 0.25rem;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  word-break: normal;
-  hyphens: none;
   font-size: 1rem;
   line-height: 1.5;
 
@@ -838,24 +834,28 @@ body.dark-mode .ai-content-badge {
   box-sizing: border-box;
 }
 
-.post-content.clamped {
-  /* Clamp long posts to keep the feed scanable. */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 5;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.post-content-text {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
+  line-height: 1.5em;
 }
 
-.post-content.clamped.hover-expanded {
+.post-content.clamped .post-content-text {
+  /* Clamp long posts to keep the feed scanable without showing partial lines. */
+  max-height: calc(5 * 1.5em);
+  overflow: hidden;
+}
+
+.post-content.clamped.hover-expanded .post-content-text {
   /* Desktop-only hover expansion is controlled in JS with a delay. */
-  display: block;
-  -webkit-line-clamp: unset;
+  max-height: none;
   overflow: visible;
 }
 
-.post-content.expanded {
-  display: block;
+.post-content.expanded .post-content-text {
+  max-height: none;
   overflow: visible;
 }
 

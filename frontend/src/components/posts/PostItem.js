@@ -368,7 +368,10 @@ export default function PostItem({ post }) {
                 clearHoverTimer();
               }
             }, [
-              div({ class: () => `post-content ${isExpanded() ? 'expanded' : 'clamped'}${(!isExpanded() && isHoverExpanded()) ? ' hover-expanded' : ''}` }, content),
+              div(
+                { class: () => `post-content ${isExpanded() ? 'expanded' : 'clamped'}${(!isExpanded() && isHoverExpanded()) ? ' hover-expanded' : ''}` },
+                div({ class: 'post-content-text' }, content)
+              ),
               () => isLong ? button({
                 type: 'button',
                 class: 'post-content-toggle',
