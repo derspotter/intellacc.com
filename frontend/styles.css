@@ -826,7 +826,9 @@ body.dark-mode .ai-content-badge {
 .post-content {
   margin-bottom: 0.25rem;
   white-space: pre-wrap;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
   font-size: 1rem;
   line-height: 1.5;
 
@@ -842,6 +844,7 @@ body.dark-mode .ai-content-badge {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 5;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .post-content.expanded {
@@ -849,14 +852,7 @@ body.dark-mode .ai-content-badge {
   overflow: visible;
 }
 
-/* Desktop affordance: hover to expand without clicking. */
-@media (hover: hover) and (pointer: fine) {
-  .post-card:hover .post-content.clamped {
-    display: block;
-    -webkit-line-clamp: unset;
-    overflow: visible;
-  }
-}
+/* Hover should not expand content (accidental triggers). Use the button. */
 
 .post-content-toggle {
   align-self: flex-start;
