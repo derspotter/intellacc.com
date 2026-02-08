@@ -167,6 +167,12 @@ export default function PostsList() {
       scheduleUpdate();
     });
     window.addEventListener('scroll', scheduleUpdate, { passive: true });
+    // If the user scrolls, cancel any delayed hover expansions (they'll often unmount due to virtualization).
+    window.addEventListener('scroll', () => {
+      if (Object.keys(postsStore.state.hoverExpandedContent.val).length) {
+        postsStore.actions.clearAllHoverExpanded.call(postsStore);
+      }
+    }, { passive: true });
     window.addEventListener('resize', scheduleUpdate);
   }, 0);
 

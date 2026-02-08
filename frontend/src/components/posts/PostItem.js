@@ -329,16 +329,53 @@ export default function PostItem({ post }) {
             // View Mode: Text + hidden Browse row to reserve space
             const content = String(post.content || '');
             const isExpanded = () => !!postsStore.state.expandedContent.val[post.id];
+            const isHoverExpanded = () => !!postsStore.state.hoverExpandedContent.val[post.id];
             // Heuristic: show a toggle when content is likely to exceed the clamped preview.
             const isLong = content.length > 240 || content.split('\n').length > 6;
-            return div({ class: "post-content-wrapper" }, [
-              div({ class: () => `post-content ${isExpanded() ? 'expanded' : 'clamped'}` }, content),
+            const canHoverExpand = () => {
+              try {
+                // Prefer a touch capability check over matchMedia hover/pointer, which is not
+                // consistently reported across browsers and automation environments.
+                if (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) return false;
+                if ('ontouchstart' in window) return false;
+                return true;
+              } catch {
+                return false;
+              }
+            };
+
+            const startHoverTimer = () => {
+              if (!canHoverExpand()) return;
+              if (isExpanded()) return;
+              if (!isLong) return;
+              postsStore.actions.startHoverExpandTimer.call(postsStore, post.id);
+            };
+
+            const clearHoverTimer = () => {
+              postsStore.actions.clearHoverExpand.call(postsStore, post.id);
+            };
+
+            return div({
+              class: "post-content-wrapper",
+              // Use mouseover/out (with relatedTarget guard) instead of mouseenter/leave.
+              // Some automation tools don't consistently trigger mouseenter.
+              onmouseover: (e) => {
+                if (e?.currentTarget && e?.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+                startHoverTimer();
+              },
+              onmouseout: (e) => {
+                if (e?.currentTarget && e?.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+                clearHoverTimer();
+              }
+            }, [
+              div({ class: () => `post-content ${isExpanded() ? 'expanded' : 'clamped'}${(!isExpanded() && isHoverExpanded()) ? ' hover-expanded' : ''}` }, content),
               () => isLong ? button({
                 type: 'button',
                 class: 'post-content-toggle',
                 onclick: (e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  clearHoverTimer();
                   postsStore.actions.toggleExpandedContent.call(postsStore, post.id);
                 }
               }, () => isExpanded() ? 'Show less' : 'Show more') : null,

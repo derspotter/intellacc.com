@@ -847,12 +847,19 @@ body.dark-mode .ai-content-badge {
   text-overflow: ellipsis;
 }
 
+.post-content.clamped.hover-expanded {
+  /* Desktop-only hover expansion is controlled in JS with a delay. */
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
 .post-content.expanded {
   display: block;
   overflow: visible;
 }
 
-/* Hover should not expand content (accidental triggers). Use the button. */
+/* Hover expansion is intentionally not CSS-driven. */
 
 .post-content-toggle {
   align-self: flex-start;
