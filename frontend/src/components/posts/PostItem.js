@@ -327,8 +327,21 @@ export default function PostItem({ post }) {
             ]);
           } else {
             // View Mode: Text + hidden Browse row to reserve space
+            const content = String(post.content || '');
+            const isExpanded = () => !!postsStore.state.expandedContent.val[post.id];
+            // Heuristic: show a toggle when content is likely to exceed the clamped preview.
+            const isLong = content.length > 240 || content.split('\n').length > 6;
             return div({ class: "post-content-wrapper" }, [
-              div({ class: "post-content" }, post.content),
+              div({ class: () => `post-content ${isExpanded() ? 'expanded' : 'clamped'}` }, content),
+              () => isLong ? button({
+                type: 'button',
+                class: 'post-content-toggle',
+                onclick: (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  postsStore.actions.toggleExpandedContent.call(postsStore, post.id);
+                }
+              }, () => isExpanded() ? 'Show less' : 'Show more') : null,
               div({ class: "edit-file-row browse-placeholder" })
             ]);
           }

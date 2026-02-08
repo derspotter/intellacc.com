@@ -28,6 +28,8 @@ const postsStore = {
     hasMore: van.state(true),
     // Tracks whether we're showing real API data or a logged-out placeholder feed.
     feedMode: van.state('unknown'),
+    // Persist per-post UI state across virtualization re-mounts.
+    expandedContent: van.state({}),
     // Use reactive object to manage individual like statuses
     likeStatus: vanX.reactive({}),
     attachmentUrls: vanX.reactive({}),
@@ -41,6 +43,14 @@ const postsStore = {
   },
   
   actions: {
+    toggleExpandedContent(postId) {
+      const cur = !!this.state.expandedContent.val[postId];
+      this.state.expandedContent.val = {
+        ...this.state.expandedContent.val,
+        [postId]: !cur
+      };
+    },
+
     /**
      * Toggle comment list visibility for a post
      * @param {number} postId - Post ID
