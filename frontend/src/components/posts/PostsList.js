@@ -132,7 +132,12 @@ export default function PostsList() {
 
     topPad.val = fenwick.sumPrefix(start);
     bottomPad.val = Math.max(0, total - fenwick.sumPrefix(end + 1));
-    range.val = { start, end };
+    // Avoid re-rendering the entire virtual list when the range didn't change.
+    // `range` is an object state, and assigning a new object triggers replacement.
+    const prev = range.val;
+    if (!prev || prev.start !== start || prev.end !== end) {
+      range.val = { start, end };
+    }
 
     // Prefetch more when approaching the bottom of the currently-known list.
     if (hasMore.val && !loadingMore.val && !loading.val) {
