@@ -880,11 +880,10 @@ body.dark-mode .ai-content-badge {
   box-shadow: var(--box-shadow);
   outline: 1px solid var(--border-color);
 
-  /* Make the box grow with content so the background isn't "see-through" for overflowed text. */
-  max-height: 76vh;
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none; /* Firefox */
+  /* Always show the full text. Never make the overlay a scroll container.
+     Scrolling should always scroll the page. */
+  max-height: none !important;
+  overflow: visible !important;
 
   opacity: 0;
   pointer-events: none;
@@ -896,10 +895,7 @@ body.dark-mode .post-content-hover-overlay {
   background: #121212;
 }
 
-.post-content-hover-overlay::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
+/* Overlay is not scrollable, so no scrollbar styling needed. */
 
 /* Delayed hover expansion: show overlay only after 1s of sustained hover. */
 .post-content.clamped.has-hover-overlay:hover .post-content-hover-overlay {
