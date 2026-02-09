@@ -77,6 +77,7 @@ Implement root-level (NOT `/api`) endpoints in `backend/src/index.js`:
 - `GET /.well-known/webfinger`
   - supports `resource=acct:username@intellacc.com`
   - returns JRD `application/jrd+json` with `rel=self` pointing at actor JSON
+  - Mastodon requires that each ActivityPub actor maps back to an `acct:` URI resolvable via WebFinger
 
 - `GET /ap/users/:username`
   - returns ActivityStreams actor JSON (`application/activity+json`)
@@ -88,6 +89,9 @@ Implement root-level (NOT `/api`) endpoints in `backend/src/index.js`:
   - verify HTTP signatures
   - handle `Follow` -> store follower and send `Accept`
   - store inbound IDs in `federation_inbox_dedupe` to make retries idempotent
+
+Mastodon requires all server-to-server `POST` requests to be signed, and may require signed `GET`
+requests depending on its configuration, so plan to sign both delivery and object fetches.
 
 ### 1C. Outbox (Serving and Delivering Posts)
 
@@ -143,8 +147,10 @@ any AT infrastructure.
 Implementation:
 
 - Add "Enable Bluesky via Bridgy" UI.
-- From the user's ActivityPub actor, send a `Follow` to the Bridgy Fed bot account.
-- Auto-accept follow-backs.
+- From the user's ActivityPub actor, send a `Follow` to `@bsky.brid.gy@bsky.brid.gy`.
+  - Bridgy will follow back; accept that follow so your posts are sent through the bridge.
+  - Users can unfollow afterward and remain bridged.
+- Auto-accept follow-backs (or provide an approval UI if you implement follow approval).
 
 Constraints to communicate:
 
@@ -153,6 +159,10 @@ Constraints to communicate:
 - Not all interactions map 1:1.
 
 Deliverable: Bluesky users can follow Intellacc users (bridged identity) and see posts.
+
+Expected handle mapping:
+
+- Fediverse account `@user@instance` becomes Bluesky handle `user.instance.ap.brid.gy`.
 
 ## Phase 4: ATProto (Native, Long-Term)
 
@@ -183,6 +193,18 @@ Critical engineering constraints:
 - Repo writes must be idempotent (store record URI/CID mapping in DB).
 - Backfill for existing posts should be batched and rate limited.
 - Auth should follow ATProto OAuth profile (DPoP) where possible; avoid long-lived tokens.
+
+Identity constraints to implement correctly:
+
+- DIDs are the primary account identifier; handles must be verified bidirectionally (handle -> DID,
+  DID doc -> handle).
+- Handle resolution supports DNS TXT (`_atproto.<handle>` with `did=...`) and HTTPS
+  `/.well-known/` resolution.
+
+Repository constraints (why "native ATProto" is non-trivial):
+
+- Repos are content-addressed (Merkle-tree) and each mutation produces a new commit CID.
+- Commits are cryptographically signed and verified via keys in the DID document.
 
 ### 4C. Stage 3: Incoming ATProto Interactions (Optional)
 
@@ -229,4 +251,3 @@ Deliverable: Intellacc users exist as first-class AT identities, not just bridge
 - ATProto handles: https://atproto.com/specs/handle
 - ATProto OAuth: https://atproto.com/specs/oauth
 - ATProto repository format: https://atproto.com/specs/repository
-
