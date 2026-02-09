@@ -70,6 +70,25 @@ export default function PostsList() {
   let rafPending = false;
   let resizeObserver = null;
   let observed = new Set();
+  let observePending = false;
+
+  // Keep a stable virtual list root element. Replacing the root on the first scroll
+  // can cause Firefox to "snap back" to the top while it recomputes scroll metrics.
+  const virtualTopSpacerEl = canVirtualize ? van.tags.div({ class: 'posts-spacer posts-spacer-top' }) : null;
+  const virtualItemsEl = canVirtualize ? van.tags.div({ class: 'posts-virtual-items' }) : null;
+  const virtualBottomSpacerEl = canVirtualize ? van.tags.div({ class: 'posts-spacer posts-spacer-bottom' }) : null;
+  const virtualLoadingMoreEl = canVirtualize ? van.tags.div({ class: 'loading', style: 'display:none' }, 'Loading more...') : null;
+  const virtualEndEl = canVirtualize ? van.tags.div({ class: 'end-of-feed', style: 'display:none' }, 'End of feed') : null;
+  const virtualRootEl = canVirtualize ? van.tags.div({
+    class: 'posts-container posts-virtualized',
+    id: 'posts-virtual-list'
+  }, [
+    virtualTopSpacerEl,
+    virtualItemsEl,
+    virtualBottomSpacerEl,
+    virtualLoadingMoreEl,
+    virtualEndEl
+  ]) : null;
 
   // Fetch posts if needed (similar to PredictionsList approach)
   // Check initialFetchAttempted to prevent infinite loop when posts are legitimately empty
@@ -100,22 +119,31 @@ export default function PostsList() {
   };
 
   const updateObserved = () => {
-    if (!rootEl) rootEl = document.getElementById('posts-virtual-list');
-    if (!rootEl || !resizeObserver) return;
+    if (!rootEl) rootEl = virtualRootEl || document.getElementById('posts-virtual-list');
+    if (!rootEl || !rootEl.isConnected || !resizeObserver) return;
     // Only observe currently-rendered items.
     observed.forEach(el => resizeObserver.unobserve(el));
     observed = new Set();
     rootEl.querySelectorAll('.post-virtual-item').forEach(el => {
       observed.add(el);
       resizeObserver.observe(el);
-      const id = Number(el.dataset.postId);
-      if (Number.isInteger(id)) updateMeasurement(id, el.offsetHeight);
+    });
+  };
+
+  const scheduleObservedUpdate = () => {
+    if (observePending) return;
+    observePending = true;
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        observePending = false;
+        updateObserved();
+      }, 0);
     });
   };
 
   const updateRange = () => {
-    if (!rootEl) rootEl = document.getElementById('posts-virtual-list');
-    if (!rootEl) return;
+    if (!rootEl) rootEl = virtualRootEl || document.getElementById('posts-virtual-list');
+    if (!rootEl || !rootEl.isConnected) return;
     const total = fenwick.total();
     const rectTop = rootEl.getBoundingClientRect().top + window.scrollY;
     const within = window.scrollY - rectTop;
@@ -136,6 +164,7 @@ export default function PostsList() {
     // Avoid re-rendering the entire virtual list when the range didn't change.
     // `range` is an object state, and assigning a new object triggers replacement.
     const prev = range.val;
+    const rangeChanged = !prev || prev.start !== start || prev.end !== end;
     if (!prev || prev.start !== start || prev.end !== end) {
       range.val = { start, end };
     }
@@ -147,8 +176,8 @@ export default function PostsList() {
       }
     }
 
-    // Defer measurement updates to after DOM settles.
-    setTimeout(updateObserved, 0);
+    // Refresh observation set only when the rendered range changes.
+    if (rangeChanged) scheduleObservedUpdate();
   };
 
   const scheduleUpdate = () => {
@@ -181,7 +210,33 @@ export default function PostsList() {
     posts.val.length;
     rebuildIndex();
     scheduleUpdate();
+    scheduleObservedUpdate();
   });
+
+  // Sync the stable virtual root without recreating it (prevents first-scroll snap-back).
+  if (canVirtualize && virtualRootEl) {
+    van.derive(() => {
+      const { start, end } = range.val;
+      const top = topPad.val;
+      const bottom = bottomPad.val;
+      const list = posts.val;
+      const lm = loadingMore.val;
+      const hm = hasMore.val;
+
+      virtualTopSpacerEl.style.height = `${top}px`;
+      virtualBottomSpacerEl.style.height = `${bottom}px`;
+
+      const visible = list.length ? list.slice(start, end + 1) : [];
+      virtualItemsEl.replaceChildren(
+        ...visible.map(post =>
+          van.tags.div({ class: 'post-virtual-item', 'data-post-id': post.id }, PostItem({ post }))
+        )
+      );
+
+      virtualLoadingMoreEl.style.display = lm ? 'block' : 'none';
+      virtualEndEl.style.display = (!hm && list.length > 0) ? 'block' : 'none';
+    });
+  }
 
   // Define the rendering functions separately for clarity
   const renderLoading = () => {
@@ -209,21 +264,7 @@ export default function PostsList() {
           posts.val.map(post => PostItem({ post }))
         );
       }
-
-      const { start, end } = range.val;
-      const visible = posts.val.slice(start, end + 1);
-      return van.tags.div({
-        class: "posts-container posts-virtualized",
-        id: 'posts-virtual-list'
-      }, [
-        van.tags.div({ class: 'posts-spacer posts-spacer-top', style: () => `height:${topPad.val}px` }),
-        ...visible.map(post =>
-          van.tags.div({ class: 'post-virtual-item', 'data-post-id': post.id }, PostItem({ post }))
-        ),
-        van.tags.div({ class: 'posts-spacer posts-spacer-bottom', style: () => `height:${bottomPad.val}px` }),
-        () => loadingMore.val ? van.tags.div({ class: 'loading' }, 'Loading more...') : null,
-        () => (!hasMore.val && posts.val.length > 0) ? van.tags.div({ class: 'end-of-feed' }, 'End of feed') : null
-      ]);
+      return virtualRootEl;
     }
     return null;
   };
