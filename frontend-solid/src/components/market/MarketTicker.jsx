@@ -33,7 +33,7 @@ const FlashValue = (props) => {
 const TickerItem = (props) => {
     return (
         <div class="flex gap-2 text-xs font-mono">
-            <span class="text-bb-accent font-bold uppercase">{props.market.title?.substring(0, 22)}...</span>
+            <span class="text-bb-accent font-bold uppercase">{props.market.title}</span>
             <FlashValue
                 val={props.market.market_prob}
                 prev={props.market.prev_market_prob}
