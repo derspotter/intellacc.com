@@ -1,6 +1,7 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { api } from "../../services/api";
 import { marketStore } from "../../store/marketStore";
+import { getToken } from "../../services/tokenService";
 
 const FlashValueBig = (props) => {
     const [colorClass, setColorClass] = createSignal(props.defaultColor);
@@ -40,11 +41,74 @@ const TradeTicket = (props) => {
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal(null);
     const [lastFill, setLastFill] = createSignal(null);
+    const [belief, setBelief] = createSignal(0.7);
+    const [kellyData, setKellyData] = createSignal(null);
+    let kellyTimeout;
 
     const marketProb = createMemo(() => {
         const p = Number(market()?.market_prob);
         return Number.isFinite(p) ? p : 0.5;
     });
+
+    const getUserId = () => {
+        try {
+            const token = getToken();
+            if (!token) return null;
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            return payload.id || payload.userId || null;
+        } catch { return null; }
+    };
+
+    const getKellySuggestion = async (beliefVal) => {
+        const m = market();
+        if (!m?.id) return;
+        const userId = getUserId();
+        if (!userId) return;
+        const token = getToken();
+        try {
+            const resp = await fetch(`/api/events/${m.id}/kelly?belief=${beliefVal}&user_id=${userId}`, {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                const kellyOptimal = data.kelly_suggestion ? parseFloat(data.kelly_suggestion) : 0;
+                const currentProb = data.current_prob ? parseFloat(data.current_prob) : 0.5;
+                const balance = data.balance ? parseFloat(data.balance) : 1000;
+                setKellyData({
+                    kelly_optimal: kellyOptimal,
+                    edge: beliefVal - currentProb,
+                    balance
+                });
+                return;
+            }
+        } catch (err) {
+            console.error('[Kelly] API error, using fallback:', err);
+        }
+        // Fallback: local calculation
+        const mp = marketProb();
+        const edge = beliefVal - mp;
+        const balance = 1000;
+        setKellyData({
+            kelly_optimal: Math.max(0, Math.abs(edge) * balance * 0.25),
+            edge,
+            balance
+        });
+    };
+
+    const handleBeliefChange = (val) => {
+        setBelief(val);
+        clearTimeout(kellyTimeout);
+        kellyTimeout = setTimeout(() => getKellySuggestion(val), 300);
+    };
+
+    // Fetch initial Kelly on market change
+    createEffect(() => {
+        if (market()?.id) {
+            getKellySuggestion(belief());
+        }
+    });
+
+    onCleanup(() => clearTimeout(kellyTimeout));
 
     const priceYes = createMemo(() => marketProb());
     const priceNo = createMemo(() => 1 - marketProb());
@@ -148,6 +212,56 @@ const TradeTicket = (props) => {
                     BUY NO
                 </button>
             </div>
+
+            {/* Belief Slider */}
+            <div class="mb-3">
+                <div class="flex justify-between text-xxs text-bb-muted uppercase mb-1">
+                    <span>Your Belief</span>
+                    <span class="text-bb-accent">{(belief() * 100).toFixed(0)}%</span>
+                </div>
+                <input
+                    type="range"
+                    min="0.01"
+                    max="0.99"
+                    step="0.01"
+                    value={belief()}
+                    onInput={(e) => handleBeliefChange(parseFloat(e.currentTarget.value))}
+                    class="w-full accent-bb-accent"
+                />
+            </div>
+
+            {/* Kelly Optimal Box */}
+            <Show when={kellyData()}>
+                <div class="mb-3 bg-black border border-bb-border p-2">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-xxs text-bb-muted uppercase">Kelly Optimal</span>
+                        <button
+                            type="button"
+                            class="px-2 py-0.5 text-xxs border border-bb-accent text-bb-accent hover:bg-bb-accent/20 transition-colors uppercase font-bold"
+                            onClick={() => {
+                                const k = kellyData();
+                                if (k && !isNaN(k.kelly_optimal)) {
+                                    setStakeShares(Math.max(0, k.kelly_optimal).toFixed(2));
+                                }
+                            }}
+                        >
+                            Apply Kelly
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+                        <div>
+                            <span class="text-bb-muted">Stake: </span>
+                            <span class="text-bb-accent font-bold">{kellyData().kelly_optimal.toFixed(2)} RP</span>
+                        </div>
+                        <div>
+                            <span class="text-bb-muted">Edge: </span>
+                            <span class={kellyData().edge >= 0 ? "text-market-up font-bold" : "text-market-down font-bold"}>
+                                {kellyData().edge >= 0 ? "+" : ""}{(kellyData().edge * 100).toFixed(1)}%
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </Show>
 
             <div class="grid grid-cols-2 gap-3 items-end mb-3">
                 <label class="block">

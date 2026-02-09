@@ -1,6 +1,10 @@
 import { For, Show, createSignal, createEffect, onCleanup } from "solid-js";
 import { marketStore } from "../../store/marketStore";
 
+const handleTickerClick = (id) => {
+    marketStore.selectMarket(id);
+};
+
 const FlashValue = (props) => {
     const [colorClass, setColorClass] = createSignal(props.defaultColor);
     let timeout;
@@ -32,7 +36,10 @@ const FlashValue = (props) => {
 
 const TickerItem = (props) => {
     return (
-        <div class="flex gap-2 text-xs font-mono">
+        <div
+            class="flex gap-2 text-xs font-mono cursor-pointer hover:bg-white/10 px-1 rounded transition-colors"
+            onClick={() => handleTickerClick(props.market.id)}
+        >
             <span class="text-bb-accent font-bold uppercase">{props.market.title}</span>
             <FlashValue
                 val={props.market.market_prob}
