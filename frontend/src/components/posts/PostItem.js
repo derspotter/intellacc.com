@@ -329,69 +329,23 @@ export default function PostItem({ post }) {
             // View Mode: Text + hidden Browse row to reserve space
             const content = String(post.content || '');
             const isExpanded = () => !!postsStore.state.expandedContent.val[post.id];
-            const isHoverExpanded = () => !!postsStore.state.hoverExpandedContent.val[post.id];
             // Heuristic: show a toggle when content is likely to exceed the clamped preview.
             const isLong = content.length > 240 || content.split('\n').length > 6;
-            const canHoverExpand = () => {
-              try {
-                // Prefer a touch capability check over matchMedia hover/pointer, which is not
-                // consistently reported across browsers and automation environments.
-                if (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) return false;
-                if ('ontouchstart' in window) return false;
-                return true;
-              } catch {
-                return false;
-              }
-            };
-
-            const startHoverTimer = () => {
-              if (!canHoverExpand()) return;
-              if (isExpanded()) return;
-              if (isHoverExpanded()) return;
-              if (!isLong) return;
-              postsStore.actions.startHoverExpandTimer.call(postsStore, post.id);
-            };
-
-            const clearHoverTimer = () => {
-              postsStore.actions.clearHoverExpand.call(postsStore, post.id);
-            };
 
             return div({ class: "post-content-wrapper" }, [
               div({
-                class: () => `post-content ${isExpanded() ? 'expanded' : 'clamped'}${(!isExpanded() && isHoverExpanded()) ? ' hover-expanded' : ''}`,
-                // Delayed hover expansion should be tied to the content area itself.
-                onmouseover: (e) => {
-                  if (e?.currentTarget && e?.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
-                  startHoverTimer();
-                },
-                onmouseout: (e) => {
-                  if (e?.currentTarget && e?.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
-                  const target = e?.currentTarget;
-                  setTimeout(() => {
-                    if (target?.matches && target.matches(':hover')) return;
-                    // If virtualization swapped DOM nodes during scroll, the pointer can still
-                    // be over the *new* content element for this same post. In that case, do not
-                    // collapse the hover-expansion.
-                    const hoveredContent = document.querySelector('.post-content:hover');
-                    const hoveredItem = hoveredContent?.closest ? hoveredContent.closest('.post-virtual-item') : null;
-                    const hoveredId = hoveredItem ? Number(hoveredItem.dataset.postId) : null;
-                    if (hoveredId === post.id) return;
-                    clearHoverTimer();
-                  }, 80);
-                }
+                class: () => `post-content ${isExpanded() ? 'expanded' : 'clamped'}${(!isExpanded() && isLong) ? ' has-hover-overlay' : ''}`,
               }, [
                 div({ class: 'post-content-text' }, content),
-                // Use an overlay for hover expansion so we don't change layout (prevents scroll jumps).
-                () => (!isExpanded() && isHoverExpanded()) ? div({ class: 'post-content-hover-overlay' }, content) : null
+                // Always render the overlay for long posts. CSS handles delayed hover and device gating.
+                (!isExpanded() && isLong) ? div({ class: 'post-content-hover-overlay' }, content) : null
               ]),
-              // Hide the toggle while hover-expanded (ephemeral). It re-appears once the hover expansion collapses.
-              () => (isLong && !isHoverExpanded()) ? button({
+              () => isLong ? button({
                 type: 'button',
                 class: 'post-content-toggle',
                 onclick: (e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  clearHoverTimer();
                   postsStore.actions.toggleExpandedContent.call(postsStore, post.id);
                 }
               }, () => isExpanded() ? 'Show less' : 'Show more') : null,

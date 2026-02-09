@@ -30,9 +30,6 @@ const postsStore = {
     feedMode: van.state('unknown'),
     // Persist per-post UI state across virtualization re-mounts.
     expandedContent: van.state({}),
-    // Ephemeral per-post hover expansion (desktop only). Stored here so it survives
-    // virtualization re-renders during the hover delay.
-    hoverExpandedContent: van.state({}),
     // Use reactive object to manage individual like statuses
     likeStatus: vanX.reactive({}),
     attachmentUrls: vanX.reactive({}),
@@ -52,59 +49,6 @@ const postsStore = {
         ...this.state.expandedContent.val,
         [postId]: !cur
       };
-    },
-
-    setHoverExpandedContent(postId, expanded) {
-      this.state.hoverExpandedContent.val = {
-        ...this.state.hoverExpandedContent.val,
-        [postId]: !!expanded
-      };
-    },
-
-    clearHoverExpand(postId) {
-      if (this._hoverTimers?.has(postId)) {
-        clearTimeout(this._hoverTimers.get(postId));
-        this._hoverTimers.delete(postId);
-      }
-      if (this.state.hoverExpandedContent.val[postId]) {
-        const next = { ...this.state.hoverExpandedContent.val };
-        delete next[postId];
-        this.state.hoverExpandedContent.val = next;
-      }
-    },
-
-    startHoverExpandTimer(postId) {
-      if (!this._hoverTimers) this._hoverTimers = new Map();
-      if (this._hoverTimers.has(postId)) clearTimeout(this._hoverTimers.get(postId));
-      this._hoverTimers.set(postId, setTimeout(() => {
-        this.actions.setHoverExpandedContent.call(this, postId, true);
-        this._hoverTimers?.delete(postId);
-      }, 1500));
-    },
-
-    maybeStartHoverExpandTimer(postId) {
-      if (!this._hoverTimers) this._hoverTimers = new Map();
-      if (this._hoverTimers.has(postId)) return;
-      this.actions.startHoverExpandTimer.call(this, postId);
-    },
-
-    cancelHoverTimersExcept(keepPostId) {
-      if (!this._hoverTimers || this._hoverTimers.size === 0) return;
-      for (const [postId, timer] of this._hoverTimers.entries()) {
-        if (keepPostId && Number(postId) === Number(keepPostId)) continue;
-        clearTimeout(timer);
-        this._hoverTimers.delete(postId);
-      }
-    },
-
-    clearAllHoverExpanded() {
-      if (this._hoverTimers) {
-        for (const t of this._hoverTimers.values()) clearTimeout(t);
-        this._hoverTimers.clear();
-      }
-      if (Object.keys(this.state.hoverExpandedContent.val).length) {
-        this.state.hoverExpandedContent.val = {};
-      }
     },
 
     /**

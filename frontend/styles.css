@@ -849,12 +849,6 @@ body.dark-mode .ai-content-badge {
   overflow: hidden;
 }
 
-.post-content.clamped.hover-expanded .post-content-text {
-  /* Hover expansion uses an overlay; keep the preview clamped to avoid layout changes. */
-  max-height: calc(5 * 1.5em);
-  overflow: hidden;
-}
-
 .post-content.expanded .post-content-text {
   max-height: none;
   overflow: visible;
@@ -881,14 +875,24 @@ body.dark-mode .ai-content-badge {
   padding: 0.5rem;
   box-shadow: var(--box-shadow);
 
-  max-height: 70vh;
-  overflow: auto;
-  scrollbar-width: none; /* Firefox */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  transition-delay: 0s;
 }
 
-.post-content-hover-overlay::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+@media (hover: hover) and (pointer: fine) {
+  /* Delayed hover expansion: show overlay only after 1.5s of sustained hover. */
+  .post-content.clamped.has-hover-overlay:hover .post-content-hover-overlay {
+    opacity: 1;
+    pointer-events: auto;
+    transition-delay: 1.5s;
+  }
+
+  /* Hide the toggle while hovering a long clamped post (prevents overlap with overlay). */
+  .post-content.clamped.has-hover-overlay:hover + .post-content-toggle {
+    visibility: hidden;
+  }
 }
 
 .post-content-toggle {

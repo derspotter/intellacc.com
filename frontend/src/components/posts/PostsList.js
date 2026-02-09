@@ -70,7 +70,6 @@ export default function PostsList() {
   let rafPending = false;
   let resizeObserver = null;
   let observed = new Set();
-  let hoverCleanupTimer = null;
 
   // Fetch posts if needed (similar to PredictionsList approach)
   // Check initialFetchAttempted to prevent infinite loop when posts are legitimately empty
@@ -133,72 +132,6 @@ export default function PostsList() {
 
     topPad.val = fenwick.sumPrefix(start);
     bottomPad.val = Math.max(0, total - fenwick.sumPrefix(end + 1));
-
-    // Keep only the hover-expanded post that is currently under the pointer.
-    // Debounce "no hovered element" states to avoid collapse during scroll/virtual re-render.
-    const hoverMap = postsStore.state.hoverExpandedContent.val;
-    // Keep hover-expansion alive only while the pointer is over the post content area.
-    const hoveredContent = document.querySelector('.post-content:hover');
-    const hoveredItem = hoveredContent?.closest ? hoveredContent.closest('.post-virtual-item') : null;
-    const hoveredId = hoveredItem ? Number(hoveredItem.dataset.postId) : null;
-
-    // If the hovered post changes purely due to scrolling (element moves under a stationary pointer),
-    // we won't necessarily get mouseout events. Cancel any pending hover timers for other posts so we
-    // don't expand the wrong one later.
-    postsStore.actions.cancelHoverTimersExcept.call(postsStore, hoveredId);
-
-    // If a post is hovered due to scroll positioning (no fresh mouseover), ensure we still kick off
-    // the delayed hover expansion.
-    if (hoveredId) {
-      const isExpanded = !!postsStore.state.expandedContent.val[hoveredId];
-      const isHoverExpanded = !!postsStore.state.hoverExpandedContent.val[hoveredId];
-      if (!isExpanded && !isHoverExpanded) {
-        const idx = idToIndex.get(hoveredId);
-        const p = (idx !== undefined) ? posts.val[idx] : null;
-        const content = p ? String(p.content || '') : '';
-        const isLong = content.length > 240 || content.split('\n').length > 6;
-        const canHoverExpand = (() => {
-          try {
-            if (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) return false;
-            if ('ontouchstart' in window) return false;
-            return true;
-          } catch {
-            return false;
-          }
-        })();
-        if (canHoverExpand && isLong) {
-          postsStore.actions.maybeStartHoverExpandTimer.call(postsStore, hoveredId);
-        }
-      }
-    }
-    const clearExcept = (keepId) => {
-      for (const idStr of Object.keys(hoverMap)) {
-        if (!hoverMap[idStr]) continue;
-        const postId = Number(idStr);
-        if (!keepId || postId !== keepId) {
-          postsStore.actions.clearHoverExpand.call(postsStore, postId);
-        }
-      }
-    };
-
-    if (hoveredId) {
-      if (hoverCleanupTimer) clearTimeout(hoverCleanupTimer);
-      hoverCleanupTimer = null;
-      clearExcept(hoveredId);
-    } else if (Object.keys(hoverMap).length) {
-      if (!hoverCleanupTimer) {
-        hoverCleanupTimer = setTimeout(() => {
-          hoverCleanupTimer = null;
-          // Re-check the content-area hover; during scroll/virtual updates we can briefly
-          // lose `:hover`, but we should never keep hover-expansion if the pointer isn't
-          // over the post content itself.
-          const hoveredContent2 = document.querySelector('.post-content:hover');
-          const hoveredItem2 = hoveredContent2?.closest ? hoveredContent2.closest('.post-virtual-item') : null;
-          const hoveredId2 = hoveredItem2 ? Number(hoveredItem2.dataset.postId) : null;
-          clearExcept(hoveredId2);
-        }, 200);
-      }
-    }
 
     // Avoid re-rendering the entire virtual list when the range didn't change.
     // `range` is an object state, and assigning a new object triggers replacement.
