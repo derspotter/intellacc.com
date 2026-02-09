@@ -1,21 +1,22 @@
+let deviceId = null;
 let pendingDeviceId = null;
 
-export const getPendingDeviceId = () => {
-  if (!pendingDeviceId) {
-    try { pendingDeviceId = sessionStorage.getItem('pending_device_id') || null; } catch {}
-  }
-  return pendingDeviceId;
+export const getDeviceId = () => deviceId;
+
+export const setDeviceId = (id) => {
+  deviceId = id || null;
 };
+
+export const clearDeviceId = () => {
+  deviceId = null;
+};
+
+export const getPendingDeviceId = () => pendingDeviceId;
 
 export const setPendingDeviceId = (id) => {
   pendingDeviceId = id || null;
-  try {
-    if (id) sessionStorage.setItem('pending_device_id', id);
-    else sessionStorage.removeItem('pending_device_id');
-  } catch {}
 };
 
 export const clearPendingDeviceId = () => {
   pendingDeviceId = null;
-  try { sessionStorage.removeItem('pending_device_id'); } catch {}
 };

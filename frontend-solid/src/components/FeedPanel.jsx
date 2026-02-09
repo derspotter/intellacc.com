@@ -54,10 +54,10 @@ const PostItem = (props) => {
         const postId = props.post.id;
         if (props.post.liked_by_user) {
             feedStore.unlikePost(postId);
-            try { await api.posts.unlike(postId); } catch { feedStore.likePost(postId); }
+            try { await api.posts.unlikePost(postId); } catch { feedStore.likePost(postId); }
         } else {
             feedStore.likePost(postId);
-            try { await api.posts.like(postId); } catch { feedStore.unlikePost(postId); }
+            try { await api.posts.likePost(postId); } catch { feedStore.unlikePost(postId); }
         }
     };
 

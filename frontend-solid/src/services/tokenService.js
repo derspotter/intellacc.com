@@ -84,7 +84,7 @@ export function clearToken() {
     // Use dynamic import to avoid circular dependency (tokenService -> vaultService -> api -> tokenService)
     import('./mls/vaultService').then(module => {
         try {
-            module.default.lock();
+            module.default.lockKeys();
         } catch (e) {
             console.warn('Failed to lock vault on logout', e);
         }

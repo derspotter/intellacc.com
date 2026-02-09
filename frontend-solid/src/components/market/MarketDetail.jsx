@@ -94,7 +94,13 @@ const TradeTicket = (props) => {
 
         setSubmitting(true);
         try {
-            const result = await api.events.updateMarket(m.id, stake, target_prob);
+            const resp = await fetch(`/api/events/${m.id}/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${(await import('../../services/tokenService')).getToken()}` },
+                body: JSON.stringify({ stake, target_prob })
+            });
+            if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw { data: d, message: d.message || 'Trade failed' }; }
+            const result = await resp.json();
             setLastFill(result);
             setStakeShares("");
         } catch (err) {

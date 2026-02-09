@@ -22,6 +22,20 @@ export const ChatPanel = () => {
     const [unreadCounts, setUnreadCounts] = createSignal({});
     const [sidebarOpen, setSidebarOpen] = createSignal(false);
 
+    // Resolve a senderId (numeric) to a display username
+    const getSenderName = (msg) => {
+        if (msg.sender) return msg.sender;
+        if (msg.sender_username) return msg.sender_username;
+        const sid = msg.senderId != null ? Number(msg.senderId) : null;
+        if (sid == null) return 'UNKNOWN';
+        const me = userData();
+        if (me && Number(me.userId) === sid) return me.username || 'ME';
+        const conv = selectedConversation();
+        if (conv?.displayName) return conv.displayName;
+        if (conv?.other_username) return conv.other_username;
+        return `USER ${sid}`;
+    };
+
     // New DM flow state
     const [showNewDM, setShowNewDM] = createSignal(false);
     const [searchQuery, setSearchQuery] = createSignal("");
@@ -105,7 +119,7 @@ export const ChatPanel = () => {
 
         const t = setTimeout(async () => {
             try {
-                const results = await api.usersSearch(q);
+                const results = await api.users.search(q);
                 if (reqId !== searchReqId) return;
                 setSearchResults(Array.isArray(results) ? results : []);
             } catch (e) {
@@ -120,84 +134,23 @@ export const ChatPanel = () => {
         onCleanup(() => clearTimeout(t));
     });
 
-    let pendingSyncPromise = null;
+    // Delegate all MLS message processing to coreCryptoClient.syncMessages()
+    // which handles welcomes, commits, proposals, and application messages properly.
     const processPendingQueue = async () => {
-        if (pendingSyncPromise) return pendingSyncPromise;
-        pendingSyncPromise = (async () => {
-            try {
-                // Without an initialized MLS client, we cannot safely process/ack.
-                const client = coreCryptoClient?.client || null;
-                if (!client) return [];
-
-                const pending = await api.mls.getPendingMessages().catch((e) => {
-                    console.warn('[ChatPanel] getPendingMessages failed:', e?.message || e);
-                    return [];
-                });
-                if (!Array.isArray(pending) || pending.length === 0) return [];
-
-                const processedIds = [];
-                for (const msg of pending) {
-                    const messageId = msg?.id;
-                    try {
-                        // Best-effort processing to keep MLS state consistent, then ack.
-                        const type = msg?.message_type || msg?.content_type;
-
-                        if (type === 'welcome') {
-                            const welcomeBytes = toBytes(msg?.data);
-                            if (!welcomeBytes) throw new Error('Invalid welcome bytes');
-                            client?.process_welcome?.(welcomeBytes, null);
-                            await coreCryptoClient?.saveState?.();
-                        } else if (type === 'commit') {
-                            const groupIdBytes = hexToBytes(String(msg?.group_id || msg?.groupId || ''));
-                            const commitBytes = toBytes(msg?.data);
-                            if (!groupIdBytes || !commitBytes) throw new Error('Invalid commit payload');
-                            client?.process_commit?.(groupIdBytes, commitBytes);
-                            client?.merge_staged_commit?.(groupIdBytes);
-                            await coreCryptoClient?.saveState?.();
-                        } else if (type === 'proposal') {
-                            const groupIdBytes = hexToBytes(String(msg?.group_id || msg?.groupId || ''));
-                            const proposalBytes = toBytes(msg?.data);
-                            if (!groupIdBytes || !proposalBytes) throw new Error('Invalid proposal payload');
-                            client?.process_proposal?.(groupIdBytes, proposalBytes);
-                            await coreCryptoClient?.saveState?.();
-                        } else if (type === 'application') {
-                            // Decrypt to validate we can read it; history is fetched via api.mls.getMessages().
-                            const groupIdBytes = hexToBytes(String(msg?.group_id || msg?.groupId || ''));
-                            const ciphertextBytes = toBytes(msg?.data);
-                            if (groupIdBytes && ciphertextBytes) {
-                                try {
-                                    client?.decrypt_message_with_aad?.(groupIdBytes, ciphertextBytes);
-                                } catch (e) {
-                                    // If we can't decrypt, avoid acking so we can retry after state catches up.
-                                    throw e;
-                                }
-                            }
-                        }
-
-                        if (messageId != null) processedIds.push(messageId);
-                    } catch (e) {
-                        console.warn('[ChatPanel] Failed processing pending message:', msg?.id, e?.message || e);
-                    }
-                }
-
-                if (processedIds.length > 0) {
-                    await api.mls.ackMessages(processedIds).catch((e) => {
-                        console.warn('[ChatPanel] ackMessages failed:', e?.message || e);
-                    });
-                }
-                return processedIds;
-            } finally {
-                pendingSyncPromise = null;
-            }
-        })();
-        return pendingSyncPromise;
+        try {
+            if (!coreCryptoClient?.client) return [];
+            await coreCryptoClient.syncMessages();
+            return [];
+        } catch (e) {
+            console.warn('[ChatPanel] syncMessages failed:', e?.message || e);
+            return [];
+        }
     };
 
     const refreshConversationMessages = async (convId) => {
         if (!convId) return;
         try {
-            const res = await api.mls.getMessages(convId, { limit: 50 });
-            const msgs = normalizeArrayResult(res, ['messages', 'items', 'data', 'rows']);
+            const msgs = await vaultService.getMessages(convId);
             setMessages(msgs);
         } catch (err) {
             console.error('[ChatPanel] Failed to load messages:', err);
@@ -283,7 +236,7 @@ export const ChatPanel = () => {
         try {
             // Fetch both groups and DMs
             const [groups, dms] = await Promise.all([
-                api.mls.getGroups().catch(() => []),
+                Promise.resolve([]),
                 api.mls.getDirectMessages().catch(() => [])
             ]);
 
@@ -347,25 +300,7 @@ export const ChatPanel = () => {
         setMsgInput("");
 
         try {
-            const deviceId = localStorage.getItem('device_id') || localStorage.getItem('device_public_id') || '';
-            const token = getToken();
-
-            const res = await fetch('/api/mls/messages/group', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-                    ...(deviceId ? { 'x-device-id': deviceId } : {}),
-                },
-                body: JSON.stringify({ groupId: convId, data: text, deviceId, messageType: 'application' }),
-            });
-
-            if (!res.ok) {
-                let payload = null;
-                try { payload = await res.json(); } catch {}
-                const msg = payload?.error || payload?.message || `Send failed (${res.status})`;
-                throw new Error(msg);
-            }
+            await coreCryptoClient.sendMessage(convId, text);
         } catch (err) {
             console.warn('[ChatPanel] Send failed:', err?.message || err);
             setMessages(prev => (prev || []).filter(m => m?.id !== optimisticId));
@@ -383,7 +318,7 @@ export const ChatPanel = () => {
 
     const createDMWithUser = async (targetUserId) => {
         try {
-            const res = await api.mls.createDirectMessage(targetUserId);
+            const res = await coreCryptoClient.startDirectMessage(targetUserId);
             const groupId = res?.groupId || res?.group_id || null;
 
             setShowNewDM(false);
@@ -663,7 +598,7 @@ export const ChatPanel = () => {
                                     <div class="mb-3 hover:bg-bb-border/20 p-1 rounded-sm">
                                         <div class="flex items-baseline gap-2 mb-1">
                                             <span class="text-bb-accent font-bold text-xs">
-                                                {(msg.sender || msg.sender_username || 'UNKNOWN').toUpperCase()}
+                                                {getSenderName(msg).toUpperCase()}
                                             </span>
                                             <span class="text-bb-muted text-[10px]">
                                                 {new Date(msg.timestamp || msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}

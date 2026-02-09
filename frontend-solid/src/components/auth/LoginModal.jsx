@@ -40,9 +40,12 @@ export const LoginModal = () => {
                     const user = userData();
                     const userId = user?.username || String(user?.userId);
                     if (userId) {
+                        // Set userId on vaultStore before vault operations (master reads from vaultStore.userId)
+                        const { default: vaultStore } = await import('../../store/vaultStore.js');
+                        vaultStore.setUserId(userId);
                         const success = await vaultService.findAndUnlock(password(), userId);
                         if (!success) {
-                            await vaultService.setupKeystoreWithPassword(password(), userId);
+                            await vaultService.setupKeystoreWithPassword(password());
                         }
                     }
                 } catch (vaultErr) {
@@ -83,9 +86,11 @@ export const LoginModal = () => {
                     const user = userData();
                     const userId = user?.username || String(user?.userId);
                     if (userId) {
+                        const { default: vaultStore } = await import('../../store/vaultStore.js');
+                        vaultStore.setUserId(userId);
                         const success = await vaultService.findAndUnlock(regPassword, userId);
                         if (!success) {
-                            await vaultService.setupKeystoreWithPassword(regPassword, userId);
+                            await vaultService.setupKeystoreWithPassword(regPassword);
                         }
                     }
                 } catch (vaultErr) {
