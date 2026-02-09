@@ -226,7 +226,7 @@ export default function PostsList() {
         if (!c.openEl) return;
         if (!c.lastMouse.valid) return;
         const el = document.elementFromPoint(c.lastMouse.x, c.lastMouse.y);
-        const stillOver = el && c.openEl.contains(el);
+        const stillOver = !!(el && el.closest && el.closest('.post-content-text, .post-content-hover-overlay') && c.openEl.contains(el));
         if (!stillOver) {
           c.openEl.classList.remove('hover-open');
           c.openEl = null;
@@ -238,10 +238,12 @@ export default function PostsList() {
     if (virtualRootEl.__hoverDelegationInstalled) return;
     virtualRootEl.__hoverDelegationInstalled = true;
 
-    const getPostContentEl = (e) => {
-      const t = e.target;
-      if (!t || !t.closest) return null;
-      const el = t.closest('.post-content.clamped.has-hover-overlay');
+    const getPostContentElFromNode = (node) => {
+      if (!node || !node.closest) return null;
+      // Trigger zone should be the clamped text itself, or the expanded overlay.
+      const zone = node.closest('.post-content-text, .post-content-hover-overlay');
+      if (!zone) return null;
+      const el = zone.closest('.post-content.clamped.has-hover-overlay');
       if (!el) return null;
       if (!virtualRootEl.contains(el)) return null;
       return el;
@@ -279,20 +281,36 @@ export default function PostsList() {
 
     // Delegate pointer enter/leave to avoid per-item listeners.
     virtualRootEl.addEventListener('pointerover', (e) => {
-      const el = getPostContentEl(e);
+      const el = getPostContentElFromNode(e.target);
       if (!el) return;
-      // Ignore transitions between children inside the same post-content.
-      if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+      // Ignore transitions within the trigger zone of the same post.
+      const toEl = getPostContentElFromNode(e.relatedTarget);
+      if (toEl && toEl === el) return;
       openAfterDelay(el);
     });
 
     virtualRootEl.addEventListener('pointerout', (e) => {
-      const el = getPostContentEl(e);
+      const el = getPostContentElFromNode(e.target);
       if (!el) return;
-      if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+      const toEl = getPostContentElFromNode(e.relatedTarget);
+      // If we're still inside the trigger zone of the same post, keep it open.
+      if (toEl && toEl === el) return;
       clearTimer();
       closeIfMatches(el);
     });
+
+    // Keep open/close precise even when moving within the post card:
+    // if the cursor is no longer over text/overlay, collapse.
+    virtualRootEl.addEventListener('pointermove', (e) => {
+      const c = feedHoverController;
+      if (!c.openEl) return;
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const over = getPostContentElFromNode(el);
+      if (over !== c.openEl) {
+        c.openEl.classList.remove('hover-open');
+        c.openEl = null;
+      }
+    }, { passive: true });
   };
 
   // Fetch posts if needed (similar to PredictionsList approach)
