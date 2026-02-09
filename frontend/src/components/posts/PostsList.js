@@ -70,6 +70,7 @@ export default function PostsList() {
   let rafPending = false;
   let resizeObserver = null;
   let observed = new Set();
+  let hoverCleanupTimer = null;
 
   // Fetch posts if needed (similar to PredictionsList approach)
   // Check initialFetchAttempted to prevent infinite loop when posts are legitimately empty
@@ -132,6 +133,37 @@ export default function PostsList() {
 
     topPad.val = fenwick.sumPrefix(start);
     bottomPad.val = Math.max(0, total - fenwick.sumPrefix(end + 1));
+
+    // Keep only the hover-expanded post that is currently under the pointer.
+    // Debounce "no hovered element" states to avoid collapse during scroll/virtual re-render.
+    const hoverMap = postsStore.state.hoverExpandedContent.val;
+    const hoveredEl = document.querySelector('.post-virtual-item:hover');
+    const hoveredId = hoveredEl ? Number(hoveredEl.dataset.postId) : null;
+    const clearExcept = (keepId) => {
+      for (const idStr of Object.keys(hoverMap)) {
+        if (!hoverMap[idStr]) continue;
+        const postId = Number(idStr);
+        if (!keepId || postId !== keepId) {
+          postsStore.actions.clearHoverExpand.call(postsStore, postId);
+        }
+      }
+    };
+
+    if (hoveredId) {
+      if (hoverCleanupTimer) clearTimeout(hoverCleanupTimer);
+      hoverCleanupTimer = null;
+      clearExcept(hoveredId);
+    } else if (Object.keys(hoverMap).length) {
+      if (!hoverCleanupTimer) {
+        hoverCleanupTimer = setTimeout(() => {
+          hoverCleanupTimer = null;
+          const hoveredEl2 = document.querySelector('.post-virtual-item:hover');
+          const hoveredId2 = hoveredEl2 ? Number(hoveredEl2.dataset.postId) : null;
+          clearExcept(hoveredId2);
+        }, 200);
+      }
+    }
+
     // Avoid re-rendering the entire virtual list when the range didn't change.
     // `range` is an object state, and assigning a new object triggers replacement.
     const prev = range.val;
@@ -172,12 +204,6 @@ export default function PostsList() {
       scheduleUpdate();
     });
     window.addEventListener('scroll', scheduleUpdate, { passive: true });
-    // If the user scrolls, cancel any delayed hover expansions (they'll often unmount due to virtualization).
-    window.addEventListener('scroll', () => {
-      if (Object.keys(postsStore.state.hoverExpandedContent.val).length) {
-        postsStore.actions.clearAllHoverExpanded.call(postsStore);
-      }
-    }, { passive: true });
     window.addEventListener('resize', scheduleUpdate);
   }, 0);
 

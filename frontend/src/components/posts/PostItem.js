@@ -347,6 +347,7 @@ export default function PostItem({ post }) {
             const startHoverTimer = () => {
               if (!canHoverExpand()) return;
               if (isExpanded()) return;
+              if (isHoverExpanded()) return;
               if (!isLong) return;
               postsStore.actions.startHoverExpandTimer.call(postsStore, post.id);
             };
@@ -365,7 +366,20 @@ export default function PostItem({ post }) {
               },
               onmouseout: (e) => {
                 if (e?.currentTarget && e?.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
-                clearHoverTimer();
+                // On scroll, some browsers may emit mouseout even if the pointer is still over the element.
+                // Debounce and only clear if we're truly not hovered anymore.
+                const target = e?.currentTarget;
+                const postId = post.id;
+                setTimeout(() => {
+                  if (target?.matches && target.matches(':hover')) return;
+                  const hovered = document.querySelector('.post-virtual-item:hover');
+                  // If hover state is transiently unavailable (e.g., during scroll/virtual re-render),
+                  // do not clear here. The virtual list will clean up stale hover expansions.
+                  if (!hovered) return;
+                  const hoveredId = Number(hovered.dataset.postId);
+                  if (hoveredId === postId) return;
+                  clearHoverTimer();
+                }, 80);
               }
             }, [
               div(
