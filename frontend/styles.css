@@ -247,6 +247,7 @@ input[type="submit"]:disabled {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100svh; /* stable viewport on mobile (prevents first-scroll URL-bar jump) */
   width: 100%;
   padding-top: 10vh;
 }
@@ -273,6 +274,7 @@ input[type="submit"]:disabled {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100svh;
 }
 
 .main-content {
@@ -507,6 +509,7 @@ body.dark-mode .device-item {
 .login-page {
   background-color: var(--blue-bg);
   min-height: 100vh;
+  min-height: 100svh;
   width: 100%;
   display: flex;
   align-items: flex-start;
@@ -728,6 +731,7 @@ body.dark-mode .device-item {
 .signup-page {
   background-color: var(--blue-bg);
   min-height: 100vh;
+  min-height: 100svh;
   width: 100%;
   display: flex;
   align-items: flex-start;
@@ -4920,6 +4924,7 @@ select {
     position: fixed;
     left: -250px;
     height: 100vh;
+    height: 100svh;
     transition: left 0.3s ease;
     z-index: 1000;
   }
@@ -4966,6 +4971,7 @@ select {
     left: -250px;
     width: 250px;
     height: 100vh;
+    height: 100svh;
     top: 0;
     transition: left 0.3s ease;
     z-index: 1000;
@@ -6348,6 +6354,7 @@ body.dark-mode .device-link-modal .instructions {
 /* Verify Email Page */
 .verify-email-page {
   min-height: 100vh;
+  min-height: 100svh;
   display: flex;
   align-items: center;
   justify-content: center;
