@@ -73,7 +73,6 @@ export default function PostsList() {
   let resizeObserver = null;
   let observed = new Set();
   let observePending = false;
-
   // Keep a stable virtual list root element. Replacing the root on the first scroll
   // can cause Firefox to "snap back" to the top while it recomputes scroll metrics.
   const virtualTopSpacerEl = canVirtualize ? van.tags.div({ class: 'posts-spacer posts-spacer-top' }) : null;
@@ -348,6 +347,7 @@ export default function PostsList() {
     if (!rootEl) rootEl = virtualRootEl || document.getElementById('posts-virtual-list');
     if (!rootEl || !rootEl.isConnected || !resizeObserver) return;
     // Only observe currently-rendered items.
+    // Avoid forced layout reads (offsetHeight) on scroll; ResizeObserver will report sizes.
     observed.forEach(el => resizeObserver.unobserve(el));
     observed = new Set();
     rootEl.querySelectorAll('.post-virtual-item').forEach(el => {
@@ -359,6 +359,7 @@ export default function PostsList() {
   const scheduleObservedUpdate = () => {
     if (observePending) return;
     observePending = true;
+    // Defer until after DOM updates settle.
     requestAnimationFrame(() => {
       setTimeout(() => {
         observePending = false;
@@ -402,7 +403,7 @@ export default function PostsList() {
       }
     }
 
-    // Refresh observation set only when the rendered range changes.
+    // Only refresh observation set when the rendered range changes.
     if (rangeChanged) scheduleObservedUpdate();
   };
 
@@ -436,6 +437,7 @@ export default function PostsList() {
     posts.val.length;
     rebuildIndex();
     scheduleUpdate();
+    // New list means new DOM nodes; ensure they're observed once rendered.
     scheduleObservedUpdate();
   });
 
