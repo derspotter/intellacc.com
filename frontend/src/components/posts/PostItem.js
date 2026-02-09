@@ -356,37 +356,32 @@ export default function PostItem({ post }) {
               postsStore.actions.clearHoverExpand.call(postsStore, post.id);
             };
 
-            return div({
-              class: "post-content-wrapper",
-              // Use mouseover/out (with relatedTarget guard) instead of mouseenter/leave.
-              // Some automation tools don't consistently trigger mouseenter.
-              onmouseover: (e) => {
-                if (e?.currentTarget && e?.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
-                startHoverTimer();
-              },
-              onmouseout: (e) => {
-                if (e?.currentTarget && e?.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
-                // On scroll, some browsers may emit mouseout even if the pointer is still over the element.
-                // Debounce and only clear if we're truly not hovered anymore.
-                const target = e?.currentTarget;
-                const postId = post.id;
-                setTimeout(() => {
-                  if (target?.matches && target.matches(':hover')) return;
-                  const hovered = document.querySelector('.post-virtual-item:hover');
-                  // If hover state is transiently unavailable (e.g., during scroll/virtual re-render),
-                  // do not clear here. The virtual list will clean up stale hover expansions.
-                  if (!hovered) return;
-                  const hoveredId = Number(hovered.dataset.postId);
-                  if (hoveredId === postId) return;
-                  clearHoverTimer();
-                }, 80);
-              }
-            }, [
-              div(
-                { class: () => `post-content ${isExpanded() ? 'expanded' : 'clamped'}${(!isExpanded() && isHoverExpanded()) ? ' hover-expanded' : ''}` },
-                div({ class: 'post-content-text' }, content)
-              ),
-              () => isLong ? button({
+            return div({ class: "post-content-wrapper" }, [
+              div({
+                class: () => `post-content ${isExpanded() ? 'expanded' : 'clamped'}${(!isExpanded() && isHoverExpanded()) ? ' hover-expanded' : ''}`,
+                // Delayed hover expansion should be tied to the content area itself.
+                onmouseover: (e) => {
+                  if (e?.currentTarget && e?.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+                  startHoverTimer();
+                },
+                onmouseout: (e) => {
+                  if (e?.currentTarget && e?.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+                  const target = e?.currentTarget;
+                  setTimeout(() => {
+                    if (target?.matches && target.matches(':hover')) return;
+                    // If virtualization swapped DOM nodes during scroll, the pointer can still
+                    // be over the *new* content element for this same post. In that case, do not
+                    // collapse the hover-expansion.
+                    const hoveredContent = document.querySelector('.post-content:hover');
+                    const hoveredItem = hoveredContent?.closest ? hoveredContent.closest('.post-virtual-item') : null;
+                    const hoveredId = hoveredItem ? Number(hoveredItem.dataset.postId) : null;
+                    if (hoveredId === post.id) return;
+                    clearHoverTimer();
+                  }, 80);
+                }
+              }, div({ class: 'post-content-text' }, content)),
+              // Hide the toggle while hover-expanded (ephemeral). It re-appears once the hover expansion collapses.
+              () => (isLong && !isHoverExpanded()) ? button({
                 type: 'button',
                 class: 'post-content-toggle',
                 onclick: (e) => {

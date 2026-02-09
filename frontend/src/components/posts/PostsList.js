@@ -137,8 +137,10 @@ export default function PostsList() {
     // Keep only the hover-expanded post that is currently under the pointer.
     // Debounce "no hovered element" states to avoid collapse during scroll/virtual re-render.
     const hoverMap = postsStore.state.hoverExpandedContent.val;
-    const hoveredEl = document.querySelector('.post-virtual-item:hover');
-    const hoveredId = hoveredEl ? Number(hoveredEl.dataset.postId) : null;
+    // Keep hover-expansion alive only while the pointer is over the post content area.
+    const hoveredContent = document.querySelector('.post-content:hover');
+    const hoveredItem = hoveredContent?.closest ? hoveredContent.closest('.post-virtual-item') : null;
+    const hoveredId = hoveredItem ? Number(hoveredItem.dataset.postId) : null;
     const clearExcept = (keepId) => {
       for (const idStr of Object.keys(hoverMap)) {
         if (!hoverMap[idStr]) continue;
@@ -157,8 +159,12 @@ export default function PostsList() {
       if (!hoverCleanupTimer) {
         hoverCleanupTimer = setTimeout(() => {
           hoverCleanupTimer = null;
-          const hoveredEl2 = document.querySelector('.post-virtual-item:hover');
-          const hoveredId2 = hoveredEl2 ? Number(hoveredEl2.dataset.postId) : null;
+          // Re-check the content-area hover; during scroll/virtual updates we can briefly
+          // lose `:hover`, but we should never keep hover-expansion if the pointer isn't
+          // over the post content itself.
+          const hoveredContent2 = document.querySelector('.post-content:hover');
+          const hoveredItem2 = hoveredContent2?.closest ? hoveredContent2.closest('.post-virtual-item') : null;
+          const hoveredId2 = hoveredItem2 ? Number(hoveredItem2.dataset.postId) : null;
           clearExcept(hoveredId2);
         }, 200);
       }
