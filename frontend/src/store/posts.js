@@ -82,6 +82,21 @@ const postsStore = {
       }, 1500));
     },
 
+    maybeStartHoverExpandTimer(postId) {
+      if (!this._hoverTimers) this._hoverTimers = new Map();
+      if (this._hoverTimers.has(postId)) return;
+      this.actions.startHoverExpandTimer.call(this, postId);
+    },
+
+    cancelHoverTimersExcept(keepPostId) {
+      if (!this._hoverTimers || this._hoverTimers.size === 0) return;
+      for (const [postId, timer] of this._hoverTimers.entries()) {
+        if (keepPostId && Number(postId) === Number(keepPostId)) continue;
+        clearTimeout(timer);
+        this._hoverTimers.delete(postId);
+      }
+    },
+
     clearAllHoverExpanded() {
       if (this._hoverTimers) {
         for (const t of this._hoverTimers.values()) clearTimeout(t);

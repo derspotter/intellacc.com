@@ -141,6 +141,36 @@ export default function PostsList() {
     const hoveredContent = document.querySelector('.post-content:hover');
     const hoveredItem = hoveredContent?.closest ? hoveredContent.closest('.post-virtual-item') : null;
     const hoveredId = hoveredItem ? Number(hoveredItem.dataset.postId) : null;
+
+    // If the hovered post changes purely due to scrolling (element moves under a stationary pointer),
+    // we won't necessarily get mouseout events. Cancel any pending hover timers for other posts so we
+    // don't expand the wrong one later.
+    postsStore.actions.cancelHoverTimersExcept.call(postsStore, hoveredId);
+
+    // If a post is hovered due to scroll positioning (no fresh mouseover), ensure we still kick off
+    // the delayed hover expansion.
+    if (hoveredId) {
+      const isExpanded = !!postsStore.state.expandedContent.val[hoveredId];
+      const isHoverExpanded = !!postsStore.state.hoverExpandedContent.val[hoveredId];
+      if (!isExpanded && !isHoverExpanded) {
+        const idx = idToIndex.get(hoveredId);
+        const p = (idx !== undefined) ? posts.val[idx] : null;
+        const content = p ? String(p.content || '') : '';
+        const isLong = content.length > 240 || content.split('\n').length > 6;
+        const canHoverExpand = (() => {
+          try {
+            if (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) return false;
+            if ('ontouchstart' in window) return false;
+            return true;
+          } catch {
+            return false;
+          }
+        })();
+        if (canHoverExpand && isLong) {
+          postsStore.actions.maybeStartHoverExpandTimer.call(postsStore, hoveredId);
+        }
+      }
+    }
     const clearExcept = (keepId) => {
       for (const idStr of Object.keys(hoverMap)) {
         if (!hoverMap[idStr]) continue;

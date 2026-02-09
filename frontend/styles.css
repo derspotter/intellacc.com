@@ -883,6 +883,12 @@ body.dark-mode .ai-content-badge {
 
   max-height: 70vh;
   overflow: auto;
+  scrollbar-width: none; /* Firefox */
+}
+
+.post-content-hover-overlay::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .post-content-toggle {
