@@ -868,6 +868,9 @@ body.dark-mode .ai-content-badge {
 
   background: var(--card-bg);
   color: var(--text-color);
+  /* Ensure the overlay fully occludes underlying feed text. */
+  mix-blend-mode: normal;
+  isolation: isolate;
   border-radius: var(--border-radius);
   padding: 0.5rem; /* match .post-content padding so text aligns */
   box-shadow: var(--box-shadow);
@@ -884,14 +887,14 @@ body.dark-mode .ai-content-badge {
   .post-content.clamped.has-hover-overlay:hover .post-content-hover-overlay {
     opacity: 1;
     pointer-events: auto;
-    transition-delay: 1.5s;
+    transition-delay: 1s;
   }
 
   /* Hide the toggle only once the overlay would appear. */
   .post-content.clamped.has-hover-overlay:hover + .post-content-toggle {
     opacity: 0;
     pointer-events: none;
-    transition-delay: 1.5s;
+    transition-delay: 1s;
   }
 }
 
