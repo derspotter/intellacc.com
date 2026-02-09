@@ -89,6 +89,29 @@ export default function PostsList() {
     virtualLoadingMoreEl,
     virtualEndEl
   ]) : null;
+  const itemCache = new Map(); // postId -> stable wrapper element
+  let lastVisibleIds = [];
+
+  const getOrCreateItemEl = (post) => {
+    let el = itemCache.get(post.id);
+    if (!el) {
+      el = van.tags.div(
+        { class: 'post-virtual-item', 'data-post-id': post.id },
+        PostItem({ post })
+      );
+      el.__postRef = post;
+      itemCache.set(post.id, el);
+      return el;
+    }
+    // Keep attributes stable even if the element got moved in/out of the DOM.
+    el.dataset.postId = String(post.id);
+    if (el.__postRef !== post) {
+      // If the store replaced the post object, refresh this item in-place.
+      el.replaceChildren(PostItem({ post }));
+      el.__postRef = post;
+    }
+    return el;
+  };
 
   // Fetch posts if needed (similar to PredictionsList approach)
   // Check initialFetchAttempted to prevent infinite loop when posts are legitimately empty
@@ -216,25 +239,36 @@ export default function PostsList() {
   // Sync the stable virtual root without recreating it (prevents first-scroll snap-back).
   if (canVirtualize && virtualRootEl) {
     van.derive(() => {
-      const { start, end } = range.val;
       const top = topPad.val;
       const bottom = bottomPad.val;
-      const list = posts.val;
       const lm = loadingMore.val;
       const hm = hasMore.val;
 
       virtualTopSpacerEl.style.height = `${top}px`;
       virtualBottomSpacerEl.style.height = `${bottom}px`;
-
-      const visible = list.length ? list.slice(start, end + 1) : [];
-      virtualItemsEl.replaceChildren(
-        ...visible.map(post =>
-          van.tags.div({ class: 'post-virtual-item', 'data-post-id': post.id }, PostItem({ post }))
-        )
-      );
-
       virtualLoadingMoreEl.style.display = lm ? 'block' : 'none';
-      virtualEndEl.style.display = (!hm && list.length > 0) ? 'block' : 'none';
+      virtualEndEl.style.display = (!hm && posts.val.length > 0) ? 'block' : 'none';
+    });
+
+    // Update visible items only when the visible range changes.
+    // This keeps hover state stable (no DOM replacement during the 1s hover delay).
+    van.derive(() => {
+      const { start, end } = range.val;
+      const list = posts.val;
+      const visible = (list.length && end >= start) ? list.slice(start, end + 1) : [];
+      const ids = visible.map(p => p.id);
+      const same =
+        ids.length === lastVisibleIds.length &&
+        ids.every((id, i) => id === lastVisibleIds[i]);
+
+      if (!same) {
+        virtualItemsEl.replaceChildren(...visible.map(getOrCreateItemEl));
+        lastVisibleIds = ids;
+        scheduleObservedUpdate();
+      } else {
+        // Keep content fresh if store swapped post objects, without touching DOM order.
+        visible.forEach(getOrCreateItemEl);
+      }
     });
   }
 
