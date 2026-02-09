@@ -84,6 +84,7 @@ recherche/2504.01781v2.pdf
 
 # Build artifacts
 /frontend/dist/
+.vite/
 
 # Test output
 /test-results/
