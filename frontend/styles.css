@@ -832,6 +832,7 @@ body.dark-mode .ai-content-badge {
   padding: 0.5rem;
   border: 1px solid transparent;
   box-sizing: border-box;
+  position: relative;
 }
 
 .post-content-text {
@@ -849,9 +850,9 @@ body.dark-mode .ai-content-badge {
 }
 
 .post-content.clamped.hover-expanded .post-content-text {
-  /* Desktop-only hover expansion is controlled in JS with a delay. */
-  max-height: none;
-  overflow: visible;
+  /* Hover expansion uses an overlay; keep the preview clamped to avoid layout changes. */
+  max-height: calc(5 * 1.5em);
+  overflow: hidden;
 }
 
 .post-content.expanded .post-content-text {
@@ -860,6 +861,29 @@ body.dark-mode .ai-content-badge {
 }
 
 /* Hover expansion is intentionally not CSS-driven. */
+
+.post-content-hover-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
+
+  background: var(--card-bg);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 0.5rem;
+  box-shadow: var(--box-shadow);
+
+  max-height: 70vh;
+  overflow: auto;
+}
 
 .post-content-toggle {
   align-self: flex-start;

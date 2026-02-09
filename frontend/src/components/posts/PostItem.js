@@ -379,7 +379,11 @@ export default function PostItem({ post }) {
                     clearHoverTimer();
                   }, 80);
                 }
-              }, div({ class: 'post-content-text' }, content)),
+              }, [
+                div({ class: 'post-content-text' }, content),
+                // Use an overlay for hover expansion so we don't change layout (prevents scroll jumps).
+                () => (!isExpanded() && isHoverExpanded()) ? div({ class: 'post-content-hover-overlay' }, content) : null
+              ]),
               // Hide the toggle while hover-expanded (ephemeral). It re-appears once the hover expansion collapses.
               () => (isLong && !isHoverExpanded()) ? button({
                 type: 'button',

@@ -66,45 +66,10 @@ const postsStore = {
         clearTimeout(this._hoverTimers.get(postId));
         this._hoverTimers.delete(postId);
       }
-
-      // If we are collapsing an actually-expanded hover post that sits above the viewport,
-      // shrink will "pull up" the document and make the user appear to jump further down.
-      // Compensate by adjusting scroll by the height delta so the viewport stays anchored.
-      const wasHoverExpanded = !!this.state.hoverExpandedContent.val[postId];
-      let anchorEl = null;
-      let anchorRect = null;
-      let beforeHeight = null;
-      if (wasHoverExpanded && typeof document !== 'undefined') {
-        anchorEl = document.querySelector(`.post-virtual-item[data-post-id="${postId}"]`);
-        if (anchorEl) {
-          anchorRect = anchorEl.getBoundingClientRect();
-          beforeHeight = anchorEl.offsetHeight;
-        }
-      }
-
-      if (wasHoverExpanded) {
+      if (this.state.hoverExpandedContent.val[postId]) {
         const next = { ...this.state.hoverExpandedContent.val };
         delete next[postId];
         this.state.hoverExpandedContent.val = next;
-
-        // Apply scroll anchoring when some part of the post is above the viewport.
-        // This is the case that creates the "jump" (content above shrinks, pulling the
-        // viewport down relative to the feed).
-        if (anchorEl && anchorRect && beforeHeight != null && anchorRect.top < 0) {
-          requestAnimationFrame(() => {
-            try {
-              const afterEl = document.querySelector(`.post-virtual-item[data-post-id="${postId}"]`);
-              if (!afterEl) return;
-              const afterHeight = afterEl.offsetHeight;
-              const delta = afterHeight - beforeHeight;
-              if (delta) {
-                window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
-              }
-            } catch {
-              // No-op: anchoring is best-effort and should never block state updates.
-            }
-          });
-        }
       }
     },
 
