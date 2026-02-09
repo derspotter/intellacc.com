@@ -767,6 +767,12 @@ body.dark-mode .device-item {
   box-shadow: var(--box-shadow);
 }
 
+/* The feed uses virtualization (spacers) which can change layout as measurements come in.
+   Disable browser scroll anchoring here to prevent the first scroll from snapping back up. */
+#posts-virtual-list {
+  overflow-anchor: none;
+}
+
 .post-header {
   display: flex;
   justify-content: space-between;

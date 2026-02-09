@@ -172,9 +172,10 @@ export async function onLoginSuccess(password = null) {
       }
     }).catch(() => {});
     
-    // Navigate to home page after login
+    // Navigate to home page after login.
+    // Let the global `hashchange` listener drive routing to avoid double-renders
+    // (and the occasional scroll snap-back on first user scroll).
     window.location.hash = 'home';
-    updatePageFromHash();
 }
 
 /**

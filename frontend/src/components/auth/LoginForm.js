@@ -46,7 +46,8 @@ const LoginForm = () => {
       const result = await auth.login(emailValue, passwordValue);
 
       if (result.success) {
-        window.location.hash = '#';
+        // Navigation is handled by auth.onLoginSuccess() to avoid hash churn
+        // (which can cause scroll jumps on slower devices/browsers).
       } else {
         error.val = result.error || 'Login failed';
         stage.val = 'idle';
@@ -94,7 +95,7 @@ const LoginForm = () => {
           div({ style: 'width: 100%; margin-top: 1rem;' },
             PasskeyButton({
               email: { val: '' }, // PasskeyButton will read from its own input
-              onSuccess: () => window.location.hash = '#',
+              onSuccess: null, // onLoginSuccess() already routes to home
               onError: (err) => { error.val = err.message || 'Passkey login failed'; }
             })
           ),
