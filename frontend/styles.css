@@ -841,6 +841,7 @@ body.dark-mode .ai-content-badge {
   word-break: normal;
   hyphens: none;
   line-height: 1.5em;
+  transition: opacity 0s linear;
 }
 
 .post-content.clamped .post-content-text {
@@ -858,7 +859,9 @@ body.dark-mode .ai-content-badge {
 
 .post-content-hover-overlay {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 50;
   box-sizing: border-box;
   white-space: pre-wrap;
@@ -866,7 +869,8 @@ body.dark-mode .ai-content-badge {
   word-break: normal;
   hyphens: none;
 
-  background: var(--card-bg);
+  /* Use fully-opaque surfaces so underlying feed text never shows through. */
+  background: #fff;
   color: var(--text-color);
   /* Ensure the overlay fully occludes underlying feed text. */
   mix-blend-mode: normal;
@@ -876,25 +880,60 @@ body.dark-mode .ai-content-badge {
   box-shadow: var(--box-shadow);
   outline: 1px solid var(--border-color);
 
+  /* Make the box grow with content so the background isn't "see-through" for overflowed text. */
+  max-height: 76vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none; /* Firefox */
+
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms ease;
+  transition: opacity 0s linear;
   transition-delay: 0s;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  /* Delayed hover expansion: show overlay only after 1.5s of sustained hover. */
-  .post-content.clamped.has-hover-overlay:hover .post-content-hover-overlay {
+body.dark-mode .post-content-hover-overlay {
+  background: #121212;
+}
+
+.post-content-hover-overlay::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Delayed hover expansion: show overlay only after 1s of sustained hover. */
+.post-content.clamped.has-hover-overlay:hover .post-content-hover-overlay {
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 1s;
+}
+
+/* Hide the clamped preview text once the overlay appears to avoid ghosting/double text. */
+.post-content.clamped.has-hover-overlay:hover .post-content-text {
+  opacity: 0;
+  transition-delay: 1s;
+}
+
+/* Hide the toggle only once the overlay would appear. */
+.post-content.clamped.has-hover-overlay:hover + .post-content-toggle {
+  opacity: 0;
+  pointer-events: none;
+  transition-delay: 1s;
+}
+
+/* Touch devices often emulate sticky hover; disable the overlay there entirely. */
+@media (hover: none) {
+  .post-content-hover-overlay {
+    display: none !important;
+  }
+  .post-content.clamped.has-hover-overlay:hover .post-content-text {
+    opacity: 1;
+    transition-delay: 0s;
+  }
+  .post-content.clamped.has-hover-overlay:hover + .post-content-toggle {
     opacity: 1;
     pointer-events: auto;
-    transition-delay: 1s;
-  }
-
-  /* Hide the toggle only once the overlay would appear. */
-  .post-content.clamped.has-hover-overlay:hover + .post-content-toggle {
-    opacity: 0;
-    pointer-events: none;
-    transition-delay: 1s;
+    transition-delay: 0s;
   }
 }
 
@@ -908,7 +947,7 @@ body.dark-mode .ai-content-badge {
   font-weight: 700;
   cursor: pointer;
   text-decoration: underline;
-  transition: opacity 120ms ease;
+  transition: opacity 0s linear;
   transition-delay: 0s;
 }
 
