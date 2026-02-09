@@ -84,12 +84,15 @@ body.dark-mode {
 html {
   scroll-behavior: smooth;
   overflow-x: hidden;
+  /* Prevent "snap back" on first scroll when late layout changes occur (fonts/images/virtualization). */
+  overflow-anchor: none;
 }
 
 body {
   line-height: 1.5;
   background-color: var(--blue-bg);
   overflow-x: hidden;
+  overflow-anchor: none;
 }
 
 /* Typography */
