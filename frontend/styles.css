@@ -609,6 +609,38 @@ body.dark-mode .device-item {
   cursor: pointer;
 }
 
+.social-auth-section {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.social-auth-title {
+  margin: 0 0 1rem;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--secondary-text);
+}
+
+.social-auth-provider {
+  margin-bottom: 1rem;
+}
+
+.social-auth-provider label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+
+.login-page .social-auth-provider input {
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+
+.social-auth-button {
+  width: 100%;
+}
+
 .reset-warning {
   background: #fff3cd;
   border: 1px solid #ffecb5;
@@ -928,10 +960,10 @@ body.dark-mode .ai-content-badge {
   box-shadow: var(--box-shadow);
   outline: 1px solid var(--border-color);
 
-  /* Always show the full text. Never make the overlay a scroll container.
-     Scrolling should always scroll the page. */
-  max-height: none !important;
-  overflow: visible !important;
+  /* Let the overlay fully expand to the full text.
+     It must not become a scroll container; scrolling should always scroll the page. */
+  max-height: none;
+  overflow: visible;
 
   opacity: 0;
   pointer-events: none;
@@ -943,7 +975,7 @@ body.dark-mode .post-content-hover-overlay {
   background: #121212;
 }
 
-/* Overlay is not scrollable, so no scrollbar styling needed. */
+/* No custom scrollbars: the overlay should never scroll. */
 
 /* JS-pinned hover: keep overlay open during scroll even if the browser drops :hover temporarily. */
 .post-content.clamped.has-hover-overlay.hover-open .post-content-hover-overlay {
