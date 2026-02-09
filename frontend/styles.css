@@ -857,11 +857,9 @@ body.dark-mode .ai-content-badge {
 /* Hover expansion is intentionally not CSS-driven. */
 
 .post-content-hover-overlay {
-  position: fixed;
-  left: 50%;
-  top: 12vh;
-  transform: translateX(-50%);
-  z-index: 2000;
+  position: absolute;
+  inset: 0;
+  z-index: 50;
   box-sizing: border-box;
   white-space: pre-wrap;
   overflow-wrap: break-word;
@@ -870,22 +868,15 @@ body.dark-mode .ai-content-badge {
 
   background: var(--card-bg);
   color: var(--text-color);
-  border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
-  padding: 0.5rem;
+  padding: 0.5rem; /* match .post-content padding so text aligns */
   box-shadow: var(--box-shadow);
+  outline: 1px solid var(--border-color);
 
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease;
   transition-delay: 0s;
-
-  width: min(720px, calc(100vw - 32px));
-  max-height: 76vh;
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE/Edge legacy */
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -896,14 +887,12 @@ body.dark-mode .ai-content-badge {
     transition-delay: 1.5s;
   }
 
-  /* Hide the toggle while hovering a long clamped post (prevents overlap with overlay). */
+  /* Hide the toggle only once the overlay would appear. */
   .post-content.clamped.has-hover-overlay:hover + .post-content-toggle {
-    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition-delay: 1.5s;
   }
-}
-
-.post-content-hover-overlay::-webkit-scrollbar {
-  display: none;
 }
 
 .post-content-toggle {
@@ -916,6 +905,8 @@ body.dark-mode .ai-content-badge {
   font-weight: 700;
   cursor: pointer;
   text-decoration: underline;
+  transition: opacity 120ms ease;
+  transition-delay: 0s;
 }
 
 body.dark-mode .post-content-toggle {
