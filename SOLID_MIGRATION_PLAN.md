@@ -56,9 +56,13 @@ Implemented as `ThreePaneLayout` with resizable dividers (pointer-based drag).
 - [x] `openmls-wasm` and `coreCryptoClient.js` integrated via Vite WASM plugin.
 - [x] `ChatPanel` with conversation list, message display, real send via `/api/mls/messages/group`.
 - [x] New DM flow: debounced user search, create DM, auto-select conversation.
-- [x] Pending queue processing (`/api/mls/queue/pending` + `/api/mls/queue/ack`).
+- [x] Pending queue processing delegated to `coreCryptoClient.syncMessages()`.
 - [x] Unread count badges per conversation.
 - [x] Vault unlock prompt for E2EE key management.
+- [x] MLS services ported from master: `api.js`, `coreCryptoClient.js`, `vaultService.js`, `deviceIdStore.js`, `tokenService.js`, `idleLock.js` (all framework-agnostic).
+- [x] SolidJS `messagingStore.js` — full port of VanJS reactive store using `createStore`/`createMemo`/`createRoot`/`batch`.
+- [x] Sender name resolution: numeric `senderId` mapped to display username via `getSenderName()` helper.
+- [x] Bidirectional E2EE verified: messages encrypt/decrypt correctly in both directions.
 
 #### Phase 5: Auth & Interactive Features — COMPLETE
 - [x] Login screen: staged email → password flow with terminal aesthetic.
@@ -79,9 +83,13 @@ Implemented as `ThreePaneLayout` with resizable dividers (pointer-based drag).
 - **Realtime**: Socket.IO client with pub/sub for MLS events.
 - **E2EE**: OpenMLS WASM with vault-based key management.
 
+### 5. Responsive Layout — COMPLETE
+- [x] Mobile (`< 768px`): Single pane with bottom tab bar for pane switching.
+- [x] Tablet (`768–1024px`): Two-pane layout.
+- [x] Desktop (`>= 1024px`): Three resizable panes with drag dividers.
+
 ## Next Steps
-All migration phases are complete. Potential future work:
-1. Mobile responsive breakpoints (currently desktop-only 3-pane layout).
-2. Deeper MLS group management (add/remove members, group settings).
-3. Prediction history charts and user accuracy tracking in Market pane.
-4. Replace the old VanJS frontend (`frontend/` on port 5173) with this SolidJS version.
+All migration phases and responsive layout are complete. Potential future work:
+1. Deeper MLS group management (add/remove members, group settings).
+2. Prediction history charts and user accuracy tracking in Market pane.
+3. Replace the old VanJS frontend (`frontend/` on port 5173) with this SolidJS version.
