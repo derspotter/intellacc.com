@@ -2,6 +2,8 @@ import van from 'vanjs-core';
 import postsStore from '../../store/posts';  // Import the store object directly
 import PostItem from './PostItem';
 
+let feedHoverController = null;
+
 /**
  * List of posts component
  */
@@ -91,6 +93,9 @@ export default function PostsList() {
   ]) : null;
   const itemCache = new Map(); // postId -> stable wrapper element
   let lastVisibleIds = [];
+  let lastStart = 0;
+  let lastEnd = -1;
+  let lastFirstId = null;
 
   const getOrCreateItemEl = (post) => {
     let el = itemCache.get(post.id);
@@ -111,6 +116,183 @@ export default function PostsList() {
       el.__postRef = post;
     }
     return el;
+  };
+
+  const resetVisibleRange = (visiblePosts, start, end) => {
+    virtualItemsEl.replaceChildren(...visiblePosts.map(getOrCreateItemEl));
+    lastVisibleIds = visiblePosts.map(p => p.id);
+    lastStart = start;
+    lastEnd = end;
+    lastFirstId = posts.val[0]?.id ?? null;
+    scheduleObservedUpdate();
+  };
+
+  const updateVisibleRangeIncremental = (start, end) => {
+    const list = posts.val;
+    if (!list.length || end < start) {
+      virtualItemsEl.replaceChildren();
+      lastVisibleIds = [];
+      lastStart = 0;
+      lastEnd = -1;
+      lastFirstId = list[0]?.id ?? null;
+      scheduleObservedUpdate();
+      return;
+    }
+
+    // If the list re-based (e.g., refresh inserted items at the top), fall back to a full reset.
+    const currentFirstId = list[0]?.id ?? null;
+    if (lastFirstId !== currentFirstId) {
+      resetVisibleRange(list.slice(start, end + 1), start, end);
+      return;
+    }
+
+    // First render.
+    if (lastEnd < lastStart || lastVisibleIds.length === 0) {
+      resetVisibleRange(list.slice(start, end + 1), start, end);
+      return;
+    }
+
+    // If the range jumped too far, do a reset (cheaper than diffing).
+    if (Math.abs(start - lastStart) > 50 || Math.abs(end - lastEnd) > 50) {
+      resetVisibleRange(list.slice(start, end + 1), start, end);
+      return;
+    }
+
+    // Remove from front.
+    while (lastStart < start && lastVisibleIds.length) {
+      const el = virtualItemsEl.firstElementChild;
+      if (el) el.remove();
+      lastVisibleIds.shift();
+      lastStart++;
+    }
+
+    // Remove from back.
+    while (lastEnd > end && lastVisibleIds.length) {
+      const el = virtualItemsEl.lastElementChild;
+      if (el) el.remove();
+      lastVisibleIds.pop();
+      lastEnd--;
+    }
+
+    // Prepend missing at front (iterate backwards so order is correct).
+    for (let i = start - 1; i >= lastStart; i--) {
+      const post = list[i];
+      if (!post) continue;
+      virtualItemsEl.prepend(getOrCreateItemEl(post));
+      lastVisibleIds.unshift(post.id);
+    }
+    if (start < lastStart) lastStart = start;
+
+    // Append missing at back.
+    for (let i = lastEnd + 1; i <= end; i++) {
+      const post = list[i];
+      if (!post) continue;
+      virtualItemsEl.append(getOrCreateItemEl(post));
+      lastVisibleIds.push(post.id);
+    }
+    if (end > lastEnd) lastEnd = end;
+
+    // Refresh content if post objects swapped, without touching DOM order.
+    for (let i = 0; i < lastVisibleIds.length; i++) {
+      const idx = lastStart + i;
+      const post = list[idx];
+      if (post) getOrCreateItemEl(post);
+    }
+
+    scheduleObservedUpdate();
+  };
+
+  const ensureFeedHover = () => {
+    if (!canVirtualize || !virtualRootEl) return;
+
+    if (!feedHoverController) {
+      feedHoverController = {
+        root: null,
+        openEl: null,
+        pendingEl: null,
+        timer: null,
+        lastMouse: { x: 0, y: 0, valid: false }
+      };
+
+      // Track cursor position so we can keep hover state stable during scroll.
+      window.addEventListener('mousemove', (e) => {
+        feedHoverController.lastMouse = { x: e.clientX, y: e.clientY, valid: true };
+      }, { passive: true });
+
+      // Some browsers may drop :hover while the page is actively scrolling.
+      // If the cursor is still over the expanded overlay, keep it open.
+      window.addEventListener('scroll', () => {
+        const c = feedHoverController;
+        if (!c.openEl) return;
+        if (!c.lastMouse.valid) return;
+        const el = document.elementFromPoint(c.lastMouse.x, c.lastMouse.y);
+        const stillOver = el && c.openEl.contains(el);
+        if (!stillOver) {
+          c.openEl.classList.remove('hover-open');
+          c.openEl = null;
+        }
+      }, { passive: true });
+    }
+
+    feedHoverController.root = virtualRootEl;
+    if (virtualRootEl.__hoverDelegationInstalled) return;
+    virtualRootEl.__hoverDelegationInstalled = true;
+
+    const getPostContentEl = (e) => {
+      const t = e.target;
+      if (!t || !t.closest) return null;
+      const el = t.closest('.post-content.clamped.has-hover-overlay');
+      if (!el) return null;
+      if (!virtualRootEl.contains(el)) return null;
+      return el;
+    };
+
+    const clearTimer = () => {
+      const c = feedHoverController;
+      if (c.timer) {
+        clearTimeout(c.timer);
+        c.timer = null;
+      }
+      c.pendingEl = null;
+    };
+
+    const openAfterDelay = (el) => {
+      const c = feedHoverController;
+      clearTimer();
+      c.pendingEl = el;
+      c.timer = setTimeout(() => {
+        // Still the current target?
+        if (c.pendingEl !== el) return;
+        if (c.openEl && c.openEl !== el) c.openEl.classList.remove('hover-open');
+        c.openEl = el;
+        el.classList.add('hover-open');
+      }, 1000);
+    };
+
+    const closeIfMatches = (el) => {
+      const c = feedHoverController;
+      if (c.openEl === el) {
+        el.classList.remove('hover-open');
+        c.openEl = null;
+      }
+    };
+
+    // Delegate pointer enter/leave to avoid per-item listeners.
+    virtualRootEl.addEventListener('pointerover', (e) => {
+      const el = getPostContentEl(e);
+      if (!el) return;
+      // Ignore transitions between children inside the same post-content.
+      if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+      openAfterDelay(el);
+    });
+
+    virtualRootEl.addEventListener('pointerout', (e) => {
+      const el = getPostContentEl(e);
+      if (!el) return;
+      if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+      clearTimer();
+      closeIfMatches(el);
+    });
   };
 
   // Fetch posts if needed (similar to PredictionsList approach)
@@ -238,6 +420,9 @@ export default function PostsList() {
 
   // Sync the stable virtual root without recreating it (prevents first-scroll snap-back).
   if (canVirtualize && virtualRootEl) {
+    // Install once per root instance.
+    setTimeout(ensureFeedHover, 0);
+
     van.derive(() => {
       const top = topPad.val;
       const bottom = bottomPad.val;
@@ -254,21 +439,9 @@ export default function PostsList() {
     // This keeps hover state stable (no DOM replacement during the 1s hover delay).
     van.derive(() => {
       const { start, end } = range.val;
-      const list = posts.val;
-      const visible = (list.length && end >= start) ? list.slice(start, end + 1) : [];
-      const ids = visible.map(p => p.id);
-      const same =
-        ids.length === lastVisibleIds.length &&
-        ids.every((id, i) => id === lastVisibleIds[i]);
-
-      if (!same) {
-        virtualItemsEl.replaceChildren(...visible.map(getOrCreateItemEl));
-        lastVisibleIds = ids;
-        scheduleObservedUpdate();
-      } else {
-        // Keep content fresh if store swapped post objects, without touching DOM order.
-        visible.forEach(getOrCreateItemEl);
-      }
+      // Touch posts to rerun when list changes.
+      posts.val.length;
+      updateVisibleRangeIncremental(start, end);
     });
   }
 

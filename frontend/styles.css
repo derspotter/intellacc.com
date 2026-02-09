@@ -908,10 +908,22 @@ body.dark-mode .post-content-hover-overlay {
   transition-delay: 1s;
 }
 
+/* JS-pinned hover: keep overlay open during scroll even if the browser drops :hover temporarily. */
+.post-content.clamped.has-hover-overlay.hover-open .post-content-hover-overlay {
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+
 /* Hide the clamped preview text once the overlay appears to avoid ghosting/double text. */
 .post-content.clamped.has-hover-overlay:hover .post-content-text {
   opacity: 0;
   transition-delay: 1s;
+}
+
+.post-content.clamped.has-hover-overlay.hover-open .post-content-text {
+  opacity: 0;
+  transition-delay: 0s;
 }
 
 /* Hide the toggle only once the overlay would appear. */
@@ -919,6 +931,12 @@ body.dark-mode .post-content-hover-overlay {
   opacity: 0;
   pointer-events: none;
   transition-delay: 1s;
+}
+
+.post-content.clamped.has-hover-overlay.hover-open + .post-content-toggle {
+  opacity: 0;
+  pointer-events: none;
+  transition-delay: 0s;
 }
 
 /* Touch devices often emulate sticky hover; disable the overlay there entirely. */
