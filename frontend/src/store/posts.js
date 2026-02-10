@@ -1,6 +1,6 @@
 import van from 'vanjs-core';
 import api from '../services/api';
-import auth from '../services/auth';
+import { isLoggedInState } from '../services/tokenService';
 import * as vanX from 'vanjs-ext';
 
 const postsStore = {
@@ -88,7 +88,7 @@ const postsStore = {
       try {
         this.state.loading.val = true;
         this.state.error.val = null;
-        if (!auth.isLoggedInState.val) {
+        if (!isLoggedInState.val) {
           return this.actions.loadMockPosts.call(this);
         }
         if (reset) {
@@ -103,7 +103,7 @@ const postsStore = {
         this.state.nextCursor.val = page?.nextCursor ?? null;
         this.state.hasMore.val = !!page?.hasMore;
         this.state.feedMode.val = 'real';
-        if (auth.isLoggedInState.val && this.state.posts.val.length > 0) {
+        if (isLoggedInState.val && this.state.posts.val.length > 0) {
           // Initialize reactive like statuses for posts
           const statuses = {};
           this.state.posts.val.forEach(post => {
@@ -125,7 +125,7 @@ const postsStore = {
     },
 
     async fetchMorePosts() {
-      if (!auth.isLoggedInState.val) return [];
+      if (!isLoggedInState.val) return [];
       if (this.state.loadingMore.val || this.state.loading.val) return [];
       if (!this.state.hasMore.val) return [];
 
@@ -247,7 +247,7 @@ const postsStore = {
 
     async deletePost(postId) {
       try {
-        if (!auth.isLoggedInState.val) return false;
+        if (!isLoggedInState.val) return false;
         await api.posts.delete(postId);
         this.state.posts.val = this.state.posts.val.filter(post => post.id !== postId);
         return true;
@@ -259,7 +259,7 @@ const postsStore = {
 
     async toggleLike(itemId) {
       console.log(`[Store Action] toggleLike called for itemId: ${itemId}`);
-      if (!auth.isLoggedInState.val) {
+      if (!isLoggedInState.val) {
         console.log('[Store Action] User not logged in.');
         return false;
       }
@@ -299,7 +299,7 @@ const postsStore = {
 
     async checkLikeStatus(postId) {
       try {
-        if (!auth.isLoggedInState.val || !postId) return;
+        if (!isLoggedInState.val || !postId) return;
         if (this.state.likeStatus[postId] !== undefined) return;
         const resp = await api.posts.getLikeStatus(postId);
         const isLiked = resp.isLiked !== undefined ? resp.isLiked : (resp.liked || false);
@@ -336,7 +336,7 @@ const postsStore = {
 
     async createComment(parentId, content) {
       try {
-        if (!auth.isLoggedInState.val) throw new Error('You must be logged in to comment');
+        if (!isLoggedInState.val) throw new Error('You must be logged in to comment');
         if (!content || content.trim() === '') throw new Error('Comment cannot be empty');
         const newComment = await api.posts.createComment(parentId, content);
         let parentUpdated = false;
@@ -383,7 +383,7 @@ const postsStore = {
 
     async deleteComment(commentId, postId) {
       try {
-        if (!auth.isLoggedInState.val) return false;
+        if (!isLoggedInState.val) return false;
         await api.posts.deleteComment(commentId);
         if (this.state.comments.val[postId]) {
           const updatedComments = this.state.comments.val[postId].filter(comment => comment.id !== commentId);
@@ -523,7 +523,7 @@ const postsStore = {
      */
     async updatePost(postId, content, options = {}) {
       try {
-        if (!auth.isLoggedInState.val) {
+        if (!isLoggedInState.val) {
           throw new Error('You must be logged in to edit posts');
         }
 
@@ -619,8 +619,7 @@ const postsStore = {
 // If we rendered a logged-out placeholder feed, refresh to the real API feed
 // as soon as the user logs in. This prevents the mock feed from "sticking".
 van.derive(() => {
-  // Some tests mock auth in a way that can make the default import undefined.
-  if (!auth?.isLoggedInState?.val) return;
+  if (!isLoggedInState.val) return;
   if (postsStore.state.feedMode.val !== 'mock') return;
   // Avoid starting a second request if something else already triggered a fetch.
   if (postsStore.state.loading.val || postsStore.state.loadingMore.val) return;

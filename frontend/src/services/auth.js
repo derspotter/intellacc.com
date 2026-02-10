@@ -151,18 +151,24 @@ export async function onLoginSuccess(password = null) {
              console.log('Passkey login without vault unlock. Vault remains locked.');
         }
 
-          // Initialize socket AFTER vault operations complete
-          // MLS is now ready to handle incoming messages
-          socketService.initializeSocket();
-      }
-    } catch (profileError) {
-      console.warn('Error during post-login vault setup:', profileError);
-    }
+	      }
+	    } catch (profileError) {
+	      console.warn('Error during post-login vault setup:', profileError);
+	    }
+	
+	    // Always attempt to initialize the authenticated socket after login.
+	    // Even if vault/MLS setup fails (e.g. device verification required), the app
+	    // still needs realtime features like feed/predictions/notifications.
+	    try {
+	      socketService.initializeSocket();
+	    } catch (e) {
+	      console.warn('Socket init failed after login:', e);
+	    }
 
-    // Fetch posts in background (don't block navigation)
-    getStore('posts').then(postsStore => {
-      if (postsStore?.actions?.fetchPosts) {
-        postsStore.actions.fetchPosts.call(postsStore);
+	    // Fetch posts in background (don't block navigation)
+	    getStore('posts').then(postsStore => {
+	      if (postsStore?.actions?.fetchPosts) {
+	        postsStore.actions.fetchPosts.call(postsStore);
       }
     }).catch(() => {});
     
