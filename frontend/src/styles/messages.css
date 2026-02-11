@@ -13,7 +13,8 @@
 
 /* Conversations Sidebar */
 .conversations-sidebar {
-  width: 320px;
+  /* Keep the sidebar usable, but prioritize chat width. */
+  width: 240px;
   background: var(--blue-bg);
   border-right: 1px solid var(--border-color);
   display: flex;
@@ -101,12 +102,12 @@
 }
 
 .conversation-item:hover {
-  background-color: rgba(0, 0, 0, 0.05);
+  background-color: var(--hover-bg);
 }
 
 .conversation-item.selected {
-  background-color: #007bff;
-  color: white;
+  background-color: var(--primary-color);
+  color: #fff;
 }
 
 .conversation-info {
@@ -164,6 +165,8 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* Enables container queries so the composer can adapt to narrow chat panes. */
+  container-type: inline-size;
 }
 
 .chat-header {
@@ -295,6 +298,11 @@
   font-weight: 600;
 }
 
+.attachment-remove {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+}
+
 .attachment-inline-preview img {
   max-height: 120px;
   border-radius: 6px;
@@ -309,7 +317,7 @@
 }
 
 .message-item.sent .message-content {
-  background: #007bff;
+  background: var(--primary-color);
   color: white;
   border-radius: 18px 18px 4px 18px;
 }
@@ -410,23 +418,34 @@
   padding: 1rem;
 }
 
+.message-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .input-group {
   display: flex;
   gap: 0.5rem;
-  align-items: flex-end;
+  align-items: stretch;
+}
+
+.input-group > * {
+  min-width: 0;
 }
 
 .message-textarea {
   flex: 1;
   resize: none;
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
+  border-radius: 0;
   padding: 0.75rem;
   font-family: inherit;
   font-size: 1rem;
   line-height: 1.4;
-  background: var(--blue-bg);
+  background: var(--card-bg);
   color: var(--text-color);
+  min-height: 44px;
   max-height: 120px;
   overflow-y: auto;
 }
@@ -437,20 +456,47 @@
   box-shadow: 0 0 0 2px rgba(var(--primary-color-rgb), 0.2);
 }
 
+.attach-button {
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border-color);
+  background: var(--button-bg);
+  color: var(--button-fg);
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+.attach-button:hover {
+  background: var(--button-hover-bg);
+}
+
+.attach-button .icon-attach::before {
+  content: "📎";
+  font-weight: 700;
+  line-height: 1;
+}
+
+.attach-label {
+  font-size: 0.9rem;
+}
+
 .send-button {
   background: var(--primary-color);
   color: white;
-  border: none;
+  border: 1px solid var(--primary-color);
   border-radius: 0;
   padding: 0.75rem 1rem;
   cursor: pointer;
   font-weight: 600;
+  font-size: 1rem;
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
   gap: 0.25rem;
   transition: background-color var(--transition);
+  flex: 0 0 auto;
 }
 
 .send-button:hover:not(:disabled) {
@@ -459,11 +505,36 @@
 
 .send-button:disabled {
   background: var(--secondary-text);
+  border-color: var(--secondary-text);
+  color: #fff;
+  opacity: 0.85;
   cursor: not-allowed;
 }
 
 .send-button .icon-send::before {
   content: "➤";
+}
+
+.send-label {
+  display: inline;
+}
+
+/* When the chat pane is narrow, go icon-first to avoid a cramped composer. */
+@container (max-width: 420px) {
+  .attach-label,
+  .send-label {
+    display: none;
+  }
+
+  .attach-button,
+  .send-button {
+    padding: 0 0.6rem;
+  }
+
+  .message-textarea {
+    padding: 0.6rem;
+    font-size: 0.95rem;
+  }
 }
 
 /* Empty States */
@@ -725,6 +796,11 @@
   
   .message-input-area {
     padding: 0.75rem;
+  }
+
+  /* Keep the composer row clean on small screens */
+  .attach-label {
+    display: none;
   }
 }
 
@@ -1158,7 +1234,7 @@
 
 /* DM item specific styling */
 .dm-item {
-  background: rgba(0, 123, 255, 0.05);
+  background: rgba(var(--primary-color-rgb), 0.05);
 }
 
 .dm-item.selected {

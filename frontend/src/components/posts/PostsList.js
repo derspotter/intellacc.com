@@ -204,6 +204,9 @@ export default function PostsList() {
 
   const ensureFeedHover = () => {
     if (!canVirtualize || !virtualRootEl) return;
+    // Mobile/touch devices do not have real hover. Avoid installing hover-based UX there
+    // (touch scrolling/tapping can emit pointer events that would make this feel random).
+    if (window.matchMedia && !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
 
     if (!feedHoverController) {
       feedHoverController = {

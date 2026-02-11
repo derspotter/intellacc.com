@@ -239,45 +239,51 @@ export default function PostItem({ post }) {
     children: [
       // 1. Header (Static)
       div({ class: "post-header" }, [
-        div({ class: "post-author" }, [
-          post.user_id ?
-            a({
-              href: `#user/${post.user_id}`,
-              class: "username-link",
-              onclick: (e) => {
-                e.preventDefault();
-                window.location.hash = `user/${post.user_id}`;
-              }
-            }, post.username || 'Anonymous') :
-            span(post.username || 'Anonymous')
-        ]),
-        div({ class: "post-meta" }, [
-          span({ class: "post-header-likes" }, `${post.like_count || 0} like${(post.like_count === 1) ? '' : 's'}`),
-          span({ 
-            class: "post-header-comments",
-            style: "cursor: pointer;",
-            onclick: () => handleShowComments(post.id)
-          }, `${post.comment_count || 0} comment${(post.comment_count === 1) ? '' : 's'}`),
-          div({ class: "post-header-expand-wrap" },
-            () => {
-              if (!(post.comment_count > 0)) return null;
-              const isExpanded = postsStore.state.allCommentsExpanded.val[post.id] || false;
-              return span({
-                class: "post-header-expand",
-                style: "cursor: pointer;",
+        div({ class: "post-header-main" }, [
+          div({ class: "post-author" }, [
+            post.user_id ?
+              a({
+                href: `#user/${post.user_id}`,
+                class: "username-link",
                 onclick: (e) => {
-                  e.stopPropagation();
-                  handleToggleExpandCollapseAll(post.id);
+                  e.preventDefault();
+                  window.location.hash = `user/${post.user_id}`;
                 }
-              }, isExpanded ? "Collapse All" : "Expand All");
-            }
-          ),
-          div({ class: "post-date" }, new Date(post.created_at).toLocaleDateString()),
-          AiContentBadge({
-            aiProbability: post.ai_probability,
-            aiFlagged: post.ai_is_flagged,
-            detectedModel: post.ai_detected_model
-          })
+              }, post.username || 'Anonymous') :
+              span(post.username || 'Anonymous')
+          ]),
+          div({ class: "post-meta post-meta-main" }, [
+            span({ class: "post-header-likes" }, `${post.like_count || 0} like${(post.like_count === 1) ? '' : 's'}`),
+            span({
+              class: "post-header-comments",
+              style: "cursor: pointer;",
+              onclick: () => handleShowComments(post.id)
+            }, `${post.comment_count || 0} comment${(post.comment_count === 1) ? '' : 's'}`),
+            span({ class: "post-date" }, new Date(post.created_at).toLocaleDateString())
+          ])
+        ]),
+        div({ class: "post-header-sub" }, [
+          div({ class: "post-meta post-meta-sub" }, [
+            div({ class: "post-header-expand-wrap" },
+              () => {
+                if (!(post.comment_count > 0)) return null;
+                const isExpanded = postsStore.state.allCommentsExpanded.val[post.id] || false;
+                return span({
+                  class: "post-header-expand",
+                  style: "cursor: pointer;",
+                  onclick: (e) => {
+                    e.stopPropagation();
+                    handleToggleExpandCollapseAll(post.id);
+                  }
+                }, isExpanded ? "Collapse All" : "Expand All");
+              }
+            ),
+            AiContentBadge({
+              aiProbability: post.ai_probability,
+              aiFlagged: post.ai_is_flagged,
+              detectedModel: post.ai_detected_model
+            })
+          ])
         ])
       ]),
 
@@ -390,30 +396,40 @@ export default function PostItem({ post }) {
 
       // 5. Actions (Toggle Edit Options)
       div({ class: "post-actions" }, [
-        // Always show these
-        LikeButton({ postId: post.id }),
-        button({ class: "post-action comment-button", onclick: () => handleShowCommentForm(post.id) }, "Comment"),
-
-        // Toggle Edit Controls
-        () => isEditing() ? span({ style: "display: contents;" }, [
-          // Edit Controls: Save, Cancel (Browse moved to content area)
-          button({
-            class: "post-action submit-button",
-            onclick: handleSave,
-            disabled: isSubmitting
-          }, isSubmitting.val ? "Saving..." : "Save"),
-
-          button({
-            class: "post-action cancel-button",
-            onclick: handleCancelEdit,
-            disabled: isSubmitting
-          }, "Cancel")
-        ]) : span({ style: "display: contents;" }, [
-          // View Controls: Edit, Delete
-          isCurrentUserPost() ?
-            button({ class: "post-action edit", onclick: handleStartEdit }, "Edit") : null,
-          isAdminState.val ?
-            button({ class: "post-action delete", onclick: () => handleDeletePost(post.id) }, "🗑️ Delete") : null
+        div({
+          class: "post-actions-left",
+          style: () => {
+            // Hide the left column entirely when there is nothing to show.
+            // This prevents "missing Edit" from creating an empty 1/3 column on mobile.
+            const show = isEditing() || isCurrentUserPost() || isAdminState.val;
+            return show ? '' : 'display: none;';
+          }
+        },
+          () => isEditing() ? span({ style: "display: contents;" }, [
+            button({
+              class: "post-action submit-button",
+              onclick: handleSave,
+              disabled: isSubmitting
+            }, isSubmitting.val ? "Saving..." : "Save"),
+            button({
+              class: "post-action cancel-button",
+              onclick: handleCancelEdit,
+              disabled: isSubmitting
+            }, "Cancel")
+          ]) : span({ style: "display: contents;" }, [
+            isCurrentUserPost()
+              ? button({ class: "post-action edit", onclick: handleStartEdit }, "Edit")
+              : null,
+            isAdminState.val
+              ? button({ class: "post-action delete", onclick: () => handleDeletePost(post.id) }, "🗑️ Delete")
+              : null
+          ])
+        ),
+        div({ class: "post-actions-center" }, [
+          LikeButton({ postId: post.id })
+        ]),
+        div({ class: "post-actions-right" }, [
+          button({ class: "post-action comment-button", onclick: () => handleShowCommentForm(post.id) }, "Comment")
         ])
       ]),
 

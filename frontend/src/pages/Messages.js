@@ -187,6 +187,8 @@ export default function MessagesPage() {
   const verifyingUserId = van.state(null);
   const attachmentFile = van.state(null);
   const attachmentPreview = van.state(null);
+  // Keep a stable reference so the attach button can open the native picker.
+  let attachmentInputEl = null;
 
   // Initialize MLS messaging
   const initialize = async () => {
@@ -835,11 +837,13 @@ export default function MessagesPage() {
             // Message input
             div({ class: "message-input-area" }, [
               form({ onsubmit: sendMessage }, [
-                div({ class: "input-group" }, [
-                  div({ class: "message-attachment-picker" }, [
-                    input({
+                div({ class: "message-composer" }, [
+                  // Hidden native file input (triggered by Attach button).
+                  (() => {
+                    const el = input({
                       type: 'file',
                       class: 'message-attachment-input',
+                      style: 'display:none',
                       onchange: (e) => {
                         const file = e.target.files && e.target.files[0];
                         if (!file) {
@@ -848,33 +852,27 @@ export default function MessagesPage() {
                         }
                         attachmentFile.val = file;
                         if (file.type && file.type.startsWith('image/')) {
-                          if (attachmentPreview.val) {
-                            URL.revokeObjectURL(attachmentPreview.val);
-                          }
+                          if (attachmentPreview.val) URL.revokeObjectURL(attachmentPreview.val);
                           attachmentPreview.val = URL.createObjectURL(file);
                         } else {
-                          if (attachmentPreview.val) {
-                            URL.revokeObjectURL(attachmentPreview.val);
-                            attachmentPreview.val = null;
-                          }
+                          if (attachmentPreview.val) URL.revokeObjectURL(attachmentPreview.val);
+                          attachmentPreview.val = null;
                         }
                       }
-                    }),
-                    () => attachmentFile.val ? div({ class: 'attachment-selected' }, [
-                      span({ class: 'attachment-selected-name' }, attachmentFile.val.name),
-                      button({
-                        type: 'button',
-                        class: 'attachment-remove',
-                        onclick: (e) => {
-                          const inputEl = e.target.closest('.message-attachment-picker')?.querySelector('input[type=\"file\"]');
-                          clearAttachment(inputEl);
-                        }
-                      }, 'Remove')
-                    ]) : null,
-                    () => attachmentPreview.val ? div({ class: 'attachment-inline-preview' }, [
-                      van.tags.img({ src: attachmentPreview.val, alt: 'Attachment preview' })
-                    ]) : null
-                  ]),
+                    });
+                    attachmentInputEl = el;
+                    return el;
+                  })(),
+                  div({ class: "input-group" }, [
+                    button({
+                      type: 'button',
+                      class: 'attach-button',
+                      title: 'Attach file',
+                      onclick: () => attachmentInputEl && attachmentInputEl.click()
+                    }, [
+                      i({ class: 'icon-attach' }),
+                      span({ class: 'attach-label' }, 'Attach')
+                    ]),
                   textarea({
                     placeholder: "Type an encrypted message...",
                     value: () => messagingStore.newMessage,
@@ -891,11 +889,24 @@ export default function MessagesPage() {
                   button({
                     type: "submit",
                     class: "send-button",
+                    'aria-label': 'Send message',
                     disabled: () => !messagingStore.newMessage.trim() && !attachmentFile.val
                   }, [
                     i({ class: "icon-send" }),
-                    "Send"
+                    span({ class: 'send-label' }, "Send")
                   ])
+                  ]),
+                  () => attachmentFile.val ? div({ class: 'attachment-selected' }, [
+                    span({ class: 'attachment-selected-name' }, attachmentFile.val.name),
+                    button({
+                      type: 'button',
+                      class: 'attachment-remove',
+                      onclick: () => clearAttachment(attachmentInputEl)
+                    }, 'Remove')
+                  ]) : null,
+                  () => attachmentPreview.val ? div({ class: 'attachment-inline-preview' }, [
+                    van.tags.img({ src: attachmentPreview.val, alt: 'Attachment preview' })
+                  ]) : null
                 ])
               ])
             ])

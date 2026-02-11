@@ -713,6 +713,13 @@ class CoreCryptoClient {
                 this.client.create_group(groupIdBytes);
                 await this.saveState();
                 await this.inviteToGroup(groupId, targetUserId);
+            } else if (!this.hasGroup(groupId)) {
+                // If this device doesn't have the group state yet, try pulling pending Welcomes.
+                // If it still isn't available, guide the user instead of failing later with "Group not found".
+                try { await this.syncMessages(); } catch {}
+                if (!this.hasGroup(groupId)) {
+                    throw new Error('Conversation exists but is not available on this device yet. If you have a pending invite, accept it. Otherwise link this device from Settings > Linked Devices, or ask the other user to start a new DM.');
+                }
             }
 
             return { groupId, isNew };
@@ -734,6 +741,16 @@ class CoreCryptoClient {
             return Number(epoch);
         }
         return epoch;
+    }
+
+    hasGroup(groupId) {
+        this.requireClient();
+        try {
+            this.getGroupEpoch(groupId);
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     getGroupMemberIdentities(groupId) {
@@ -1105,7 +1122,16 @@ class CoreCryptoClient {
 
         const plaintextBytes = new TextEncoder().encode(plaintext);
         this.setGroupAad(groupIdValue, 'application');
-        const ciphertextBytes = this.client.encrypt_message(groupIdBytes, plaintextBytes);
+        let ciphertextBytes;
+        try {
+            ciphertextBytes = this.client.encrypt_message(groupIdBytes, plaintextBytes);
+        } catch (e) {
+            const msg = String(e?.message || e || '');
+            if (/group/i.test(msg) && /not found/i.test(msg)) {
+                throw new Error('This conversation is not available on this device (group state missing). Accept the pending invite or link this device to recover your messaging state.');
+            }
+            throw e;
+        }
 
         const result = await this.mlsFetch('/messages/group', {
             groupId: groupIdValue,

@@ -53,10 +53,6 @@ async function clearBrowserStorage(page) {
 async function loginUser(page, user) {
   await page.goto('/#login');
   await page.fill('#email', user.email);
-  await page.getByRole('button', { name: 'Continue' }).click();
-
-  const passwordInput = page.locator('#password');
-  await expect(passwordInput).toBeVisible({ timeout: 15000 });
   await page.fill('#password', user.password);
   await page.getByRole('button', { name: 'Sign In' }).click();
 
@@ -71,7 +67,7 @@ test.describe('E2E Messaging', () => {
     await resetServerState();
   });
 
-  test('Two users can exchange encrypted messages and history is persisted', async ({ browser }) => {
+test('Two users can exchange encrypted messages and history is persisted', async ({ browser }, testInfo) => {
     // Clear browser storage for both contexts before starting
     const tempContext = await browser.newContext();
     const tempPage = await tempContext.newPage();
@@ -100,6 +96,7 @@ test.describe('E2E Messaging', () => {
 
     await pageAlice.goto('/#messages');
     await pageAlice.waitForSelector('.messages-page', { timeout: 15000 });
+    await pageAlice.screenshot({ path: testInfo.outputPath('messages-alice-initial.png') });
 
     // Debug: Check MLS state after navigating to messages
     const mlsInitState = await pageAlice.evaluate(() => {
@@ -129,6 +126,8 @@ test.describe('E2E Messaging', () => {
     // Start DM
     const startDmBtn = pageAlice.locator('button:has-text("Start DM"), button:has-text("Start"), button:has-text("Message")');
     await startDmBtn.click();
+    await pageAlice.waitForTimeout(500);
+    await pageAlice.screenshot({ path: testInfo.outputPath('messages-alice-after-start-dm.png') });
 
     // Debug: Check MLS state after starting DM
     const mlsAfterDm = await pageAlice.evaluate(() => {
@@ -145,6 +144,39 @@ test.describe('E2E Messaging', () => {
 
     // Check if chat opened
     await expect(pageAlice.locator('.chat-title').first()).toContainText(USER2.name, { timeout: 10000 });
+    await pageAlice.screenshot({ path: testInfo.outputPath('messages-alice-chat-open.png') });
+    const composerBoxes = await pageAlice.evaluate(() => {
+      const q = (sel) => document.querySelector(sel);
+      const rect = (el) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: r.x, y: r.y, w: r.width, h: r.height };
+      };
+      const style = (el) => {
+        if (!el) return null;
+        const cs = getComputedStyle(el);
+        return {
+          display: cs.display,
+          color: cs.color,
+          backgroundColor: cs.backgroundColor,
+          borderColor: cs.borderColor,
+          opacity: cs.opacity,
+          fontSize: cs.fontSize
+        };
+      };
+      return {
+        messageInputArea: rect(q('.message-input-area')),
+        inputGroup: rect(q('.message-input-area .input-group')),
+        textarea: rect(q('.message-textarea')),
+        attach: rect(q('.attach-button')),
+        send: rect(q('.send-button')),
+        sendStyle: style(q('.send-button')),
+        sendText: q('.send-button')?.innerText || '',
+        chatArea: rect(q('.chat-area')),
+        conversationView: rect(q('.conversation-view'))
+      };
+    });
+    console.log('Composer boxes:', composerBoxes);
 
     // --- 4. Alice sends message ---
     console.log('Alice sending message...');
@@ -185,7 +217,7 @@ test.describe('E2E Messaging', () => {
     console.log('Browser console logs:', consoleLogs.slice(-10));
 
     // Debug: take screenshot
-    await pageAlice.screenshot({ path: 'test-results/alice-after-send.png' });
+    await pageAlice.screenshot({ path: testInfo.outputPath('alice-after-send.png') });
     // Check what's visible in the chat area
     const chatContent = await pageAlice.locator('.chat-messages, .messages-list, .message-list').innerHTML().catch(() => 'not found');
     console.log('Chat content:', chatContent.substring(0, 500));

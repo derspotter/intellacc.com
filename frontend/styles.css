@@ -21,7 +21,6 @@
   --pending-color: #888;
   --correct-color: #0a0;
   --incorrect-color: #c00;
-  --primary-dark: #0056b3;
   --border-radius: 4px;
   --box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   --transition: 0.2s ease;
@@ -32,6 +31,10 @@
   /* Brand */
   --signature-blue: #0000ff; /* matches POST button */
   --signature-blue-dark: #0000cc;
+  /* Legacy/shared variable names (used by Messages, MLS, etc.) */
+  --primary-color: var(--signature-blue);
+  --primary-color-rgb: 0, 0, 255;
+  --primary-dark: var(--signature-blue-dark);
 
   /* UI surfaces */
   --hover-bg: rgba(0, 0, 0, 0.03);
@@ -771,8 +774,26 @@ body.dark-mode .device-item {
   margin-bottom: 0.75rem;
 }
 
+.post-header-main {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.post-header-sub {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
 .post-author {
   font-weight: bold;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .post-date {
@@ -786,10 +807,24 @@ body.dark-mode .device-item {
   gap: 0.5rem;
 }
 
+.post-meta-main {
+  margin-left: auto;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.post-meta-sub {
+  gap: 0.75rem;
+}
+
 .post-header-expand-wrap {
   margin-left: auto;
   display: flex;
   align-items: center;
+}
+
+.post-meta-sub .post-header-expand-wrap {
+  margin-left: 0;
 }
 
 .ai-content-badge {
@@ -1046,6 +1081,16 @@ body.dark-mode .post-content-toggle {
   margin-bottom: 0.25rem;
   justify-content: flex-start;
   flex-wrap: wrap;
+}
+
+.post-actions-left,
+.post-actions-center,
+.post-actions-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
 }
 
 .post-action {
@@ -4134,7 +4179,7 @@ body.dark-mode .belief-slider::-moz-range-thumb {
   display: grid;
   /* Keep the list usable (search + filters) while keeping the selected event readable
      on common laptop widths. */
-  grid-template-columns: clamp(260px, 40%, 420px) 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1.5rem;
   align-items: start;
   height: auto;
@@ -5011,30 +5056,25 @@ select {
     gap: 0.25rem;
   }
 
-  .post-meta {
+  .post-header-main {
     width: 100%;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "likes comments"
-      "date expand"
-      "badge badge";
-    align-items: center;
-    gap: 0.35rem 0.75rem;
+    flex-wrap: nowrap;
+    align-items: baseline;
   }
 
-  .post-meta > div {
-    margin-left: 0 !important;
-    flex-basis: auto;
-  }
-
-  .post-header-expand,
-  .post-date {
-    flex-basis: auto;
+  .post-meta-main {
+    gap: 0.5rem;
+    font-size: 0.8rem;
   }
 
   .post-date {
     font-size: 0.8rem;
+  }
+
+  .post-header-sub {
+    width: 100%;
+    justify-content: flex-start;
+    margin-top: 0.35rem;
   }
 
   .post-header-likes,
@@ -5042,38 +5082,10 @@ select {
     font-size: 0.8rem;
   }
 
-  .post-header-likes {
-    grid-area: likes;
-  }
-
-  .post-header-comments {
-    grid-area: comments;
-    justify-self: end;
-  }
-
-  .post-header-expand-wrap {
-    margin-left: 0;
-    justify-self: end;
-    grid-area: expand;
-  }
-
   .post-header-expand {
     font-size: 0.75rem;
     color: var(--secondary-text);
     text-decoration: underline;
-    justify-self: end;
-    text-align: right;
-  }
-
-  .post-date {
-    grid-area: date;
-    font-size: 0.75rem;
-    color: var(--secondary-text);
-  }
-
-  .ai-content-badge {
-    grid-area: badge;
-    justify-self: start;
   }
 
   .post-stats {
@@ -5088,14 +5100,42 @@ select {
   }
 
   .post-actions {
+    column-gap: 0.5rem;
+  }
+
+  .post-action {
+    min-height: 44px;
+    font-size: 0.9rem;
+  }
+
+  /* On mobile, make the three main actions fill the full width evenly. */
+  .post-actions {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    align-items: stretch;
     gap: 0.5rem;
+  }
+
+  .post-actions-left,
+  .post-actions-center,
+  .post-actions-right {
+    align-items: stretch;
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .post-actions-left .post-action,
+  .post-actions-center .post-action,
+  .post-actions-right .post-action {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
   }
 
   .post-action.like-button,
   .post-action.comment-button {
-    flex: 1 1 calc(50% - 0.25rem);
-    min-height: 44px;
-    font-size: 0.9rem;
+    width: auto;
   }
 
   .create-post-card,

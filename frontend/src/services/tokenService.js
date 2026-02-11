@@ -4,6 +4,14 @@ import van from 'vanjs-core';
 export const tokenState = van.state(localStorage.getItem('token') || '');
 export const isLoggedInState = van.state(!!localStorage.getItem('token'));
 
+function decodeBase64Url(b64url) {
+  if (!b64url) return '';
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const padLen = (4 - (b64.length % 4)) % 4;
+  const padded = b64 + '='.repeat(padLen);
+  return atob(padded);
+}
+
 /**
  * Get the current authentication token
  * @returns {string|null} JWT token or null
@@ -41,7 +49,7 @@ export function getTokenData() {
   
   try {
     // Decode the payload part of the JWT (second segment)
-    const payload = JSON.parse(atob(token.split('.')[1]));
+    const payload = JSON.parse(decodeBase64Url(token.split('.')[1]));
     return payload;
   } catch (e) {
     console.error('Error decoding token:', e);
@@ -74,7 +82,7 @@ export function getUserId() {
   const cachedUserId = localStorage.getItem('userId');
   
   try {
-    const tokenData = JSON.parse(atob(token.split('.')[1]));
+    const tokenData = JSON.parse(decodeBase64Url(token.split('.')[1]));
     const tokenUserId = String(tokenData.userId);
     
     if (cachedUserId !== tokenUserId) {
