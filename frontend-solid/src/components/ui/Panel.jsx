@@ -11,7 +11,7 @@ export const Panel = (props) => {
         )}>
             {/* Header Bar */}
             {props.title && (
-                <div class="bg-bb-border/50 px-2 py-1 text-xs font-mono text-bb-accent uppercase border-b border-bb-border flex justify-between items-center select-none shrink-0">
+                <div class="bg-bb-accent text-black font-bold px-2 py-0.5 text-xs font-mono uppercase border-b border-bb-border flex justify-between items-center select-none shrink-0">
                     <span>{props.title}</span>
                     {props.headerActions}
                 </div>

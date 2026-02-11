@@ -11,9 +11,9 @@ export default {
                     bg: '#000000',
                     panel: '#111111',
                     border: '#333333',
-                    text: '#E0E0E0',
-                    muted: '#888888',
-                    accent: '#FF9800', // Amber for highlights
+                    text: '#F0F0F0',
+                    muted: '#666666',
+                    accent: '#FFB400', // Amber for highlights
                     tmux: '#d7d787', // Tmux Bar
                     'ib-orange': '#F5A623',
                     'ib-blue': '#007ACD',
@@ -36,7 +36,6 @@ export default {
             },
             fontFamily: {
                 mono: ['"JetBrains Mono"', 'monospace'], // For data/numbers
-                sans: ['Inter', 'sans-serif'],          // For UI text
             },
             fontSize: {
                 'xxs': '0.65rem',

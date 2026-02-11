@@ -4092,9 +4092,8 @@ body.dark-mode .belief-slider::-moz-range-thumb {
 /* Events Container - New Layout */
 .events-container {
   display: grid;
-  /* Keep the list usable (search + filters) while keeping the selected event readable
-     on common laptop widths. */
-  grid-template-columns: clamp(260px, 40%, 420px) 1fr;
+  /* Keep both cards the same width. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1.5rem;
   align-items: start;
   height: auto;

@@ -72,10 +72,12 @@ const TradeTicket = (props) => {
             if (resp.ok) {
                 const data = await resp.json();
                 const kellyOptimal = data.kelly_suggestion ? parseFloat(data.kelly_suggestion) : 0;
+                const quarterKelly = data.quarter_kelly ? parseFloat(data.quarter_kelly) : kellyOptimal * 0.25;
                 const currentProb = data.current_prob ? parseFloat(data.current_prob) : 0.5;
                 const balance = data.balance ? parseFloat(data.balance) : 1000;
                 setKellyData({
                     kelly_optimal: kellyOptimal,
+                    quarter_kelly: quarterKelly,
                     edge: beliefVal - currentProb,
                     balance
                 });
@@ -88,8 +90,10 @@ const TradeTicket = (props) => {
         const mp = marketProb();
         const edge = beliefVal - mp;
         const balance = 1000;
+        const kellyOptimal = Math.max(0, Math.abs(edge) * balance * 0.25);
         setKellyData({
-            kelly_optimal: Math.max(0, Math.abs(edge) * balance * 0.25),
+            kelly_optimal: kellyOptimal,
+            quarter_kelly: kellyOptimal * 0.25,
             edge,
             balance
         });
@@ -234,31 +238,49 @@ const TradeTicket = (props) => {
             <Show when={kellyData()}>
                 <div class="mb-3 bg-black border border-bb-border p-2">
                     <div class="flex items-center justify-between mb-1">
-                        <span class="text-xxs text-bb-muted uppercase">Kelly Optimal</span>
+                        <span class="text-xxs text-bb-muted uppercase">Kelly Criterion</span>
+                        <span class={`text-xxs font-bold ${kellyData().edge >= 0 ? "text-market-up" : "text-market-down"}`}>
+                            EDGE: {kellyData().edge >= 0 ? "+" : ""}{(kellyData().edge * 100).toFixed(1)}%
+                            {" "}{kellyData().edge >= 0 ? "YES" : "NO"}
+                        </span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-xs font-mono mb-1">
+                        <div class="flex items-center gap-1">
+                            <span class="text-bb-muted">1/4 Kelly:</span>
+                            <span class="text-bb-accent font-bold">{kellyData().quarter_kelly.toFixed(2)} RP</span>
+                        </div>
                         <button
                             type="button"
-                            class="px-2 py-0.5 text-xxs border border-bb-accent text-bb-accent hover:bg-bb-accent/20 transition-colors uppercase font-bold"
+                            class="px-2 py-0.5 text-xxs border border-bb-accent text-bb-accent hover:bg-bb-accent/20 transition-colors uppercase font-bold text-right"
+                            onClick={() => {
+                                const k = kellyData();
+                                if (k && !isNaN(k.quarter_kelly)) {
+                                    setStakeShares(Math.max(0, k.quarter_kelly).toFixed(2));
+                                    setSide(k.edge >= 0 ? "YES" : "NO");
+                                }
+                            }}
+                        >
+                            Apply 1/4
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+                        <div class="flex items-center gap-1">
+                            <span class="text-bb-muted">Full Kelly:</span>
+                            <span class="text-bb-text">{kellyData().kelly_optimal.toFixed(2)} RP</span>
+                        </div>
+                        <button
+                            type="button"
+                            class="px-2 py-0.5 text-xxs border border-bb-border text-bb-muted hover:bg-bb-border/30 transition-colors uppercase font-bold text-right"
                             onClick={() => {
                                 const k = kellyData();
                                 if (k && !isNaN(k.kelly_optimal)) {
                                     setStakeShares(Math.max(0, k.kelly_optimal).toFixed(2));
+                                    setSide(k.edge >= 0 ? "YES" : "NO");
                                 }
                             }}
                         >
-                            Apply Kelly
+                            Apply Full
                         </button>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2 text-xs font-mono">
-                        <div>
-                            <span class="text-bb-muted">Stake: </span>
-                            <span class="text-bb-accent font-bold">{kellyData().kelly_optimal.toFixed(2)} RP</span>
-                        </div>
-                        <div>
-                            <span class="text-bb-muted">Edge: </span>
-                            <span class={kellyData().edge >= 0 ? "text-market-up font-bold" : "text-market-down font-bold"}>
-                                {kellyData().edge >= 0 ? "+" : ""}{(kellyData().edge * 100).toFixed(1)}%
-                            </span>
-                        </div>
                     </div>
                 </div>
             </Show>

@@ -289,46 +289,10 @@ function App() {
 	          </div>
 	      </Show>
 
-      {/* Top Bar (Tmux Style) */}
-      <header class="min-h-6 shrink-0 flex items-stretch text-xs font-mono z-20 relative select-none bg-bb-tmux text-bb-bg font-bold overflow-x-auto no-scrollbar whitespace-nowrap">
-        {/* Left Block */}
-        <div class="px-3 flex items-center border-r border-bb-bg/20 gap-2">
-          <span>[INTELLACC] USER: @{userData()?.username || 'GUEST'}</span>
-          <Show when={isLoggedIn()}>
-            <button
-              onClick={() => {
-                import("./services/tokenService").then(s => s.clearToken());
-              }}
-              class="hover:text-bb-accent cursor-pointer"
-            >
-              [LOGOUT]
-            </button>
-          </Show>
-        </div>
-
-	        {/* Middle Spacer */}
-	        <div class="flex-1 flex items-center justify-end px-3 gap-4">
-	          <span>SYS: {socketState.connected ? 'ONLINE' : 'OFFLINE'}</span>
-	          <button
-	            type="button"
-	            class="max-w-[40vw] sm:max-w-[50vw] truncate hover:text-bb-accent cursor-pointer"
-	            title={socketState.lastNotification || ''}
-	            onClick={() => setShowNotifications(true)}
-	          >
-	            NOTIF: {socketState.lastNotification || '-'}
-	          </button>
-	        </div>
-
-        {/* Right Block */}
-        <div class="px-3 flex items-center border-l border-bb-bg/20">
-          {formatTime(time())} {formatDate(time())}
-        </div>
-      </header>
-
-      {/* Resizable Grid */}
-      <div class="flex-1 min-h-0 relative z-10">
-        <ThreePaneLayout
-          activePane={activePane()}
+	      {/* Resizable Grid */}
+	      <div class="flex-1 min-h-0 relative z-10">
+	        <ThreePaneLayout
+	          activePane={activePane()}
           left={<FeedPanel isActive={activePane() === 1} />}
           center={<MarketPanel isActive={activePane() === 2} />}
           right={<ChatPanel isActive={activePane() === 3} />}
@@ -368,10 +332,46 @@ function App() {
             <span class="text-[10px] opacity-80">[3]</span>
             <span>CHAT</span>
           </button>
-        </nav>
-      </Show>
-    </div>
-  );
-}
+	        </nav>
+	      </Show>
+
+	      {/* Top Bar (Tmux Style) */}
+	      <header class="min-h-6 shrink-0 flex items-stretch text-xs font-mono z-20 relative select-none bg-bb-tmux text-bb-bg font-bold overflow-x-auto no-scrollbar whitespace-nowrap">
+	        {/* Left Block */}
+	        <div class="px-3 flex items-center border-r border-bb-bg/20 gap-2">
+	          <span>[INTELLACC] USER: @{userData()?.username || 'GUEST'}</span>
+	          <Show when={isLoggedIn()}>
+	            <button
+	              onClick={() => {
+	                import("./services/tokenService").then(s => s.clearToken());
+	              }}
+	              class="hover:text-bb-accent cursor-pointer"
+	            >
+	              [LOGOUT]
+	            </button>
+	          </Show>
+	        </div>
+
+		        {/* Middle Spacer */}
+		        <div class="flex-1 flex items-center justify-end px-3 gap-4">
+		          <span>SYS: {socketState.connected ? 'ONLINE' : 'OFFLINE'}</span>
+		          <button
+		            type="button"
+		            class="max-w-[40vw] sm:max-w-[50vw] truncate hover:text-bb-accent cursor-pointer"
+		            title={socketState.lastNotification || ''}
+		            onClick={() => setShowNotifications(true)}
+		          >
+		            NOTIF: {socketState.lastNotification || '-'}
+		          </button>
+		        </div>
+
+	        {/* Right Block */}
+	        <div class="px-3 flex items-center border-l border-bb-bg/20">
+	          {formatTime(time())} {formatDate(time())}
+	        </div>
+	      </header>
+	    </div>
+	  );
+	}
 
 export default App;

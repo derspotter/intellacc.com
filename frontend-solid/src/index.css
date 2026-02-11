@@ -10,7 +10,7 @@ body {
   margin: 0;
   background-color: #000000;
   color: #e0e0e0;
-  font-family: 'Inter', sans-serif;
+  font-family: 'JetBrains Mono', monospace;
   overflow: hidden; /* Prevent body scroll, let panels scroll */
 }
 
@@ -38,5 +38,5 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #FF9800; 
+  background: #FFB400;
 }
