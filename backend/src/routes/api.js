@@ -19,6 +19,9 @@ const attachmentsController = require('../controllers/attachmentsController');
 const verificationController = require('../controllers/verificationController');
 const passwordResetController = require('../controllers/passwordResetController');
 const aiModerationController = require('../controllers/aiModerationController');
+const federationController = require('../controllers/federationController');
+const atprotoController = require('../controllers/atprotoController');
+const socialAuthController = require('../controllers/socialAuthController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
 const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
 const predictionEngineHeaders = {
@@ -50,6 +53,12 @@ router.post('/users/master-key', authenticateJWT, userController.setMasterKey);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
 router.get("/users/:id", authenticateJWT, userController.getUser);
 router.post('/login', userController.loginUser);
+
+// Social OAuth login routes
+router.post('/auth/atproto/start', socialAuthController.startAtprotoLogin);
+router.get('/auth/atproto/callback', socialAuthController.finishAtprotoLogin);
+router.post('/auth/mastodon/start', socialAuthController.startMastodonLogin);
+router.get('/auth/mastodon/callback', socialAuthController.finishMastodonLogin);
 
 // Email Verification Routes (Tier 1)
 // Confirm can be unauthenticated (token contains user info) for email links
@@ -128,6 +137,18 @@ router.delete("/users/:id/follow", authenticateJWT, userController.unfollowUser)
 router.get("/users/:id/following-status", authenticateJWT, userController.getFollowingStatus);
 router.get("/users/:id/followers", authenticateJWT, userController.getFollowers);
 router.get("/users/:id/following", authenticateJWT, userController.getFollowing);
+
+// ActivityPub Federation Routes
+router.post('/federation/activitypub/follow', authenticateJWT, federationController.followActivityPubActor);
+router.get('/federation/activitypub/following', authenticateJWT, federationController.getActivityPubFollowing);
+
+// AT Protocol Federation Routes
+router.get('/federation/atproto/client-metadata.json', atprotoController.getClientMetadata);
+router.get('/federation/atproto/oauth/callback', atprotoController.oauthCallback);
+router.post('/federation/atproto/oauth/start', authenticateJWT, atprotoController.startOAuth);
+router.get('/federation/atproto/account', authenticateJWT, atprotoController.getAccount);
+router.delete('/federation/atproto/account', authenticateJWT, atprotoController.disconnectAccount);
+router.post('/federation/atproto/posts/:postId/enqueue', authenticateJWT, atprotoController.enqueuePost);
 
 // Portfolio Routes
 router.get("/users/:id/positions", (req, res, next) => {

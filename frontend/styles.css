@@ -84,12 +84,15 @@ body.dark-mode {
 html {
   scroll-behavior: smooth;
   overflow-x: hidden;
+  /* Prevent "snap back" on first scroll when late layout changes occur (fonts/images/virtualization). */
+  overflow-anchor: none;
 }
 
 body {
   line-height: 1.5;
   background-color: var(--blue-bg);
   overflow-x: hidden;
+  overflow-anchor: none;
 }
 
 /* Typography */
@@ -244,6 +247,7 @@ input[type="submit"]:disabled {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100svh; /* stable viewport on mobile (prevents first-scroll URL-bar jump) */
   width: 100%;
   padding-top: 10vh;
 }
@@ -270,6 +274,7 @@ input[type="submit"]:disabled {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100svh;
 }
 
 .main-content {
@@ -504,6 +509,7 @@ body.dark-mode .device-item {
 .login-page {
   background-color: var(--blue-bg);
   min-height: 100vh;
+  min-height: 100svh;
   width: 100%;
   display: flex;
   align-items: flex-start;
@@ -601,6 +607,38 @@ body.dark-mode .device-item {
   color: #007bff;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.social-auth-section {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.social-auth-title {
+  margin: 0 0 1rem;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--secondary-text);
+}
+
+.social-auth-provider {
+  margin-bottom: 1rem;
+}
+
+.social-auth-provider label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+
+.login-page .social-auth-provider input {
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+
+.social-auth-button {
+  width: 100%;
 }
 
 .reset-warning {
@@ -725,6 +763,7 @@ body.dark-mode .device-item {
 .signup-page {
   background-color: var(--blue-bg);
   min-height: 100vh;
+  min-height: 100svh;
   width: 100%;
   display: flex;
   align-items: flex-start;
@@ -765,6 +804,12 @@ body.dark-mode .device-item {
 .post-card {
   margin-top: 2rem;
   box-shadow: var(--box-shadow);
+}
+
+/* The feed uses virtualization (spacers) which can change layout as measurements come in.
+   Disable browser scroll anchoring here to prevent the first scroll from snapping back up. */
+#posts-virtual-list {
+  overflow-anchor: none;
 }
 
 .post-header {
@@ -915,10 +960,10 @@ body.dark-mode .ai-content-badge {
   box-shadow: var(--box-shadow);
   outline: 1px solid var(--border-color);
 
-  /* Always show the full text. Never make the overlay a scroll container.
-     Scrolling should always scroll the page. */
-  max-height: none !important;
-  overflow: visible !important;
+  /* Let the overlay fully expand to the full text.
+     It must not become a scroll container; scrolling should always scroll the page. */
+  max-height: none;
+  overflow: visible;
 
   opacity: 0;
   pointer-events: none;
@@ -930,7 +975,7 @@ body.dark-mode .post-content-hover-overlay {
   background: #121212;
 }
 
-/* Overlay is not scrollable, so no scrollbar styling needed. */
+/* No custom scrollbars: the overlay should never scroll. */
 
 /* JS-pinned hover: keep overlay open during scroll even if the browser drops :hover temporarily. */
 .post-content.clamped.has-hover-overlay.hover-open .post-content-hover-overlay {
@@ -4911,6 +4956,7 @@ select {
     position: fixed;
     left: -250px;
     height: 100vh;
+    height: 100svh;
     transition: left 0.3s ease;
     z-index: 1000;
   }
@@ -4957,6 +5003,7 @@ select {
     left: -250px;
     width: 250px;
     height: 100vh;
+    height: 100svh;
     top: 0;
     transition: left 0.3s ease;
     z-index: 1000;
@@ -6339,6 +6386,7 @@ body.dark-mode .device-link-modal .instructions {
 /* Verify Email Page */
 .verify-email-page {
   min-height: 100vh;
+  min-height: 100svh;
   display: flex;
   align-items: center;
   justify-content: center;

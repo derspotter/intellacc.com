@@ -70,10 +70,6 @@ export function checkAuth() {
 
 // Export for PasskeyButton
 export async function onLoginSuccess(password = null) {
-    // Navigate immediately so auth never feels stuck while background bootstrap runs.
-    window.location.hash = 'home';
-    updatePageFromHash();
-
     // Fetch user profile after login
     let profile = null;
     try {
@@ -91,7 +87,7 @@ export async function onLoginSuccess(password = null) {
         // Device verification now happens during vault unlock. If linking is
         // required, prompt the user to verify this device before unlocking.
 
-        let unlocked = false;
+        let unlocked = vaultService.isUnlocked();
         let linkRequired = false;
 
         if (password) {
@@ -152,7 +148,16 @@ export async function onLoginSuccess(password = null) {
                 }
             }
         } else if (!unlocked && !password) {
-             console.log('Passkey login without vault unlock. Vault remains locked.');
+             console.log('[Vault] No password-based unlock available. Prompting for vault passphrase.');
+             const hasLocalVaults = await vaultService.hasLockedVaults();
+             let hasAccountVault = hasLocalVaults;
+             try {
+                 hasAccountVault = await vaultService.hasAccountVault();
+             } catch (e) {
+                 console.warn('[Vault] Failed to check account vault existence:', e?.message || e);
+             }
+             vaultStore.setVaultExists(hasAccountVault);
+             vaultStore.setShowUnlockModal(true);
         }
 
 	      }
@@ -176,6 +181,10 @@ export async function onLoginSuccess(password = null) {
       }
     }).catch(() => {});
     
+    // Navigate to home page after login.
+    // Let the global `hashchange` listener drive routing to avoid double-renders
+    // (and the occasional scroll snap-back on first user scroll).
+    window.location.hash = 'home';
 }
 
 /**
@@ -208,18 +217,114 @@ export async function login(email, password) {
     // Save token and update state
     saveToken(response.token);
     updateAdminStateFromToken();
-
-    // Do not block login response on vault/MLS bootstrap.
-    onLoginSuccess(password).catch((e) => {
-      console.warn('Post-login bootstrap failed:', e);
-    });
-
+    
+    await onLoginSuccess(password);
+    
     return { success: true };
   } catch (error) {
     console.error('Login error:', error);
     return { 
       success: false, 
       error: error.message || 'Login failed. Please check your credentials.'
+    };
+  }
+}
+
+/**
+ * Start Bluesky login via backend OAuth flow
+ * @param {string} identifier - Bluesky handle or DID
+ * @returns {Promise<Object>} Start result
+ */
+export async function startAtprotoLogin(identifier) {
+  try {
+    const normalizedIdentifier = String(identifier || '').trim();
+    if (!normalizedIdentifier) {
+      return {
+        success: false,
+        error: 'Bluesky handle or DID is required'
+      };
+    }
+
+    const response = await api.auth.startAtprotoLogin(normalizedIdentifier, true);
+    const authorizationUrl = String(response?.authorizationUrl || '').trim();
+    if (!authorizationUrl) {
+      return {
+        success: false,
+        error: 'Unable to start Bluesky login'
+      };
+    }
+
+    window.location.href = authorizationUrl;
+    return { success: true };
+  } catch (error) {
+    console.error('Start Bluesky login error:', error);
+    return {
+      success: false,
+      error: error.message || 'Unable to start Bluesky login'
+    };
+  }
+}
+
+/**
+ * Start Mastodon login via backend OAuth flow
+ * @param {string} instance - Mastodon instance domain or URL
+ * @returns {Promise<Object>} Start result
+ */
+export async function startMastodonLogin(instance) {
+  try {
+    const normalizedInstance = String(instance || '').trim();
+    if (!normalizedInstance) {
+      return {
+        success: false,
+        error: 'Mastodon instance is required'
+      };
+    }
+
+    const response = await api.auth.startMastodonLogin(normalizedInstance, true);
+    const authorizationUrl = String(response?.authorizationUrl || '').trim();
+    if (!authorizationUrl) {
+      return {
+        success: false,
+        error: 'Unable to start Mastodon login'
+      };
+    }
+
+    window.location.href = authorizationUrl;
+    return { success: true };
+  } catch (error) {
+    console.error('Start Mastodon login error:', error);
+    return {
+      success: false,
+      error: error.message || 'Unable to start Mastodon login'
+    };
+  }
+}
+
+/**
+ * Complete login using a backend-issued social auth token
+ * @param {string} token - JWT token from social callback
+ * @returns {Promise<Object>} Completion result
+ */
+export async function completeSocialLogin(token) {
+  try {
+    const normalizedToken = String(token || '').trim();
+    if (!normalizedToken) {
+      return {
+        success: false,
+        error: 'Missing social login token'
+      };
+    }
+
+    saveToken(normalizedToken);
+    updateAdminStateFromToken();
+    await onLoginSuccess(null);
+    return { success: true };
+  } catch (error) {
+    clearToken();
+    console.error('Complete social login error:', error);
+    return {
+      success: false,
+      error: error.message || 'Social login failed'
     };
   }
 }
@@ -292,6 +397,9 @@ export default {
   checkAuth,
   login,
   register,
+  startAtprotoLogin,
+  startMastodonLogin,
+  completeSocialLogin,
   logout,
   getTokenData,
   isTokenExpired,

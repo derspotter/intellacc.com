@@ -2,12 +2,24 @@
 const webpush = require('web-push');
 const db = require('../db');
 
-// Configure VAPID keys from environment
-const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+// Configure VAPID keys from environment.
+// In Jest runs we auto-generate ephemeral keys so integration tests don't depend on external config.
+let VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
+let VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@intellacc.com';
 
 // Initialize web-push if keys are configured
+if ((!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) && process.env.JEST_WORKER_ID) {
+  try {
+    const generated = webpush.generateVAPIDKeys();
+    VAPID_PUBLIC_KEY = generated.publicKey;
+    VAPID_PRIVATE_KEY = generated.privateKey;
+    console.log('[Push] Generated ephemeral VAPID keys for tests');
+  } catch (err) {
+    console.warn('[Push] Failed to generate VAPID keys for tests:', err?.message || err);
+  }
+}
+
 if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
   console.log('[Push] Web Push configured with VAPID keys');
