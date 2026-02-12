@@ -267,7 +267,7 @@ Deliverable: Intellacc users exist as first-class AT identities, not just bridge
 
 - Use an isolated stack (separate DB volume) when developing federation/migrations locally:
   - `docker compose -f docker-compose.federation.yml up -d --build`
-  - Backend: `http://localhost:3100` (default), DB: `localhost:55432` (default)
+  - Backend: `http://localhost:3000` (default), DB: `localhost:5432` (default)
 - Unit tests: ActivityPub JSON generation for Actor/Note/Create; signature sign/verify; id mapping.
 - Integration tests (docker):
   - fake ActivityPub inbox server to assert deliveries and signature headers

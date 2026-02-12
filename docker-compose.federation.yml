@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${FED_POSTGRES_PASSWORD:-supersecretpassword}
       POSTGRES_DB: ${FED_POSTGRES_DB:-intellacc_feddb}
     ports:
-      - "${FED_POSTGRES_PORT:-55432}:5432"
+      - "${FED_POSTGRES_PORT:-5432}:5432"
     volumes:
       - fed-db-data:/var/lib/postgresql/data
     networks:
@@ -45,7 +45,7 @@ services:
       - ./backend/uploads:/usr/src/app/uploads
     working_dir: /usr/src/app
     ports:
-      - "${FED_BACKEND_PORT:-3100}:3000"
+      - "${FED_BACKEND_PORT:-3000}:3000"
     command: ["./scripts/docker-dev-entrypoint.sh"]
     depends_on:
       - db
@@ -59,7 +59,7 @@ services:
     container_name: intellacc_fed_frontend
     command: sh -lc "npm install && npm install @rollup/rollup-linux-x64-musl --save-optional && npm run dev -- --host 0.0.0.0"
     ports:
-      - "${FED_FRONTEND_PORT:-5176}:5173"
+      - "${FED_FRONTEND_PORT:-5173}:5173"
     volumes:
       - ./frontend:/app
       - fed-frontend-node-modules:/app/node_modules
