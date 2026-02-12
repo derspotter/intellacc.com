@@ -83,6 +83,7 @@ test.describe('Device linking flow', () => {
       .toBeVisible({ timeout: 10000 });
 
     await pageA.getByPlaceholder('Enter linking token').fill(linkToken);
+    await pageA.getByPlaceholder('Approver password').fill(USER.password);
     pageA.once('dialog', dialog => dialog.accept());
     await pageA.getByRole('button', { name: 'Approve' }).click();
 

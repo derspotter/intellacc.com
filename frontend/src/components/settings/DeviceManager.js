@@ -16,6 +16,7 @@ export default function DeviceManager() {
     const approveToken = van.state('');
     const isApproving = van.state(false);
     const approveError = van.state('');
+    const approverPassword = van.state('');
 
 
     const loadDevices = async () => {
@@ -79,13 +80,13 @@ export default function DeviceManager() {
         if (!approveToken.val) return;
         isApproving.val = true;
         approveError.val = '';
+        if (!approverPassword.val) {
+            approveError.val = 'Please enter your account password to approve this device.';
+            isApproving.val = false;
+            return;
+        }
         try {
-            // We need our internal device ID to mark who approved it
-            const myDevices = await api.devices.list();
-            const myInternalId = myDevices.find(d => d.device_public_id === vaultService.getDeviceId())?.id;
-
-            // 1. Approve the device linking request
-            const result = await api.devices.approveLinking(approveToken.val, myInternalId);
+            const result = await api.devices.approveLinking(approveToken.val, approverPassword.val);
             const newDevice = result.device;
 
             // 2. Sync MLS Groups to the new device (Device B)
@@ -105,6 +106,7 @@ export default function DeviceManager() {
             }
 
             approveToken.val = '';
+            approverPassword.val = '';
             alert(`Device approved and synced to ${syncedCount} groups!`);
             loadDevices();
         } catch (e) {
@@ -168,6 +170,14 @@ export default function DeviceManager() {
                             placeholder: 'Enter linking token',
                             value: approveToken,
                             oninput: e => approveToken.val = e.target.value,
+                            class: 'form-input',
+                            style: 'flex: 1;'
+                        }),
+                        input({
+                            type: 'password',
+                            placeholder: 'Approver password',
+                            value: approverPassword,
+                            oninput: e => approverPassword.val = e.target.value,
                             class: 'form-input',
                             style: 'flex: 1;'
                         }),

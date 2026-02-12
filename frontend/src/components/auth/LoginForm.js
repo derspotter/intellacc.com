@@ -3,7 +3,7 @@
 
 import van from 'vanjs-core';
 import PasskeyButton from './PasskeyButton';
-const { div, h1, form, label, input, button, p, a, span } = van.tags;
+const { div, h1, form, label, input, button, p, a } = van.tags;
 import auth from '../../services/auth';
 
 // Preload WASM module in background while user types credentials
@@ -13,7 +13,6 @@ function preloadWasm() {
   wasmPreloaded = true;
   import('openmls-wasm').catch(() => {});
 }
-
 
 /**
  * Login Form Component
@@ -68,32 +67,40 @@ const LoginForm = () => {
       // === LOGIN FORM ===
       form({
         onsubmit: handleSubmit,
+        autocomplete: 'on',
         style: () => `display: ${stage.val === 'logging_in' ? 'none' : 'block'}`
       },
         div({ class: 'form-group' },
-          label({ for: 'email' }, 'Email'),
+          label({ for: 'login-email' }, 'Email'),
           emailInputRef = input({
-            id: 'email',
+            id: 'login-email',
+            name: 'email',
             type: 'email',
             required: true,
             placeholder: 'Enter your email',
-            autofocus: true
+            autofocus: true,
+            autocomplete: 'username',
+            inputmode: 'email',
+            autocapitalize: 'off',
+            spellcheck: 'false'
           })
         ),
         div({ class: 'form-group' },
-          label({ for: 'password' }, 'Password'),
+          label({ for: 'login-password' }, 'Password'),
           passwordInputRef = input({
-            id: 'password',
+            id: 'login-password',
+            name: 'password',
             type: 'password',
             required: true,
-            placeholder: 'Enter your password'
+            placeholder: 'Enter your password',
+            autocomplete: 'current-password'
           })
         ),
         div({ class: 'form-actions' },
           button({ type: 'submit', class: 'btn-primary' }, 'Sign In'),
           div({ style: 'width: 100%; margin-top: 1rem;' },
             PasskeyButton({
-              email: { val: '' }, // PasskeyButton will read from its own input
+              email: { val: '' },
               onSuccess: () => window.location.hash = '#',
               onError: (err) => { error.val = err.message || 'Passkey login failed'; }
             })

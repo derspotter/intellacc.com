@@ -70,6 +70,10 @@ export function checkAuth() {
 
 // Export for PasskeyButton
 export async function onLoginSuccess(password = null) {
+    // Navigate immediately so auth never feels stuck while background bootstrap runs.
+    window.location.hash = 'home';
+    updatePageFromHash();
+
     // Fetch user profile after login
     let profile = null;
     try {
@@ -172,9 +176,6 @@ export async function onLoginSuccess(password = null) {
       }
     }).catch(() => {});
     
-    // Navigate to home page after login
-    window.location.hash = 'home';
-    updatePageFromHash();
 }
 
 /**
@@ -207,9 +208,12 @@ export async function login(email, password) {
     // Save token and update state
     saveToken(response.token);
     updateAdminStateFromToken();
-    
-    await onLoginSuccess(password);
-    
+
+    // Do not block login response on vault/MLS bootstrap.
+    onLoginSuccess(password).catch((e) => {
+      console.warn('Post-login bootstrap failed:', e);
+    });
+
     return { success: true };
   } catch (error) {
     console.error('Login error:', error);

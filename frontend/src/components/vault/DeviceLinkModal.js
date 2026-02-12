@@ -186,25 +186,15 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
     if (!moduleState.deriveInitialized) {
         moduleState.deriveInitialized = true;
 
-        // Use van.derive() to trigger startLinking when modal opens
-        // Only watch showDeviceLinkModal, NOT status (to avoid re-triggering on status change)
+        // Use van.derive() to trigger startLinking while modal is visible.
+        // Watching status as well makes this robust against stale in-memory guard state.
         van.derive(() => {
             const isVisible = vaultStore.showDeviceLinkModal;
+            const currentStatus = status.val;
 
-            // Detect modal opening (transition from hidden to visible)
-            if (isVisible && !moduleState.lastModalVisible) {
-                moduleState.lastModalVisible = true;
-                // Only start linking if not already started and status is init
-                if (!moduleState.linkingStarted && status.val === 'init') {
-                    moduleState.linkingStarted = true;
-                    // Use setTimeout to ensure we're fully outside any render cycle
-                    setTimeout(() => {
-                        console.log('[DeviceLink] Derive triggered startLinking');
-                        startLinking();
-                    }, 0);
-                }
-            } else if (!isVisible && moduleState.lastModalVisible) {
+            if (!isVisible) {
                 // Modal closing - reset state and cleanup timers
+                if (!moduleState.lastModalVisible) return;
                 moduleState.lastModalVisible = false;
                 moduleState.linkingStarted = false;
                 cleanupTimers();
@@ -212,6 +202,18 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                 linkToken.val = '';
                 error.val = '';
                 timeRemaining.val = '';
+                return;
+            }
+
+            // Modal visible - ensure linking starts whenever status is init.
+            moduleState.lastModalVisible = true;
+            if (!moduleState.linkingStarted && currentStatus === 'init') {
+                moduleState.linkingStarted = true;
+                // Use setTimeout to ensure we're fully outside any render cycle
+                setTimeout(() => {
+                    console.log('[DeviceLink] Derive triggered startLinking');
+                    startLinking();
+                }, 0);
             }
         });
     }

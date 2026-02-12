@@ -4,200 +4,175 @@ const { div, h1, form, label, input, button, p, a } = van.tags;
 import auth from '../../services/auth';
 
 /**
- * Sign up form component with improved input handling
+ * Sign up form component.
+ * Uses direct input refs on submit so browser autofill/password-manager writes
+ * are always captured, even when input events are not emitted.
  */
 const SignUpForm = () => {
-  // Use separate state for each field
-  const username = van.state('');
-  const email = van.state('');
-  const password = van.state('');
-  const confirmPassword = van.state('');
   const submitting = van.state(false);
   const error = van.state('');
-  
-  // Validation state
   const validationErrors = van.state({});
-  
-  // Validate form
-  const validateForm = () => {
+
+  let usernameInputRef = null;
+  let emailInputRef = null;
+  let passwordInputRef = null;
+  let confirmPasswordInputRef = null;
+
+  const clearFieldValidationError = (fieldName) => {
+    if (!validationErrors.val[fieldName]) return;
+    const errors = { ...validationErrors.val };
+    delete errors[fieldName];
+    validationErrors.val = errors;
+  };
+
+  const validateForm = ({ username, email, password, confirmPassword }) => {
     const errors = {};
-    
-    if (!username.val.trim()) {
+
+    if (!username) {
       errors.username = 'Username is required';
-    } else if (username.val.trim().length < 3) {
+    } else if (username.length < 3) {
       errors.username = 'Username must be at least 3 characters';
     }
-    
-    if (!email.val.trim()) {
+
+    if (!email) {
       errors.email = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.val)) {
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       errors.email = 'Please enter a valid email address';
     }
-    
-    if (!password.val) {
+
+    if (!password) {
       errors.password = 'Password is required';
-    } else if (password.val.length < 6) {
+    } else if (password.length < 6) {
       errors.password = 'Password must be at least 6 characters';
     }
-    
-    if (!confirmPassword.val) {
+
+    if (!confirmPassword) {
       errors.confirmPassword = 'Please confirm your password';
-    } else if (password.val !== confirmPassword.val) {
+    } else if (password !== confirmPassword) {
       errors.confirmPassword = 'Passwords do not match';
     }
-    
+
     validationErrors.val = errors;
     return Object.keys(errors).length === 0;
   };
-  
-  // Handle form submission
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    // Clear previous error
+    if (submitting.val) return;
+
+    const username = (usernameInputRef?.value || '').trim();
+    const email = (emailInputRef?.value || '').trim();
+    const password = passwordInputRef?.value || '';
+    const confirmPassword = confirmPasswordInputRef?.value || '';
+
     error.val = '';
-    
-    // Validate form
-    if (!validateForm()) {
+
+    if (!validateForm({ username, email, password, confirmPassword })) {
       return;
     }
-    
+
     submitting.val = true;
-    
+
     try {
-      // Call register function from auth service
-      const result = await auth.register(username.val.trim(), email.val.trim(), password.val);
-      
-      if (result.success) {
-        // Registration successful - user should be logged in automatically
-        // The auth.register function handles login after successful registration
-        // Redirect will happen automatically in the auth service
-      } else {
-        console.error('Registration failed:', result);
+      const result = await auth.register(username, email, password);
+      if (!result.success) {
         error.val = result.error || 'Registration failed';
-        submitting.val = false;
       }
     } catch (err) {
       console.error('Registration error:', err);
       error.val = err.message || 'Registration failed';
+    } finally {
       submitting.val = false;
     }
   };
-  
-  // Add back the outer div for page styling
-  return div({ class: "signup-page" }, 
-    div({ class: "signup-container" }, [
-      h1("Create Account"),
-      
-      // Show error message if present
-      () => error.val ? 
-        div({ class: "error-message" }, error.val) : null,
-      
-      form({ onsubmit: handleSubmit }, [
-        div({ class: "form-group" }, [
-          label({ for: "username" }, "Username"),
-          input({
-            id: "username",
-            type: "text",
-            onchange: (e) => { 
-              username.val = e.target.value;
-              // Clear validation error when user starts typing
-              if (validationErrors.val.username) {
-                const errors = { ...validationErrors.val };
-                delete errors.username;
-                validationErrors.val = errors;
-              }
-            },
-            disabled: submitting.val,
+
+  return div({ class: 'signup-page' },
+    div({ class: 'signup-container' }, [
+      h1('Create Account'),
+
+      () => error.val ?
+        div({ class: 'error-message' }, error.val) : null,
+
+      form({ onsubmit: handleSubmit, autocomplete: 'on' }, [
+        div({ class: 'form-group' }, [
+          label({ for: 'signup-username' }, 'Username'),
+          usernameInputRef = input({
+            id: 'signup-username',
+            name: 'username',
+            type: 'text',
+            oninput: () => clearFieldValidationError('username'),
+            disabled: () => submitting.val,
             required: true,
-            placeholder: "Choose a username"
+            placeholder: 'Choose a username',
+            autocomplete: 'username',
+            autocapitalize: 'off',
+            spellcheck: 'false'
           }),
-          // Show validation error
-          () => validationErrors.val.username ? 
-            div({ class: "field-error" }, validationErrors.val.username) : null
+          () => validationErrors.val.username ?
+            div({ class: 'field-error' }, validationErrors.val.username) : null
         ]),
-        
-        div({ class: "form-group" }, [
-          label({ for: "email" }, "Email"),
-          input({
-            id: "email",
-            type: "email",
-            onchange: (e) => { 
-              email.val = e.target.value;
-              // Clear validation error when user starts typing
-              if (validationErrors.val.email) {
-                const errors = { ...validationErrors.val };
-                delete errors.email;
-                validationErrors.val = errors;
-              }
-            },
-            disabled: submitting.val,
+
+        div({ class: 'form-group' }, [
+          label({ for: 'signup-email' }, 'Email'),
+          emailInputRef = input({
+            id: 'signup-email',
+            name: 'email',
+            type: 'email',
+            oninput: () => clearFieldValidationError('email'),
+            disabled: () => submitting.val,
             required: true,
-            placeholder: "Enter your email"
+            placeholder: 'Enter your email',
+            autocomplete: 'email',
+            inputmode: 'email',
+            autocapitalize: 'off',
+            spellcheck: 'false'
           }),
-          // Show validation error
-          () => validationErrors.val.email ? 
-            div({ class: "field-error" }, validationErrors.val.email) : null
+          () => validationErrors.val.email ?
+            div({ class: 'field-error' }, validationErrors.val.email) : null
         ]),
-        
-        div({ class: "form-group" }, [
-          label({ for: "password" }, "Password"),
-          input({
-            id: "password",
-            type: "password",
-            onchange: (e) => { 
-              password.val = e.target.value;
-              // Clear validation error when user starts typing
-              if (validationErrors.val.password) {
-                const errors = { ...validationErrors.val };
-                delete errors.password;
-                validationErrors.val = errors;
-              }
-            },
-            disabled: submitting.val,
+
+        div({ class: 'form-group' }, [
+          label({ for: 'signup-password' }, 'Password'),
+          passwordInputRef = input({
+            id: 'signup-password',
+            name: 'password',
+            type: 'password',
+            oninput: () => clearFieldValidationError('password'),
+            disabled: () => submitting.val,
             required: true,
-            placeholder: "Choose a password"
+            placeholder: 'Choose a password',
+            autocomplete: 'new-password'
           }),
-          // Show validation error
-          () => validationErrors.val.password ? 
-            div({ class: "field-error" }, validationErrors.val.password) : null
+          () => validationErrors.val.password ?
+            div({ class: 'field-error' }, validationErrors.val.password) : null
         ]),
-        
-        div({ class: "form-group" }, [
-          label({ for: "confirmPassword" }, "Confirm Password"),
-          input({
-            id: "confirmPassword",
-            type: "password",
-            onchange: (e) => { 
-              confirmPassword.val = e.target.value;
-              // Clear validation error when user starts typing
-              if (validationErrors.val.confirmPassword) {
-                const errors = { ...validationErrors.val };
-                delete errors.confirmPassword;
-                validationErrors.val = errors;
-              }
-            },
-            disabled: submitting.val,
+
+        div({ class: 'form-group' }, [
+          label({ for: 'signup-confirm-password' }, 'Confirm Password'),
+          confirmPasswordInputRef = input({
+            id: 'signup-confirm-password',
+            name: 'confirmPassword',
+            type: 'password',
+            oninput: () => clearFieldValidationError('confirmPassword'),
+            disabled: () => submitting.val,
             required: true,
-            placeholder: "Confirm your password"
+            placeholder: 'Confirm your password',
+            autocomplete: 'new-password'
           }),
-          // Show validation error
-          () => validationErrors.val.confirmPassword ? 
-            div({ class: "field-error" }, validationErrors.val.confirmPassword) : null
+          () => validationErrors.val.confirmPassword ?
+            div({ class: 'field-error' }, validationErrors.val.confirmPassword) : null
         ]),
-        
-        div({ class: "form-actions" }, [
+
+        div({ class: 'form-actions' }, [
           button({
-            type: "submit",
-            disabled: submitting.val,
-            class: "btn-primary"
-          }, () => submitting.val ? "Creating Account..." : "Create Account"),
-          
-          p({ class: "login-link" }, [
-            "Already have an account? ",
-            a({ 
-              href: "#login"
-            }, "Sign in here")
+            type: 'submit',
+            disabled: () => submitting.val,
+            class: 'btn-primary'
+          }, () => submitting.val ? 'Creating Account...' : 'Create Account'),
+
+          p({ class: 'login-link' }, [
+            'Already have an account? ',
+            a({ href: '#login' }, 'Sign in here')
           ])
         ])
       ])

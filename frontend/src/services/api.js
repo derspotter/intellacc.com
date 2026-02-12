@@ -799,7 +799,17 @@ export const api = {
     register: (device_public_id, name) => request('/devices/register', { method: 'POST', body: { device_public_id, name } }),
     revoke: (id) => request(`/devices/${id}`, { method: 'DELETE' }),
     startLinking: (device_public_id, name) => request('/devices/link/start', { method: 'POST', body: { device_public_id, name } }),
-    approveLinking: (token, approving_device_id) => request('/devices/link/approve', { method: 'POST', body: { token, approving_device_id } }),
+    approveLinking: (token, approver_password) => {
+      const headers = {};
+      const deviceId = getDeviceId();
+      if (deviceId) headers['x-device-id'] = deviceId;
+
+      return request('/devices/link/approve', {
+        method: 'POST',
+        body: { token, approver_password },
+        headers
+      });
+    },
     getLinkingStatus: (token) => request(`/devices/link/status?token=${token}`)
   }
 };

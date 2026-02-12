@@ -93,6 +93,20 @@ export async function registerServiceWorker() {
     return null;
   }
 
+  // In local dev, stale SW caches can serve old JS and make auth flows appear broken.
+  // Keep localhost uncached and unregister any leftover service workers.
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1') {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((reg) => reg.unregister()));
+      console.log('[Push] Skipping service worker on localhost and cleared existing registrations');
+    } catch (error) {
+      console.warn('[Push] Failed clearing localhost service workers:', error);
+    }
+    return null;
+  }
+
   try {
     const registration = await navigator.serviceWorker.register('/sw.js');
     console.log('[Push] Service worker registered:', registration.scope);

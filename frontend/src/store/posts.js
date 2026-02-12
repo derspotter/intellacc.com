@@ -88,34 +88,33 @@ const postsStore = {
       try {
         this.state.loading.val = true;
         this.state.error.val = null;
-        if (!isLoggedInState.val) {
-          return this.actions.loadMockPosts.call(this);
-        }
         if (reset) {
           this.state.nextCursor.val = null;
           this.state.hasMore.val = true;
         }
 
-        // Home timeline should use the personalized feed endpoint.
-        const page = await api.posts.getFeedPage({ cursor: null, limit: 20 });
+        const page = isLoggedInState.val
+          ? await api.posts.getFeedPage({ cursor: null, limit: 20 })
+          : await api.posts.getPage({ cursor: null, limit: 20 });
+
         const items = Array.isArray(page?.items) ? page.items : [];
         this.state.posts.val = items;
         this.state.nextCursor.val = page?.nextCursor ?? null;
         this.state.hasMore.val = !!page?.hasMore;
-        this.state.feedMode.val = 'real';
-        if (isLoggedInState.val && this.state.posts.val.length > 0) {
-          // Initialize reactive like statuses for posts
-          const statuses = {};
-          this.state.posts.val.forEach(post => {
-            if (post.liked_by_user !== undefined) statuses[post.id] = post.liked_by_user;
-          });
-          Object.assign(this.state.likeStatus, statuses);
-        }
+        this.state.feedMode.val = isLoggedInState.val ? 'real' : 'public';
+
+        // Initialize reactive like statuses for posts
+        const statuses = {};
+        this.state.posts.val.forEach(post => {
+          if (post.liked_by_user !== undefined) statuses[post.id] = post.liked_by_user;
+        });
+        Object.assign(this.state.likeStatus, statuses);
+
         return this.state.posts.val;
       } catch (error) {
         console.error('Error fetching posts:', error);
         this.state.error.val = error.message;
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        if (!isLoggedInState.val && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
           this.actions.loadMockPosts.call(this);
         }
         return [];
@@ -125,15 +124,18 @@ const postsStore = {
     },
 
     async fetchMorePosts() {
-      if (!isLoggedInState.val) return [];
       if (this.state.loadingMore.val || this.state.loading.val) return [];
       if (!this.state.hasMore.val) return [];
+      if (!isLoggedInState.val && this.state.feedMode.val === 'mock') return [];
 
       try {
         this.state.loadingMore.val = true;
         this.state.error.val = null;
 
-        const page = await api.posts.getFeedPage({ cursor: this.state.nextCursor.val, limit: 20 });
+        const page = isLoggedInState.val
+          ? await api.posts.getFeedPage({ cursor: this.state.nextCursor.val, limit: 20 })
+          : await api.posts.getPage({ cursor: this.state.nextCursor.val, limit: 20 });
+
         const items = Array.isArray(page?.items) ? page.items : [];
         if (items.length === 0) {
           this.state.hasMore.val = false;
@@ -150,7 +152,7 @@ const postsStore = {
         this.state.posts.val = merged;
         this.state.nextCursor.val = page?.nextCursor ?? null;
         this.state.hasMore.val = !!page?.hasMore;
-        this.state.feedMode.val = 'real';
+        this.state.feedMode.val = isLoggedInState.val ? 'real' : 'public';
 
         // Like status init for new posts
         const statuses = {};
