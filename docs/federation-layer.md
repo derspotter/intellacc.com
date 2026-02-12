@@ -40,7 +40,7 @@ Required env vars for safer operation:
 
 Verification command used in this branch:
 
-- `docker exec intellacc_fed_backend npx jest test/atproto_mvp.test.js --runInBand`
+- `docker exec intellacc_backend npx jest test/atproto_mvp.test.js --runInBand`
 
 ## Social Login MVP (This Update)
 
@@ -265,8 +265,8 @@ Deliverable: Intellacc users exist as first-class AT identities, not just bridge
 
 ## Testing Plan (Must-Haves)
 
-- Use an isolated stack (separate DB volume) when developing federation/migrations locally:
-  - `docker compose -f docker-compose.federation.yml up -d --build`
+- Use the standard app stack when developing federation/migrations locally:
+  - `docker compose up -d --build`
   - Backend: `http://localhost:3000` (default), DB: `localhost:5432` (default)
 - Unit tests: ActivityPub JSON generation for Actor/Note/Create; signature sign/verify; id mapping.
 - Integration tests (docker):
