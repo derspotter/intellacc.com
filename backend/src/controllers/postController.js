@@ -3,6 +3,9 @@ const fs = require('fs');
 const path = require('path');
 const notificationService = require('../services/notificationService');
 const pangramService = require('../services/pangramService');
+const activitypubOutbound = require('../services/activitypub/outboundService');
+const atprotoOutbound = require('../services/atproto/outboundService');
+const { getRequestBaseUrl } = require('../services/activitypub/url');
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
 
@@ -136,6 +139,24 @@ exports.createPost = async (req, res) => {
     } else if (req.io) {
       // Emit new post event for timeline updates
       req.io.emit('new_post', newPost);
+    }
+
+    // ActivityPub federation is best-effort; never block local post creation.
+    if (!isComment) {
+      const baseUrl = getRequestBaseUrl(req);
+      activitypubOutbound.enqueueCreateForLocalPost({
+        baseUrl,
+        post: newPost,
+        username: newPost.username
+      }).catch((err) => {
+        console.error('[ActivityPub] Failed to enqueue outbound Create:', err?.message || err);
+      });
+
+      atprotoOutbound.enqueueCreateForLocalPost({
+        post: newPost
+      }).catch((err) => {
+        console.error('[ATProto] Failed to enqueue outbound post:', err?.message || err);
+      });
     }
 
     console.log('Post/comment created successfully:', newPost);

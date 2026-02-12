@@ -311,7 +311,19 @@ export const api = {
     },
 
     cancelPasswordReset: () =>
-      request('/auth/reset-password/cancel', { method: 'POST' })
+      request('/auth/reset-password/cancel', { method: 'POST' }),
+
+    startAtprotoLogin: (identifier, redirect = true) =>
+      request('/auth/atproto/start', {
+        method: 'POST',
+        body: { identifier, redirect }
+      }),
+
+    startMastodonLogin: (instance, redirect = true) =>
+      request('/auth/mastodon/start', {
+        method: 'POST',
+        body: { instance, redirect }
+      })
   },
   
   // Users endpoints

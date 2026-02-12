@@ -32,8 +32,9 @@ class VaultService {
         this.db = null;
         this.compositeKey = null; // The actual encryption key
         this.masterKey = null;
+        this.masterKeyResolved = false;
         this.localKey = null;
-        this.deviceId = null; 
+        this.deviceId = null;
         this.masterKeyCreated = false;
     }
 
@@ -51,6 +52,10 @@ class VaultService {
 
     didCreateMasterKey() {
         return this.masterKeyCreated;
+    }
+
+    didResolveMasterKey() {
+        return this.masterKeyResolved;
     }
 
     setDeviceId(deviceId) {
@@ -957,6 +962,19 @@ class VaultService {
         return deviceIds.length > 0;
     }
 
+    async hasAccountVault() {
+        const deviceIds = await this.getLocalDeviceIds({ includePending: true });
+
+        try {
+            await api.users.getMasterKey(deviceIds.length ? deviceIds : undefined);
+            return true;
+        } catch (err) {
+            if (err?.status === 404) return false;
+            if (err?.status === 403 && err?.data?.code === 'LINK_REQUIRED') return true;
+            throw err;
+        }
+    }
+
     async checkVaultExists(userId) {
         vaultStore.setVaultExists(true);
         return true;
@@ -985,10 +1003,14 @@ class VaultService {
         
         // Standard flow ...
         // (Code from findAndUnlock above)
+        this.masterKeyResolved = false;
         if (!userId) return false;
         try {
             this.masterKey = await this.getOrCreateMasterKey(password);
+            this.masterKeyResolved = true;
         } catch (e) {
+            this.masterKey = null;
+            this.masterKeyResolved = false;
             if (e.status === 403) throw e;
             return false;
         }
@@ -1053,6 +1075,7 @@ class VaultService {
         messagingStore.clearCache();         // Decrypted messages, groups, DMs
 
         this.masterKey = null;
+        this.masterKeyResolved = false;
         this.localKey = null;
         this.compositeKey = null;
         this.deviceKey = null; // Alias

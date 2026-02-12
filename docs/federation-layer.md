@@ -8,6 +8,54 @@ This document is a practical plan for making Intellacc interoperable with:
 The goal is to keep Intellacc as the source of truth while adding a translation + delivery layer
 that exports/imports social graph + posts.
 
+## Implemented in This Branch (ATProto MVP)
+
+This branch includes an OAuth-only ATProto publishing MVP (Stage 4A-style syndication):
+
+- Authenticated account linking via ATProto OAuth:
+  - `GET /api/federation/atproto/client-metadata.json` (public)
+  - `POST /api/federation/atproto/oauth/start` (authenticated)
+  - `GET /api/federation/atproto/oauth/callback` (public)
+  - `GET /api/federation/atproto/account`
+  - `DELETE /api/federation/atproto/account`
+- Local post federation enqueue:
+  - automatic enqueue on local top-level post creation
+  - manual enqueue endpoint: `POST /api/federation/atproto/posts/:postId/enqueue`
+- Async delivery worker with retry/backoff:
+  - DB queue table: `atproto_delivery_queue`
+  - worker: `backend/src/services/atproto/deliveryWorker.js`
+- OAuth session lifecycle handling:
+  - stores encrypted OAuth state/session payloads in `atproto_oauth_state` and `atproto_oauth_session`
+  - restores and refreshes OAuth sessions via `@atproto/oauth-client-node`
+- Mapping table for published records:
+  - `atproto_post_map` maps local post IDs to AT URIs/CIDs
+
+Required env vars for safer operation:
+
+- `APP_PUBLIC_URL` (public backend URL used for OAuth metadata/callback URLs)
+- `ATPROTO_OAUTH_CLIENT_ID` (optional override; defaults to `${APP_PUBLIC_URL}/api/federation/atproto/client-metadata.json`)
+- `ATPROTO_OAUTH_SCOPES` (optional; defaults to `atproto transition:generic`)
+- `ATPROTO_CREDENTIAL_SECRET` (required in production)
+- `ATPROTO_WORKER_INTERVAL_MS` (optional; defaults to 15000 ms)
+
+Verification command used in this branch:
+
+- `docker exec intellacc_fed_backend npx jest test/atproto_mvp.test.js --runInBand`
+
+## Social Login MVP (This Update)
+
+This branch now also includes seamless social sign-in for migration from Bluesky and Mastodon:
+
+- Bluesky login:
+  - `POST /api/auth/atproto/start`
+  - `GET /api/auth/atproto/callback`
+- Mastodon login:
+  - `POST /api/auth/mastodon/start`
+  - `GET /api/auth/mastodon/callback`
+- First login automatically creates a local Intellacc account and links provider identity in `federated_auth_identities`.
+- Returning login for the same provider identity signs into the same local account (no duplicate account creation).
+
+
 ## Definitions (Avoiding Ambiguity)
 
 - "Syndication": cross-posting to a user's existing external account (easy, not true federation).
@@ -217,6 +265,9 @@ Deliverable: Intellacc users exist as first-class AT identities, not just bridge
 
 ## Testing Plan (Must-Haves)
 
+- Use an isolated stack (separate DB volume) when developing federation/migrations locally:
+  - `docker compose -f docker-compose.federation.yml up -d --build`
+  - Backend: `http://localhost:3100` (default), DB: `localhost:55432` (default)
 - Unit tests: ActivityPub JSON generation for Actor/Note/Create; signature sign/verify; id mapping.
 - Integration tests (docker):
   - fake ActivityPub inbox server to assert deliveries and signature headers

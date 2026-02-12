@@ -5,6 +5,8 @@ const socketIo = require('socket.io');
 const { verifyToken } = require('./utils/jwt');
 const notificationService = require('./services/notificationService');
 const passwordResetService = require('./services/passwordResetService');
+const { startDeliveryWorker: startActivityPubDeliveryWorker } = require('./services/activitypub/deliveryWorker');
+const { startDeliveryWorker: startAtprotoDeliveryWorker } = require('./services/atproto/deliveryWorker');
 
 const app = express();
 const port = process.env.NODE_PORT || 3000;
@@ -119,6 +121,7 @@ io.on('connection', (socket) => {
 
 // Middleware
 app.use(express.json({
+  type: ['application/json', 'application/*+json'],
   verify: (req, res, buf) => {
     req.rawBody = buf;
   }
@@ -160,6 +163,8 @@ app.get('/', async (req, res) => {
 });
 
 // API Routes
+// ActivityPub federation endpoints (root-level, not under /api)
+app.use(require('./routes/activitypub'));
 app.use('/api', require('./routes/api'));
 
 // Attach io instance to app for controllers to use
@@ -168,6 +173,11 @@ app.set('io', io);
 // Start server only when run directly (not when imported for testing)
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
+  const apIntervalMs = parseInt(process.env.FEDERATION_WORKER_INTERVAL_MS || '10000', 10) || 10000;
+  const atprotoIntervalMs = parseInt(process.env.ATPROTO_WORKER_INTERVAL_MS || '15000', 10) || 15000;
+  startActivityPubDeliveryWorker({ intervalMs: apIntervalMs });
+  startAtprotoDeliveryWorker({ intervalMs: atprotoIntervalMs });
+
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running with Socket.IO on port ${PORT}`);
   });

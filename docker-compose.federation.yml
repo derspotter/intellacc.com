@@ -1,0 +1,77 @@
+services:
+  # Isolated Postgres for federation development/testing.
+  # Uses a separate container name, volume, ports, and network so it can't affect the main app DB.
+  db:
+    image: postgres:17-alpine
+    container_name: intellacc_fed_db
+    environment:
+      POSTGRES_USER: ${FED_POSTGRES_USER:-intellacc_user}
+      POSTGRES_PASSWORD: ${FED_POSTGRES_PASSWORD:-supersecretpassword}
+      POSTGRES_DB: ${FED_POSTGRES_DB:-intellacc_feddb}
+    ports:
+      - "${FED_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - fed-db-data:/var/lib/postgresql/data
+    networks:
+      - intellacc-federation-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intellacc_fed_backend
+    environment:
+      NODE_ENV: ${FED_NODE_ENV:-development}
+      # Keep the container port stable (3000) and only vary host port via FED_BACKEND_PORT.
+      PORT: "3000"
+      FRONTEND_URL: ${FED_FRONTEND_URL:-https://intellacc.de}
+      JWT_SECRET: ${FED_JWT_SECRET:-your_jwt_secret}
+      FEDERATION_BASE_URL: ${FEDERATION_BASE_URL:-https://intellacc.de}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://intellacc.de}
+      ATPROTO_OAUTH_CLIENT_ID: ${ATPROTO_OAUTH_CLIENT_ID:-https://intellacc.de/api/federation/atproto/client-metadata.json}
+      ATPROTO_OAUTH_SCOPES: "${ATPROTO_OAUTH_SCOPES:-atproto transition:generic}"
+      MASTODON_OAUTH_SCOPES: "${MASTODON_OAUTH_SCOPES:-read:accounts}"
+      SOCIAL_AUTH_STATE_TTL_SECONDS: ${SOCIAL_AUTH_STATE_TTL_SECONDS:-600}
+      ATPROTO_CREDENTIAL_SECRET: ${ATPROTO_CREDENTIAL_SECRET:-dev-atproto-credential-secret}
+      ATPROTO_WORKER_INTERVAL_MS: ${ATPROTO_WORKER_INTERVAL_MS:-15000}
+      DATABASE_URL: "postgres://${FED_POSTGRES_USER:-intellacc_user}:${FED_POSTGRES_PASSWORD:-supersecretpassword}@db:5432/${FED_POSTGRES_DB:-intellacc_feddb}"
+    volumes:
+      - ./backend/src:/usr/src/app/src
+      - ./backend/test:/usr/src/app/test
+      - ./backend/package.json:/usr/src/app/package.json
+      - ./backend/package-lock.json:/usr/src/app/package-lock.json
+      - ./backend/.npmrc:/usr/src/app/.npmrc
+      - ./backend/migrations:/usr/src/app/migrations
+      - ./backend/uploads:/usr/src/app/uploads
+    working_dir: /usr/src/app
+    ports:
+      - "${FED_BACKEND_PORT:-3100}:3000"
+    command: ["./scripts/docker-dev-entrypoint.sh"]
+    depends_on:
+      - db
+    networks:
+      - intellacc-federation-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: intellacc_fed_frontend
+    command: sh -lc "npm install && npm install @rollup/rollup-linux-x64-musl --save-optional && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "${FED_FRONTEND_PORT:-5176}:5173"
+    volumes:
+      - ./frontend:/app
+      - fed-frontend-node-modules:/app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - intellacc-federation-network
+
+networks:
+  intellacc-federation-network:
+    driver: bridge
+
+volumes:
+  fed-db-data:
+  fed-frontend-node-modules:
