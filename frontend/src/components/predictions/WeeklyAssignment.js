@@ -65,35 +65,32 @@ export default function WeeklyAssignment() {
     }, '📋 Pending');
   };
 
-  const getRewardInfo = (assignment) => {
-    const minStake = assignment?.min_stake_rp ?? 1;
-    if (!assignment || !assignment.has_stake) {
-      return p({
-        class: 'weekly-assignment-reward-info'
-      }, [
-        `💰 Place a stake of at least ${minStake} RP to earn `,
-        span({ class: 'reward-amount' }, '+50 RP'),
-        ' bonus!'
-      ]);
-    }
-    
+  const getParticipationInfo = (assignment) => {
+    const minStake = Number(assignment?.min_stake_rp ?? 0);
+    if (!assignment) return null;
+
     if (assignment.weekly_assignment_completed) {
       return p({
         class: 'weekly-assignment-reward-info completed'
-      }, [
-        '🎉 Congratulations! You earned the ',
-        span({ class: 'reward-amount' }, '+50 RP'),
-        ' weekly bonus!'
-      ]);
+      }, '✅ Weekly requirement met.');
     }
-    
+
+    if (!assignment.has_stake) {
+      return p({
+        class: 'weekly-assignment-reward-info'
+      }, `⚠️ Place at least ${minStake.toFixed(2)} RP this week to avoid the 1% missed-week penalty.`);
+    }
+
+    const currentStake = Number(assignment.stake_amount || 0);
+    if (currentStake >= minStake) {
+      return p({
+        class: 'weekly-assignment-reward-info completed'
+      }, `✅ Current stake (${currentStake.toFixed(2)} RP) meets this week's requirement.`);
+    }
+
     return p({
       class: 'weekly-assignment-reward-info'
-    }, [
-      `⚠️ Stake placed but below minimum ${minStake} RP for `,
-      span({ class: 'reward-amount' }, '+50 RP'),
-      ' bonus.'
-    ]);
+    }, `⚠️ Current stake (${currentStake.toFixed(2)} RP) is below ${minStake.toFixed(2)} RP. Add stake to avoid the 1% missed-week penalty.`);
   };
 
   return Card({
@@ -157,7 +154,7 @@ export default function WeeklyAssignment() {
                 ])
             ]),
             
-            getRewardInfo(assign),
+            getParticipationInfo(assign),
             
             div({ class: 'weekly-assignment-actions' }, [
               Button({

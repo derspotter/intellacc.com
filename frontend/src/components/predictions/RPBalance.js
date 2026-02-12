@@ -69,7 +69,7 @@ export default function RPBalance({ horizontal = false }) {
   };
 
   const getEarningTips = () => [
-    '📅 Complete weekly assignments (+50 RP each)',
+    '📅 Place at least 1% weekly assignment stake (avoid 1% missed-week penalty)',
     '🎯 Make accurate predictions (log loss scoring)',
     '💎 Stake optimal amounts (Kelly criterion)',
     '⚡ Trade actively in markets for better rates',

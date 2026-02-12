@@ -90,3 +90,6 @@ recherche/2504.01781v2.pdf
 
 # Uploads
 /backend/uploads/
+
+# Playwright ad-hoc run artifacts
+.playwright-test-results/

@@ -25,11 +25,11 @@ const assignWeeklyPredictions = async (req, res) => {
 };
 
 /**
- * Process completed weekly assignments and award rewards (admin only)
+ * Process completed weekly assignments (admin only)
  */
 const processCompletedAssignments = async (req, res) => {
   try {
-    console.log('💰 Processing completed assignments');
+    console.log('✅ Processing completed weekly assignments');
     
     const result = await weeklyAssignmentService.processCompletedAssignments();
     
@@ -48,11 +48,11 @@ const processCompletedAssignments = async (req, res) => {
 };
 
 /**
- * Apply weekly RP decay (admin only)
+ * Apply weekly missed-assignment penalty (admin only)
  */
 const applyWeeklyDecay = async (req, res) => {
   try {
-    console.log('📉 Applying weekly RP decay');
+    console.log('📉 Applying weekly missed-assignment penalty');
     
     const result = await weeklyAssignmentService.applyWeeklyDecay();
     
@@ -142,16 +142,16 @@ const getUserWeeklyStatus = async (req, res) => {
 };
 
 /**
- * Run all weekly processes (assignment, rewards, decay) - admin only
+ * Run all weekly processes (completion processing, missed-week penalty, new assignments) - admin only
  */
 const runWeeklyProcesses = async (req, res) => {
   try {
     console.log('🔄 Running all weekly processes');
     
-    // 1. Process completed assignments first (award rewards)
+    // 1. Process completed assignments from previous week
     const completedResult = await weeklyAssignmentService.processCompletedAssignments();
     
-    // 2. Apply weekly decay
+    // 2. Apply missed-week penalty
     const decayResult = await weeklyAssignmentService.applyWeeklyDecay();
     
     // 3. Assign new weekly predictions
