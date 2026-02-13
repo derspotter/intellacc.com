@@ -10,6 +10,7 @@ const PASSWORD_RESET_SECRET = process.env.PASSWORD_RESET_SECRET || 'dev-password
 const PASSWORD_RESET_EXPIRY = process.env.PASSWORD_RESET_EXPIRY || '1h';
 const PASSWORD_RESET_DELAY_HOURS = parseFloat(process.env.PASSWORD_RESET_DELAY_HOURS || '168');
 const PASSWORD_RESET_POLL_INTERVAL_MS = parseInt(process.env.PASSWORD_RESET_POLL_INTERVAL_MS || '60000', 10) || 60000;
+const PASSWORD_RESET_COOLDOWN_SECONDS = parseInt(process.env.PASSWORD_RESET_COOLDOWN_SECONDS || '90', 10);
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const SMTP_TLS_REJECT_UNAUTHORIZED = process.env.SMTP_TLS_REJECT_UNAUTHORIZED;
 const SMTP_IGNORE_TLS = process.env.SMTP_IGNORE_TLS;
@@ -101,6 +102,32 @@ const markTokenUsed = async (tokenId, client = null) => {
 
 exports.sendPasswordResetEmail = async (userId, email) => {
   const transport = initTransporter();
+  const effectiveCooldownSeconds = Number.isFinite(PASSWORD_RESET_COOLDOWN_SECONDS) ? PASSWORD_RESET_COOLDOWN_SECONDS : 90;
+
+  const existing = await db.query(
+    `SELECT id, created_at, token_hash
+     FROM password_reset_tokens
+     WHERE user_id = $1
+       AND used_at IS NULL
+       AND expires_at > NOW()
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [userId]
+  );
+
+  if (existing.rows.length > 0) {
+    const lastSentAt = new Date(existing.rows[0].created_at).getTime();
+    const now = Date.now();
+    const cooldownMs = Math.max(0, effectiveCooldownSeconds) * 1000;
+
+    if (cooldownMs > 0 && now - lastSentAt < cooldownMs) {
+      console.log(
+        `[PasswordReset] Skipping duplicate reset email for user ${userId} to ${email} within ${effectiveCooldownSeconds}s`
+      );
+      return { success: true, skipped: true };
+    }
+  }
+
   const token = generateResetToken(userId, email);
   const tokenHash = hashToken(token);
   const expiresAt = getTokenExpiry(token);

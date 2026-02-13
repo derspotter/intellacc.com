@@ -138,6 +138,39 @@ describe('Password reset flow', () => {
     expect(tokenRows.rows[0].used_at).toBeNull();
   });
 
+  test('forgot password does not send duplicate email within cooldown', async () => {
+    const user = await createUser();
+    users.push(user);
+
+    const firstRes = await request(app)
+      .post('/api/auth/forgot-password')
+      .send({ email: user.email });
+
+    expect(firstRes.statusCode).toBe(200);
+
+    const firstTokenRows = await db.query(
+      'SELECT id, created_at FROM password_reset_tokens WHERE user_id = $1 ORDER BY created_at DESC',
+      [user.id]
+    );
+
+    expect(firstTokenRows.rows.length).toBe(1);
+    const firstCreatedAt = new Date(firstTokenRows.rows[0].created_at).getTime();
+
+    const secondRes = await request(app)
+      .post('/api/auth/forgot-password')
+      .send({ email: user.email });
+
+    expect(secondRes.statusCode).toBe(200);
+
+    const secondTokenRows = await db.query(
+      'SELECT id, created_at FROM password_reset_tokens WHERE user_id = $1 ORDER BY created_at DESC',
+      [user.id]
+    );
+
+    expect(secondTokenRows.rows.length).toBe(1);
+    expect(new Date(secondTokenRows.rows[0].created_at).getTime()).toBe(firstCreatedAt);
+  });
+
   test('immediate reset updates password, clears MLS data, and revokes old JWT', async () => {
     const user = await createUser();
     users.push(user);
