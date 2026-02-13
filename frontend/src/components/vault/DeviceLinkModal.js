@@ -282,17 +282,15 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                                 'Approve it from a device where you are already logged in.'
                             ),
 
-                            currentToken ? div({ class: 'verification-code-display' },
+                            currentToken ? div({ class: 'verification-code-wrap' },
                                 div({ class: 'token-label' }, 'Pairing code'),
-                                div({ class: 'verification-code-display-inner' }, [
-                                    code({ class: 'verification-code' }, formatToken(currentToken)),
-                                    button({
-                                        type: 'button',
-                                        class: 'btn btn-sm btn-copy',
-                                        onclick: copyToken,
-                                        title: 'Copy code'
-                                    }, 'Copy')
-                                ]),
+                                span({ class: 'verification-code' }, formatToken(currentToken)),
+                                button({
+                                    type: 'button',
+                                    class: 'btn btn-sm btn-copy',
+                                    onclick: copyToken,
+                                    title: 'Copy code'
+                                }, 'Copy'),
                                 p({ class: 'verification-code-hint' }, 'Copy or tap the code, then paste it on the device that is being linked.')
                             ) : null,
                             currentDeviceId ? p({ class: 'device-id-display' }, `Device ID: ${currentDeviceId}`) : null,

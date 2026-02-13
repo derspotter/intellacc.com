@@ -66,7 +66,7 @@
   margin-bottom: 1.5rem;
 }
 
-.verification-code-display {
+.verification-code-wrap {
   margin: 1.5rem 0;
   text-align: center;
 }
@@ -80,13 +80,9 @@
   margin-bottom: 0.5rem;
 }
 
-.verification-code-display-inner {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
+.verification-code-wrap > .verification-code {
+  display: block;
   margin-bottom: 0.5rem;
-  flex-wrap: wrap;
 }
 
 .verification-code {
@@ -106,6 +102,7 @@
   border-radius: 20px;
   height: auto;
   min-height: 28px;
+  margin-top: 0.5rem;
 }
 
 .verification-code-hint {
@@ -224,10 +221,6 @@
 }
 
 /* Dark mode adjustments */
-body.dark-mode .verification-code-display {
-  background: rgba(255, 255, 255, 0.05);
-}
-
 body.dark-mode .steps-list {
   background: rgba(255, 255, 255, 0.03);
 }
