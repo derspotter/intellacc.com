@@ -6,7 +6,7 @@
     "scripts": {
         "start": "node src/index.js",
         "dev": "nodemon --watch src --legacy-watch src/index.js",
-        "test": "jest"
+        "test": "NODE_ENV=test ALLOW_REGISTRATION=true jest"
     },
     "dependencies": {
         "@atproto/api": "^0.18.21",
