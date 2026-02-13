@@ -25,6 +25,9 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Partial` Community market question validation + incentives:
   backend routes/migration/tests are implemented (including automatic traction/resolution reward runner),
   but frontend submission/review/reward UX is still missing.
+  Implemented backend rules: 5 validators, 4/5 approvals required, creator bond 10 RP plus +5 RP per concurrent pending submission,
+  validator stake 2 RP with 5 RP payout to winning-side validators, and creator rewards +10 RP for approval, +10 RP for traction,
+  and +10 RP for resolution. Automatic reward runner endpoint: `/api/market-questions/rewards/run`.
 - `Done` Attachments storage:
   local disk storage + JWT-gated downloads are implemented for posts/messages.
   Presign endpoints exist as scaffold for later object-storage migration.
