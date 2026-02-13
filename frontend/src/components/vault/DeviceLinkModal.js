@@ -9,16 +9,16 @@ const { div, h2, h3, p, button, span, code, strong } = van.tags;
 // These are singleton because DeviceLinkModal is only rendered once in MainLayout
 const status = van.state('init'); // 'init', 'loading', 'waiting', 'approved', 'error'
 const linkToken = van.state('');
+const devicePublicIdState = van.state('');
 const expiresAt = van.state(null);
 const error = van.state('');
 const pollInterval = van.state(null);
 const timeRemaining = van.state('');
-
 let moduleState = {
     linkingStarted: false,
     lastModalVisible: false,
     deriveInitialized: false,
-    countdownTimer: null  // Track countdown timer for cleanup
+    countdownTimer: null
 };
 
 const getDevicePublicId = () => {
@@ -35,7 +35,6 @@ const getDevicePublicId = () => {
  * Shown when user logs in from a new device that needs to be verified
  */
 export default function DeviceLinkModal({ onSuccess } = {}) {
-
     // Start the linking process
     const startLinking = async () => {
         console.log('[DeviceLink] Starting linking process...');
@@ -48,6 +47,7 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
             const result = await api.devices.startLinking(devicePublicId, getDeviceName());
             console.log('[DeviceLink] Got token:', result.token);
             linkToken.val = result.token;
+            devicePublicIdState.val = devicePublicId;
             expiresAt.val = new Date(result.expires_at);
             vaultStore.setDeviceLinkToken(result.token, result.expires_at);
 
@@ -134,6 +134,7 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
     // Handle successful approval
     const handleApproved = async () => {
         try {
+            cleanupTimers();
             // Close the modal
             vaultStore.setShowDeviceLinkModal(false);
 
@@ -148,8 +149,7 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
 
     // Cancel and close
     const handleCancel = () => {
-        cleanupTimers();
-        clearPendingDeviceId();
+        resetModalState();
         vaultStore.setShowDeviceLinkModal(false);
     };
 
@@ -165,21 +165,43 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
         return 'New Device';
     };
 
-    // Format token for display (groups of 4)
+    // Show linking token in full so users can copy accurately on the second device
     const formatToken = (token) => {
         if (!token) return '';
-        // Take first 12 chars and format as XXX-XXX-XXX-XXX
-        const short = token.slice(0, 12).toUpperCase();
-        return short.match(/.{1,3}/g)?.join('-') || short;
+        return token.toUpperCase();
     };
 
     // Copy token to clipboard
     const copyToken = async () => {
         try {
-            await navigator.clipboard.writeText(formatToken(linkToken.val));
+            await navigator.clipboard.writeText(linkToken.val);
         } catch (e) {
             console.warn('[DeviceLink] Copy failed:', e);
         }
+    };
+
+    const tryStartLinking = () => {
+        if (!vaultStore.showDeviceLinkModal) return;
+        if (moduleState.linkingStarted) return;
+        if (status.val !== 'init') return;
+
+        moduleState.linkingStarted = true;
+        setTimeout(() => {
+            console.log('[DeviceLink] Triggering linking start');
+            startLinking();
+        }, 0);
+    };
+
+    const resetModalState = () => {
+        cleanupTimers();
+        status.val = 'init';
+        linkToken.val = '';
+        devicePublicIdState.val = '';
+        expiresAt.val = null;
+        timeRemaining.val = '';
+        error.val = '';
+        moduleState.linkingStarted = false;
+        clearPendingDeviceId();
     };
 
     // Initialize derive only once per module lifecycle
@@ -196,26 +218,25 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                 // Modal closing - reset state and cleanup timers
                 if (!moduleState.lastModalVisible) return;
                 moduleState.lastModalVisible = false;
-                moduleState.linkingStarted = false;
-                cleanupTimers();
-                status.val = 'init';
-                linkToken.val = '';
-                error.val = '';
-                timeRemaining.val = '';
+                resetModalState();
                 return;
+            }
+
+            if (!moduleState.lastModalVisible) {
+                moduleState.lastModalVisible = true;
+                resetModalState();
             }
 
             // Modal visible - ensure linking starts whenever status is init.
             moduleState.lastModalVisible = true;
-            if (!moduleState.linkingStarted && currentStatus === 'init') {
-                moduleState.linkingStarted = true;
-                // Use setTimeout to ensure we're fully outside any render cycle
-                setTimeout(() => {
-                    console.log('[DeviceLink] Derive triggered startLinking');
-                    startLinking();
-                }, 0);
+            tryStartLinking();
+
+            if (currentStatus === 'error' && !error.val) {
+                error.val = 'An error occurred while setting up verification.';
             }
         });
+
+        // keep fallback watchdog removed; derive reacts directly to store/state updates.
     }
 
     return () => div({ class: 'device-link-modal-wrapper' },
@@ -231,6 +252,7 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                     const currentStatus = status.val;
                     const currentError = error.val;
                     const currentToken = linkToken.val;
+                    const currentDeviceId = devicePublicIdState.val;
                     const currentTimeRemaining = timeRemaining.val;
 
                     return div({ class: 'modal-body' },
@@ -243,18 +265,23 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                         currentStatus === 'waiting' ? div({ class: 'waiting-state' },
                             p({ class: 'description' },
                                 'This device needs to be verified before you can access your encrypted messages. ' +
-                                'Enter this code on a device where you\'re already logged in:'
+                                'Approve it from a device where you are already logged in.'
                             ),
 
-                            div({ class: 'verification-code-display' },
-                                code({ class: 'verification-code' }, formatToken(currentToken)),
-                                button({
-                                    type: 'button',
-                                    class: 'btn btn-sm btn-copy',
-                                    onclick: copyToken,
-                                    title: 'Copy code'
-                                }, '\uD83D\uDCCB')
-                            ),
+                            currentToken ? div({ class: 'verification-code-display' },
+                                div({ class: 'token-label' }, 'Pairing code'),
+                                div({ class: 'verification-code-display-inner' }, [
+                                    code({ class: 'verification-code' }, formatToken(currentToken)),
+                                    button({
+                                        type: 'button',
+                                        class: 'btn btn-sm btn-copy',
+                                        onclick: copyToken,
+                                        title: 'Copy code'
+                                    }, 'Copy')
+                                ]),
+                                p({ class: 'verification-code-hint' }, 'Copy or tap the code, then paste it on the device that is being linked.')
+                            ) : null,
+                            currentDeviceId ? p({ class: 'device-id-display' }, `Device ID: ${currentDeviceId}`) : null,
 
                             div({ class: 'expiry-timer' },
                                 span('Expires in: '),
@@ -273,7 +300,7 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                                 ),
                                 div({ class: 'instruction-step' },
                                     span({ class: 'step-num' }, '3'),
-                                    span('Tap "Approve New Device" and enter this code')
+                                    span('Tap "Device Link Requests" and approve the pending request.')
                                 )
                             ),
 
@@ -311,7 +338,17 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
 
                         // Init state fallback (should briefly show while startLinking is called)
                         currentStatus === 'init' ? div({ class: 'loading-state' },
-                            p('Initializing device verification...')
+                            p('Initializing device verification...'),
+                            button({
+                                type: 'button',
+                                class: 'button button-primary',
+                                onclick: () => {
+                                    status.val = 'init';
+                                    error.val = '';
+                                    moduleState.linkingStarted = false;
+                                    setTimeout(startLinking, 0);
+                                }
+                            }, 'Start Verification')
                         ) : null
                     );
                 },

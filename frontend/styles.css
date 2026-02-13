@@ -489,6 +489,55 @@ body.dark-mode .device-item {
   width: 100%;
 }
 
+.device-link-toast {
+  margin: 0.75rem 0.75rem 0;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #1f2937, #111827);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  cursor: pointer;
+  position: relative;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.device-link-toast:hover {
+  background: linear-gradient(135deg, #273246, #121a2b);
+}
+
+.device-link-toast-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.device-link-toast-body {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.device-link-toast-close {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+
+.device-link-toast-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
 .sidebar-item:hover {
   background-color: rgba(255, 255, 255, 0.1);
 }
@@ -1765,7 +1814,15 @@ body.dark-mode .post-action.liked:hover {
   border: 1px dashed var(--border-color);
   padding: 1rem;
   margin: 1rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
+}
+
+.login-notice p {
+  margin: 0 0 0.75rem;
 }
 
 .comment-input {
@@ -6109,32 +6166,76 @@ body.dark-mode .fingerprint-group {
 /* Verification code display */
 .verification-code-display {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.7rem;
   margin-bottom: 1rem;
 }
 
 .verification-code {
   font-family: 'Courier New', monospace;
-  font-size: 1.75rem;
+  font-size: 0.82rem;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.03em;
   color: var(--primary-color);
-  background: var(--blue-bg);
-  padding: 1rem 1.5rem;
-  border-radius: 8px;
-  border: 2px dashed var(--border-color);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--blue-bg) 92%, transparent), color-mix(in srgb, var(--card-bg) 85%, transparent));
+  border: 1px solid color-mix(in srgb, var(--border-color) 85%, transparent);
+  border-radius: 10px;
+  padding: 0.68rem 0.75rem;
+  text-align: left;
+  white-space: nowrap;
+  text-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  word-break: normal;
+  flex: 1;
+  min-width: 0;
+  min-height: 2.8rem;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 4%);
+  line-height: 1.2;
+  overflow-wrap: normal;
+  -webkit-overflow-scrolling: touch;
+  display: block;
+  box-sizing: border-box;
+}
+
+.verification-code-display-inner {
+  display: flex;
+  align-items: stretch;
+  gap: 0.55rem;
+  flex-wrap: nowrap;
+}
+
+.token-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--secondary-text);
+}
+
+.verification-code-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--secondary-text);
+  line-height: 1.35;
 }
 
 .btn-copy {
-  padding: 0.5rem;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
+  flex: 0 0 auto;
+  padding: 0.5rem 0.65rem;
+  background: var(--blue-bg);
+  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 1.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
   transition: all 0.2s;
+  line-height: 1.1;
+  align-self: stretch;
+  white-space: nowrap;
+  border-color: color-mix(in srgb, var(--primary-color) 35%, transparent);
+  min-height: 2.8rem;
 }
 
 .btn-copy:hover {
@@ -6277,9 +6378,37 @@ body.dark-mode .device-link-modal .instructions {
     width: 95%;
   }
 
-  .verification-code {
-    font-size: 1.5rem;
-    padding: 0.75rem 1rem;
+  .device-link-modal .verification-code {
+    font-size: 0.75rem;
+    padding: 0.7rem 0.75rem;
+    letter-spacing: 0;
+    white-space: nowrap;
+    overflow-x: auto;
+    width: 100%;
+    text-align: left;
+    word-break: normal;
+  }
+
+  .device-id-display {
+    text-align: center;
+    margin-bottom: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--secondary-text);
+    word-break: break-all;
+  }
+
+  .verification-code-display {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+
+  .verification-code-display-inner {
+    flex-direction: column;
+  }
+
+  .btn-copy {
+    align-self: flex-end;
   }
 
   .device-link-modal .modal-body {

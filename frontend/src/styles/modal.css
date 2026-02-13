@@ -45,3 +45,196 @@
   gap: 10px;
   margin-top: 1.5rem;
 }
+
+/* Device Link Modal Specifics */
+.device-link-modal {
+  text-align: center;
+}
+
+.device-link-modal .modal-header {
+  margin-bottom: 1.5rem;
+}
+
+.device-link-modal .modal-icon {
+  font-size: 3rem;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.device-link-modal .description {
+  color: var(--secondary-text);
+  margin-bottom: 1.5rem;
+}
+
+.verification-code-display {
+  background: var(--hover-bg);
+  border: 2px dashed var(--border-color);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+  text-align: center;
+}
+
+.token-label {
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--secondary-text);
+  margin-bottom: 0.5rem;
+}
+
+.verification-code-display-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.verification-code {
+  font-family: 'Courier New', monospace;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--primary-color);
+  word-break: break-all;
+  line-height: 1.2;
+}
+
+.btn-copy {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  height: auto;
+  min-height: 28px;
+}
+
+.verification-code-hint {
+  font-size: 0.85rem;
+  color: var(--secondary-text);
+  margin: 0;
+}
+
+.steps-list {
+  text-align: left;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1.5rem 0;
+}
+
+.step-item {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.step-item:last-child {
+  margin-bottom: 0;
+}
+
+.step-number {
+  background: var(--primary-color);
+  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.step-text {
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.expiry-timer {
+  font-size: 0.9rem;
+  color: var(--warning-color);
+  margin: 1rem 0;
+  font-weight: 500;
+}
+
+.waiting-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--secondary-text);
+  font-size: 0.9rem;
+  margin-top: 1.5rem;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.approved-state {
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.success-icon {
+  width: 64px;
+  height: 64px;
+  background: var(--success-color);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  margin: 0 auto 1.5rem;
+}
+
+.error-state {
+  text-align: center;
+  padding: 1rem;
+  background: rgba(255, 0, 0, 0.05);
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.error-message {
+  color: var(--error-color);
+  margin-bottom: 1rem;
+}
+
+.device-id-display {
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--secondary-text);
+  margin-top: 0.5rem;
+}
+
+/* Dark mode adjustments */
+body.dark-mode .verification-code-display {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+body.dark-mode .steps-list {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+body.dark-mode .error-state {
+  background: rgba(255, 0, 0, 0.15);
+}
