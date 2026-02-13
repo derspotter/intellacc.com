@@ -35,6 +35,7 @@ const getDevicePublicId = () => {
  * Shown when user logs in from a new device that needs to be verified
  */
 export default function DeviceLinkModal({ onSuccess } = {}) {
+
     // Start the linking process
     const startLinking = async () => {
         console.log('[DeviceLink] Starting linking process...');
@@ -336,19 +337,9 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                             }, 'Try Again')
                         ) : null,
 
-                        // Init state fallback (should briefly show while startLinking is called)
+                        // Init state fallback (short while startLinking is called)
                         currentStatus === 'init' ? div({ class: 'loading-state' },
-                            p('Initializing device verification...'),
-                            button({
-                                type: 'button',
-                                class: 'button button-primary',
-                                onclick: () => {
-                                    status.val = 'init';
-                                    error.val = '';
-                                    moduleState.linkingStarted = false;
-                                    setTimeout(startLinking, 0);
-                                }
-                            }, 'Start Verification')
+                            p('Initializing device verification...')
                         ) : null
                     );
                 },
