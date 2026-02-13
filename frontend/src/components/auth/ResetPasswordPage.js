@@ -4,6 +4,9 @@ import { clearToken } from '../../services/tokenService';
 
 const { div, h1, form, label, input, button, p, a, ul, li } = van.tags;
 
+const SUCCESS_REDIRECT_SECONDS = 4;
+const ERROR_REDIRECT_SECONDS = 6;
+
 const getTokenFromHash = () => {
   const hash = window.location.hash.slice(1);
   const query = hash.split('?')[1] || '';
@@ -28,9 +31,47 @@ const ResetPasswordPage = () => {
   const error = van.state('');
   const acknowledged = van.state(false);
   const executeAfter = van.state(null);
+  const redirectIn = van.state(0);
+  const redirectTarget = van.state('login');
+
+  let redirectTimer = null;
+  let redirectCounter = null;
 
   let passwordInputRef = null;
   let confirmInputRef = null;
+
+  const stopRedirect = () => {
+    if (redirectTimer) {
+      window.clearTimeout(redirectTimer);
+      redirectTimer = null;
+    }
+    if (redirectCounter) {
+      window.clearInterval(redirectCounter);
+      redirectCounter = null;
+    }
+  };
+
+  const startRedirect = (target, seconds) => {
+    stopRedirect();
+    redirectTarget.val = target;
+    redirectIn.val = seconds;
+
+    const endAt = Date.now() + seconds * 1000;
+    redirectCounter = window.setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+      redirectIn.val = remaining;
+
+      if (remaining <= 0) {
+        stopRedirect();
+        window.location.hash = target;
+      }
+    }, 250);
+
+    redirectTimer = window.setTimeout(() => {
+      stopRedirect();
+      window.location.hash = target;
+    }, seconds * 1000);
+  };
 
   const handleContinue = () => {
     if (!acknowledged.val) {
@@ -47,6 +88,7 @@ const ResetPasswordPage = () => {
     if (!token) {
       error.val = 'Reset token is missing.';
       stage.val = 'invalid';
+      startRedirect('#forgot-password', ERROR_REDIRECT_SECONDS);
       return;
     }
 
@@ -77,15 +119,25 @@ const ResetPasswordPage = () => {
       if (result?.status === 'pending') {
         executeAfter.val = result.executeAfter ? new Date(result.executeAfter) : null;
         stage.val = 'pending';
+        error.val = '';
+        startRedirect('#login', ERROR_REDIRECT_SECONDS);
         return;
       }
 
       clearLocalResetState();
       stage.val = 'success';
+      startRedirect('#login', SUCCESS_REDIRECT_SECONDS);
     } catch (err) {
       error.val = err.message || 'Failed to reset password';
-      stage.val = 'form';
+      stage.val = 'invalid';
+      startRedirect('#forgot-password', ERROR_REDIRECT_SECONDS);
     }
+  };
+
+  const getRedirectLabel = () => {
+    if (!redirectTarget.val) return '';
+    const targetLabel = redirectTarget.val === '#forgot-password' ? 'a new reset link' : 'sign in';
+    return `Redirecting to ${targetLabel} in ${redirectIn.val} seconds...`;
   };
 
   return div({ class: 'login-page' },
@@ -97,6 +149,9 @@ const ResetPasswordPage = () => {
       () => stage.val === 'invalid'
         ? div({ class: 'reset-note' },
             p('This reset link is invalid or missing.'),
+            () => redirectIn.val > 0
+              ? p(getRedirectLabel())
+              : null,
             div({ class: 'auth-links' },
               a({ href: '#forgot-password' }, 'Request a new link')
             )
@@ -186,7 +241,10 @@ const ResetPasswordPage = () => {
             p('If this was not you, cancel from a logged-in device.'),
             div({ class: 'auth-links' },
               a({ href: '#login' }, 'Back to sign in')
-            )
+            ),
+            () => redirectIn.val > 0
+              ? p(getRedirectLabel())
+              : null
           )
         : null,
 
@@ -194,6 +252,9 @@ const ResetPasswordPage = () => {
       () => stage.val === 'success'
         ? div({ class: 'reset-note' },
             p('Password reset complete. Please sign in again.'),
+            () => redirectIn.val > 0
+              ? p(getRedirectLabel())
+              : null,
             div({ class: 'auth-links' },
               a({ href: '#login' }, 'Go to sign in')
             )
