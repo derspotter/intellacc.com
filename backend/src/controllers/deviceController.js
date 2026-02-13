@@ -20,6 +20,26 @@ exports.listDevices = async (req, res) => {
     }
 };
 
+// List pending device-link requests for this user
+exports.listPendingLinking = async (req, res) => {
+    const userId = req.user.id;
+
+    try {
+        const result = await db.query(
+            `SELECT id, device_public_id, device_name, created_at, expires_at
+             FROM device_linking_tokens
+             WHERE user_id = $1 AND approved_at IS NULL AND expires_at > NOW()
+             ORDER BY created_at DESC`,
+            [userId]
+        );
+
+        res.json(result.rows);
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Failed to fetch pending link requests' });
+    }
+};
+
 exports.revokeDevice = async (req, res) => {
     const userId = req.user.id;
     const deviceId = req.params.id;
@@ -50,6 +70,17 @@ exports.startLinking = async (req, res) => {
             'INSERT INTO device_linking_tokens (user_id, token, device_public_id, device_name, expires_at) VALUES ($1, $2, $3, $4, $5)',
             [userId, token, device_public_id, name || 'New Device', expires_at]
         );
+
+        // Emit real-time in-app notification to other authenticated sessions.
+        const io = req.app?.get('io');
+        if (io) {
+            io.to(`user:${userId}`).emit('deviceLinkRequest', {
+                userId,
+                deviceName: name || 'New Device',
+                devicePublicId: device_public_id,
+                expiresAt: expires_at.toISOString()
+            });
+        }
 
         res.json({ token, expires_at });
     } catch (e) {

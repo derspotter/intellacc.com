@@ -885,6 +885,7 @@ export const api = {
   // Device management
   devices: {
     list: () => request('/devices'),
+    listPendingLinkRequests: () => request('/devices/link/pending'),
     register: (device_public_id, name) => request('/devices/register', { method: 'POST', body: { device_public_id, name } }),
     revoke: (id) => request(`/devices/${id}`, { method: 'DELETE' }),
     startLinking: (device_public_id, name) => request('/devices/link/start', { method: 'POST', body: { device_public_id, name } }),

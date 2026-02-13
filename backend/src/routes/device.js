@@ -4,6 +4,7 @@ const controller = require('../controllers/deviceController');
 const authenticateJWT = require('../middleware/auth');
 
 router.get('/', authenticateJWT, controller.listDevices);
+router.get('/link/pending', authenticateJWT, controller.listPendingLinking);
 router.post('/register', authenticateJWT, controller.registerDevice);
 router.delete('/:id', authenticateJWT, controller.revokeDevice);
 

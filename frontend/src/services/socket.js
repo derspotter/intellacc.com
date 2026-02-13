@@ -23,6 +23,7 @@ const eventHandlers = {
   newBet: [],
   marketUpdate: [],
   notification: [],
+  deviceLinkRequest: [],
   // Messaging events
   newMessage: [],
   messageSent: [],
@@ -257,9 +258,14 @@ function setupSocketHandlers() {
   // User-specific notification event
   socket.on('notification', (data) => {
     addMessage(`Notification: ${data.message || JSON.stringify(data)}`);
-    
+
     // Notify registered handlers
     notifyHandlers('notification', data);
+  });
+
+  // Device-link request event (initiated from another logged-in device)
+  socket.on('deviceLinkRequest', (data) => {
+    notifyHandlers('deviceLinkRequest', data);
   });
 
   // Messaging events
