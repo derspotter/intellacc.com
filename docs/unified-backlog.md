@@ -1,50 +1,79 @@
 # Unified Backlog
-Updated: 2026-02-13
+Updated: 2026-02-13 (audited against current codebase)
 
-This backlog consolidates open work from `next-steps.md`, `production-checklist.md`,
-`mobile-pwa-plan.md`, `e2ee-next-steps.md`, `docs/mls-status.md`, and
-`Intellacc Feature Roadmap.md` into a single prioritized view.
+Status legend:
+- `Done`: implemented in app code (may still require production rollout/config).
+- `Partial`: substantial implementation exists, but core pieces are missing.
+- `Open`: not implemented yet.
+- `Ops`: operational/deployment work outside app code.
+
+This backlog was re-audited item-by-item against the repository (frontend, backend, prediction-engine, tests).
 
 ## Priority 0 - Critical (launch blockers)
-- Password reset + recovery flow: status (2026-02-04) backend + frontend flow implemented; SMTP env wiring done; Postfix container added (direct-to-MX); cancellation UX added in settings. Remaining: apply migrations in prod DB, set strong secrets, DNS/rDNS + DKIM/DMARC, verify worker job.
-- Account deletion (GDPR/CCPA): implemented (soft delete + anonymize + password confirmation UI).
-- Prediction engine access control: set `PREDICTION_ENGINE_AUTH_TOKEN` in backend + engine configs.
-- Admin auth guard for weekly assignment routes: implemented (admin-only ops + self-only status).
+- `Partial + Ops` Password reset + recovery flow:
+  backend routes/service/worker + frontend screens/cancel UX + tests are present.
+  Remaining launch work is operational: run prod migrations, set strong secrets, and complete DNS/rDNS + DKIM/DMARC + prod worker verification.
+- `Done` Account deletion (GDPR/CCPA):
+  soft-delete/anonymization flow + password-confirm UI + backend test coverage are present.
+- `Partial + Ops` Prediction engine access control:
+  token guard is implemented in backend and prediction-engine, but prediction-engine explicitly disables auth when token is unset.
+  Launch requirement remains: set `PREDICTION_ENGINE_AUTH_TOKEN` in deployed env/config.
+- `Done` Admin auth guard for weekly assignment routes:
+  admin-only route guards are applied, with self-only restrictions for per-user status endpoint.
 
 ## Priority 1 - High impact
-- Community market question validation + incentives: backend implemented (`/api/market-questions*`).
-  Rules: 5 validators, 4/5 approval, creator bond 10 RP with +5 RP per concurrent pending submission,
-  validator stake 2 RP / winner payout 5 RP, creator rewards +10 RP (approval), +10 RP (traction),
-  +10 RP (resolution). Remaining: frontend UX for submission/review/reward visibility.
-- Attachments storage: implemented (local disk + JWT-gated download). Optional follow-up: presigned/object storage.
-- Home feed infinite scroll: implemented (cursor pagination + frontend virtualization/windowing).
-- Tiered verification (phone + payment): ship SMS (Twilio) + Stripe SetupIntent verification flows,
-  wire `VerificationSettings` UI, and confirm webhook + env config readiness.
-- PWA foundation: manifest, offline caching, install prompt, offline page.
-- MLS key rotation UX: periodic `selfUpdate()` + manual "Refresh Keys" in settings.
-- MLS staged-welcome inspection UI: view member fingerprints before accept.
-- Market lifecycle tests: integration tests for closed/resolved trade rejection.
+- `Partial` Community market question validation + incentives:
+  backend routes/migration/tests are implemented, but frontend submission/review/reward UX is still missing.
+- `Done` Attachments storage:
+  local disk storage + JWT-gated downloads are implemented for posts/messages.
+  Presign endpoints exist as scaffold for later object-storage migration.
+- `Done` Home feed infinite scroll:
+  cursor pagination + frontend virtualization/windowed rendering are implemented.
+- `Partial` Tiered verification (phone + payment):
+  phone + Stripe SetupIntent flows, verification middleware, webhook route, and `VerificationSettings` UI exist.
+  Remaining risk is env/provider readiness in deployment (Twilio/Stripe keys/webhook config).
+- `Partial` PWA foundation:
+  service worker exists (currently push-focused), but manifest/offline page/install prompt/offline caching are not fully implemented.
+- `Open` MLS key rotation UX:
+  low-level `selfUpdate()` exists, but no periodic scheduler and no manual "Refresh Keys" settings UI found.
+- `Partial` MLS staged-welcome inspection UI:
+  pending invite accept/reject exists, but member fingerprint inspection before acceptance is still missing.
+- `Partial` Market lifecycle tests:
+  resolved-market rejection is covered in prediction-engine integration tests, but explicit closed-market rejection integration coverage is still missing.
 
 ## Priority 2 - Medium
-- Profile editing: avatar, bio, display name, visibility settings.
-- Two-factor auth (TOTP): setup + login step + backup codes.
-- Passkey PRF vault unlock: finish placeholder flow end-to-end.
-- MLS proposal wrappers: `propose_add_member`, `propose_remove_member`, `propose_self_update`,
-  `add_members_without_update`, `self_update_with_new_signer`.
-- MLS CommitBuilder JS wrapper for multi-proposal commits and policy hooks.
-- Persistent message deduplication across restarts (vault-backed IDs).
-- AI moderation pipeline: Pangram detection service + flagged content API + admin UI and
-  `AiContentBadge` display for AI-likely posts/comments.
-- Moderation/reporting/blocking basics (report endpoint + admin review).
-- Investigate MLS WASM concurrency issue (`mls-wasm-concurrency-bug.md`).
+- `Partial` Profile editing:
+  username + bio editing exists; avatar/display-name/visibility settings are still missing.
+- `Open` Two-factor auth (TOTP):
+  no TOTP setup/login/backup-code flow found.
+- `Partial` Passkey PRF vault unlock:
+  WebAuthn/passkey management exists, but PRF flow is incomplete (`getPrfInput()` placeholder still returns `null`).
+- `Open` MLS proposal wrappers:
+  `propose_add_member`, `propose_remove_member`, `propose_self_update`, `add_members_without_update`, `self_update_with_new_signer` wrappers not implemented in app-facing JS.
+- `Open` MLS CommitBuilder JS wrapper:
+  no general JS wrapper for app-driven multi-proposal/policy commit building.
+- `Open` Persistent message dedup across restarts:
+  dedup logic remains in-memory; no vault-backed processed-ID persistence found.
+- `Done` AI moderation pipeline:
+  Pangram service + flagged-content admin API/UI + `AiContentBadge` integration are present.
+- `Open` Moderation/reporting/blocking basics:
+  no local report endpoint/admin review workflow/block-user baseline found.
+- `Open` Investigate MLS WASM concurrency issue:
+  no dedicated issue doc/worklog found in repo; only small mitigation comments.
 
 ## Priority 3 - Longer-term
-- Mobile navigation overhaul: hamburger + bottom nav, touch targets, responsive layout.
-- Enhanced offline + push notifications + background sync (PWA phases 2-4).
-- Messaging UX: reactions, editing/deletion, read receipts, disappearing messages.
-- Advanced social features: follow system, sharing/boosting, groups.
-- Prediction analytics + user insights dashboards.
-- Performance/scaling work (DB optimization, infra hardening, CI/CD).
+- `Done` Mobile navigation overhaul:
+  mobile header/hamburger, bottom nav, and responsive touch-target CSS are present.
+- `Partial` Enhanced offline + push notifications + background sync:
+  push notifications are implemented; offline caching and background sync are still missing.
+- `Open` Messaging UX upgrades:
+  reactions, message edit/delete, read receipts, and disappearing messages not implemented.
+- `Partial` Advanced social features:
+  follow system exists; sharing/boosting and social groups remain open.
+- `Partial` Prediction analytics + user insights dashboards:
+  scoring/calibration APIs exist; dedicated analytics dashboard UX is still missing.
+- `Partial` Performance/scaling work:
+  some DB/index and feed-performance work is done, but infra hardening and CI/CD remain open.
 
 ## Source References
 - `next-steps.md`
@@ -53,3 +82,7 @@ This backlog consolidates open work from `next-steps.md`, `production-checklist.
 - `e2ee-next-steps.md`
 - `docs/mls-status.md`
 - `Intellacc Feature Roadmap.md`
+
+## Audit Notes
+- This pass validates repository/app implementation state, not production runtime state.
+- Any item marked `Ops` should be tracked with deployment checklists and env verification.
