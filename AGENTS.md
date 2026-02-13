@@ -1,68 +1,60 @@
-# AGENTS.md
+# Repository Guidelines
 
-This file guides AI coding agents working in this repository. It summarizes the
-project shape, commands, and conventions.
+## Project Structure & Module Organization
+- `frontend/`: VanJS + Vite SPA (`src/`, `public/`, `test/`, `vite.config.js`); hash-based routing.
+- `backend/`: Express API and Socket.IO (`src/`, `test/`, `migrations/`, `Caddyfile`).
+- `prediction-engine/`: Rust LMSR market maker (`src/`, `Cargo.toml`, Dockerfiles).
+- `backend/migrations/`: auto-run database migrations; shared SQL also exists in `migrations/`.
+- `openmls-wasm/` and `frontend/openmls-pkg/`: OpenMLS WASM bindings.
+- `tests/e2e/`, `docs/`, `scripts/`: Playwright specs, docs, and maintenance utilities.
 
-## Project Overview
-Intellacc is a prediction market + social platform with:
-- Social feed (posts/comments)
-- LMSR-based prediction markets
-- End-to-end encrypted messaging via OpenMLS (WASM)
-- User profiles with prediction accuracy tracking
+## Architecture Snapshot
+- Frontend: VanJS + Vite on port 5173 with hash-based routing and OpenMLS WASM bindings.
+- Backend: Express + Socket.IO on port 3000 with JWT auth, MLS relay flows, and PostgreSQL access.
+- Prediction Engine: Rust LMSR service on port 3001 with SQLx/PostgreSQL integration.
+- Database: PostgreSQL container (`intellacc_db`), user `intellacc_user`, database `intellaccdb`.
 
-## Architecture
-Frontend (VanJS + Vite)          Backend (Express.js)         Prediction Engine (Rust)
-port 5173                        port 3000                    port 3001
-├─ openmls-wasm (E2EE)          ├─ Socket.io (realtime)      ├─ Axum web framework
-├─ VanJS reactive stores        ├─ MLS message relay         ├─ LMSR market maker
-└─ Hash-based routing           └─ PostgreSQL queries        └─ SQLx + PostgreSQL
+## Build, Test, and Development Commands
+- Docker-first workflow: run npm commands inside containers (see `CLAUDE.md`).
+- Start stack: `docker network create intellacc-network` (once), then `docker compose up -d`.
+- Logs: `docker logs -f intellacc_backend` / `intellacc_frontend` / `intellacc_prediction_engine`.
+- Backend tests: `docker exec intellacc_backend npm test` or `docker exec intellacc_backend npx jest test/messaging_e2e.test.js`.
+- Frontend tests: `docker exec intellacc_frontend npx vitest`.
+- E2E: `./tests/e2e/reset-test-users.sh` then `npx playwright test tests/e2e/messaging-full.spec.js` (host).
+- Rebuild Rust service: `docker compose up -d --build prediction-engine`.
 
-Database: PostgreSQL (container: intellacc_db, user: intellacc_user, db: intellaccdb)
+## Coding Style & Naming Conventions
+- JavaScript uses 2-space indentation, semicolons, and single quotes; match existing file style.
+- Frontend components use `PascalCase` filenames (for example, `UserCard.js`).
+- Utilities and services use `camelCase` filenames (for example, `messagingUtils.js`).
+- SQL migrations use descriptive `snake_case` names, often date-prefixed (for example, `20250727_sync_numeric_ledger_precision.sql`).
+- Rust changes should be formatted with `rustfmt` inside the prediction-engine container.
 
-## Key Paths
-- Frontend: frontend/
-- Backend: backend/ (entry: backend/src/index.js)
-- Prediction engine: prediction-engine/
-- MLS WASM: openmls-wasm/
-- DB migrations: backend/migrations/
+## Testing Guidelines
+- Backend tests live in `backend/test` and use Jest (`*.test.js`).
+- Frontend tests live in `frontend/test` and use Vitest (`*.test.js`).
+- Playwright specs live in `tests/e2e` (`*.spec.js`); set `E2E_BASE_URL` or `E2E_USE_EXISTING_SERVER=true` when pointing at an existing dev server.
 
-## Development Commands (Docker-first)
-Run commands inside containers unless noted.
+## Commit & Pull Request Guidelines
+- Commit messages follow the `type: summary` convention seen in history (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`).
+- PRs should include a short description, testing commands run, and screenshots/GIFs for UI changes.
+- Call out migrations or config changes (for example, `backend/.env` or `prediction-engine/.env`) in the PR body.
 
-Start stack:
-  docker network create intellacc-network  # once
-  docker compose up -d
+## Security & Configuration Tips
+- Keep secrets in `.env` files and never commit credentials.
+- Prediction engine runtime flags are documented in `docs/configuration.md`.
+- E2EE architecture and vault/key handling notes live in `security.md`.
 
-Logs:
-  docker logs -f intellacc_backend
-  docker logs -f intellacc_frontend
-  docker logs -f intellacc_prediction_engine
+## Safety Guardrails
+- Do not run potentially destructive commands without explicit user approval.
+- High-risk git commands include `git checkout -- ...`, `git restore`, `git reset --hard`, `git clean -fdx`, and `git revert` on user work.
+- High-risk file operations include `rm -rf`, `rm -f`, overwrite `mv`/`cp`, `truncate`, and shell redirection such as `> file`.
+- High-risk Docker/system commands include `docker system prune`, `docker volume rm`, and `docker image rm`.
+- High-risk database actions include `DROP`, `TRUNCATE`, and destructive migrations.
 
-Database:
-  docker exec -it intellacc_db psql -U intellacc_user -d intellaccdb
+## Ports & Services
+- Frontend 5173, Backend 3000, Prediction Engine 3001, Postgres 5432, Caddy 80/443.
 
-Tests:
-  docker exec intellacc_backend npm test
-  docker exec intellacc_frontend npm test
-  npx playwright test tests/e2e/messaging-full.spec.js  # host (Playwright)
-
-Rebuild Rust service:
-  docker compose up -d --build prediction-engine
-
-## Conventions & Guidelines
-- Frontend: VanJS, minimal abstractions, hash-based routing (#home, #predictions).
-- Backend: CommonJS, direct SQL for performance/clarity.
-- Indentation: 2 spaces.
-- Strings: prefer single quotes.
-- Auth: JWT middleware; use userId (not username) for MLS identity.
-- Schema changes: check backend/migrations/ before updating DB logic.
-- Verification: always run relevant tests/verification steps without asking first.
-- Safety: never run possibly destructive commands without explicit user approval. This includes (non-exhaustive):
-  - Git: `git checkout -- ...`, `git restore`, `git reset --hard`, `git clean -fdx`, `git revert` on user work
-  - File ops: `rm -rf`, `rm -f`, `mv`/`cp` that overwrite, `truncate`, shell redirection `> file`
-  - Docker/system: `docker system prune`, `docker volume rm`, `docker image rm`
-  - Database: `DROP`, `TRUNCATE`, destructive migrations
-
-## E2E Test Users
-user1@example.com / password123 (ID: 24)
-user2@example.com / password123 (ID: 25)
+## E2E Test Users (Local Seed Data)
+- `user1@example.com` / `password123` (ID: 24)
+- `user2@example.com` / `password123` (ID: 25)
