@@ -60,6 +60,7 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
             console.error('[DeviceLink] Failed to start linking:', e);
             error.val = e.message || 'Failed to start device verification';
             status.val = 'error';
+            moduleState.linkingStarted = false;
         }
     };
 
@@ -205,6 +206,14 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
         clearPendingDeviceId();
     };
 
+    const ensureLinkingStarted = () => {
+        if (!vaultStore.showDeviceLinkModal) return;
+        if (status.val !== 'init') return;
+        if (moduleState.linkingStarted) return;
+
+        tryStartLinking();
+    };
+
     // Initialize derive only once per module lifecycle
     if (!moduleState.deriveInitialized) {
         moduleState.deriveInitialized = true;
@@ -255,6 +264,7 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                     const currentToken = linkToken.val;
                     const currentDeviceId = devicePublicIdState.val;
                     const currentTimeRemaining = timeRemaining.val;
+                    ensureLinkingStarted();
 
                     return div({ class: 'modal-body' },
                         // Loading state
