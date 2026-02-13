@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
+const { isRegistrationEnabled, REGISTRATION_CLOSED_MESSAGE } = require('../utils/registration');
 
 const USERNAME_MAX_LEN = 50;
 
@@ -202,6 +203,12 @@ const getOrCreateUserFromIdentity = async ({
       metadata
     });
     return existing.user;
+  }
+
+  if (!isRegistrationEnabled()) {
+    const err = new Error(REGISTRATION_CLOSED_MESSAGE);
+    err.statusCode = 403;
+    throw err;
   }
 
   const createdUser = await createUserForIdentity({

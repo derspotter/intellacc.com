@@ -195,10 +195,6 @@ const LoginForm = () => {
               }, 'Continue with Mastodon')
             )
           ),
-          p({ class: 'register-link' },
-            "Don't have an account? ",
-            a({ href: '#signup' }, 'Register here')
-          )
         ),
         div({ class: 'auth-links' },
           a({ href: '#forgot-password' }, 'Forgot password?')

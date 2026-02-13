@@ -6,7 +6,7 @@ services:
       HOSTNAME: mail.intellacc.com
       ALLOWED_SENDER_DOMAINS: intellacc.com
     volumes:
-      - ./postfix/keys:/etc/opendkim/keys
+      - ./postfix/keys:/etc/opendkim/keys:ro
     networks:
       - intellacc-network
 
@@ -54,6 +54,8 @@ services:
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: ${SMTP_FROM}
+      SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-true}
+      SMTP_IGNORE_TLS: ${SMTP_IGNORE_TLS:-false}
       PREDICTION_ENGINE_AUTH_TOKEN: ${PREDICTION_ENGINE_AUTH_TOKEN}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
@@ -61,10 +63,6 @@ services:
     volumes:
       - ./src:/usr/src/app/src    # Only mount source code for live updates
       - ./test:/usr/src/app/test  # for testing
-      - ./package.json:/usr/src/app/package.json
-      - ./package-lock.json:/usr/src/app/package-lock.json
-      - ./.npmrc:/usr/src/app/.npmrc
-      - ./.env:/usr/src/app/.env  # mount .env for live updates
       - ./migrations:/usr/src/app/migrations  # mount migrations for auto-run
       - ./uploads:/usr/src/app/uploads
     working_dir: /usr/src/app
@@ -90,6 +88,7 @@ services:
   #   ports:
   #     - "80:80"
   #     - "443:443"
+  #     - "443:443/udp"
   #   depends_on:
   #     - backend
   #   networks:

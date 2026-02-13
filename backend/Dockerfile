@@ -8,13 +8,12 @@ RUN apk add --no-cache postgresql-client
 # Set the working directory inside the container
 WORKDIR /usr/src/app
 
-# Copy package.json and npmrc for faster, quieter installs
+# Copy package manifests first for better cache behavior
 COPY package*.json .npmrc ./
 
-# Install dependencies with cache + lockfile support (npm ci if lockfile exists)
-ARG NPM_LOGLEVEL=error
+# Install all dependencies from lockfile during image build so runtime can start quickly
 RUN --mount=type=cache,target=/root/.npm \
-    sh -lc 'npm install --no-fund --no-audit --loglevel=${NPM_LOGLEVEL}'
+    sh -lc 'npm ci --no-fund --no-audit --loglevel=error'
 
 # Copy the rest of the application code
 COPY . .
@@ -22,5 +21,5 @@ COPY . .
 # Expose the port the app runs on
 EXPOSE 3000
 
-# Use nodemon for hot-reloading in development
-CMD ["npm", "run", "dev"]
+# Use dev entrypoint for migrations/watcher
+CMD ["./scripts/docker-dev-entrypoint.sh"]

@@ -11,6 +11,8 @@ const db = require('../db');
 const EMAIL_TOKEN_SECRET = process.env.EMAIL_TOKEN_SECRET || 'dev-email-secret-change-in-production';
 const EMAIL_TOKEN_EXPIRY = '24h';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const SMTP_TLS_REJECT_UNAUTHORIZED = process.env.SMTP_TLS_REJECT_UNAUTHORIZED;
+const SMTP_IGNORE_TLS = process.env.SMTP_IGNORE_TLS;
 
 // Email transporter - configure based on environment
 let transporter;
@@ -31,6 +33,19 @@ const initTransporter = () => {
         const smtpPass = process.env.SMTP_PASS;
         if (smtpUser || smtpPass) {
             transportOptions.auth = { user: smtpUser, pass: smtpPass };
+        }
+
+        const rejectUnauthorized = SMTP_TLS_REJECT_UNAUTHORIZED === undefined
+            ? true
+            : SMTP_TLS_REJECT_UNAUTHORIZED !== 'false';
+
+        transportOptions.tls = {
+            ...transportOptions.tls,
+            rejectUnauthorized
+        };
+
+        if (SMTP_IGNORE_TLS === 'true' || SMTP_IGNORE_TLS === '1') {
+            transportOptions.ignoreTLS = true;
         }
 
         transporter = nodemailer.createTransport(transportOptions);

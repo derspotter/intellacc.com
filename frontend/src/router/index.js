@@ -8,7 +8,6 @@ import { getStore } from '../store';
 
 // Import all components directly
 import LoginForm from '../components/auth/LoginForm';
-import SignUpForm from '../components/auth/SignUpForm';
 import ForgotPasswordPage from '../components/auth/ForgotPasswordPage';
 import ResetPasswordPage from '../components/auth/ResetPasswordPage';
 import PostsList from '../components/posts/PostsList';
@@ -125,7 +124,13 @@ export default function Router() {
     },
     
     login: () => LoginForm(),
-    signup: () => SignUpForm(),
+    signup: () => div({ class: 'login-page' },
+      div({ class: 'login-container' }, [
+        h1('Registration Closed'),
+        p('New account registration is currently disabled.'),
+        button({ onclick: () => { window.location.hash = 'login'; } }, 'Back to Sign In')
+      ])
+    ),
     'forgot-password': () => ForgotPasswordPage(),
     'reset-password': () => ResetPasswordPage(),
     'verify-email': () => VerifyEmailPage(),

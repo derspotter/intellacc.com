@@ -11,6 +11,8 @@ const PASSWORD_RESET_EXPIRY = process.env.PASSWORD_RESET_EXPIRY || '1h';
 const PASSWORD_RESET_DELAY_HOURS = parseFloat(process.env.PASSWORD_RESET_DELAY_HOURS || '168');
 const PASSWORD_RESET_POLL_INTERVAL_MS = parseInt(process.env.PASSWORD_RESET_POLL_INTERVAL_MS || '60000', 10) || 60000;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const SMTP_TLS_REJECT_UNAUTHORIZED = process.env.SMTP_TLS_REJECT_UNAUTHORIZED;
+const SMTP_IGNORE_TLS = process.env.SMTP_IGNORE_TLS;
 
 let transporter;
 let resetWorkerStarted = false;
@@ -39,6 +41,19 @@ const initTransporter = () => {
     const smtpPass = process.env.SMTP_PASS;
     if (smtpUser || smtpPass) {
       transportOptions.auth = { user: smtpUser, pass: smtpPass };
+    }
+
+    const rejectUnauthorized = SMTP_TLS_REJECT_UNAUTHORIZED === undefined
+      ? true
+      : SMTP_TLS_REJECT_UNAUTHORIZED !== 'false';
+
+    transportOptions.tls = {
+      ...transportOptions.tls,
+      rejectUnauthorized
+    };
+
+    if (SMTP_IGNORE_TLS === 'true' || SMTP_IGNORE_TLS === '1') {
+      transportOptions.ignoreTLS = true;
     }
 
     transporter = nodemailer.createTransport(transportOptions);

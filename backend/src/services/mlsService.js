@@ -58,14 +58,23 @@ const mlsService = {
       await client.query('BEGIN');
       const results = [];
       for (const kp of keyPackages) {
-        const query = `
-          INSERT INTO mls_key_packages (user_id, device_id, package_data, hash, not_before, not_after, is_last_resort, last_updated_at)
-          VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6), $7, NOW())
-          ON CONFLICT (hash) DO NOTHING
-          RETURNING *;
-        `;
+        const isLastResort = kp.isLastResort || false;
+        const query = isLastResort
+          ? `
+            INSERT INTO mls_key_packages (user_id, device_id, package_data, hash, not_before, not_after, is_last_resort, last_updated_at)
+            VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6), true, NOW())
+            ON CONFLICT (user_id, device_id) WHERE is_last_resort = true
+            DO UPDATE SET package_data = $3, hash = $4, not_before = to_timestamp($5), not_after = to_timestamp($6), last_updated_at = NOW()
+            RETURNING *;
+          `
+          : `
+            INSERT INTO mls_key_packages (user_id, device_id, package_data, hash, not_before, not_after, is_last_resort, last_updated_at)
+            VALUES ($1, $2, $3, $4, to_timestamp($5), to_timestamp($6), false, NOW())
+            ON CONFLICT (hash) DO NOTHING
+            RETURNING *;
+          `;
         const { rows } = await client.query(query, [
-          userId, deviceId, kp.packageData, kp.hash, kp.notBefore, kp.notAfter, kp.isLastResort || false
+          userId, deviceId, kp.packageData, kp.hash, kp.notBefore, kp.notAfter
         ]);
         if (rows[0]) results.push(rows[0]);
       }

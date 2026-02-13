@@ -181,7 +181,8 @@ exports.createPost = async (req, res) => {
 // Retrieve all top-level posts (e.g., a feed)
 exports.getPosts = async (req, res) => {
   console.log("--- ENTERING getPosts function ---"); // Add entry log
-  const userId = req.user.id; // Get current user's ID
+  // Public feed endpoint: when unauthenticated, keep liked_by_user false.
+  const userId = req.user?.id || null;
   try {
     console.log("getPosts called with userId:", userId);
 

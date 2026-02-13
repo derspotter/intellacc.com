@@ -90,7 +90,7 @@ export default function VerificationStatus({ onUpgrade } = {}) {
             return div({ class: 'tier-list' },
                 TIER_INFO.map(tier =>
                     div({
-                        class: `tier-item ${currentTier >= tier.level ? 'verified' : ''} ${currentTier === tier.level ? 'current' : ''}`
+                        class: `tier-item tier-level-${tier.level} ${currentTier >= tier.level ? 'verified' : ''} ${currentTier === tier.level ? 'current' : ''}`
                     },
                         div({ class: 'tier-header' },
                             span({ class: 'tier-icon' }, tier.icon),

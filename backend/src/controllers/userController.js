@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { generateToken } = require('../utils/jwt');
+const { isRegistrationEnabled, REGISTRATION_CLOSED_MESSAGE } = require('../utils/registration');
 const notificationService = require('../services/notificationService');
 const emailVerificationService = require('../services/emailVerificationService');
 
@@ -23,6 +24,10 @@ const removeAttachmentFile = (storagePath) => {
 
 // Create a new user
 exports.createUser = async (req, res) => {
+  if (!isRegistrationEnabled()) {
+    return res.status(403).json({ message: REGISTRATION_CLOSED_MESSAGE });
+  }
+
   const { username, email, password } = req.body;
   
   // Validate required fields
@@ -125,19 +130,37 @@ exports.getUserByUsername = async (req, res) => {
 exports.searchUsers = async (req, res) => {
   const query = req.query.q || '';
   const limit = Math.min(parseInt(req.query.limit) || 10, 20);
+  const messagingReadyOnly = req.query.messaging_ready === '1' || req.query.messaging_ready === 'true';
 
   if (!query.trim()) {
     return res.json([]);
   }
 
   try {
+    const whereMessagingReady = messagingReadyOnly
+      ? `
+        AND EXISTS (
+          SELECT 1
+          FROM user_devices ud
+          JOIN mls_key_packages kp
+            ON kp.user_id = u.id
+           AND kp.device_id = ud.device_public_id::text
+          WHERE ud.user_id = u.id
+            AND ud.revoked_at IS NULL
+            AND (kp.not_before IS NULL OR kp.not_before <= NOW())
+            AND (kp.not_after IS NULL OR kp.not_after > NOW())
+        )
+      `
+      : '';
+
     const result = await db.query(`
-      SELECT id, username, bio, created_at
-      FROM users
-      WHERE (LOWER(username) LIKE $1 OR id::text = $2)
-        AND id != $3
-        AND deleted_at IS NULL
-      ORDER BY username
+      SELECT u.id, u.username, u.bio, u.created_at
+      FROM users u
+      WHERE (LOWER(u.username) LIKE $1 OR u.id::text = $2)
+        AND u.id != $3
+        AND u.deleted_at IS NULL
+        ${whereMessagingReady}
+      ORDER BY u.username
       LIMIT $4
     `, [`%${query.toLowerCase()}%`, query, req.user.id, limit]);
 

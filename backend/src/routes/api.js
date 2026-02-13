@@ -175,7 +175,7 @@ router.get("/bets/stats", authenticateJWT, predictionsController.getMonthlyBetti
 
 // Post Routes (require email verification - Tier 1)
 router.post("/posts", authenticateJWT, requireEmailVerified, postController.createPost);
-router.get("/posts", authenticateJWT, postController.getPosts);                // Get all posts
+router.get("/posts", postController.getPosts);                                 // Get all posts (public)
 router.get("/feed", authenticateJWT, postController.getFeed);                  // Get personalized feed
 router.get("/posts/:id", authenticateJWT, postController.getPostById);         // Get a single post
 router.patch("/posts/:id", authenticateJWT, postController.updatePost);        // Update a post

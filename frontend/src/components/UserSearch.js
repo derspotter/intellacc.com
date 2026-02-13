@@ -35,7 +35,7 @@ export function NewConversationPanel({ onClose }) {
         error.val = '';
 
         try {
-            const results = await api.users.search(query);
+            const results = await api.users.search(query, { messagingReady: true });
             const selectedIds = selectedUsers.val.map(u => u.id);
             searchResults.val = (results || []).filter(u => !selectedIds.includes(u.id));
         } catch (err) {

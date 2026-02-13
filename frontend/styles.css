@@ -612,7 +612,6 @@ body.dark-mode .device-item {
 .social-auth-section {
   margin-top: 1.5rem;
   padding-top: 1rem;
-  border-top: 1px solid var(--border-color);
 }
 
 .social-auth-title {
@@ -6164,6 +6163,10 @@ body.dark-mode .device-link-modal .instructions {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   opacity: 0.6;
+}
+
+.tier-item.tier-level-1 {
+  border-radius: 0;
 }
 
 .tier-item.verified {

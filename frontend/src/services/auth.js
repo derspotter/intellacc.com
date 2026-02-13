@@ -107,6 +107,21 @@ export async function onLoginSuccess(password = null) {
             }
         }
 
+        // Guard against stale local vaults after DB/user resets:
+        // if local unlock succeeded but server has no account vault, rebuild locally.
+        if (unlocked && password) {
+            try {
+                const hasAccountVault = await vaultService.hasAccountVault();
+                if (!hasAccountVault) {
+                    console.warn('[Vault] Local vault unlocked but no server vault exists; rebuilding local keystore');
+                    await vaultService.lockKeys();
+                    unlocked = false;
+                }
+            } catch (e) {
+                console.warn('[Vault] Failed to verify server vault existence:', e?.message || e);
+            }
+        }
+
         if (linkRequired) {
             // Skip vault setup until device is verified.
         } else if (!unlocked && password) {

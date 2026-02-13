@@ -63,6 +63,19 @@ async function request(endpoint, options = {}) {
     if (!response.ok) {
       // Handle authentication errors
       if (response.status === 401) {
+        // If there is no token at all, this is not a "session expired" case.
+        // Avoid forced login redirects for accidentally-auth-gated public calls.
+        if (!token) {
+          let errorMessage = 'Unauthorized';
+          let errorData = {};
+          try {
+            const errorResponse = await response.json();
+            errorMessage = errorResponse.message || errorResponse.error || errorMessage;
+            errorData = errorResponse;
+          } catch {}
+          throw new ApiError(response.status, errorMessage, errorData);
+        }
+
         // Try to parse error response
         try {
           const errorData = await response.json();
@@ -154,6 +167,17 @@ async function requestForm(endpoint, formData, options = {}) {
 
     if (!response.ok) {
       if (response.status === 401) {
+        if (!token) {
+          let errorMessage = 'Unauthorized';
+          let errorData = {};
+          try {
+            const errorResponse = await response.json();
+            errorMessage = errorResponse.message || errorResponse.error || errorMessage;
+            errorData = errorResponse;
+          } catch {}
+          throw new ApiError(response.status, errorMessage, errorData);
+        }
+
         try {
           const errorData = await response.json();
           clearToken();
@@ -228,6 +252,17 @@ async function requestBlob(endpoint, options = {}) {
 
     if (!response.ok) {
       if (response.status === 401) {
+        if (!token) {
+          let errorMessage = 'Unauthorized';
+          let errorData = {};
+          try {
+            const errorResponse = await response.json();
+            errorMessage = errorResponse.message || errorResponse.error || errorMessage;
+            errorData = errorResponse;
+          } catch {}
+          throw new ApiError(response.status, errorMessage, errorData);
+        }
+
         try {
           const errorData = await response.json();
           clearToken();
@@ -344,8 +379,12 @@ export const api = {
     getUserByUsername: (username) =>
       request(`/users/username/${username}`),
 
-    search: (query) =>
-      request(`/users/search?q=${encodeURIComponent(query)}`),
+    search: (query, { messagingReady = false } = {}) => {
+      const params = new URLSearchParams();
+      params.set('q', query);
+      if (messagingReady) params.set('messaging_ready', '1');
+      return request(`/users/search?${params.toString()}`);
+    },
 
     changePassword: (oldPassword, newPassword) =>
       request('/users/change-password', { method: 'POST', body: { oldPassword, newPassword } }),
