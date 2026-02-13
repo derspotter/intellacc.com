@@ -67,10 +67,6 @@
 }
 
 .verification-code-display {
-  background: var(--hover-bg);
-  border: 2px dashed var(--border-color);
-  border-radius: 8px;
-  padding: 1.5rem;
   margin: 1.5rem 0;
   text-align: center;
 }
@@ -85,7 +81,7 @@
 }
 
 .verification-code-display-inner {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 1rem;
@@ -95,11 +91,12 @@
 
 .verification-code {
   font-family: 'Courier New', monospace;
-  font-size: 2rem;
+  font-size: 1.6rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--primary-color);
-  word-break: break-all;
+  white-space: normal;
+  overflow-wrap: anywhere;
   line-height: 1.2;
 }
 
