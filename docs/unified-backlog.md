@@ -1,5 +1,5 @@
 # Unified Backlog
-Updated: 2026-02-06
+Updated: 2026-02-13
 
 This backlog consolidates open work from `next-steps.md`, `production-checklist.md`,
 `mobile-pwa-plan.md`, `e2ee-next-steps.md`, `docs/mls-status.md`, and
@@ -12,6 +12,10 @@ This backlog consolidates open work from `next-steps.md`, `production-checklist.
 - Admin auth guard for weekly assignment routes: implemented (admin-only ops + self-only status).
 
 ## Priority 1 - High impact
+- Community market question validation + incentives: backend implemented (`/api/market-questions*`).
+  Rules: 5 validators, 4/5 approval, creator bond 10 RP with +5 RP per concurrent pending submission,
+  validator stake 2 RP / winner payout 5 RP, creator rewards +10 RP (approval), +10 RP (traction),
+  +10 RP (resolution). Remaining: frontend UX for submission/review/reward visibility.
 - Attachments storage: implemented (local disk + JWT-gated download). Optional follow-up: presigned/object storage.
 - Home feed infinite scroll: implemented (cursor pagination + frontend virtualization/windowing).
 - Tiered verification (phone + payment): ship SMS (Twilio) + Stripe SetupIntent verification flows,

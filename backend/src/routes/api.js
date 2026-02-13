@@ -11,6 +11,7 @@ const leaderboardController = require('../controllers/leaderboardController');
 const notificationController = require('../controllers/notificationController');
 const pushController = require('../controllers/pushController');
 const weeklyAssignmentController = require('../controllers/weeklyAssignmentController');
+const marketQuestionController = require('../controllers/marketQuestionController');
 const mlsRoutes = require('./mls');
 const authenticateJWT = require("../middleware/auth");
 const { requireAdmin } = require("../middleware/auth");
@@ -163,6 +164,16 @@ router.get("/events", predictionsController.getEvents); // Temporarily no auth f
 router.get("/categories", predictionsController.getCategories); // Get available categories
 router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
 router.get("/predictions", authenticateJWT, predictionsController.getUserPredictions);
+
+// Community market question submission + validation
+router.get('/market-questions/config', authenticateJWT, marketQuestionController.getConfig);
+router.post('/market-questions', authenticateJWT, marketQuestionController.createSubmission);
+router.get('/market-questions', authenticateJWT, marketQuestionController.listSubmissions);
+router.get('/market-questions/review-queue', authenticateJWT, marketQuestionController.getReviewQueue);
+router.get('/market-questions/:id', authenticateJWT, marketQuestionController.getSubmission);
+router.post('/market-questions/:id/reviews', authenticateJWT, marketQuestionController.submitReview);
+router.post('/market-questions/:id/rewards/traction', authenticateJWT, requireAdmin, marketQuestionController.rewardTraction);
+router.post('/market-questions/:id/rewards/resolution', authenticateJWT, requireAdmin, marketQuestionController.rewardResolution);
 
 // ADMIN: Delete all predictions (for testing only)
 router.delete("/predictions/all", authenticateJWT, predictionsController.deleteAllPredictions);
