@@ -197,6 +197,11 @@ export default function MessagesPage() {
       messagingStore.clearError();
 
       const uid = authGetUserId();
+      const existingUid = messagingStore.currentUserId;
+      if (existingUid != null && uid != null && Number(existingUid) !== Number(uid)) {
+        // Same-tab account switch fallback: ensure no stale MLS/DM state remains.
+        messagingStore.clearCache();
+      }
       if (uid != null) messagingStore.setCurrentUserId(uid);
 
       await messagingService.initialize();

@@ -44,6 +44,29 @@ const updateAdminStateFromToken = () => {
 };
 
 /**
+ * Reset in-memory authenticated state before replacing an existing session token.
+ * This avoids carrying MLS/vault/message state across re-login in the same tab.
+ */
+const resetSessionStateForRelogin = async () => {
+  if (!getToken()) return;
+
+  try {
+    await vaultService.lockKeys();
+  } catch (e) {
+    console.warn('[Auth] Failed to lock vault before re-login:', e);
+  }
+
+  vaultStore.reset();
+  userStore.actions.reset.call(userStore);
+  postsStore.actions.reset.call(postsStore);
+  predictionsStore.actions.reset.call(predictionsStore);
+
+  try {
+    socketService.disconnect();
+  } catch {}
+};
+
+/**
  * Check if current user is logged in
  * @returns {boolean} Whether user is logged in
  */
@@ -228,6 +251,10 @@ export async function login(email, password) {
         error: 'Invalid server response'
       };
     }
+
+    // Handle same-tab re-login safely (including account switches) by wiping
+    // old in-memory vault/MLS/socket state before swapping the JWT.
+    await resetSessionStateForRelogin();
     
     // Save token and update state
     saveToken(response.token);

@@ -2160,7 +2160,14 @@ class CoreCryptoClient {
         this.confirmationTags.clear();
         this.remoteConfirmationTags.clear();
         this.sentConfirmationTags.clear();
+        this.pendingWelcomes.clear();
+        this.processedMessageIds.clear();
+        this.processingMessageIds.clear();
         this.messageHandlers = [];
+        this.welcomeHandlers = [];
+        this.welcomeRequestHandlers = [];
+        this.forkHandlers = [];
+        this.commitRejectionHandlers = [];
         this.bootstrapPromise = null;
         this.bootstrapUser = null;
     }
