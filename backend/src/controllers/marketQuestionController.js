@@ -17,6 +17,10 @@ const TRACTION_MIN_STAKE_LEDGER = 100n * LEDGER_SCALE; // 100 RP
 const toLedger = (rpBigInt) => (rpBigInt * LEDGER_SCALE);
 const fromLedger = (ledgerValue) => Number(ledgerValue) / 1_000_000;
 const toLedgerString = (rpBigInt) => toLedger(rpBigInt).toString();
+const isResolvedOutcome = (outcome) => {
+  if (outcome === null || outcome === undefined) return false;
+  return String(outcome).toLowerCase() !== 'pending';
+};
 
 const httpError = (status, message) => {
   const err = new Error(message);
@@ -35,6 +39,33 @@ const normalizeSubmission = (row) => ({
   required_validators: Number(row.required_validators || REQUIRED_VALIDATORS),
   required_approvals: Number(row.required_approvals || REQUIRED_APPROVALS)
 });
+
+const getTractionMetricsByEvent = async (client, eventIds) => {
+  if (!eventIds.length) return new Map();
+
+  const metricsRes = await client.query(
+    `SELECT
+       event_id,
+       COUNT(DISTINCT user_id)::int AS bettors,
+       COALESCE(
+         SUM(COALESCE(stake_amount_ledger, ROUND(stake_amount * 1000000)::bigint)),
+         0
+       )::bigint AS total_stake_ledger
+     FROM market_updates
+     WHERE event_id = ANY($1::int[])
+     GROUP BY event_id`,
+    [eventIds]
+  );
+
+  const metricsByEvent = new Map();
+  for (const row of metricsRes.rows) {
+    metricsByEvent.set(Number(row.event_id), {
+      bettors: Number(row.bettors || 0),
+      totalStakeLedger: BigInt(row.total_stake_ledger || 0)
+    });
+  }
+  return metricsByEvent;
+};
 
 const settleCreatorReward = async ({
   client,
@@ -61,6 +92,143 @@ const settleCreatorReward = async ({
   );
   return true;
 };
+
+const runAutomaticMarketQuestionRewards = async (client) => {
+  const candidatesRes = await client.query(
+    `SELECT
+       mqs.id,
+       mqs.creator_user_id,
+       mqs.approved_event_id,
+       mqs.creator_traction_reward_paid,
+       mqs.creator_resolution_reward_paid,
+       e.outcome
+     FROM market_question_submissions mqs
+     LEFT JOIN events e ON e.id = mqs.approved_event_id
+     WHERE mqs.status = 'approved'
+       AND mqs.approved_event_id IS NOT NULL
+       AND (
+         mqs.creator_traction_reward_paid = FALSE
+         OR mqs.creator_resolution_reward_paid = FALSE
+       )`,
+    []
+  );
+
+  const candidates = candidatesRes.rows;
+  if (!candidates.length) {
+    return {
+      success: true,
+      processed: 0,
+      traction_rewarded: 0,
+      resolution_rewarded: 0,
+      results: []
+    };
+  }
+
+  const eventIds = [...new Set(candidates.map((row) => Number(row.approved_event_id)).filter(Boolean))];
+  const tractionMetricsByEvent = await getTractionMetricsByEvent(client, eventIds);
+
+  let tractionRewarded = 0;
+  let tractionSkippedBelowThreshold = 0;
+  let tractionErrors = 0;
+  let resolutionRewarded = 0;
+  let resolutionSkippedUnresolved = 0;
+  let resolutionErrors = 0;
+  const results = [];
+
+  for (const submission of candidates) {
+    const submissionId = Number(submission.id);
+    const creatorUserId = Number(submission.creator_user_id);
+    let submissionSummary = {
+      submission_id: submissionId,
+      traction_rewarded: false,
+      traction_reason: null,
+      resolution_rewarded: false,
+      resolution_reason: null
+    };
+
+    if (!submission.creator_traction_reward_paid) {
+      const metrics = tractionMetricsByEvent.get(Number(submission.approved_event_id)) || {
+        bettors: 0,
+        totalStakeLedger: 0n
+      };
+      const meetsTractionThreshold =
+        metrics.bettors >= TRACTION_MIN_BETTORS ||
+        metrics.totalStakeLedger >= TRACTION_MIN_STAKE_LEDGER;
+
+      if (meetsTractionThreshold) {
+        try {
+          const rewarded = await settleCreatorReward({
+            client,
+            submissionId,
+            creatorUserId,
+            rewardLedger: toLedgerString(CREATOR_TRACTION_REWARD_RP),
+            rewardColumn: 'creator_traction_reward_paid'
+          });
+          if (rewarded) {
+            tractionRewarded += 1;
+            submissionSummary.traction_rewarded = true;
+          } else {
+            submissionSummary.traction_reason = 'already_paid';
+          }
+        } catch (err) {
+          tractionErrors += 1;
+          submissionSummary.traction_reason = `error:${err.message}`;
+          console.error('Error applying automatic traction reward:', err);
+        }
+      } else {
+        tractionSkippedBelowThreshold += 1;
+        submissionSummary.traction_reason = 'threshold_not_met';
+      }
+    } else {
+      submissionSummary.traction_reason = 'already_paid';
+    }
+
+    if (!submission.creator_resolution_reward_paid) {
+      if (isResolvedOutcome(submission.outcome)) {
+        try {
+          const rewarded = await settleCreatorReward({
+            client,
+            submissionId,
+            creatorUserId,
+            rewardLedger: toLedgerString(CREATOR_RESOLUTION_REWARD_RP),
+            rewardColumn: 'creator_resolution_reward_paid'
+          });
+          if (rewarded) {
+            resolutionRewarded += 1;
+            submissionSummary.resolution_rewarded = true;
+          } else {
+            submissionSummary.resolution_reason = 'already_paid';
+          }
+        } catch (err) {
+          resolutionErrors += 1;
+          submissionSummary.resolution_reason = `error:${err.message}`;
+          console.error('Error applying automatic resolution reward:', err);
+        }
+      } else {
+        resolutionSkippedUnresolved += 1;
+        submissionSummary.resolution_reason = 'unresolved';
+      }
+    } else {
+      submissionSummary.resolution_reason = 'already_paid';
+    }
+
+    results.push(submissionSummary);
+  }
+
+  return {
+    success: true,
+    processed: candidates.length,
+    traction_rewarded: tractionRewarded,
+    traction_skipped_below_threshold: tractionSkippedBelowThreshold,
+    traction_skipped_errors: tractionErrors,
+    resolution_rewarded: resolutionRewarded,
+    resolution_skipped_unresolved: resolutionSkippedUnresolved,
+    resolution_skipped_errors: resolutionErrors,
+    results
+  };
+};
+
+exports.runAutomaticMarketQuestionRewards = runAutomaticMarketQuestionRewards;
 
 exports.getConfig = async (_req, res) => {
   res.json({
@@ -585,7 +753,7 @@ exports.rewardResolution = async (req, res) => {
     if (eventRes.rows.length === 0) {
       throw httpError(404, 'Linked event not found');
     }
-    if (!eventRes.rows[0].outcome) {
+    if (!isResolvedOutcome(eventRes.rows[0].outcome)) {
       throw httpError(409, 'Linked event is not resolved yet');
     }
 
@@ -607,6 +775,23 @@ exports.rewardResolution = async (req, res) => {
     await client.query('ROLLBACK');
     console.error('Error applying resolution reward:', err);
     res.status(err.status || 500).json({ message: err.message || 'Failed to apply resolution reward' });
+  } finally {
+    client.release();
+  }
+};
+
+exports.runAutomaticRewards = async (_req, res) => {
+  const client = await db.getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const results = await runAutomaticMarketQuestionRewards(client);
+    await client.query('COMMIT');
+
+    res.json(results);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error running automatic market question rewards:', err);
+    res.status(500).json({ success: false, message: err.message || 'Failed to run automatic rewards' });
   } finally {
     client.release();
   }

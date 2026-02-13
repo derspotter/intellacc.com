@@ -7,7 +7,8 @@ jest.setTimeout(30000);
 
 const cleanup = {
   users: new Set(),
-  events: new Set()
+  events: new Set(),
+  marketUpdates: new Set()
 };
 
 const LEDGER_SCALE = 1_000_000n;
@@ -37,6 +38,36 @@ const getBalanceLedger = async (userId) => {
   return BigInt(result.rows[0].rp_balance_ledger || 0);
 };
 
+const createMarketUpdate = async ({ userId, eventId, stakeAmount }) => {
+  const prevProb = 0.5;
+  const newProb = 0.5001;
+  const sharesAcquired = 1;
+  const stakeAmountLedger = Math.round(stakeAmount * 1_000_000);
+  const result = await db.query(
+    `INSERT INTO market_updates
+     (user_id, event_id, prev_prob, new_prob, stake_amount, shares_acquired, share_type, hold_until, stake_amount_ledger)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW() + INTERVAL '1 hour', $8)
+     RETURNING id`,
+    [
+      userId,
+      eventId,
+      prevProb,
+      newProb,
+      stakeAmount,
+      sharesAcquired,
+      'yes',
+      stakeAmountLedger
+    ]
+  );
+  cleanup.marketUpdates.add(result.rows[0].id);
+};
+
+const createAdminUser = async ({ email, username, password, rpBalanceLedger }) => {
+  const id = await createUser({ email, username, password, rpBalanceLedger });
+  await db.query('UPDATE users SET role = $1 WHERE id = $2', ['admin', id]);
+  return id;
+};
+
 describe('Market question submission and validation', () => {
   afterAll(async () => {
     if (cleanup.events.size) {
@@ -44,6 +75,9 @@ describe('Market question submission and validation', () => {
     }
     if (cleanup.users.size) {
       await db.query('DELETE FROM users WHERE id = ANY($1::int[])', [Array.from(cleanup.users)]);
+    }
+    if (cleanup.marketUpdates.size) {
+      await db.query('DELETE FROM market_updates WHERE id = ANY($1::int[])', [Array.from(cleanup.marketUpdates)]);
     }
   });
 
@@ -135,5 +169,131 @@ describe('Market question submission and validation', () => {
     expect(Number(submissionRow.rows[0].approvals)).toBe(4);
     expect(Number(submissionRow.rows[0].rejections)).toBe(1);
     expect(submissionRow.rows[0].approved_event_id).toBe(finalReviewResponse.body.approved_event_id);
+  });
+
+  test('automatic market-question reward sweep applies traction and resolution payouts', async () => {
+    const ts = Date.now();
+    const password = 'testpass123';
+
+    await createAdminUser({
+      email: `mq_admin_${ts}@example.com`,
+      username: `mq_admin_${ts}`,
+      password,
+      rpBalanceLedger: 1_000n * LEDGER_SCALE
+    });
+
+    const creatorId = await createUser({
+      email: `mq_creator_auto_${ts}@example.com`,
+      username: `mq_creator_auto_${ts}`,
+      password,
+      rpBalanceLedger: 1_000n * LEDGER_SCALE
+    });
+
+    const validatorIds = [];
+    const validatorEmails = [];
+    for (let i = 0; i < 5; i += 1) {
+      const email = `mq_validator_auto_${i}_${ts}@example.com`;
+      validatorEmails.push(email);
+      const id = await createUser({
+        email,
+        username: `mq_validator_auto_${i}_${ts}`,
+        password,
+        rpBalanceLedger: 1_000n * LEDGER_SCALE
+      });
+      validatorIds.push(id);
+    }
+
+    const bettorIds = [];
+    for (let i = 0; i < 5; i += 1) {
+      const email = `mq_bettor_auto_${i}_${ts}@example.com`;
+      const id = await createUser({
+        email,
+        username: `mq_bettor_auto_${i}_${ts}`,
+        password,
+        rpBalanceLedger: 1_000n * LEDGER_SCALE
+      });
+      bettorIds.push(id);
+    }
+
+    const creatorToken = await login(`mq_creator_auto_${ts}@example.com`, password);
+    const createRes = await request(app)
+      .post('/api/market-questions')
+      .set('Authorization', `Bearer ${creatorToken}`)
+      .send({
+        title: `Market Question Auto ${ts}`,
+        details: 'Will feature X reach milestone by date Y?',
+        category: 'product',
+        closing_date: new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)).toISOString()
+      });
+
+    expect(createRes.statusCode).toBe(201);
+    expect(createRes.body.submission).toBeTruthy();
+    expect(createRes.body.submission.id).toBeDefined();
+
+    const submissionId = createRes.body.submission.id;
+    for (let i = 0; i < validatorEmails.length; i += 1) {
+      const token = await login(validatorEmails[i], password);
+      const reviewRes = await request(app)
+        .post(`/api/market-questions/${submissionId}/reviews`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ vote: 'approve', note: `vote-${i}` });
+
+      expect(reviewRes.statusCode).toBe(200);
+    }
+
+    const approvedEventRes = await request(app)
+      .get(`/api/market-questions/${submissionId}`)
+      .set('Authorization', `Bearer ${creatorToken}`);
+    expect(approvedEventRes.statusCode).toBe(200);
+    expect(approvedEventRes.body.submission.status).toBe('approved');
+    expect(approvedEventRes.body.submission.approved_event_id).toBeDefined();
+
+
+    const approvedEventId = approvedEventRes.body.submission.approved_event_id;
+    cleanup.events.add(approvedEventId);
+
+    for (let i = 0; i < 5; i += 1) {
+      const userId = validatorIds[i];
+      await createMarketUpdate({
+        userId,
+        eventId: approvedEventId,
+        stakeAmount: 1
+      });
+    }
+
+    for (let i = 0; i < bettorIds.length; i += 1) {
+      await createMarketUpdate({
+        userId: bettorIds[i],
+        eventId: approvedEventId,
+        stakeAmount: 1
+      });
+    }
+
+    const adminToken = await login(`mq_admin_${ts}@example.com`, password);
+
+    const rewardRunRes = await request(app)
+      .post('/api/market-questions/rewards/run')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(rewardRunRes.statusCode).toBe(200);
+    expect(rewardRunRes.body.success).toBe(true);
+    expect(rewardRunRes.body.traction_rewarded).toBe(1);
+    expect(rewardRunRes.body.resolution_rewarded).toBe(0);
+
+    const creatorBalanceAfterTraction = await getBalanceLedger(creatorId);
+    expect(creatorBalanceAfterTraction).toBe(1_020n * LEDGER_SCALE);
+
+    await db.query('UPDATE events SET outcome = $1 WHERE id = $2', ['yes', approvedEventId]);
+
+    const rewardRunResolutionRes = await request(app)
+      .post('/api/market-questions/rewards/run')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(rewardRunResolutionRes.statusCode).toBe(200);
+    expect(rewardRunResolutionRes.body.success).toBe(true);
+    expect(rewardRunResolutionRes.body.resolution_rewarded).toBe(1);
+
+    const creatorBalanceAfterResolution = await getBalanceLedger(creatorId);
+    expect(creatorBalanceAfterResolution).toBe(1_030n * LEDGER_SCALE);
   });
 });

@@ -23,7 +23,8 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 
 ## Priority 1 - High impact
 - `Partial` Community market question validation + incentives:
-  backend routes/migration/tests are implemented, but frontend submission/review/reward UX is still missing.
+  backend routes/migration/tests are implemented (including automatic traction/resolution reward runner),
+  but frontend submission/review/reward UX is still missing.
 - `Done` Attachments storage:
   local disk storage + JWT-gated downloads are implemented for posts/messages.
   Presign endpoints exist as scaffold for later object-storage migration.

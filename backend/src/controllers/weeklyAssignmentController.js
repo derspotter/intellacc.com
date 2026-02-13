@@ -1,3 +1,5 @@
+const db = require('../db');
+const { runAutomaticMarketQuestionRewards } = require('./marketQuestionController');
 const weeklyAssignmentService = require('../services/weeklyAssignmentService');
 
 /**
@@ -156,6 +158,20 @@ const runWeeklyProcesses = async (req, res) => {
     
     // 3. Assign new weekly predictions
     const assignmentResult = await weeklyAssignmentService.assignWeeklyPredictions();
+
+    // 4. Auto-issue market-question rewards (traction + resolution)
+    const rewardsClient = await db.getPool().connect();
+    let rewardResult = { success: true, traction_rewarded: 0, resolution_rewarded: 0, results: [] };
+    try {
+      await rewardsClient.query('BEGIN');
+      rewardResult = await runAutomaticMarketQuestionRewards(rewardsClient);
+      await rewardsClient.query('COMMIT');
+    } catch (err) {
+      await rewardsClient.query('ROLLBACK');
+      throw err;
+    } finally {
+      rewardsClient.release();
+    }
     
     res.status(200).json({
       success: true,
@@ -163,7 +179,8 @@ const runWeeklyProcesses = async (req, res) => {
       results: {
         completed_assignments: completedResult,
         decay: decayResult,
-        new_assignments: assignmentResult
+        new_assignments: assignmentResult,
+        market_question_rewards: rewardResult
       }
     });
   } catch (error) {

@@ -5,6 +5,7 @@ This document explains how to set up and run the weekly assignment cron job that
 1. **Weekly Assignment Rewards**: +50 RP for users who place a minimum stake on their assigned event
 2. **Weekly RP Decay**: 1% decay applied to all user RP balances
 3. **New Weekly Assignments**: Random event assignment for all active users
+4. **Market Question Rewards**: Auto-issue creator rewards for approved community questions (traction + resolution)
 
 ## 🚀 Quick Start (Manual Testing)
 
@@ -72,6 +73,7 @@ docker exec intellacc_weekly_cron tail -f /var/log/weekly_cron.log
   1. Process completed assignments from previous week
   2. Apply 1% RP decay to all users
   3. Assign new weekly predictions
+  4. Run automatic market-question rewards
 
 ## 🔧 Manual API Endpoints (Admin Only)
 
@@ -87,8 +89,11 @@ curl -X POST http://localhost:3000/api/weekly/apply-decay
 # Assign new weekly predictions
 curl -X POST http://localhost:3000/api/weekly/assign
 
-# Run all processes in sequence
+# Run all processes in sequence (includes market-question reward sweep)
 curl -X POST http://localhost:3000/api/weekly/run-all
+
+# Run automatic market-question rewards directly (traction + resolution)
+curl -X POST http://localhost:3000/api/market-questions/rewards/run
 
 # Get weekly statistics
 curl http://localhost:3000/api/weekly/stats
