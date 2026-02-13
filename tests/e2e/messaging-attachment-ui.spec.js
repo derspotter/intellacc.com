@@ -3,6 +3,19 @@ const path = require('path');
 
 const PASSWORD = 'password123';
 
+async function resetServerState() {
+  const { exec } = require('child_process');
+  return new Promise((resolve) => {
+    exec('./tests/e2e/reset-test-users.sh', (error, stdout, stderr) => {
+      if (error) {
+        console.warn('Reset script warning:', stderr);
+      }
+      console.log('Server state reset:', stdout.includes('Reset complete'));
+      resolve();
+    });
+  });
+}
+
 async function clearBrowserStorage(page) {
   await page.goto('/#login');
   await page.waitForTimeout(500);
@@ -13,7 +26,7 @@ async function clearBrowserStorage(page) {
 
     if (indexedDB?.databases) {
       const databases = await indexedDB.databases();
-      const deletePromises = databases.map(db => {
+      const deletePromises = databases.map((db) => {
         return new Promise((resolve) => {
           if (!db.name) return resolve();
           const req = indexedDB.deleteDatabase(db.name);
@@ -30,25 +43,18 @@ async function clearBrowserStorage(page) {
 }
 
 async function registerUser(request, user) {
-  const res = await request.post('http://127.0.0.1:3000/api/users/register', {
-    data: { username: user.name, email: user.email, password: user.password }
+  const res = await request.post('/api/login', {
+    data: { email: user.email, password: user.password }
   });
 
   if (!res.ok()) {
-    const text = await res.text();
-    if (!text.includes('already exists')) {
-      throw new Error(`Failed to register ${user.email}: ${text}`);
-    }
+    throw new Error(`Test user ${user.email} is not available in test environment`);
   }
 }
 
 async function loginUser(page, user) {
   await page.goto('/#login');
   await page.fill('#email', user.email);
-  await page.getByRole('button', { name: 'Continue' }).click();
-
-  const passwordInput = page.locator('#password');
-  await expect(passwordInput).toBeVisible({ timeout: 15000 });
   await page.fill('#password', user.password);
   await page.getByRole('button', { name: 'Sign In' }).click();
 
@@ -57,29 +63,40 @@ async function loginUser(page, user) {
 }
 
 async function unlockMessagingIfNeeded(page, password) {
-  const lockedState = page.locator('.messages-page.messages-locked');
-  if (await lockedState.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await page.getByRole('button', { name: 'Unlock Messaging' }).click();
-    const unlockModal = page.locator('.unlock-modal');
-    await expect(unlockModal).toBeVisible({ timeout: 5000 });
-    await unlockModal.getByPlaceholder('Login Password').fill(password);
-    await unlockModal.getByRole('button', { name: 'Unlock' }).click();
-    await expect(page.locator('.messages-page.messages-locked')).toBeHidden({ timeout: 15000 });
-  }
-
   const deviceModal = page.locator('.device-link-modal');
   if (await deviceModal.isVisible({ timeout: 2000 }).catch(() => false)) {
     await deviceModal.getByRole('button', { name: 'Cancel' }).click();
     await expect(deviceModal).toBeHidden({ timeout: 5000 });
   }
+
+  const lockedState = page.locator('.messages-page.messages-locked');
+  if (await lockedState.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await page.getByRole('button', { name: 'Unlock Messaging' }).click();
+    const unlockModal = page.locator('.unlock-modal');
+    await expect(unlockModal).toBeVisible({ timeout: 5000 });
+
+    const unlockInput = unlockModal.getByPlaceholder('Login Password');
+    if (await unlockInput.isVisible().catch(() => false)) {
+      await unlockInput.fill(password);
+      await unlockModal.getByRole('button', { name: 'Unlock' }).click();
+    }
+
+    await expect(page.locator('.messages-page.messages-locked')).toBeHidden({ timeout: 15000 });
+  }
+
+  if (await page.locator('.unlock-modal').isVisible({ timeout: 2000 }).catch(() => false)) {
+    await page.locator('.unlock-modal .close-button, .unlock-modal button:has-text("Cancel")').click();
+    await expect(page.locator('.unlock-modal')).toBeHidden({ timeout: 5000 });
+  }
 }
 
 test('User can send and download an attachment in an MLS group', async ({ browser, request }) => {
-  const suffix = Date.now();
+  await resetServerState();
+
   const USER = {
-    email: `msgui_${suffix}@example.com`,
+    email: `user1@example.com`,
     password: PASSWORD,
-    name: `msgui_${suffix}`
+    name: 'testuser1'
   };
 
   await registerUser(request, USER);

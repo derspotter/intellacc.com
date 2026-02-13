@@ -3,6 +3,19 @@ const path = require('path');
 
 const PASSWORD = 'password123';
 
+async function resetServerState() {
+  const { exec } = require('child_process');
+  return new Promise((resolve) => {
+    exec('./tests/e2e/reset-test-users.sh', (error, stdout, stderr) => {
+      if (error) {
+        console.warn('Reset script warning:', stderr);
+      }
+      console.log('Server state reset:', stdout.includes('Reset complete'));
+      resolve();
+    });
+  });
+}
+
 async function clearBrowserStorage(page) {
   await page.goto('/#login');
   await page.waitForTimeout(500);
@@ -30,10 +43,6 @@ async function clearBrowserStorage(page) {
 async function loginUser(page, user) {
   await page.goto('/#login');
   await page.fill('#email', user.email);
-  await page.getByRole('button', { name: 'Continue' }).click();
-
-  const passwordInput = page.locator('#password');
-  await expect(passwordInput).toBeVisible({ timeout: 15000 });
   await page.fill('#password', user.password);
   await page.getByRole('button', { name: 'Sign In' }).click();
 
@@ -42,32 +51,30 @@ async function loginUser(page, user) {
 }
 
 test('Users can share an attachment via MLS messaging', async ({ browser, request }) => {
-  const suffix = Date.now();
+  await resetServerState();
+
   const USER1 = {
-    email: `msguser1_${suffix}@example.com`,
+    email: 'user1@example.com',
     password: PASSWORD,
-    name: `msguser1_${suffix}`
+    name: 'testuser1'
   };
   const USER2 = {
-    email: `msguser2_${suffix}@example.com`,
+    email: 'user2@example.com',
     password: PASSWORD,
-    name: `msguser2_${suffix}`
+    name: 'testuser2'
   };
 
-  const register = async (user) => {
-    const res = await request.post('http://127.0.0.1:3000/api/users/register', {
-      data: { username: user.name, email: user.email, password: user.password }
+  const ensureUsers = async (user) => {
+    const res = await request.post('/api/login', {
+      data: { email: user.email, password: user.password }
     });
     if (!res.ok()) {
-      const text = await res.text();
-      if (!text.includes('already exists')) {
-        throw new Error(`Failed to register ${user.email}: ${text}`);
-      }
+      throw new Error(`Expected seeded test user ${user.email} to be available`);
     }
   };
 
-  await register(USER1);
-  await register(USER2);
+  await ensureUsers(USER1);
+  await ensureUsers(USER2);
   const tempContext = await browser.newContext();
   const tempPage = await tempContext.newPage();
   await clearBrowserStorage(tempPage);
@@ -100,8 +107,11 @@ test('Users can share an attachment via MLS messaging', async ({ browser, reques
     await pageAlice.getByRole('button', { name: 'Unlock Messaging' }).click();
     const unlockModal = pageAlice.locator('.unlock-modal');
     await expect(unlockModal).toBeVisible({ timeout: 5000 });
-    await unlockModal.getByPlaceholder('Login Password').fill(USER1.password);
-    await unlockModal.getByRole('button', { name: 'Unlock' }).click();
+    const unlockInput = unlockModal.getByPlaceholder('Login Password');
+    if (await unlockInput.isVisible().catch(() => false)) {
+      await unlockInput.fill(USER1.password);
+      await unlockModal.getByRole('button', { name: 'Unlock' }).click();
+    }
     await expect(pageAlice.locator('.messages-page.messages-locked')).toBeHidden({ timeout: 10000 });
   }
 
@@ -141,8 +151,11 @@ test('Users can share an attachment via MLS messaging', async ({ browser, reques
     await pageBob.getByRole('button', { name: 'Unlock Messaging' }).click();
     const unlockModal = pageBob.locator('.unlock-modal');
     await expect(unlockModal).toBeVisible({ timeout: 5000 });
-    await unlockModal.getByPlaceholder('Login Password').fill(USER2.password);
-    await unlockModal.getByRole('button', { name: 'Unlock' }).click();
+    const unlockInput = unlockModal.getByPlaceholder('Login Password');
+    if (await unlockInput.isVisible().catch(() => false)) {
+      await unlockInput.fill(USER2.password);
+      await unlockModal.getByRole('button', { name: 'Unlock' }).click();
+    }
     await expect(pageBob.locator('.messages-page.messages-locked')).toBeHidden({ timeout: 10000 });
   }
 

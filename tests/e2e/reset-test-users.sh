@@ -6,7 +6,35 @@
 #   user1@example.com, user2@example.com (seeded)
 #   alice_test@example.com, bob_test@example.com (manually registered)
 
+PASSWORD='password123'
+
 docker exec intellacc_db psql -U intellacc_user -d intellaccdb -c "
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+INSERT INTO users (username, email, password_hash, created_at, updated_at)
+VALUES
+  ('testuser1', 'user1@example.com', crypt('$PASSWORD', gen_salt('bf')), NOW(), NOW()),
+  ('testuser2', 'user2@example.com', crypt('$PASSWORD', gen_salt('bf')), NOW(), NOW()),
+  ('alice_test', 'alice_test@example.com', crypt('$PASSWORD', gen_salt('bf')), NOW(), NOW()),
+  ('bob_test', 'bob_test@example.com', crypt('$PASSWORD', gen_salt('bf')), NOW(), NOW())
+ON CONFLICT (email) DO UPDATE
+SET
+  username = EXCLUDED.username,
+  password_hash = EXCLUDED.password_hash,
+  deleted_at = NULL,
+  updated_at = NOW();
+
+UPDATE users
+SET
+  verification_tier = 1,
+  email_verified_at = NOW()
+WHERE email IN (
+  'user1@example.com',
+  'user2@example.com',
+  'alice_test@example.com',
+  'bob_test@example.com'
+);
+
 CREATE TEMP TABLE tmp_test_user_ids AS
   SELECT id FROM users
   WHERE email IN (

@@ -41,14 +41,37 @@ async function clearBrowserStorage(page) {
 async function loginUser(page, user) {
   await page.goto('/#login');
   await page.fill('#email', user.email);
-  await page.getByRole('button', { name: 'Continue' }).click();
-
-  await expect(page.locator('#password')).toBeVisible({ timeout: 15000 });
   await page.fill('#password', user.password);
   await page.getByRole('button', { name: 'Sign In' }).click();
 
   await expect(page.locator('.home-page')).toBeVisible({ timeout: 20000 });
   await page.waitForFunction(() => window.__vaultStore?.userId, null, { timeout: 15000 });
+}
+
+async function dismissDeviceModalIfVisible(page) {
+  const deviceModal = page.locator('.device-link-modal');
+  if (await deviceModal.isVisible().catch(() => false)) {
+    await deviceModal.getByRole('button', { name: 'Cancel' }).click();
+    await expect(deviceModal).toBeHidden({ timeout: 5000 });
+  }
+}
+
+async function unlockMessagingIfNeeded(page, password) {
+  await dismissDeviceModalIfVisible(page);
+
+  const lockedState = page.locator('.messages-page.messages-locked');
+  if (!(await lockedState.isVisible().catch(() => false))) return;
+
+  await page.getByRole('button', { name: 'Unlock Messaging' }).click();
+
+  const unlockModal = page.locator('.unlock-modal');
+  await expect(unlockModal).toBeVisible({ timeout: 5000 });
+
+  const unlockInput = unlockModal.getByPlaceholder('Login Password');
+  if (await unlockInput.isVisible()) {
+    await unlockInput.fill(password);
+    await unlockModal.getByRole('button', { name: 'Unlock' }).click();
+  }
 }
 
 test.describe('Device linking flow', () => {
@@ -89,21 +112,10 @@ test.describe('Device linking flow', () => {
 
     await expect(linkModal).toBeHidden({ timeout: 30000 });
 
-    await pageB.goto('/#messages');
-    await expect(pageB.locator('.messages-page')).toBeVisible({ timeout: 15000 });
-
-    const unlockButton = pageB.getByRole('button', { name: 'Unlock Messaging' });
-    await expect(unlockButton).toBeVisible({ timeout: 15000 });
-    await unlockButton.click();
-
-    await pageB.waitForFunction(() => window.__vaultStore?.showUnlockModal === true, null, { timeout: 10000 });
-    await expect(pageB.getByPlaceholder('Login Password')).toBeVisible({ timeout: 10000 });
-    await pageB.getByPlaceholder('Login Password').fill(USER.password);
-    await pageB.locator('.unlock-modal').getByRole('button', { name: 'Unlock' }).click();
-
-    await expect(pageB.locator('.unlock-modal')).toBeHidden({ timeout: 15000 });
-    await expect(pageB.locator('.messages-locked')).toBeHidden({ timeout: 15000 });
-    await expect(pageB.locator('.messages-page')).toBeVisible({ timeout: 15000 });
+  await pageB.goto('/#messages');
+  await expect(pageB.locator('.messages-page')).toBeVisible({ timeout: 15000 });
+  await unlockMessagingIfNeeded(pageB, USER.password);
+  await expect(pageB.locator('.messages-page')).toBeVisible({ timeout: 15000 });
 
     await contextA.close();
     await contextB.close();

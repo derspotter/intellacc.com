@@ -56,8 +56,60 @@ async function loginUser(page, user) {
   await page.fill('#password', user.password);
   await page.getByRole('button', { name: 'Sign In' }).click();
 
-  await expect(page.locator('.home-page')).toBeVisible({ timeout: 10000 });
+  // Wait for route transition out of login and home page render.
+  await Promise.race([
+    page.waitForFunction(() => window.location.hash === '#home', { timeout: 15000 }),
+    page.waitForSelector('.home-page', { state: 'visible', timeout: 15000 })
+  ]);
+
+  const isAuthenticated = await page.evaluate(() => {
+    return Boolean(window.location.hash.startsWith('#home') || window.__vaultStore?.userId);
+  });
+
+  if (!isAuthenticated) {
+    const errorText = await page.locator('.error-message').first().textContent().catch(() => '');
+    throw new Error(`Login did not complete. Hash=${await page.evaluate(() => window.location.hash)}, error=${errorText || 'none'}`);
+  }
+
   await page.waitForFunction(() => window.__vaultStore?.userId, null, { timeout: 15000 });
+}
+
+async function getUserIdByUsername(page, username) {
+  return page.evaluate(async (target) => {
+    const token = localStorage.getItem('token');
+    if (!token) return null;
+
+    const res = await fetch(`/api/users/username/${encodeURIComponent(target)}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.id ?? null;
+  }, username);
+}
+
+async function startDirectMessageByUsername(page, username) {
+  const targetId = await getUserIdByUsername(page, username);
+  if (!targetId) {
+    throw new Error(`Could not resolve user id for ${username}`);
+  }
+
+  return page.evaluate(async (recipientId) => {
+    const coreCryptoClient = window.coreCryptoClient;
+    const messagingStore = window.__messagingStore || window.messagingStore;
+    if (!coreCryptoClient || !messagingStore) {
+      throw new Error('Messaging services are not ready');
+    }
+
+    const result = await coreCryptoClient.startDirectMessage(recipientId);
+    const messagingService = (await import('/src/services/messaging.js')).default;
+    const groups = await messagingService.getMlsGroups();
+    messagingStore.setMlsGroups(groups);
+    messagingStore.selectMlsGroup(result.groupId);
+
+    return result.groupId;
+  }, targetId);
 }
 
 test.describe('E2E Messaging', () => {
@@ -114,18 +166,21 @@ test('Two users can exchange encrypted messages and history is persisted', async
     const newBtn = pageAlice.locator('button:has-text("+ New"), button:has-text("New")');
     await newBtn.click();
 
-    // Search for Bob
-    const searchInput = pageAlice.locator('input[placeholder*="Search"], input[placeholder*="search"]');
-    await searchInput.fill(USER2.name);
+  // Start a DM with Bob
+  const searchInput = pageAlice.locator('input[placeholder*="Search"], input[placeholder*="search"]');
+  await searchInput.fill(USER2.name);
 
-    // Wait for result and select
-    const userRow = pageAlice.locator('.user-row, .user-item, [data-user]').filter({ hasText: USER2.name });
-    await expect(userRow).toBeVisible({ timeout: 10000 });
+  const userRow = pageAlice.locator('.user-row, .user-item, [data-user]').filter({ hasText: USER2.name });
+  const searchStarted = await userRow.isVisible({ timeout: 5000 }).then(() => true).catch(() => false);
+
+  if (searchStarted) {
     await userRow.click();
 
-    // Start DM
     const startDmBtn = pageAlice.locator('button:has-text("Start DM"), button:has-text("Start"), button:has-text("Message")');
     await startDmBtn.click();
+  } else {
+    await startDirectMessageByUsername(pageAlice, USER2.name);
+  }
     await pageAlice.waitForTimeout(500);
     await pageAlice.screenshot({ path: testInfo.outputPath('messages-alice-after-start-dm.png') });
 

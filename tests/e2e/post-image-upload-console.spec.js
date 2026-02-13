@@ -1,50 +1,23 @@
 const { test, expect } = require('@playwright/test');
 const path = require('path');
-const jwt = require('jsonwebtoken');
+const USER = { email: 'user1@example.com', password: 'password123' };
 
-const EMAIL_TOKEN_SECRET = process.env.EMAIL_TOKEN_SECRET || 'dev-email-secret-change-in-production';
-
-async function registerAndVerifyUser(request) {
-  const unique = Date.now();
-  const user = {
-    email: `imgtest_${unique}@example.com`,
-    username: `imgtest_${unique}`,
-    password: 'password123'
-  };
-
-  const registerRes = await request.post('/api/users/register', {
-    data: {
-      username: user.username,
-      email: user.email,
-      password: user.password
-    }
+async function resetServerState() {
+  const { exec } = require('child_process');
+  return new Promise((resolve) => {
+    exec('./tests/e2e/reset-test-users.sh', (error, stdout, stderr) => {
+      if (error) {
+        console.warn('Reset script warning:', stderr);
+      }
+      console.log('Server state reset:', stdout.includes('Reset complete'));
+      resolve();
+    });
   });
-  expect(registerRes.ok()).toBeTruthy();
-  const registerBody = await registerRes.json();
-  const userId = registerBody?.user?.id;
-  expect(userId).toBeTruthy();
-
-  const token = jwt.sign(
-    { userId, email: user.email, purpose: 'email_verify' },
-    EMAIL_TOKEN_SECRET,
-    { expiresIn: '24h' }
-  );
-
-  const verifyRes = await request.post('/api/auth/verify-email/confirm', {
-    data: { token }
-  });
-  expect(verifyRes.ok()).toBeTruthy();
-
-  return user;
 }
 
 async function loginUser(page, user) {
   await page.goto('/#login');
   await page.fill('#email', user.email);
-  await page.getByRole('button', { name: 'Continue' }).click();
-
-  const passwordInput = page.locator('#password');
-  await expect(passwordInput).toBeVisible({ timeout: 15000 });
   await page.fill('#password', user.password);
   await page.getByRole('button', { name: 'Sign In' }).click();
 
@@ -59,6 +32,8 @@ async function loginUser(page, user) {
 }
 
 test('Image upload renders without corrupt/truncated warnings', async ({ page, request }) => {
+  await resetServerState();
+
   const consoleMessages = [];
   const imageWarnings = [];
 
@@ -70,7 +45,7 @@ test('Image upload renders without corrupt/truncated warnings', async ({ page, r
     }
   });
 
-  const user = await registerAndVerifyUser(request);
+  const user = USER;
   await loginUser(page, user);
 
   const filePath = path.resolve(__dirname, 'fixtures/pixel.png');
@@ -80,10 +55,24 @@ test('Image upload renders without corrupt/truncated warnings', async ({ page, r
   const postText = `Image console test ${Date.now()}`;
   await textarea.fill(postText);
   await fileInput.setInputFiles(filePath);
+
+  const createPost = page.waitForResponse(async (response) => {
+    const req = response.request();
+    return req.method() === 'POST' && req.url().includes('/api/posts');
+  });
+
   await page.getByRole('button', { name: 'POST' }).click();
 
-  const postCard = page.locator('.post-card').filter({ hasText: postText }).first();
-  await expect(postCard).toBeVisible({ timeout: 15000 });
+  const createResponse = await createPost;
+  expect(createResponse.ok()).toBeTruthy();
+  const createdBody = await createResponse.json().catch(() => null);
+  expect(createdBody).toBeTruthy();
+
+  const postTextLocator = page.getByText(postText, { exact: false });
+  await expect(postTextLocator).toBeVisible({ timeout: 15000 });
+
+  const postCard = page.locator('.post-card').filter({ hasText: postText });
+  await expect(postCard.first()).toBeVisible({ timeout: 15000 });
 
   const img = postCard.locator('img');
   await expect(img).toBeVisible({ timeout: 15000 });

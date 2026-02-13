@@ -63,11 +63,8 @@ async function clearBrowserStorage(page) {
 async function loginUser(page, user) {
   await page.goto('/#login');
   await page.fill('#email', user.email);
-  await page.getByRole('button', { name: 'Continue' }).click();
-
-  // Wait for password stage (device should be auto-verified or prompt will appear)
-  await expect(page.locator('#password')).toBeVisible({ timeout: 15000 });
   await page.fill('#password', user.password);
+
   await page.getByRole('button', { name: 'Sign In' }).click();
 
   await expect(page.locator('.home-page')).toBeVisible({ timeout: 10000 });
