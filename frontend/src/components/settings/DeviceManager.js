@@ -3,12 +3,16 @@ import { api } from '../../services/api';
 import vaultService from '../../services/vaultService';
 import coreCryptoClient from '../../services/mls/coreCryptoClient';
 import messagingService from '../../services/messaging';
+import vaultStore from '../../stores/vaultStore.js';
 
-const { div, h3, p, button, ul, li, span, input } = van.tags;
+const { div, h3, p, button, ul, li, span, input, form } = van.tags;
 
 export default function DeviceManager() {
     const devices = van.state([]);
     const isLoading = van.state(true);
+    const pendingLinkRequests = van.state([]);
+    const isPendingLoading = van.state(true);
+    const pollPendingInterval = van.state(null);
     
     // Linking states
     const linkingToken = van.state(null);
@@ -17,6 +21,9 @@ export default function DeviceManager() {
     const isApproving = van.state(false);
     const approveError = van.state('');
     const approverPassword = van.state('');
+    const unlockPassword = van.state('');
+    const unlockError = van.state('');
+    const isUnlocking = van.state(false);
 
 
     const loadDevices = async () => {
@@ -29,7 +36,30 @@ export default function DeviceManager() {
         }
     };
 
-    loadDevices();
+    const loadPendingLinkRequests = async () => {
+        try {
+            pendingLinkRequests.val = await api.devices.listPendingLinkRequests();
+        } catch (e) {
+            console.error('Failed to load pending link requests:', e);
+            pendingLinkRequests.val = [];
+        } finally {
+            isPendingLoading.val = false;
+        }
+    };
+
+    const startPendingPoll = () => {
+        if (pollPendingInterval.val) return;
+        pollPendingInterval.val = setInterval(() => {
+            loadPendingLinkRequests();
+        }, 15000);
+    };
+
+    const stopPendingPoll = () => {
+        if (pollPendingInterval.val) {
+            clearInterval(pollPendingInterval.val);
+            pollPendingInterval.val = null;
+        }
+    };
 
     const handleRevoke = async (id) => {
         if (!confirm('Are you sure you want to revoke this device? It will no longer be able to send or receive secure messages.')) return;
@@ -42,13 +72,36 @@ export default function DeviceManager() {
         }
     };
 
+    const handleUnlock = async (e) => {
+        e.preventDefault();
+        isUnlocking.val = true;
+        unlockError.val = '';
+        try {
+            await vaultService.unlockWithPassword(unlockPassword.val);
+            unlockPassword.val = '';
+        } catch (err) {
+            unlockError.val = 'Incorrect password';
+        } finally {
+            isUnlocking.val = false;
+        }
+    };
+
+    const requiresVaultAuth = () => {
+        return vaultStore.isLocked || !vaultStore.vaultExists;
+    };
+
     const startLinking = async () => {
+        if (requiresVaultAuth()) {
+            return;
+        }
+
         try {
             const deviceId = vaultService.getDeviceId();
             const deviceName = `${navigator.platform || 'Web'} - ${navigator.userAgent.split('/')[0]}`;
             const res = await api.devices.startLinking(deviceId, deviceName);
             linkingToken.val = res.token;
             startPolling(res.token);
+            await loadPendingLinkRequests();
         } catch (e) {
             alert('Failed to start linking');
         }
@@ -78,6 +131,12 @@ export default function DeviceManager() {
 
     const handleApprove = async () => {
         if (!approveToken.val) return;
+
+        if (requiresVaultAuth()) {
+            approveError.val = 'Unlock your vault to approve device links.';
+            return;
+        }
+
         isApproving.val = true;
         approveError.val = '';
         if (!approverPassword.val) {
@@ -109,6 +168,7 @@ export default function DeviceManager() {
             approverPassword.val = '';
             alert(`Device approved and synced to ${syncedCount} groups!`);
             loadDevices();
+            loadPendingLinkRequests();
         } catch (e) {
             console.error(e);
             approveError.val = e.message || 'Approval failed';
@@ -116,6 +176,15 @@ export default function DeviceManager() {
             isApproving.val = false;
         }
     };
+
+    const formatExpiry = (expiresAt) => {
+        const expiry = new Date(expiresAt);
+        return expiry.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
+    loadDevices();
+    loadPendingLinkRequests();
+    startPendingPoll();
 
     return div({ class: 'settings-section device-manager' },
         h3({ class: 'settings-section-title' },
@@ -148,47 +217,85 @@ export default function DeviceManager() {
 
             // Device linking UI (for authenticated device-to-device linking)
             div({ class: 'linking-actions', style: 'margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;' },
-                h3('Link Another Logged-In Device'),
-                p({ style: 'font-size: 0.9em; color: #666; margin-bottom: 15px;' },
-                    'Already logged in on another device? Generate a token to link it:'
-                ),
+                () => {
+                    if (requiresVaultAuth()) {
+                        return div({ class: 'unlock-form-container', style: 'margin-top: 0.5rem;' }, [
+                            p('Unlock your vault with your password to manage linked devices and approve trust requests.'),
+                            form({ onsubmit: handleUnlock, class: 'settings-form' },
+                                input({
+                                    type: 'password',
+                                    placeholder: 'Password',
+                                    value: unlockPassword,
+                                    oninput: e => unlockPassword.val = e.target.value,
+                                    class: 'form-input',
+                                    style: 'margin-bottom: 0.5rem;'
+                                }),
+                                button({
+                                    class: 'button button-primary',
+                                    type: 'submit',
+                                    disabled: isUnlocking
+                                }, isUnlocking.val ? 'Unlocking...' : 'Unlock Vault'),
+                                () => unlockError.val ? p({ class: 'error-message', style: 'color: #e74c3c;' }, unlockError.val) : null
+                            )
+                        ]);
+                    }
 
-                !linkingToken.val ?
-                    button({ class: 'button button-secondary', onclick: startLinking }, 'Show Linking Token') :
-                    div({ class: 'token-display', style: 'background: #f4f4f4; padding: 15px; border-radius: 8px; text-align: center;' },
-                        p('Enter this token on your existing trusted device:'),
-                        div({ style: 'font-family: monospace; font-size: 1.2em; font-weight: bold; margin: 10px 0; word-break: break-all;' }, linkingToken.val),
-                        p({ style: 'font-size: 0.9em; color: #666;' }, 'Waiting for approval...'),
-                        button({ class: 'button button-secondary button-sm', onclick: () => { isPolling.val = false; linkingToken.val = null; } }, 'Cancel')
-                    ),
+                    return div({ class: 'linking-content' }, [
+                        h3('Pending Link Requests'),
+                        () => isPendingLoading.val ? p('Checking for pending requests...') :
+                            pendingLinkRequests.val.length === 0 ? p({ style: 'font-size: 0.9em; color: #666;' }, 'No pending link requests') :
+                            ul({ class: 'device-list' }, pendingLinkRequests.val.map(request => {
+                                return li({ class: 'device-item' },
+                                    div({ class: 'device-info' },
+                                        span({ class: 'device-name' }, request.device_name || 'New Device'),
+                                        span({ class: 'device-details' }, `Device: ${request.device_public_id}`)
+                                    ),
+                                    span({ class: 'device-details' }, `Expires: ${formatExpiry(request.expires_at)}`)
+                                );
+                            })),
 
-                div({ style: 'margin-top: 20px;' },
-                    p({ style: 'font-size: 0.9em;' }, 'Have a linking token from another logged-in device? Enter it here:'),
-                    div({ class: 'linking-approve-row' },
-                        input({
-                            type: 'text',
-                            placeholder: 'Enter linking token',
-                            value: approveToken,
-                            oninput: e => approveToken.val = e.target.value,
-                            class: 'form-input',
-                            style: 'flex: 1;'
-                        }),
-                        input({
-                            type: 'password',
-                            placeholder: 'Approver password',
-                            value: approverPassword,
-                            oninput: e => approverPassword.val = e.target.value,
-                            class: 'form-input',
-                            style: 'flex: 1;'
-                        }),
-                        button({
-                            class: 'button button-secondary',
-                            onclick: handleApprove,
-                            disabled: () => !approveToken.val || isApproving.val
-                        }, () => isApproving.val ? 'Approving...' : 'Approve')
-                    ),
-                    () => approveError.val ? p({ class: 'error-message', style: 'color: #e74c3c;' }, approveError.val) : null
-                )
+                        h3('Link Another Logged-In Device'),
+                        p({ style: 'font-size: 0.9em; color: #666; margin-bottom: 15px;' },
+                            'Already logged in on another device? Generate a token to link it:'
+                        ),
+
+                        !linkingToken.val ?
+                            button({ class: 'button button-secondary', onclick: startLinking }, 'Link another device') :
+                            div({ class: 'token-display', style: 'background: #f4f4f4; padding: 15px; border-radius: 8px; text-align: center;' },
+                                p('This request is pending on the new device. Paste its token here to approve linking:'),
+                                p({ style: 'font-size: 0.9em; color: #666;' }, 'Waiting for approval...'),
+                                button({ class: 'button button-secondary button-sm', onclick: () => { isPolling.val = false; linkingToken.val = null; } }, 'Cancel')
+                            ),
+
+                            div({ style: 'margin-top: 20px;' },
+                            p({ style: 'font-size: 0.9em;' }, 'Have the full linking token from the new device? Enter it here to approve:'),
+                            div({ class: 'linking-approve-row' },
+                                input({
+                                    type: 'text',
+                                    placeholder: 'Enter linking token',
+                                    value: approveToken,
+                                    oninput: e => approveToken.val = e.target.value,
+                                    class: 'form-input',
+                                    style: 'flex: 1;'
+                                }),
+                                input({
+                                    type: 'password',
+                                    placeholder: 'Approver password',
+                                    value: approverPassword,
+                                    oninput: e => approverPassword.val = e.target.value,
+                                    class: 'form-input',
+                                    style: 'flex: 1;'
+                                }),
+                                button({
+                                    class: 'button button-secondary',
+                                    onclick: handleApprove,
+                                    disabled: () => !approveToken.val || isApproving.val
+                                }, () => isApproving.val ? 'Approving...' : 'Approve')
+                            ),
+                            () => approveError.val ? p({ class: 'error-message', style: 'color: #e74c3c;' }, approveError.val) : null
+                        )
+                    ]);
+                }
             )
         )
     );
