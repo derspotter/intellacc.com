@@ -1,10 +1,10 @@
 //! Database adapter layer for clean numeric conversions
 //! Eliminates scattered to_f64()/from_f64() calls throughout the codebase
 
-use anyhow::{Result, anyhow};
-use sqlx::Row;
-use chrono::{DateTime, Utc};
 use crate::lmsr_core::Side;
+use anyhow::{anyhow, Result};
+use chrono::{DateTime, Utc};
+use sqlx::Row;
 use tracing::debug;
 
 /// Clean conversion helpers between database rows and core f64 math
@@ -48,7 +48,7 @@ impl DbAdapter {
                 cumulative_stake = $2,
                 q_yes = $3,
                 q_no = $4
-             WHERE id = $5"
+             WHERE id = $5",
         )
         .bind(new_prob)
         .bind(new_cost)
@@ -57,10 +57,10 @@ impl DbAdapter {
         .bind(event_id)
         .execute(&mut **tx)
         .await?;
-        
+
         Ok(())
     }
-    
+
     /// Update user balance from ledger units (bypasses f64 conversion for single rounding boundary)
     pub async fn update_user_balance_ledger(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -74,7 +74,7 @@ impl DbAdapter {
                 rp_staked_ledger  = rp_staked_ledger  + $2
              WHERE id = $3
                AND (rp_balance_ledger + $1) >= 0
-               AND (rp_staked_ledger  + $2) >= 0"
+               AND (rp_staked_ledger  + $2) >= 0",
         )
         .bind(balance_delta_ledger)
         .bind(staked_delta_ledger)
@@ -82,10 +82,10 @@ impl DbAdapter {
         .execute(&mut **tx)
         .await?
         .rows_affected();
-        
+
         Ok(rows_affected)
     }
-    
+
     /// Deduct cost from user balance using ledger units (bypasses f64 conversion)
     pub async fn deduct_user_cost_ledger(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -98,17 +98,17 @@ impl DbAdapter {
                 rp_staked_ledger  = rp_staked_ledger  + $1
              WHERE id = $2
                AND (rp_balance_ledger - $1) >= 0
-               AND (rp_staked_ledger  + $1) >= 0"
+               AND (rp_staked_ledger  + $1) >= 0",
         )
         .bind(cost_ledger)
         .bind(user_id)
         .execute(&mut **tx)
         .await?
         .rows_affected();
-        
+
         Ok(rows_affected > 0)
     }
-    
+
     /// Record market update with f64 values
     pub async fn record_market_update(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -122,10 +122,12 @@ impl DbAdapter {
         hold_until: DateTime<Utc>,
     ) -> Result<()> {
         let share_type = side.as_str();
-        let cost_ledger = i64::try_from(crate::lmsr_core::to_ledger_units(cost)
-            .map_err(|e| anyhow!("Invalid cost value: {}", e))?)
-            .map_err(|_| anyhow!("stake_amount_ledger out of i64 range"))?;
-        
+        let cost_ledger = i64::try_from(
+            crate::lmsr_core::to_ledger_units(cost)
+                .map_err(|e| anyhow!("Invalid cost value: {}", e))?,
+        )
+        .map_err(|_| anyhow!("stake_amount_ledger out of i64 range"))?;
+
         sqlx::query(
             "INSERT INTO market_updates 
              (user_id, event_id, prev_prob, new_prob, stake_amount, shares_acquired, share_type, hold_until, stake_amount_ledger)
@@ -142,11 +144,10 @@ impl DbAdapter {
         .bind(cost_ledger)
         .execute(&mut **tx)
         .await?;
-        
+
         Ok(())
     }
-    
-    
+
     /// Update user shares with ledger-native cost (bypasses f64 conversion for single rounding boundary)
     pub async fn update_user_shares_ledger(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -159,8 +160,8 @@ impl DbAdapter {
         match side {
             Side::Yes => {
                 debug!(
-                    user_id, event_id, shares_delta, cost_ledger,
-                    "update_user_shares_ledger YES side"
+                    user_id,
+                    event_id, shares_delta, cost_ledger, "update_user_shares_ledger YES side"
                 );
                 sqlx::query(
                     "INSERT INTO user_shares (user_id, event_id, yes_shares, no_shares, total_staked_ledger, staked_yes_ledger, staked_no_ledger, version)
@@ -200,7 +201,7 @@ impl DbAdapter {
                 .await?;
             }
         }
-        
+
         Ok(())
     }
 
@@ -210,8 +211,8 @@ impl DbAdapter {
         user_id: i32,
         event_id: i32,
         side: Side,
-        shares_delta: f64,  // Negative for selling
-        stake_unwind_ledger: i64,  // Positive amount to unwind from side-specific stake
+        shares_delta: f64,        // Negative for selling
+        stake_unwind_ledger: i64, // Positive amount to unwind from side-specific stake
     ) -> Result<()> {
         match side {
             Side::Yes => {
@@ -222,7 +223,7 @@ impl DbAdapter {
                         staked_yes_ledger = staked_yes_ledger - $4,
                         version = version + 1,
                         last_updated = NOW()
-                     WHERE user_id = $1 AND event_id = $2"
+                     WHERE user_id = $1 AND event_id = $2",
                 )
                 .bind(user_id)
                 .bind(event_id)
@@ -239,7 +240,7 @@ impl DbAdapter {
                         staked_no_ledger = staked_no_ledger - $4,
                         version = version + 1,
                         last_updated = NOW()
-                     WHERE user_id = $1 AND event_id = $2"
+                     WHERE user_id = $1 AND event_id = $2",
                 )
                 .bind(user_id)
                 .bind(event_id)
@@ -249,7 +250,7 @@ impl DbAdapter {
                 .await?;
             }
         }
-        
+
         Ok(())
     }
 }

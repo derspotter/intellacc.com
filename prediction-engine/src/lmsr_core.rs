@@ -49,7 +49,11 @@ impl fmt::Debug for Market {
 impl Market {
     pub fn new(b: f64) -> Self {
         assert!(b.is_finite() && b > 0.0, "b must be positive and finite");
-        Self { q_yes: 0.0, q_no: 0.0, b }
+        Self {
+            q_yes: 0.0,
+            q_no: 0.0,
+            b,
+        }
     }
 
     /// Convenience accessor.
@@ -68,20 +72,20 @@ impl Market {
         if stake <= 0.0 {
             return Err("stake must be > 0".to_string());
         }
-        
+
         let pre_cost = self.cost();
         let shares_delta = delta_q_for_stake(side, self.q_yes, self.q_no, self.b, stake)?;
-        
+
         // Apply the share delta to the appropriate side
         match side {
             Side::Yes => self.q_yes += shares_delta,
             Side::No => self.q_no += shares_delta,
         }
-        
+
         let post_cost = self.cost();
         let cash_delta = post_cost - pre_cost; // what trader pays (positive)
         let cash_debit = to_ledger_units(cash_delta)?;
-        
+
         Ok((shares_delta, cash_debit))
     }
 
@@ -100,15 +104,15 @@ impl Market {
         if shares <= 0.0 {
             return Err("shares must be > 0".to_string());
         }
-        
+
         let pre_cost = self.cost();
-        
+
         // Remove shares from the appropriate side
         match side {
             Side::Yes => self.q_yes -= shares,
             Side::No => self.q_no -= shares,
         }
-        
+
         let post_cost = self.cost();
         let cash_delta = pre_cost - post_cost; // what trader receives (positive)
         to_ledger_units(cash_delta)
@@ -170,7 +174,7 @@ impl Side {
             _ => Err(format!("Invalid side: '{}', expected 'yes' or 'no'", s)),
         }
     }
-    
+
     /// Convert to string for database storage
     pub fn to_string(&self) -> String {
         match self {
@@ -178,7 +182,7 @@ impl Side {
             Side::No => "no".to_string(),
         }
     }
-    
+
     /// Convert to lowercase string slice (efficient for comparisons)
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -194,12 +198,12 @@ fn ln_expm1_pos(t: f64) -> f64 {
     // t > 0; returns ln(exp(t) - 1) stably for all magnitudes of t
     // Uses: ln(expm1(t)) = t + ln(1 - exp(-t))
     debug_assert!(t.is_finite() && t > 0.0);
-    let e_neg_t = (-t).exp();               // safe even for large t (underflows to 0)
+    let e_neg_t = (-t).exp(); // safe even for large t (underflows to 0)
     t + (1.0 - e_neg_t).ln()
 }
 
 /// Unified closed-form delta calculation for buying shares with stake S.
-/// 
+///
 /// Log-domain implementation avoids exp(q/b) overflow for large market quantities.
 /// For YES: dq_yes = b * ((q_no - q_yes)/b + ln(expm1(s/b + ln(exp(q_yes/b) + exp(q_no/b)) - q_no/b)))
 /// For NO:  dq_no  = b * ((q_yes - q_no)/b + ln(expm1(s/b + ln(exp(q_yes/b) + exp(q_no/b)) - q_yes/b)))
@@ -207,28 +211,31 @@ fn ln_expm1_pos(t: f64) -> f64 {
 pub const MAX_STAKE_TO_LIQUIDITY_RATIO: f64 = 700.0;
 
 pub fn delta_q_for_stake(side: Side, q_yes: f64, q_no: f64, b: f64, s: f64) -> Result<f64, String> {
-    if s <= 0.0 { 
-        return Err("stake must be positive".to_string()); 
+    if s <= 0.0 {
+        return Err("stake must be positive".to_string());
     }
-    if b <= 0.0 || !b.is_finite() { 
-        return Err("liquidity parameter b must be positive and finite".to_string()); 
+    if b <= 0.0 || !b.is_finite() {
+        return Err("liquidity parameter b must be positive and finite".to_string());
     }
-    if !q_yes.is_finite() || !q_no.is_finite() { 
-        return Err("market quantities must be finite".to_string()); 
+    if !q_yes.is_finite() || !q_no.is_finite() {
+        return Err("market quantities must be finite".to_string());
     }
     if s / b > MAX_STAKE_TO_LIQUIDITY_RATIO {
         return Err(format!(
             "stake too large relative to liquidity parameter: {:.2} / {:.2} = {:.2} > {}",
-            s, b, s / b, MAX_STAKE_TO_LIQUIDITY_RATIO
+            s,
+            b,
+            s / b,
+            MAX_STAKE_TO_LIQUIDITY_RATIO
         ));
     }
 
     let ay = q_yes / b;
-    let an = q_no  / b;
-    let lse = log_sum_exp(ay, an);          // = ln(exp(ay)+exp(an))
-    let sb  = s / b;
-    let t_yes = sb + lse - an;              // for YES: ln(exp(sb)*(exp(ay)+exp(an)) / exp(an))
-    let t_no  = sb + lse - ay;              // for  NO: ln(exp(sb)*(exp(ay)+exp(an)) / exp(ay))
+    let an = q_no / b;
+    let lse = log_sum_exp(ay, an); // = ln(exp(ay)+exp(an))
+    let sb = s / b;
+    let t_yes = sb + lse - an; // for YES: ln(exp(sb)*(exp(ay)+exp(an)) / exp(an))
+    let t_no = sb + lse - ay; // for  NO: ln(exp(sb)*(exp(ay)+exp(an)) / exp(ay))
 
     // ln((exp(sb)*(exp(ay)+exp(an)) - exp(an)) / exp(ay))
     //   = (an - ay) + ln(expm1(t_yes))
@@ -236,21 +243,24 @@ pub fn delta_q_for_stake(side: Side, q_yes: f64, q_no: f64, b: f64, s: f64) -> R
     //   = (ay - an) + ln(expm1(t_no))
     let delta = match side {
         Side::Yes => {
-            if !(t_yes > 0.0) { 
-                return Err("numerically unstable: stake too small".to_string()); 
+            if !(t_yes > 0.0) {
+                return Err("numerically unstable: stake too small".to_string());
             }
             b * ((an - ay) + ln_expm1_pos(t_yes))
         }
         Side::No => {
-            if !(t_no > 0.0) { 
-                return Err("numerically unstable: stake too small".to_string()); 
+            if !(t_no > 0.0) {
+                return Err("numerically unstable: stake too small".to_string());
             }
             b * ((ay - an) + ln_expm1_pos(t_no))
         }
     };
 
     if !delta.is_finite() {
-        return Err(format!("delta calculation resulted in non-finite value: {}", delta));
+        return Err(format!(
+            "delta calculation resulted in non-finite value: {}",
+            delta
+        ));
     }
     Ok(delta)
 }
@@ -358,6 +368,9 @@ mod tests {
         let mut m = Market::new(5000.0);
         let (dq, debit) = m.buy_yes(to_ledger_units(100.0).unwrap()).unwrap();
         let credit = m.sell_yes(dq).unwrap();
-        assert_eq!(debit, credit, "round trip should net to zero in ledger units");
+        assert_eq!(
+            debit, credit,
+            "round trip should net to zero in ledger units"
+        );
     }
 }

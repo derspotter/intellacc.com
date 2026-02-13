@@ -571,6 +571,20 @@ body.dark-mode .device-item {
   font-size: 0.9rem;
 }
 
+.login-error-message {
+  position: fixed !important;
+  top: 1.25rem !important;
+  left: 50% !important;
+  right: auto !important;
+  transform: translateX(-50%);
+  width: min(92vw, 420px);
+  max-width: 92vw;
+  text-align: center;
+  margin: 0;
+  box-sizing: border-box;
+  z-index: 1200;
+}
+
 .button-danger {
   background-color: var(--error-color);
   color: #fff;
@@ -1384,6 +1398,136 @@ body.dark-mode .post-action.liked:hover {
   margin-top: 1rem;
 }
 
+.predictions-top-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.market-question-hub {
+  width: 100%;
+  max-width: 100%;
+}
+
+.market-question-hub .market-question-tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.market-question-hub .market-question-tab {
+  min-height: 2.25rem;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--button-border);
+  color: var(--text-color);
+  background: var(--card-bg);
+}
+
+.market-question-hub .market-question-tab.is-active {
+  border-color: var(--primary-dark);
+  color: white;
+  background: linear-gradient(135deg, var(--signature-blue), var(--signature-blue-dark));
+}
+
+.market-question-hub .market-question-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--predictions-radius);
+  margin-bottom: 1rem;
+}
+
+.market-question-hub .market-question-config,
+.market-question-hub .market-question-card-subtitle {
+  color: var(--secondary-text);
+  margin-bottom: 0.6rem;
+}
+
+.market-question-hub .market-question-form,
+.market-question-hub .market-question-filters {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.market-question-hub .market-question-form label,
+.market-question-hub .market-question-filters label {
+  font-weight: 500;
+}
+
+.market-question-hub input,
+.market-question-hub textarea,
+.market-question-hub select {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.market-question-hub .market-question-form-actions {
+  margin-top: 0.75rem;
+}
+
+.market-question-hub .market-question-note textarea {
+  width: 100%;
+}
+
+.market-question-hub .market-question-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.market-question-hub .market-question-item {
+  border: 1px solid var(--border-color);
+  border-radius: var(--predictions-radius);
+  padding: 0.75rem;
+  background: var(--bg-card, var(--card-bg));
+}
+
+.market-question-hub .market-question-item-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+
+.market-question-hub .market-question-title,
+.market-question-hub .market-question-status {
+  font-weight: 600;
+}
+
+.market-question-hub .market-question-meta,
+.market-question-hub .market-question-votes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  color: var(--secondary-text);
+  font-size: 0.9rem;
+}
+
+.market-question-hub .market-question-details {
+  margin: 0.5rem 0;
+  white-space: pre-wrap;
+}
+
+.market-question-hub .market-question-item-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.market-question-hub .market-question-item-actions button {
+  min-width: 8.25rem;
+}
+
+.market-question-hub .market-question-submission-meta {
+  margin-top: 0.5rem;
+}
+
 .events-list-column,
 .market-stakes-column,
 .leaderboard-column {
@@ -1406,6 +1550,10 @@ body.dark-mode .post-action.liked:hover {
 
 /* Mobile: stack everything (< 900px) */
 @media (max-width: 900px) {
+  .predictions-top-grid {
+    grid-template-columns: 1fr;
+  }
+
   /* Ensure events container is also stacked (redundant but safe) */
   .events-container {
     grid-template-columns: 1fr;

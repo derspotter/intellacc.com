@@ -19,6 +19,7 @@ import LeaderboardCard from '../components/predictions/LeaderboardCard.js';
 import RPBalance from '../components/predictions/RPBalance.js';
 import WeeklyAssignment from '../components/predictions/WeeklyAssignment.js';
 import AdminEventManagement from '../components/predictions/AdminEventManagement.js';
+import MarketQuestionHub from '../components/predictions/MarketQuestionHub.js';
 import predictionsStore from '../store/predictions.js';
 import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
@@ -153,10 +154,11 @@ export default function Router() {
         RPBalance({ horizontal: true })
       ]),
       div({ class: "predictions-main" }, [
-        div({ class: "events-list-column" }, [
-          EventsList()
+        div({ class: "predictions-top-grid" }, [
+          div({ class: "events-list-column" }, [EventsList()]),
+          div({ class: "leaderboard-column" }, [LeaderboardCard()])
         ]),
-        div({ class: "leaderboard-column" }, [ LeaderboardCard() ])
+        MarketQuestionHub()
       ]),
       () => isAdminState.val ? AdminEventManagement() : null,
       // Deprecated "Make a New Prediction" card removed from Predictions page

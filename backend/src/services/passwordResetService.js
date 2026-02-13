@@ -103,55 +103,67 @@ const markTokenUsed = async (tokenId, client = null) => {
 exports.sendPasswordResetEmail = async (userId, email) => {
   const transport = initTransporter();
   const effectiveCooldownSeconds = Number.isFinite(PASSWORD_RESET_COOLDOWN_SECONDS) ? PASSWORD_RESET_COOLDOWN_SECONDS : 90;
-
-  const existing = await db.query(
-    `SELECT id, created_at, token_hash
-     FROM password_reset_tokens
-     WHERE user_id = $1
-       AND used_at IS NULL
-       AND expires_at > NOW()
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [userId]
-  );
-
-  if (existing.rows.length > 0) {
-    const lastSentAt = new Date(existing.rows[0].created_at).getTime();
-    const now = Date.now();
-    const cooldownMs = Math.max(0, effectiveCooldownSeconds) * 1000;
-
-    if (cooldownMs > 0 && now - lastSentAt < cooldownMs) {
-      console.log(
-        `[PasswordReset] Skipping duplicate reset email for user ${userId} to ${email} within ${effectiveCooldownSeconds}s`
-      );
-      return { success: true, skipped: true };
-    }
-  }
-
+  const pool = db.getPool();
+  const client = await pool.connect();
   const token = generateResetToken(userId, email);
   const tokenHash = hashToken(token);
   const expiresAt = getTokenExpiry(token);
 
-  await db.query(
-    'DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL',
-    [userId]
-  );
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock($1)', [userId]);
 
-  await db.query(
-    'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
-    [userId, tokenHash, expiresAt]
-  );
+    const existing = await client.query(
+      `SELECT id, created_at, used_at, expires_at
+       FROM password_reset_tokens
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (existing.rows.length > 0) {
+      const lastSentAt = new Date(existing.rows[0].created_at).getTime();
+      const now = Date.now();
+      const cooldownMs = Math.max(0, effectiveCooldownSeconds) * 1000;
+
+      if (cooldownMs > 0 && now - lastSentAt < cooldownMs) {
+        console.log(
+          `[PasswordReset] Skipping duplicate reset email for user ${userId} to ${email} within ${effectiveCooldownSeconds}s`
+        );
+        await client.query('ROLLBACK');
+        return { success: true, skipped: true };
+      }
+    }
+
+    await client.query(
+      'DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL',
+      [userId]
+    );
+
+    const created = await client.query(
+      'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3) RETURNING id, created_at',
+      [userId, tokenHash, expiresAt]
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 
   const resetUrl = `${FRONTEND_URL}/#reset-password?token=${token}`;
 
-  const result = await transport.sendMail({
-    from: `"Intellacc" <${process.env.SMTP_FROM || 'noreply@intellacc.com'}>`,
-    to: email,
-    subject: 'Reset your Intellacc password',
-    html: `
+  try {
+    const result = await transport.sendMail({
+      from: `"Intellacc" <${process.env.SMTP_FROM || 'noreply@intellacc.com'}>`,
+      to: email,
+      subject: 'Reset your Intellacc password',
+      html: `
       <!DOCTYPE html>
       <html>
-      <head>
+        <head>
         <style>
           body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
           .container { max-width: 600px; margin: 0 auto; padding: 20px; }
@@ -180,20 +192,25 @@ exports.sendPasswordResetEmail = async (userId, email) => {
         </div>
       </body>
       </html>
-    `,
-    text: `
+      `,
+      text: `
 Reset your Intellacc password:
 ${resetUrl}
 
 Important: Resetting your password will remove access to encrypted messages and MLS group memberships.
 You will need to be re-invited to encrypted conversations.
 
-If you did not request this, you can ignore this email.
-    `.trim()
-  });
+      If you did not request this, you can ignore this email.
+      `.trim()
+    });
 
-  console.log(`[PasswordReset] Sent reset email to ${email}, messageId: ${result.messageId}`);
-  return { success: true, messageId: result.messageId };
+    console.log(`[PasswordReset] Sent reset email to ${email}, messageId: ${result.messageId}`);
+    return { success: true, messageId: result.messageId };
+  } catch (err) {
+    console.error(`[PasswordReset] Failed to send reset email to ${email}:`, err);
+    throw err;
+  }
+
 };
 
 exports.verifyResetToken = async (token) => {

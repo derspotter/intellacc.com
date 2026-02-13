@@ -32,8 +32,15 @@ const getLoginHashParams = () => {
 const LoginForm = () => {
   preloadWasm();
 
+  const normalizeLoginError = (message) => {
+    const text = String(message || '').trim();
+    if (!text) return 'Login failed';
+    return text.replace(/^ApiError:\s*/i, '');
+  };
+
   // Stage: 'idle' | 'logging_in'
   const stage = van.state('idle');
+  const isSubmitting = van.state(false);
   const error = van.state('');
 
   // Input refs - values are read directly from DOM
@@ -50,18 +57,23 @@ const LoginForm = () => {
     if (!emailValue || !passwordValue) return;
 
     error.val = '';
-    stage.val = 'logging_in';
+    isSubmitting.val = true;
 
     try {
       const result = await auth.login(emailValue, passwordValue);
 
       if (!result.success) {
-        error.val = result.error || 'Login failed';
+        error.val = normalizeLoginError(result.error);
         stage.val = 'idle';
+        isSubmitting.val = false;
+      }
+      if (result.success) {
+        stage.val = 'logging_in';
       }
     } catch (err) {
-      error.val = err.message || 'Login failed';
+      error.val = normalizeLoginError(err?.message || 'Login failed');
       stage.val = 'idle';
+      isSubmitting.val = false;
     }
   };
 
@@ -129,10 +141,14 @@ const LoginForm = () => {
 
   // Build form once - show/hide with CSS
   return div({ class: 'login-page' },
-    div({ class: 'login-container' },
-      h1('Sign In'),
+      div({ class: 'login-container' },
+        h1('Sign In'),
 
-      () => error.val ? div({ class: 'error-message' }, error.val) : null,
+      div({ 
+        class: 'error-message login-error-message',
+        id: 'login-error',
+        style: () => `display: ${error.val ? 'block' : 'none'};`
+      }, () => error.val),
 
       form({
         onsubmit: handleSubmit,
@@ -158,7 +174,11 @@ const LoginForm = () => {
           })
         ),
         div({ class: 'form-actions' },
-          button({ type: 'submit', class: 'btn-primary' }, 'Sign In'),
+          button({
+            type: 'submit',
+            class: 'btn-primary',
+            disabled: () => isSubmitting.val
+          }, 'Sign In'),
           div({ style: 'width: 100%; margin-top: 1rem;' },
             PasskeyButton({
               email: { val: '' },

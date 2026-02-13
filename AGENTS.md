@@ -22,6 +22,10 @@
 - Frontend tests: `docker exec intellacc_frontend npx vitest`.
 - E2E: `./tests/e2e/reset-test-users.sh` then `npx playwright test tests/e2e/messaging-full.spec.js` (host).
 - Rebuild Rust service: `docker compose up -d --build prediction-engine`.
+- Frontend tooling note: run frontend scripts/tests/builds from the frontend package context, not repo root.
+  - From host: `cd frontend && npm run build` or `cd frontend && npm test`
+  - From host using compose service: `docker exec intellacc_frontend sh -lc 'cd /app && npm run build'`
+  - From host using vite explicitly: `docker exec intellacc_frontend sh -lc '/app/node_modules/.bin/vite --version'`.
 
 ## Coding Style & Naming Conventions
 - JavaScript uses 2-space indentation, semicolons, and single quotes; match existing file style.

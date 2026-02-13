@@ -7,14 +7,26 @@ const ForgotPasswordPage = () => {
   const stage = van.state('form');
   const error = van.state('');
   let emailInputRef = null;
+  const lastSubmitTime = van.state(0);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (stage.val === 'sending') {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastSubmitTime.val < 3000) {
+      return;
+    }
+
     const emailValue = emailInputRef?.value?.trim();
     if (!emailValue) return;
 
     error.val = '';
     stage.val = 'sending';
+    lastSubmitTime.val = now;
 
     try {
       await api.auth.requestPasswordReset(emailValue);

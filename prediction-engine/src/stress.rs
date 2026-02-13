@@ -1,5 +1,5 @@
 //! Comprehensive stress tests for the LMSR prediction engine
-//! 
+//!
 //! This module tests:
 //! 1. **Correctness**: Core LMSR math, buy/sell symmetry, and resolution logic
 //! 2. **Financial Invariants**: Ensures no RP is created or destroyed
@@ -13,7 +13,7 @@ use sqlx::{PgPool, Row};
 use std::env;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::config::Config;
 use crate::lmsr_api::{self, MarketUpdate};
@@ -25,9 +25,9 @@ const INITIAL_BALANCE_LEDGER: i64 = 1_000 * LEDGER_SCALE as i64; // 1000 RP
 // Simulation Parameters (defaults; override via STRESS_* env vars)
 const NUM_USERS: usize = 1_000;
 const NUM_EVENTS: usize = 1_000;
-const TRADES_PER_USER: usize = 1_000;  // 1M trades total (1k users * 1k trades each)
-const LIQUIDITY_B: f64 = 5000.0;  // Higher liquidity for more stable markets
-const BATCH_SIZE: usize = 100;  // Process trades in batches to reduce contention
+const TRADES_PER_USER: usize = 1_000; // 1M trades total (1k users * 1k trades each)
+const LIQUIDITY_B: f64 = 5000.0; // Higher liquidity for more stable markets
+const BATCH_SIZE: usize = 100; // Process trades in batches to reduce contention
 const SELL_PROBABILITY: f64 = 0.25;
 const MIN_SELL_SHARES: f64 = 0.0001;
 
@@ -49,7 +49,8 @@ impl StressConfig {
         let trades_per_user = env_usize("STRESS_TRADES_PER_USER", TRADES_PER_USER);
         let batch_size = env_usize("STRESS_BATCH_SIZE", BATCH_SIZE);
         let liquidity_b = env_f64("STRESS_LIQUIDITY_B", LIQUIDITY_B);
-        let sell_probability = env_f64_clamped("STRESS_SELL_PROBABILITY", SELL_PROBABILITY, 0.0, 1.0);
+        let sell_probability =
+            env_f64_clamped("STRESS_SELL_PROBABILITY", SELL_PROBABILITY, 0.0, 1.0);
         let min_sell_shares = env_f64_min("STRESS_MIN_SELL_SHARES", MIN_SELL_SHARES, 0.0);
 
         Self {
@@ -116,11 +117,19 @@ enum TradeOutcome {
 /// Sets up a clean, isolated database for testing
 pub async fn setup_test_database(pool: &PgPool) -> Result<()> {
     // Drop and recreate tables to ensure clean state
-    sqlx::query("DROP TABLE IF EXISTS market_updates CASCADE").execute(pool).await?;
-    sqlx::query("DROP TABLE IF EXISTS user_shares CASCADE").execute(pool).await?;
-    sqlx::query("DROP TABLE IF EXISTS events CASCADE").execute(pool).await?;
-    sqlx::query("DROP TABLE IF EXISTS users CASCADE").execute(pool).await?;
-    
+    sqlx::query("DROP TABLE IF EXISTS market_updates CASCADE")
+        .execute(pool)
+        .await?;
+    sqlx::query("DROP TABLE IF EXISTS user_shares CASCADE")
+        .execute(pool)
+        .await?;
+    sqlx::query("DROP TABLE IF EXISTS events CASCADE")
+        .execute(pool)
+        .await?;
+    sqlx::query("DROP TABLE IF EXISTS users CASCADE")
+        .execute(pool)
+        .await?;
+
     // Create minimal test tables with double-precision market math
     sqlx::query(
         r#"
@@ -132,8 +141,10 @@ pub async fn setup_test_database(pool: &PgPool) -> Result<()> {
             rp_staked_ledger BIGINT NOT NULL DEFAULT 0,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
-        "#
-    ).execute(pool).await?;
+        "#,
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         r#"
@@ -150,8 +161,10 @@ pub async fn setup_test_database(pool: &PgPool) -> Result<()> {
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
-        "#
-    ).execute(pool).await?;
+        "#,
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         r#"
@@ -168,8 +181,10 @@ pub async fn setup_test_database(pool: &PgPool) -> Result<()> {
             version INTEGER NOT NULL DEFAULT 1,
             UNIQUE(user_id, event_id)
         )
-        "#
-    ).execute(pool).await?;
+        "#,
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         r#"
@@ -186,16 +201,21 @@ pub async fn setup_test_database(pool: &PgPool) -> Result<()> {
             hold_until TIMESTAMP WITH TIME ZONE NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
-        "#
-    ).execute(pool).await?;
+        "#,
+    )
+    .execute(pool)
+    .await?;
 
     // Create indexes
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_market_updates_user ON market_updates(user_id)")
-        .execute(pool).await?;
+        .execute(pool)
+        .await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_market_updates_event ON market_updates(event_id)")
-        .execute(pool).await?;
+        .execute(pool)
+        .await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_user_shares_event ON user_shares(event_id)")
-        .execute(pool).await?;
+        .execute(pool)
+        .await?;
 
     info!("✅ Test database schema created");
     Ok(())
@@ -206,7 +226,7 @@ async fn create_test_users(pool: &PgPool) -> Result<Vec<TestUser>> {
     let stress = stress_config();
     let mut users = Vec::new();
     let mut rng = thread_rng();
-    
+
     for i in 0..stress.num_users {
         let username = format!("testuser_{}", i);
         let email = format!("test{}@example.com", i);
@@ -224,8 +244,11 @@ async fn create_test_users(pool: &PgPool) -> Result<Vec<TestUser>> {
             skill: rng.gen(), // Random skill between 0.0 and 1.0
         });
     }
-    
-    info!("✅ Created {} test users with varying skill levels", stress.num_users);
+
+    info!(
+        "✅ Created {} test users with varying skill levels",
+        stress.num_users
+    );
     Ok(users)
 }
 
@@ -233,18 +256,18 @@ async fn create_test_users(pool: &PgPool) -> Result<Vec<TestUser>> {
 async fn create_test_events(pool: &PgPool) -> Result<Vec<TestEvent>> {
     let stress = stress_config();
     let mut events = Vec::new();
-    
+
     info!("Creating {} test events...", stress.num_events);
-    
+
     // Create events in batches for better performance
     for batch_start in (0..stress.num_events).step_by(stress.batch_size) {
         let batch_end = (batch_start + stress.batch_size).min(stress.num_events);
         let mut batch_events = Vec::new();
-        
+
         for i in batch_start..batch_end {
             let title = format!("Test Event #{}", i);
             let true_prob = 0.2 + (i as f64 / stress.num_events as f64) * 0.6; // Spread between 0.2 and 0.8
-            
+
             let event_id: i32 = sqlx::query_scalar(
                 r#"
                 INSERT INTO events (title, liquidity_b, market_prob, q_yes, q_no, cumulative_stake, closing_date) 
@@ -257,17 +280,23 @@ async fn create_test_events(pool: &PgPool) -> Result<Vec<TestEvent>> {
             .fetch_one(pool)
             .await?;
 
-            batch_events.push(TestEvent { id: event_id, true_prob });
+            batch_events.push(TestEvent {
+                id: event_id,
+                true_prob,
+            });
         }
-        
+
         events.extend(batch_events);
-        
+
         if batch_start % 10000 == 0 || batch_end == stress.num_events {
             info!("Created {} / {} events", batch_end, stress.num_events);
         }
     }
-    
-    info!("✅ Created {} test events with hidden ground truths", stress.num_events);
+
+    info!(
+        "✅ Created {} test events with hidden ground truths",
+        stress.num_events
+    );
     Ok(events)
 }
 
@@ -293,7 +322,7 @@ async fn try_execute_trade(
 
     if should_sell {
         let shares_row = sqlx::query(
-            "SELECT yes_shares, no_shares FROM user_shares WHERE user_id = $1 AND event_id = $2"
+            "SELECT yes_shares, no_shares FROM user_shares WHERE user_id = $1 AND event_id = $2",
         )
         .bind(user_id)
         .bind(event_id)
@@ -366,10 +395,9 @@ async fn try_execute_trade(
         .bind(user_id)
         .fetch_one(pool)
         .await?;
-    
-    let balance = lmsr_core::from_ledger_units(
-        balance_row.get::<i64, _>("rp_balance_ledger") as i128
-    );
+
+    let balance =
+        lmsr_core::from_ledger_units(balance_row.get::<i64, _>("rp_balance_ledger") as i128);
 
     if balance <= 1.0 {
         return Ok(TradeOutcome::Skipped);
@@ -412,7 +440,8 @@ pub async fn run_stress_test(pool: &PgPool, config: &Config) -> Result<()> {
     let start_time = Instant::now();
 
     info!("\n🚀 Starting high-load market simulation...");
-    info!("Target: {} trades ({} users × {} trades each)", 
+    info!(
+        "Target: {} trades ({} users × {} trades each)",
         stress.num_users * stress.trades_per_user,
         stress.num_users,
         stress.trades_per_user
@@ -421,12 +450,12 @@ pub async fn run_stress_test(pool: &PgPool, config: &Config) -> Result<()> {
     let mut successful_trades = 0u64;
     let mut failed_trades = 0u64;
     let mut skipped_trades = 0u64;
-    
+
     // Process trades in batches by user to reduce contention
     for user_batch_start in (0..stress.num_users).step_by(stress.batch_size) {
         let user_batch_end = (user_batch_start + stress.batch_size).min(stress.num_users);
         let mut batch_handles = Vec::new();
-        
+
         // Create concurrent tasks for this batch of users
         for user_idx in user_batch_start..user_batch_end {
             let pool = Arc::clone(&pool);
@@ -438,37 +467,46 @@ pub async fn run_stress_test(pool: &PgPool, config: &Config) -> Result<()> {
                 let mut user_successful = 0u64;
                 let mut user_failed = 0u64;
                 let mut user_skipped = 0u64;
-                
+
                 // Each user makes multiple trades
                 for trade_num in 0..stress.trades_per_user {
                     // Select a random event (deterministic but spread across events)
                     let event_idx = (user.id as usize + trade_num) % events.len();
                     let event = &events[event_idx];
-                    
+
                     // Generate random factors before async operations
                     let noise_factor = rand::random::<f64>();
                     let belief = simulate_belief(user.skill, event.true_prob, noise_factor);
                     let stake_multiplier = 0.5 + rand::random::<f64>(); // 0.5 to 1.5
 
                     // Get user balance and current market state
-                    match try_execute_trade(&pool, &config, user.id, event.id, belief, stake_multiplier).await {
+                    match try_execute_trade(
+                        &pool,
+                        &config,
+                        user.id,
+                        event.id,
+                        belief,
+                        stake_multiplier,
+                    )
+                    .await
+                    {
                         Ok(TradeOutcome::Executed) => user_successful += 1,
                         Ok(TradeOutcome::Skipped) => user_skipped += 1,
                         Err(_) => user_failed += 1, // Log details for debugging if needed
                     }
-                    
+
                     // Add small delay every 100 trades to prevent overwhelming the system
                     if trade_num % 100 == 0 && trade_num > 0 {
                         tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
                     }
                 }
-                
+
                 (user_successful, user_failed, user_skipped)
             });
-            
+
             batch_handles.push(handle);
         }
-        
+
         // Wait for this batch to complete and collect results
         for handle in batch_handles {
             match handle.await {
@@ -483,20 +521,26 @@ pub async fn run_stress_test(pool: &PgPool, config: &Config) -> Result<()> {
                 }
             }
         }
-        
+
         // Progress reporting
         let completed_users = user_batch_end;
         let _total_attempted = completed_users * stress.trades_per_user;
         let current_duration = start_time.elapsed();
         let current_tps = (successful_trades + failed_trades + skipped_trades) as f64
             / current_duration.as_secs_f64();
-        
-        info!("Progress: {}/{} users ({:.1}%) | {} successful, {} failed, {} skipped | {:.0} TPS", 
-            completed_users, stress.num_users, 
+
+        info!(
+            "Progress: {}/{} users ({:.1}%) | {} successful, {} failed, {} skipped | {:.0} TPS",
+            completed_users,
+            stress.num_users,
             (completed_users as f64 / stress.num_users as f64) * 100.0,
-            successful_trades, failed_trades, skipped_trades, current_tps);
+            successful_trades,
+            failed_trades,
+            skipped_trades,
+            current_tps
+        );
     }
-    
+
     let total_trades = successful_trades + failed_trades + skipped_trades;
     let duration = start_time.elapsed();
     let tps = total_trades as f64 / duration.as_secs_f64();
@@ -508,40 +552,49 @@ pub async fn run_stress_test(pool: &PgPool, config: &Config) -> Result<()> {
 
     info!("\n🏁 Simulation finished in {:.2?}", duration);
     info!("   Executed {} trades successfully", successful_trades);
-    info!("   Skipped {} trades (no shares/balance/hold)", skipped_trades);
+    info!(
+        "   Skipped {} trades (no shares/balance/hold)",
+        skipped_trades
+    );
     info!("   Failed {} trades", failed_trades);
     info!("   Performance: {:.2} Transactions/Second", tps);
 
     // --- VERIFICATION & MEASUREMENT ---
     info!("\n🔍 Verifying financial invariants...");
-    
+
     // 1. Check initial total RP in the system
     let initial_total_rp: i64 = (stress.num_users as i64) * INITIAL_BALANCE_LEDGER;
-    
+
     // 2. Resolve events and measure accuracy
     let mut brier_scores = vec![];
     for event in &events {
         let market_state_json = lmsr_api::get_market_state(&pool, event.id).await?;
         let final_prob = market_state_json["market_prob"].as_f64().unwrap();
-        
+
         // Simulate the actual outcome based on true probability
         let outcome = thread_rng().gen_bool(event.true_prob);
-        
+
         // Resolve the event
         lmsr_api::resolve_event(&pool, event.id, outcome).await?;
-        
+
         // Calculate Brier score (lower is better)
         let brier_score = (final_prob - if outcome { 1.0 } else { 0.0 }).powi(2);
         brier_scores.push(brier_score);
     }
 
     let avg_brier_score = brier_scores.iter().sum::<f64>() / brier_scores.len() as f64;
-    info!("   Market Accuracy (Avg Brier Score): {:.4}", avg_brier_score);
-    assert!(avg_brier_score < 0.35, "Market should be more accurate than random chance!");
+    info!(
+        "   Market Accuracy (Avg Brier Score): {:.4}",
+        avg_brier_score
+    );
+    assert!(
+        avg_brier_score < 0.35,
+        "Market should be more accurate than random chance!"
+    );
 
     // 3. Verify final total RP
     let final_total_rp: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(rp_balance_ledger + rp_staked_ledger), 0)::BIGINT FROM users"
+        "SELECT COALESCE(SUM(rp_balance_ledger + rp_staked_ledger), 0)::BIGINT FROM users",
     )
     .fetch_one(pool.as_ref())
     .await?;
@@ -551,35 +604,50 @@ pub async fn run_stress_test(pool: &PgPool, config: &Config) -> Result<()> {
     let rp_difference = initial_total_rp - final_total_rp;
     let rp_difference_pct = (rp_difference as f64 / initial_total_rp as f64).abs() * 100.0;
 
-    info!("   Initial Total RP: {:.2}", lmsr_core::from_ledger_units(initial_total_rp as i128));
-    info!("   Final Total RP:   {:.2}", lmsr_core::from_ledger_units(final_total_rp as i128));
-    info!("   Market Maker Loss: {:.2} ({:.2}%)", 
+    info!(
+        "   Initial Total RP: {:.2}",
+        lmsr_core::from_ledger_units(initial_total_rp as i128)
+    );
+    info!(
+        "   Final Total RP:   {:.2}",
+        lmsr_core::from_ledger_units(final_total_rp as i128)
+    );
+    info!(
+        "   Market Maker Loss: {:.2} ({:.2}%)",
         lmsr_core::from_ledger_units(rp_difference as i128),
         rp_difference_pct
     );
 
     // 4. Verify system invariants for a sample of users
-    let sample_users: Vec<i32> = sqlx::query_scalar("SELECT id FROM users ORDER BY RANDOM() LIMIT 10")
-        .fetch_all(pool.as_ref())
-        .await?;
+    let sample_users: Vec<i32> =
+        sqlx::query_scalar("SELECT id FROM users ORDER BY RANDOM() LIMIT 10")
+            .fetch_all(pool.as_ref())
+            .await?;
 
     for user_id in sample_users {
         let balance_result = lmsr_api::verify_balance_invariant(&pool, user_id).await?;
-        assert!(balance_result["valid"].as_bool().unwrap(), 
-            "Balance invariant failed for user {}: {}", 
-            user_id, balance_result["message"]
+        assert!(
+            balance_result["valid"].as_bool().unwrap(),
+            "Balance invariant failed for user {}: {}",
+            user_id,
+            balance_result["message"]
         );
 
         let staked_result = lmsr_api::verify_staked_invariant(&pool, user_id).await?;
-        assert!(staked_result["valid"].as_bool().unwrap(),
+        assert!(
+            staked_result["valid"].as_bool().unwrap(),
             "Staked invariant failed for user {}: {}",
-            user_id, staked_result["message"]
+            user_id,
+            staked_result["message"]
         );
     }
 
     info!("✅ Financial invariants maintained. System is sound.");
     info!("\n📊 Stress Test Summary:");
-    info!("   - Total trades attempted: {}", stress.num_users * stress.trades_per_user);
+    info!(
+        "   - Total trades attempted: {}",
+        stress.num_users * stress.trades_per_user
+    );
     info!("   - Successful trades: {}", successful_trades);
     info!("   - Failed trades: {}", failed_trades);
     info!("   - Skipped trades: {}", skipped_trades);
@@ -606,12 +674,14 @@ mod tests {
         let database_url = env::var("STRESS_TEST_DB_URL")
             .or_else(|_| env::var("TEST_DB_URL"))
             .or_else(|_| env::var("DATABASE_URL"))
-            .unwrap_or_else(|_| "postgresql://postgres:password@localhost/test_intellacc".to_string());
+            .unwrap_or_else(|_| {
+                "postgresql://postgres:password@localhost/test_intellacc".to_string()
+            });
         let acquire_timeout_secs = env::var("STRESS_TEST_ACQUIRE_TIMEOUT_SECS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(120);
-        
+
         let pool = PgPoolOptions::new()
             .max_connections(50)
             .acquire_timeout(Duration::from_secs(acquire_timeout_secs))

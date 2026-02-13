@@ -2,11 +2,11 @@
 //! Run with: cargo run --bin stress_test
 
 use anyhow::Result;
-use sqlx::postgres::PgPoolOptions;
 use prediction_engine::config::Config;
 use prediction_engine::stress;
-use tracing_subscriber;
+use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
+use tracing_subscriber;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,7 +23,10 @@ async fn main() -> Result<()> {
     println!("Configuration loaded:");
     println!("  - Hold period: {} hours", config.market.hold_period_hours);
     println!("  - Kelly fraction: {}", config.market.kelly_fraction);
-    println!("  - Max Kelly fraction: {}\n", config.market.max_kelly_fraction);
+    println!(
+        "  - Max Kelly fraction: {}\n",
+        config.market.max_kelly_fraction
+    );
 
     // Create database connection pool
     let database_url = std::env::var("DATABASE_URL")
@@ -32,7 +35,7 @@ async fn main() -> Result<()> {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(120);
-    
+
     println!("Connecting to database: {}", database_url);
     let pool = PgPoolOptions::new()
         .max_connections(50)

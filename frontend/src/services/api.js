@@ -724,6 +724,44 @@ export const api = {
       request(`/notifications/${notificationId}`, { method: 'DELETE' })
   },
 
+  // Market question flow (community submissions + validation)
+  marketQuestions: {
+    getConfig: () =>
+      request('/market-questions/config'),
+
+    create: (payload) =>
+      request('/market-questions', {
+        method: 'POST',
+        body: payload
+      }),
+
+    list: ({ status = null, mine = false, limit = 20, offset = 0 } = {}) => {
+      const params = new URLSearchParams();
+      if (status) params.set('status', status);
+      if (mine) params.set('mine', 'true');
+      if (limit) params.set('limit', String(limit));
+      if (offset) params.set('offset', String(offset));
+      const suffix = params.toString() ? `?${params.toString()}` : '';
+      return request(`/market-questions${suffix}`);
+    },
+
+    getReviewQueue: ({ limit = 20 } = {}) => {
+      const params = new URLSearchParams();
+      if (limit) params.set('limit', String(limit));
+      const suffix = params.toString() ? `?${params.toString()}` : '';
+      return request(`/market-questions/review-queue${suffix}`);
+    },
+
+    submitReview: (submissionId, { vote, note = null }) =>
+      request(`/market-questions/${submissionId}/reviews`, {
+        method: 'POST',
+        body: { vote, note }
+      }),
+
+    runAutomaticRewards: () =>
+      request('/market-questions/rewards/run', { method: 'POST' })
+  },
+
   // Push notification endpoints
   push: {
     getVapidKey: () =>

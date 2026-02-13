@@ -43,6 +43,40 @@ const updateAdminStateFromToken = () => {
   isAdminState.val = tokenData?.role === 'admin';
 };
 
+const getUserFriendlyAuthError = (
+  error,
+  fallback = 'Login failed. Please check your credentials.'
+) => {
+  const candidates = [
+    error?.message,
+    error?.data?.message,
+    error?.data?.error
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'string') {
+      continue;
+    }
+
+    const normalized = candidate.replace(/^ApiError:\s*/i, '').trim();
+    if (!normalized) {
+      continue;
+    }
+
+    if (/user not found/i.test(normalized)) {
+      return 'User not found';
+    }
+
+    if (/incorrect password/i.test(normalized)) {
+      return 'Incorrect password';
+    }
+
+    return normalized;
+  }
+
+  return fallback;
+};
+
 /**
  * Reset in-memory authenticated state before replacing an existing session token.
  * This avoids carrying MLS/vault/message state across re-login in the same tab.
@@ -267,7 +301,10 @@ export async function login(email, password) {
     console.error('Login error:', error);
     return { 
       success: false, 
-      error: error.message || 'Login failed. Please check your credentials.'
+      error: getUserFriendlyAuthError(
+        error,
+        'Login failed. Please check your credentials.'
+      )
     };
   }
 }

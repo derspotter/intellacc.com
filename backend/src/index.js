@@ -7,6 +7,7 @@ const notificationService = require('./services/notificationService');
 const passwordResetService = require('./services/passwordResetService');
 const { startDeliveryWorker: startActivityPubDeliveryWorker } = require('./services/activitypub/deliveryWorker');
 const { startDeliveryWorker: startAtprotoDeliveryWorker } = require('./services/atproto/deliveryWorker');
+const { validateProductionConfig } = require('./utils/productionGuard');
 
 const app = express();
 const port = process.env.NODE_PORT || 3000;
@@ -18,6 +19,10 @@ const pool = new Pool({
 
 // Create HTTP server
 const server = http.createServer(app);
+
+if (process.env.NODE_ENV === 'production') {
+  validateProductionConfig();
+}
 
 // Initialize Socket.IO with restricted CORS
 const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['http://localhost:5173'];

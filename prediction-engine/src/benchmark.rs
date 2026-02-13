@@ -1,8 +1,8 @@
 // Simple benchmark test for Rust vs SQL scoring performance
-use sqlx::{PgPool, Row};
-use std::time::Instant;
 use anyhow::Result;
 use rayon::prelude::*;
+use sqlx::{PgPool, Row};
+use std::time::Instant;
 
 /// Benchmark Rust approach: Fetch data, calculate in Rust, update DB
 async fn benchmark_rust_approach(pool: &PgPool) -> Result<u128> {
@@ -14,7 +14,7 @@ async fn benchmark_rust_approach(pool: &PgPool) -> Result<u128> {
          FROM predictions 
          WHERE outcome_index IS NOT NULL 
          AND prob_vector IS NOT NULL 
-         LIMIT 1000"
+         LIMIT 1000",
     )
     .fetch_all(pool)
     .await?;
@@ -22,34 +22,38 @@ async fn benchmark_rust_approach(pool: &PgPool) -> Result<u128> {
     println!("Rust approach: Fetched {} predictions", predictions.len());
 
     // 2. Calculate scores in parallel using Rust
-    let score_updates: Vec<_> = predictions.par_iter().map(|row| {
-        let id: i32 = row.get("id");
-        let prob_vector_json: serde_json::Value = row.get("prob_vector");
-        let outcome_index: i32 = row.get("outcome_index");
-        
-        // Parse probability vector
-        let prob_vec: Vec<f64> = if let Ok(vec) = serde_json::from_value(prob_vector_json) {
-            vec
-        } else {
-            vec![0.5, 0.5] // Default for binary
-        };
-        
-        // Calculate log loss in Rust
-        let p_true = prob_vec.get(outcome_index as usize).unwrap_or(&0.5).max(0.0001);
-        let log_loss = -p_true.ln();
-        
-        (id, log_loss)
-    }).collect();
+    let score_updates: Vec<_> = predictions
+        .par_iter()
+        .map(|row| {
+            let id: i32 = row.get("id");
+            let prob_vector_json: serde_json::Value = row.get("prob_vector");
+            let outcome_index: i32 = row.get("outcome_index");
+
+            // Parse probability vector
+            let prob_vec: Vec<f64> = if let Ok(vec) = serde_json::from_value(prob_vector_json) {
+                vec
+            } else {
+                vec![0.5, 0.5] // Default for binary
+            };
+
+            // Calculate log loss in Rust
+            let p_true = prob_vec
+                .get(outcome_index as usize)
+                .unwrap_or(&0.5)
+                .max(0.0001);
+            let log_loss = -p_true.ln();
+
+            (id, log_loss)
+        })
+        .collect();
 
     // 3. Update database with calculated scores
     for (pred_id, score) in score_updates {
-        sqlx::query(
-            "UPDATE predictions SET raw_log_loss = $1 WHERE id = $2"
-        )
-        .bind(score)
-        .bind(pred_id)
-        .execute(pool)
-        .await?;
+        sqlx::query("UPDATE predictions SET raw_log_loss = $1 WHERE id = $2")
+            .bind(score)
+            .bind(pred_id)
+            .execute(pool)
+            .await?;
     }
 
     Ok(start.elapsed().as_millis())
@@ -63,7 +67,7 @@ async fn benchmark_sql_approach(pool: &PgPool) -> Result<u128> {
     sqlx::query(
         "UPDATE predictions SET raw_log_loss = NULL 
          WHERE outcome_index IS NOT NULL 
-         AND prob_vector IS NOT NULL"
+         AND prob_vector IS NOT NULL",
     )
     .execute(pool)
     .await?;
@@ -74,12 +78,15 @@ async fn benchmark_sql_approach(pool: &PgPool) -> Result<u128> {
          SET raw_log_loss = -LN(GREATEST((prob_vector->>outcome_index)::FLOAT, 0.0001))
          WHERE outcome_index IS NOT NULL 
          AND prob_vector IS NOT NULL 
-         AND raw_log_loss IS NULL"
+         AND raw_log_loss IS NULL",
     )
     .execute(pool)
     .await?;
 
-    println!("SQL approach: Updated {} predictions", updated_count.rows_affected());
+    println!(
+        "SQL approach: Updated {} predictions",
+        updated_count.rows_affected()
+    );
     Ok(start.elapsed().as_millis())
 }
 
@@ -87,7 +94,7 @@ async fn benchmark_sql_approach(pool: &PgPool) -> Result<u128> {
 async fn reset_scores(pool: &PgPool) -> Result<()> {
     sqlx::query(
         "UPDATE predictions SET raw_log_loss = NULL 
-         WHERE outcome_index IS NOT NULL"
+         WHERE outcome_index IS NOT NULL",
     )
     .execute(pool)
     .await?;
@@ -103,7 +110,7 @@ pub async fn run_scoring_benchmark(pool: &PgPool) -> Result<()> {
     let prediction_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM predictions 
          WHERE outcome_index IS NOT NULL 
-         AND prob_vector IS NOT NULL"
+         AND prob_vector IS NOT NULL",
     )
     .fetch_one(pool)
     .await?;
@@ -113,7 +120,10 @@ pub async fn run_scoring_benchmark(pool: &PgPool) -> Result<()> {
         return Ok(());
     }
 
-    println!("📊 Found {} resolved predictions to benchmark", prediction_count);
+    println!(
+        "📊 Found {} resolved predictions to benchmark",
+        prediction_count
+    );
 
     let mut rust_times = Vec::new();
     let mut sql_times = Vec::new();
@@ -128,7 +138,7 @@ pub async fn run_scoring_benchmark(pool: &PgPool) -> Result<()> {
         rust_times.push(rust_time);
         println!("🦀 Rust approach: {}ms", rust_time);
 
-        // Test SQL approach  
+        // Test SQL approach
         reset_scores(pool).await?;
         let sql_time = benchmark_sql_approach(pool).await?;
         sql_times.push(sql_time);
@@ -138,16 +148,22 @@ pub async fn run_scoring_benchmark(pool: &PgPool) -> Result<()> {
     // Calculate averages
     let avg_rust = rust_times.iter().sum::<u128>() / rust_times.len() as u128;
     let avg_sql = sql_times.iter().sum::<u128>() / sql_times.len() as u128;
-    
+
     println!("\n{}", "=".repeat(50));
     println!("📊 FINAL RESULTS:");
     println!("🦀 Rust average: {}ms", avg_rust);
     println!("🐘 SQL average:  {}ms", avg_sql);
-    
+
     let winner = if avg_rust < avg_sql {
-        format!("🏆 Rust is {:.1}x FASTER than SQL", avg_sql as f64 / avg_rust as f64)
+        format!(
+            "🏆 Rust is {:.1}x FASTER than SQL",
+            avg_sql as f64 / avg_rust as f64
+        )
     } else {
-        format!("🏆 SQL is {:.1}x FASTER than Rust", avg_rust as f64 / avg_sql as f64)
+        format!(
+            "🏆 SQL is {:.1}x FASTER than Rust",
+            avg_rust as f64 / avg_sql as f64
+        )
     };
     println!("{}", winner);
     println!("{}", "=".repeat(50));

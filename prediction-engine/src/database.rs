@@ -1,8 +1,8 @@
 // Database connection and query functions - CLEANED VERSION
-use sqlx::{PgPool, Row};
 use anyhow::Result;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
+use sqlx::{PgPool, Row};
 
 // Common SQL fragments to ensure DRY principle
 const ACCURACY_CALCULATION_SQL: &str = r#"
@@ -44,12 +44,12 @@ pub struct CalibrationBin {
 // Create a connection pool to PostgreSQL
 pub async fn create_pool(database_url: &str) -> Result<PgPool> {
     println!("🔌 Connecting to PostgreSQL...");
-    
+
     let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(10)  // Connection pool size
+        .max_connections(10) // Connection pool size
         .connect(database_url)
         .await?;
-    
+
     println!("✅ Connected to database!");
     Ok(pool)
 }
@@ -72,11 +72,11 @@ pub async fn calculate_user_accuracy(pool: &PgPool, user_id: i32) -> Result<Opti
         "#,
         ACCURACY_CALCULATION_SQL, WEIGHTED_ACCURACY_SQL
     );
-    
+
     let row = sqlx::query(&query)
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await?;
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?;
 
     if let Some(row) = row {
         Ok(Some(UserAccuracy {
@@ -114,11 +114,8 @@ pub async fn get_leaderboard(pool: &PgPool, limit: i32) -> Result<Vec<UserAccura
         "#,
         ACCURACY_CALCULATION_SQL, WEIGHTED_ACCURACY_SQL
     );
-    
-    let rows = sqlx::query(&query)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
+
+    let rows = sqlx::query(&query).bind(limit).fetch_all(pool).await?;
 
     let mut leaderboard = Vec::new();
     for row in rows {
@@ -147,7 +144,7 @@ pub async fn calculate_user_numerical_accuracy(pool: &PgPool, user_id: i32) -> R
         WHERE p.user_id = $1 
           AND p.prediction_type IN ('numeric', 'discrete')
           AND p.numerical_score IS NOT NULL
-        "#
+        "#,
     )
     .bind(user_id)
     .fetch_optional(pool)
@@ -185,7 +182,7 @@ pub async fn update_numerical_scores(pool: &PgPool) -> Result<i32> {
         WHERE prediction_type IN ('numeric', 'discrete') 
           AND actual_value IS NOT NULL 
           AND numerical_score IS NULL
-        "#
+        "#,
     )
     .execute(pool)
     .await?;
@@ -213,7 +210,7 @@ pub async fn calculate_log_scores(pool: &PgPool) -> Result<i32> {
         WHERE (prediction_type IN ('binary', 'multiple_choice')) 
           AND (outcome IS NOT NULL OR outcome_index IS NOT NULL)
           AND raw_log_loss IS NULL
-        "#
+        "#,
     )
     .execute(pool)
     .await?;
@@ -259,7 +256,7 @@ pub async fn calculate_time_weighted_scores(pool: &PgPool) -> Result<i32> {
             GROUP BY p.user_id
         ) as subquery
         WHERE user_reputation.user_id = subquery.user_id
-        "#
+        "#,
     )
     .execute(pool)
     .await?;
@@ -291,7 +288,7 @@ pub async fn calculate_user_peer_bonus(pool: &PgPool, user_id: i32) -> Result<f6
               AND p.raw_log_loss IS NOT NULL
             GROUP BY p.id, p.raw_log_loss
         ) as event_scores
-        "#
+        "#,
     )
     .bind(user_id)
     .fetch_one(pool)
@@ -308,7 +305,7 @@ pub async fn update_user_reputation(pool: &PgPool, user_id: i32) -> Result<Decim
         INSERT INTO user_reputation (user_id, rep_points) 
         VALUES ($1, 1.0)
         ON CONFLICT (user_id) DO NOTHING
-        "#
+        "#,
     )
     .bind(user_id)
     .execute(pool)
@@ -326,7 +323,7 @@ pub async fn update_user_reputation(pool: &PgPool, user_id: i32) -> Result<Decim
             updated_at = NOW()
         WHERE user_id = $1
         RETURNING rep_points
-        "#
+        "#,
     )
     .bind(user_id)
     .bind(Decimal::from_f64_retain(peer_bonus).unwrap_or(Decimal::from(0)))
@@ -338,8 +335,11 @@ pub async fn update_user_reputation(pool: &PgPool, user_id: i32) -> Result<Decim
 
 /// Resolve event and update all participants' scores
 pub async fn resolve_event_batch(pool: &PgPool, event_id: i32, outcome_index: i32) -> Result<i32> {
-    println!("🎯 Resolving event {} with outcome {}", event_id, outcome_index);
-    
+    println!(
+        "🎯 Resolving event {} with outcome {}",
+        event_id, outcome_index
+    );
+
     // Update event with outcome
     sqlx::query(
         "UPDATE events SET outcome = 'resolved', numerical_outcome = $1, updated_at = NOW() WHERE id = $2"
@@ -355,28 +355,36 @@ pub async fn resolve_event_batch(pool: &PgPool, event_id: i32, outcome_index: i3
         SELECT id, user_id, prob_vector 
         FROM predictions 
         WHERE event_id = $1 AND prob_vector IS NOT NULL
-        "#
+        "#,
     )
     .bind(event_id)
     .fetch_all(pool)
     .await?;
 
-    println!("📊 Processing {} predictions for event {}", predictions.len(), event_id);
+    println!(
+        "📊 Processing {} predictions for event {}",
+        predictions.len(),
+        event_id
+    );
 
     // Calculate scores in Rust (parallel processing)
-    let score_updates: Vec<_> = predictions.iter().map(|row| {
-        let prediction_id: i32 = row.get("id");
-        let user_id: i32 = row.get("user_id");
-        let prob_vector_json: serde_json::Value = row.get("prob_vector");
-        
-        // Parse probability vector
-        let prob_vec: Vec<f64> = serde_json::from_value(prob_vector_json).unwrap_or(vec![0.5, 0.5]);
-        
-        // Calculate log loss
-        let log_loss = calculate_log_loss(&prob_vec, outcome_index as usize);
-        
-        (prediction_id, user_id, log_loss)
-    }).collect();
+    let score_updates: Vec<_> = predictions
+        .iter()
+        .map(|row| {
+            let prediction_id: i32 = row.get("id");
+            let user_id: i32 = row.get("user_id");
+            let prob_vector_json: serde_json::Value = row.get("prob_vector");
+
+            // Parse probability vector
+            let prob_vec: Vec<f64> =
+                serde_json::from_value(prob_vector_json).unwrap_or(vec![0.5, 0.5]);
+
+            // Calculate log loss
+            let log_loss = calculate_log_loss(&prob_vec, outcome_index as usize);
+
+            (prediction_id, user_id, log_loss)
+        })
+        .collect();
 
     // Batch update predictions with scores
     for (prediction_id, _user_id, log_loss) in &score_updates {
@@ -391,8 +399,11 @@ pub async fn resolve_event_batch(pool: &PgPool, event_id: i32, outcome_index: i3
     }
 
     // Get unique user IDs to update
-    let unique_users: std::collections::HashSet<i32> = score_updates.iter().map(|(_, user_id, _)| *user_id).collect();
-    
+    let unique_users: std::collections::HashSet<i32> = score_updates
+        .iter()
+        .map(|(_, user_id, _)| *user_id)
+        .collect();
+
     // Update time-weighted scores for all affected users
     for user_id in &unique_users {
         calculate_time_weighted_scores_for_user(pool, *user_id).await?;
@@ -440,7 +451,7 @@ pub async fn calculate_time_weighted_scores_for_user(pool: &PgPool, user_id: i32
         ), 0),
         updated_at = NOW()
         WHERE user_id = $1
-        "#
+        "#,
     )
     .bind(user_id)
     .execute(pool)
@@ -452,7 +463,7 @@ pub async fn calculate_time_weighted_scores_for_user(pool: &PgPool, user_id: i32
 /// Update global rankings for all users (zero-sum relative ranking)
 pub async fn update_global_rankings(pool: &PgPool) -> Result<i32> {
     println!("🏆 Updating global rankings...");
-    
+
     // Calculate rankings using window function and update in single query
     let updated_count = sqlx::query(
         r#"
@@ -473,14 +484,18 @@ pub async fn update_global_rankings(pool: &PgPool) -> Result<i32> {
     .execute(pool)
     .await?;
 
-    println!("📊 Updated rankings for {} users", updated_count.rows_affected());
+    println!(
+        "📊 Updated rankings for {} users",
+        updated_count.rows_affected()
+    );
     Ok(updated_count.rows_affected() as i32)
 }
 
-
-
 /// Get user reputation and stats
-pub async fn get_user_reputation_stats(pool: &PgPool, user_id: i32) -> Result<Option<serde_json::Value>> {
+pub async fn get_user_reputation_stats(
+    pool: &PgPool,
+    user_id: i32,
+) -> Result<Option<serde_json::Value>> {
     let row = sqlx::query(
         r#"
         SELECT 
@@ -528,7 +543,10 @@ pub async fn get_user_reputation_stats(pool: &PgPool, user_id: i32) -> Result<Op
 }
 
 /// Get enhanced leaderboard with log scoring
-pub async fn get_log_scoring_leaderboard(pool: &PgPool, limit: i32) -> Result<Vec<serde_json::Value>> {
+pub async fn get_log_scoring_leaderboard(
+    pool: &PgPool,
+    limit: i32,
+) -> Result<Vec<serde_json::Value>> {
     let rows = sqlx::query(
         r#"
         SELECT 
@@ -546,7 +564,7 @@ pub async fn get_log_scoring_leaderboard(pool: &PgPool, limit: i32) -> Result<Ve
         HAVING COUNT(p.id) > 0
         ORDER BY ur.rep_points DESC, COUNT(p.id) DESC
         LIMIT $1
-        "#
+        "#,
     )
     .bind(limit)
     .fetch_all(pool)
@@ -579,13 +597,16 @@ pub fn calculate_log_loss(prob_vector: &[f64], outcome_index: usize) -> f64 {
     if outcome_index >= prob_vector.len() {
         return f64::INFINITY; // Invalid outcome index
     }
-    
+
     let p_true = prob_vector[outcome_index].max(1e-4); // Clip to avoid infinity
     -p_true.ln()
 }
 
 // Calculate calibration score (how well-calibrated a user's confidence is)
-pub async fn calculate_calibration_score(pool: &PgPool, user_id: i32) -> Result<Vec<CalibrationBin>> {
+pub async fn calculate_calibration_score(
+    pool: &PgPool,
+    user_id: i32,
+) -> Result<Vec<CalibrationBin>> {
     let rows = sqlx::query(
         r#"
         SELECT 
@@ -598,7 +619,7 @@ pub async fn calculate_calibration_score(pool: &PgPool, user_id: i32) -> Result<
         WHERE p.user_id = $1 AND p.outcome IS NOT NULL
         GROUP BY FLOOR(p.confidence / 10)
         ORDER BY confidence_bin_start
-        "#
+        "#,
     )
     .bind(user_id)
     .fetch_all(pool)
@@ -607,7 +628,10 @@ pub async fn calculate_calibration_score(pool: &PgPool, user_id: i32) -> Result<
     let mut bins = Vec::new();
     for row in rows {
         bins.push(CalibrationBin {
-            confidence_range: (row.get("confidence_bin_start"), row.get("confidence_bin_end")),
+            confidence_range: (
+                row.get("confidence_bin_start"),
+                row.get("confidence_bin_end"),
+            ),
             predicted_probability: row.get("avg_predicted_prob"),
             actual_frequency: row.get("actual_frequency"),
             count: row.get("prediction_count"),
@@ -618,7 +642,10 @@ pub async fn calculate_calibration_score(pool: &PgPool, user_id: i32) -> Result<
 }
 
 // Enhanced user accuracy with log scores only
-pub async fn calculate_enhanced_user_accuracy(pool: &PgPool, user_id: i32) -> Result<Option<UserAccuracy>> {
+pub async fn calculate_enhanced_user_accuracy(
+    pool: &PgPool,
+    user_id: i32,
+) -> Result<Option<UserAccuracy>> {
     let row = sqlx::query(
         r#"
         SELECT 

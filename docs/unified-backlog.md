@@ -10,21 +10,22 @@ Status legend:
 This backlog was re-audited item-by-item against the repository (frontend, backend, prediction-engine, tests).
 
 ## Priority 0 - Critical (launch blockers)
-- `Partial + Ops` Password reset + recovery flow:
+- `Done` Password reset + recovery flow:
   backend routes/service/worker + frontend screens/cancel UX + tests are present.
-  Remaining launch work is operational: run prod migrations, set strong secrets, and complete DNS/rDNS + DKIM/DMARC + prod worker verification.
+  Production hardening is now also wired through startup validation and an ops checklist:
+  `docs/password-reset-production-checklist.md`.
 - `Done` Account deletion (GDPR/CCPA):
   soft-delete/anonymization flow + password-confirm UI + backend test coverage are present.
-- `Partial + Ops` Prediction engine access control:
-  token guard is implemented in backend and prediction-engine, but prediction-engine explicitly disables auth when token is unset.
-  Launch requirement remains: set `PREDICTION_ENGINE_AUTH_TOKEN` in deployed env/config.
+- `Done` Prediction engine access control:
+  token guard is enforced in both backend and prediction-engine.
+  Prediction engine now hard-fails startup when `PREDICTION_ENGINE_AUTH_TOKEN` is missing, and backend continues to pass `x-engine-token` on all calls.
 - `Done` Admin auth guard for weekly assignment routes:
   admin-only route guards are applied, with self-only restrictions for per-user status endpoint.
 
 ## Priority 1 - High impact
-- `Partial` Community market question validation + incentives:
-  backend routes/migration/tests are implemented (including automatic traction/resolution reward runner),
-  but frontend submission/review/reward UX is still missing.
+- `Done` Community market question validation + incentives:
+  backend + frontend are wired end-to-end (submission, review queue, my-submissions, admin reward sweep trigger),
+  with config-aware bond/rules display and API integration.
   Implemented backend rules: 5 validators, 4/5 approvals required, creator bond 10 RP plus +5 RP per concurrent pending submission,
   validator stake 2 RP with 5 RP payout to winning-side validators, and creator rewards +10 RP for approval, +10 RP for traction,
   and +10 RP for resolution. Automatic reward runner endpoint: `/api/market-questions/rewards/run`.
