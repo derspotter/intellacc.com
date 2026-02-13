@@ -17,8 +17,8 @@ const timeRemaining = van.state('');
 let moduleState = {
     linkingStarted: false,
     lastModalVisible: false,
-    deriveInitialized: false,
-    countdownTimer: null
+    countdownTimer: null,
+    autoStartLoop: null
 };
 
 const getDevicePublicId = () => {
@@ -214,40 +214,43 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
         tryStartLinking();
     };
 
-    // Initialize derive only once per module lifecycle
-    if (!moduleState.deriveInitialized) {
-        moduleState.deriveInitialized = true;
+    const stopAutoStartLoop = () => {
+        if (moduleState.autoStartLoop) {
+            clearInterval(moduleState.autoStartLoop);
+            moduleState.autoStartLoop = null;
+        }
+    };
 
-        // Use van.derive() to trigger startLinking while modal is visible.
-        // Watching status as well makes this robust against stale in-memory guard state.
-        van.derive(() => {
-            const isVisible = vaultStore.showDeviceLinkModal;
-            const currentStatus = status.val;
+    const startAutoStartLoop = () => {
+        if (moduleState.autoStartLoop) return;
+        moduleState.autoStartLoop = setInterval(() => {
+            if (!vaultStore.showDeviceLinkModal) return;
+            ensureLinkingStarted();
+        }, 250);
+    };
 
-            if (!isVisible) {
-                // Modal closing - reset state and cleanup timers
-                if (!moduleState.lastModalVisible) return;
+    const syncModalLifecycle = () => {
+        if (!vaultStore.showDeviceLinkModal) {
+            if (moduleState.lastModalVisible) {
                 moduleState.lastModalVisible = false;
-                resetModalState();
-                return;
-            }
-
-            if (!moduleState.lastModalVisible) {
-                moduleState.lastModalVisible = true;
+                stopAutoStartLoop();
                 resetModalState();
             }
+            return;
+        }
 
-            // Modal visible - ensure linking starts whenever status is init.
+        if (!moduleState.lastModalVisible) {
             moduleState.lastModalVisible = true;
-            tryStartLinking();
+            resetModalState();
+        }
 
-            if (currentStatus === 'error' && !error.val) {
-                error.val = 'An error occurred while setting up verification.';
-            }
-        });
+        if (status.val === 'error' && !error.val) {
+            error.val = 'An error occurred while setting up verification.';
+        }
 
-        // keep fallback watchdog removed; derive reacts directly to store/state updates.
-    }
+        startAutoStartLoop();
+        ensureLinkingStarted();
+    };
 
     return () => div({ class: 'device-link-modal-wrapper' },
         vaultStore.showDeviceLinkModal ? div({ class: 'modal-overlay' },
@@ -264,7 +267,7 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                     const currentToken = linkToken.val;
                     const currentDeviceId = devicePublicIdState.val;
                     const currentTimeRemaining = timeRemaining.val;
-                    ensureLinkingStarted();
+                    syncModalLifecycle();
 
                     return div({ class: 'modal-body' },
                         // Loading state
