@@ -17,6 +17,11 @@ export default function Sidebar({ isOpen = van.state(false) } = {}) {
   const pendingLinkCount = van.state(0);
   const lastSeenPendingLinkCount = van.state(0);
   const showPendingLinkToast = van.state(false);
+  const isSocketBound = van.state(false);
+  const isPollingRunning = van.state(false);
+  const intervalIds = van.state(null);
+
+  const toastCount = () => Math.max(1, pendingLinkCount.val || 0);
 
   // Load unread notification count
   const loadUnreadCount = async () => {
@@ -47,9 +52,7 @@ export default function Sidebar({ isOpen = van.state(false) } = {}) {
       }
     } catch (error) {
       console.error('Error loading pending link requests:', error);
-      pendingLinkCount.val = 0;
-      lastSeenPendingLinkCount.val = 0;
-      showPendingLinkToast.val = false;
+      // Keep current values so we don't hide an active request on temporary API failures.
     }
   };
 
@@ -81,24 +84,80 @@ export default function Sidebar({ isOpen = van.state(false) } = {}) {
     }
   };
 
-  const handleDeviceLinkRequest = () => {
+  const handleDeviceLinkRequest = async () => {
     showPendingLinkToast.val = true;
-    loadPendingLinkCount();
+    try {
+      const result = await api.devices.listPendingLinkRequests();
+      pendingLinkCount.val = Array.isArray(result) ? result.length : 0;
+      if (!pendingLinkCount.val) {
+        pendingLinkCount.val = 1;
+      }
+      lastSeenPendingLinkCount.val = pendingLinkCount.val;
+    } catch (error) {
+      console.error('Error loading pending link requests after notification:', error);
+      pendingLinkCount.val = Math.max(1, pendingLinkCount.val || 0);
+    }
   };
 
-  // Initial load and setup
-  if (isLoggedInState.val) {
-    loadUnreadCount();
-    loadPendingLinkCount();
+  const teardownSocketBinding = () => {
+    if (!isSocketBound.val) return;
+
+    socketService.off('notification', handleNotification);
+    socketService.off('deviceLinkRequest', handleDeviceLinkRequest);
+    isSocketBound.val = false;
+  };
+
+  const ensureRealtimeBindings = () => {
+    if (isSocketBound.val) return;
+
     socketService.on('notification', handleNotification);
     socketService.on('deviceLinkRequest', handleDeviceLinkRequest);
+    isSocketBound.val = true;
+  };
 
-    // Refresh counts every 30 seconds
-    setInterval(() => {
+  const ensurePolling = () => {
+    if (isPollingRunning.val) return;
+    isPollingRunning.val = true;
+
+    const interval = setInterval(() => {
       loadUnreadCount();
       loadPendingLinkCount();
     }, 30000);
-  }
+
+    intervalIds.val = interval;
+  };
+
+  const stopPolling = () => {
+    if (!isPollingRunning.val) return;
+    if (intervalIds.val) {
+      clearInterval(intervalIds.val);
+      intervalIds.val = null;
+    }
+    isPollingRunning.val = false;
+  };
+
+  // Initial load and setup
+  const syncSidebarState = () => {
+    if (!isLoggedInState.val) {
+      unreadCount.val = 0;
+      pendingLinkCount.val = 0;
+      lastSeenPendingLinkCount.val = 0;
+      stopPolling();
+      teardownSocketBinding();
+      return;
+    }
+
+    loadUnreadCount();
+    loadPendingLinkCount();
+    ensureRealtimeBindings();
+    ensurePolling();
+  };
+
+  syncSidebarState();
+  van.derive(() => {
+    isLoggedInState.val;
+    syncSidebarState();
+  });
 
   // Create overlay for mobile
   const overlay = () => isMobile.val ? div({
@@ -144,13 +203,13 @@ export default function Sidebar({ isOpen = van.state(false) } = {}) {
           ])
         : null,
 
-      () => showPendingLinkToast.val && pendingLinkCount.val > 0
+      () => showPendingLinkToast.val
         ? div({
             class: 'device-link-toast',
             onclick: goToSettingsForLinkRequest
           }, [
             div({ class: 'device-link-toast-title' }, 'New device verification request'),
-            div({ class: 'device-link-toast-body' }, `Tap to approve ${pendingLinkCount.val} pending request${pendingLinkCount.val === 1 ? '' : 's'} in Settings.`),
+            div({ class: 'device-link-toast-body' }, `Tap to approve ${toastCount()} pending request${toastCount() === 1 ? '' : 's'} in Settings.`),
             button({
               class: 'device-link-toast-close',
               type: 'button',
