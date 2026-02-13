@@ -7,6 +7,7 @@
  * 1. Process completed assignments from previous week
  * 2. Apply 1% RP decay to all users
  * 3. Assign new weekly predictions
+ * 4. Auto-issue market-question rewards (traction + resolution)
  *
  * Schedule: Every Monday at 2 AM UTC
  */
@@ -103,6 +104,14 @@ async function runWeeklyProcesses() {
       headers
     });
     console.log(`✅ New assignments: ${JSON.stringify(assignResponse.data, null, 2)}`);
+
+    // Step 4: Auto-issue community market-question rewards
+    console.log('\n💰 Step 4: Auto-issuing market-question rewards...');
+    const rewardsResponse = await requestJson(`${API_BASE}/market-questions/rewards/run`, {
+      method: 'POST',
+      headers
+    });
+    console.log(`✅ Market-question rewards: ${JSON.stringify(rewardsResponse.data, null, 2)}`);
     
     // Get weekly stats
     console.log('\n📊 Weekly Statistics:');
@@ -122,6 +131,7 @@ async function runWeeklyProcesses() {
         completed: completedResponse.data,
         decay: decayResponse.data,
         assignments: assignResponse.data,
+        rewards: rewardsResponse.data,
         stats: statsResponse.data
       });
     }
@@ -210,6 +220,7 @@ async function sendWebhookNotification(data) {
         `**Completed Assignments:** ${data.completed.rewarded} users rewarded, ${data.completed.skipped} skipped\n` +
         `**RP Decay:** ${data.decay.processed} users processed, ${data.decay.totalDecayAmount} RP decayed\n` +
         `**New Assignments:** ${data.assignments.assigned} new assignments for week ${data.assignments.week}\n` +
+        `**Market Question Rewards:** traction=${data.rewards.traction_rewarded} resolved=${data.rewards.resolution_rewarded}\n` +
         `**Stats:** ${JSON.stringify(data.stats, null, 2)}`
         :
         `❌ Weekly Assignment Process Failed\n\n` +

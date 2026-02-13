@@ -16,6 +16,7 @@ This backlog consolidates open work from `next-steps.md`, `production-checklist.
   Rules: 5 validators, 4/5 approval, creator bond 10 RP with +5 RP per concurrent pending submission,
   validator stake 2 RP / winner payout 5 RP, creator rewards +10 RP (approval), +10 RP (traction),
   +10 RP (resolution). Remaining: frontend UX for submission/review/reward visibility.
+  Payouts for traction/resolution are now automatic via the backend scheduler (`/api/market-questions/rewards/run`).
 - Attachments storage: implemented (local disk + JWT-gated download). Optional follow-up: presigned/object storage.
 - Home feed infinite scroll: implemented (cursor pagination + frontend virtualization/windowing).
 - Tiered verification (phone + payment): ship SMS (Twilio) + Stripe SetupIntent verification flows,

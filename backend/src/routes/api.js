@@ -170,6 +170,7 @@ router.get('/market-questions/config', authenticateJWT, marketQuestionController
 router.post('/market-questions', authenticateJWT, marketQuestionController.createSubmission);
 router.get('/market-questions', authenticateJWT, marketQuestionController.listSubmissions);
 router.get('/market-questions/review-queue', authenticateJWT, marketQuestionController.getReviewQueue);
+router.post('/market-questions/rewards/run', authenticateJWT, requireAdmin, marketQuestionController.runAutomaticRewards);
 router.get('/market-questions/:id', authenticateJWT, marketQuestionController.getSubmission);
 router.post('/market-questions/:id/reviews', authenticateJWT, marketQuestionController.submitReview);
 router.post('/market-questions/:id/rewards/traction', authenticateJWT, requireAdmin, marketQuestionController.rewardTraction);
