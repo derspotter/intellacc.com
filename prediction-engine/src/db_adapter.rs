@@ -120,7 +120,10 @@ impl DbAdapter {
         shares: f64,
         side: Side,
         hold_until: DateTime<Utc>,
-    ) -> Result<()> {
+        referral_post_id: Option<i32>,
+        referral_click_id: Option<i32>,
+        had_prior_position: bool,
+    ) -> Result<i32> {
         let share_type = side.as_str();
         let cost_ledger = i64::try_from(
             crate::lmsr_core::to_ledger_units(cost)
@@ -128,10 +131,11 @@ impl DbAdapter {
         )
         .map_err(|_| anyhow!("stake_amount_ledger out of i64 range"))?;
 
-        sqlx::query(
+        let row = sqlx::query(
             "INSERT INTO market_updates 
-             (user_id, event_id, prev_prob, new_prob, stake_amount, shares_acquired, share_type, hold_until, stake_amount_ledger)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+             (user_id, event_id, prev_prob, new_prob, stake_amount, shares_acquired, share_type, hold_until, stake_amount_ledger, referral_post_id, referral_click_id, had_prior_position)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             RETURNING id"
         )
         .bind(user_id)
         .bind(event_id)
@@ -142,10 +146,14 @@ impl DbAdapter {
         .bind(share_type)
         .bind(hold_until)
         .bind(cost_ledger)
-        .execute(&mut **tx)
+        .bind(referral_post_id)
+        .bind(referral_click_id)
+        .bind(had_prior_position)
+        .fetch_one(&mut **tx)
         .await?;
 
-        Ok(())
+        let market_update_id: i32 = row.get("id");
+        Ok(market_update_id)
     }
 
     /// Update user shares with ledger-native cost (bypasses f64 conversion for single rounding boundary)

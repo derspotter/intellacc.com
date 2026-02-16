@@ -23,7 +23,9 @@ const aiModerationController = require('../controllers/aiModerationController');
 const federationController = require('../controllers/federationController');
 const atprotoController = require('../controllers/atprotoController');
 const socialAuthController = require('../controllers/socialAuthController');
+const persuasiveAlphaController = require('../controllers/persuasiveAlphaController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
+const db = require('../db');
 const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
 const predictionEngineHeaders = {
     'Content-Type': 'application/json',
@@ -187,6 +189,8 @@ router.get("/bets/stats", authenticateJWT, predictionsController.getMonthlyBetti
 
 // Post Routes (require email verification - Tier 1)
 router.post("/posts", authenticateJWT, requireEmailVerified, postController.createPost);
+router.post("/posts/:postId/market-click", authenticateJWT, persuasiveAlphaController.createPostMarketClick);
+router.get("/posts/:postId/markets", authenticateJWT, persuasiveAlphaController.getPostMarkets);
 router.get("/posts", postController.getPosts);                                 // Get all posts (public)
 router.get("/feed", authenticateJWT, postController.getFeed);                  // Get personalized feed
 router.get("/posts/:id", authenticateJWT, postController.getPostById);         // Get a single post
@@ -373,16 +377,64 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
         const { eventId } = req.params;
         const { stake, target_prob } = req.body;
         const userId = req.user.id;
+        const eventIdNumber = Number(eventId);
+
+        if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
+            return res.status(400).json({ message: 'Invalid event id' });
+        }
+
+        let referralPayload = null;
+        try {
+            const clickRes = await db.query(
+                `SELECT pmc.id, pmc.post_id, p.user_id AS post_author_id
+                 FROM post_market_clicks pmc
+                 JOIN posts p ON p.id = pmc.post_id
+                 WHERE pmc.user_id = $1
+                   AND pmc.event_id = $2
+                   AND pmc.consumed_at IS NULL
+                   AND pmc.expires_at > NOW()
+                 ORDER BY pmc.clicked_at DESC
+                 LIMIT 1`,
+                [userId, eventIdNumber]
+            );
+
+            if (clickRes.rows.length > 0 && Number(clickRes.rows[0].post_author_id) !== Number(userId)) {
+                referralPayload = {
+                    postId: Number(clickRes.rows[0].post_id),
+                    clickId: Number(clickRes.rows[0].id)
+                };
+            }
+        } catch (err) {
+            console.error('Failed to load attribution click:', err.message);
+        }
+
+        const updatePayload = { user_id: userId, stake, target_prob };
+        if (referralPayload) {
+            updatePayload.referral_post_id = referralPayload.postId;
+            updatePayload.referral_click_id = referralPayload.clickId;
+        }
 
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/update`, {
             method: 'POST',
             headers: predictionEngineHeaders,
-            body: JSON.stringify({ user_id: userId, stake, target_prob })
+            body: JSON.stringify(updatePayload)
         });
 
         const data = await response.json();
 
         if (response.ok) {
+            if (data.market_update_id && referralPayload) {
+                db.query(
+                    `UPDATE post_market_clicks
+                     SET consumed_by_market_update_id = $1,
+                         consumed_at = NOW()
+                     WHERE id = $2`,
+                    [Number(data.market_update_id), referralPayload.clickId]
+                ).catch((err) => {
+                    console.error('Failed to consume market click:', err.message);
+                });
+            }
+
             // Broadcast market update to all connected clients
             const io = req.app.get('io');
             if (io && data.new_prob !== undefined) {

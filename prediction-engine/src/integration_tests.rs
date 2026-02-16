@@ -239,6 +239,9 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
             stake_amount_ledger BIGINT NOT NULL DEFAULT 0 CHECK (stake_amount_ledger >= 0),
             shares_acquired DOUBLE PRECISION NOT NULL CHECK (shares_acquired > 0),
             share_type VARCHAR(10) NOT NULL CHECK (share_type IN ('yes', 'no')),
+            referral_post_id INTEGER,
+            referral_click_id INTEGER,
+            had_prior_position BOOLEAN NOT NULL DEFAULT FALSE,
             hold_until TIMESTAMP WITH TIME ZONE NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
@@ -490,6 +493,8 @@ mod tests {
                 event_id,
                 target_prob: 0.7,
                 stake: stake1,
+                referral_post_id: None,
+                referral_click_id: None,
             },
         )
         .await?;
@@ -513,6 +518,8 @@ mod tests {
                 event_id,
                 target_prob: 0.4,
                 stake: stake2,
+                referral_post_id: None,
+                referral_click_id: None,
             },
         )
         .await?;
@@ -589,20 +596,25 @@ mod tests {
 
         // Calculate resolution credits before resolution
         let final_shares = sqlx::query(
-            "SELECT yes_shares, no_shares FROM user_shares WHERE user_id = $1 AND event_id = $2",
-        )
-        .bind(user.id)
-        .bind(event_id)
-        .fetch_optional(&pool)
-        .await?;
+                "SELECT yes_shares, staked_yes_ledger, staked_no_ledger FROM user_shares WHERE user_id = $1 AND event_id = $2",
+            )
+            .bind(user.id)
+            .bind(event_id)
+            .fetch_optional(&pool)
+            .await?;
 
-        if let Some(shares_row) = final_shares {
-            let final_yes_shares: f64 = shares_row.get("yes_shares");
+            if let Some(shares_row) = final_shares {
+                let final_yes_shares: f64 = shares_row.get("yes_shares");
+                let staked_yes_ledger: i64 = shares_row.get("staked_yes_ledger");
+                let staked_no_ledger: i64 = shares_row.get("staked_no_ledger");
+                let total_staked_ledger = staked_yes_ledger + staked_no_ledger;
 
-            // YES outcome: YES shares worth 1 RP each, NO shares worth 0
-            let resolution_value = final_yes_shares;
-            resolution_credits.insert(user.id, to_ledger_i64(resolution_value)?);
-        }
+                // Net payout includes share value minus remaining staked ledger balance cleared at resolution.
+                let payout_ledger = to_ledger_i64(final_yes_shares)?
+                    .checked_sub(total_staked_ledger)
+                    .ok_or_else(|| anyhow!("Resolution payout underflow for user {}", user.id))?;
+                resolution_credits.insert(user.id, payout_ledger);
+            }
 
         lmsr_api::resolve_event(&pool, event_id, true).await?;
 
@@ -665,6 +677,8 @@ mod tests {
                                 event_id,
                                 target_prob,
                                 stake,
+                                referral_post_id: None,
+                                referral_click_id: None,
                             },
                         )
                         .await
@@ -769,7 +783,7 @@ mod tests {
             // Calculate resolution credits
             let mut resolution_credits = HashMap::new();
             let all_shares = sqlx::query(
-                "SELECT user_id, yes_shares, no_shares FROM user_shares WHERE event_id = $1",
+                "SELECT user_id, yes_shares, no_shares, staked_yes_ledger, staked_no_ledger FROM user_shares WHERE event_id = $1",
             )
             .bind(event_id)
             .fetch_all(&pool)
@@ -786,8 +800,12 @@ mod tests {
                 } else {
                     no_shares // NO outcome
                 };
-
-                resolution_credits.insert(user_id, to_ledger_i64(resolution_value)?);
+                let total_staked_ledger = shares_row.get::<i64, _>("staked_yes_ledger")
+                    + shares_row.get::<i64, _>("staked_no_ledger");
+                let payout_ledger = to_ledger_i64(resolution_value)?
+                    .checked_sub(total_staked_ledger)
+                    .ok_or_else(|| anyhow!("Resolution payout underflow for user {}", user_id))?;
+                resolution_credits.insert(user_id, payout_ledger);
             }
 
             // Resolve event
@@ -835,6 +853,8 @@ mod tests {
                 event_id,
                 target_prob: 0.7,
                 stake: 100.0,
+                referral_post_id: None,
+                referral_click_id: None,
             },
         )
         .await;
@@ -855,6 +875,8 @@ mod tests {
                 event_id,
                 target_prob: 0.9,
                 stake: 1_000_000.0, // Very large stake
+                referral_post_id: None,
+                referral_click_id: None,
             },
         )
         .await;
@@ -877,6 +899,8 @@ mod tests {
                 event_id,
                 target_prob: 0.6,
                 stake: 50.0,
+                referral_post_id: None,
+                referral_click_id: None,
             },
         )
         .await?;
@@ -910,6 +934,8 @@ mod tests {
                     event_id,
                     target_prob: 0.55,
                     stake: 10.0,
+                    referral_post_id: None,
+                    referral_click_id: None,
                 },
             )
         });
@@ -933,6 +959,8 @@ mod tests {
                 event_id,
                 target_prob: 1.5, // Invalid: > 1.0
                 stake: 10.0,
+                referral_post_id: None,
+                referral_click_id: None,
             },
         )
         .await;
@@ -945,6 +973,8 @@ mod tests {
                 event_id,
                 target_prob: -0.1, // Invalid: < 0.0
                 stake: 10.0,
+                referral_post_id: None,
+                referral_click_id: None,
             },
         )
         .await;
@@ -974,6 +1004,8 @@ mod tests {
                 event_id,
                 target_prob: 0.7,
                 stake: 20.0,
+                referral_post_id: None,
+                referral_click_id: None,
             },
         )
         .await;
@@ -999,6 +1031,8 @@ mod tests {
                 event_id: consistency_event_id,
                 target_prob: 0.65,
                 stake: 25.0,
+                referral_post_id: None,
+                referral_click_id: None,
             },
         )
         .await?;
@@ -1073,6 +1107,8 @@ mod tests {
                 event_id,
                 target_prob: 0.50001, // Very small probability change
                 stake: micro_stake,
+                referral_post_id: None,
+                referral_click_id: None,
             },
         )
         .await;
@@ -1109,6 +1145,8 @@ mod tests {
                     event_id,
                     target_prob: prob,
                     stake: 1.0,
+                    referral_post_id: None,
+                    referral_click_id: None,
                 },
             )
             .await;
@@ -1141,6 +1179,8 @@ mod tests {
                     event_id,
                     target_prob: 0.6,
                     stake,
+                    referral_post_id: None,
+                    referral_click_id: None,
                 },
             )
             .await?;
@@ -1280,6 +1320,8 @@ mod tests {
                     event_id,
                     target_prob,
                     stake,
+                    referral_post_id: None,
+                    referral_click_id: None,
                 },
             )
             .await

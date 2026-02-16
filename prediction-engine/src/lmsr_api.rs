@@ -87,6 +87,8 @@ pub struct MarketUpdate {
     pub event_id: i32,
     pub target_prob: f64, // User's belief (0-1) - now f64 directly
     pub stake: f64,       // Amount of RP to stake - now f64 directly
+    pub referral_post_id: Option<i32>,
+    pub referral_click_id: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -98,6 +100,7 @@ pub struct UpdateResult {
     pub hold_until: DateTime<Utc>,
     pub expected_payout_if_yes: f64,
     pub expected_payout_if_no: f64,
+    pub market_update_id: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -257,6 +260,18 @@ async fn update_market_transaction(
         b: liquidity_b,
     };
 
+    let had_prior_position: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+           SELECT 1
+           FROM user_shares
+           WHERE user_id = $1 AND event_id = $2 AND (yes_shares > 0 OR no_shares > 0)
+        )",
+    )
+    .bind(user_id)
+    .bind(update.event_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+
     // Convert stake to ledger units for exact computation
     let stake_ledger =
         to_ledger_units(update.stake).map_err(|e| anyhow!("Invalid stake value: {}", e))?;
@@ -314,7 +329,7 @@ async fn update_market_transaction(
     } else {
         Utc::now() // No hold period
     };
-    DbAdapter::record_market_update(
+    let market_update_id = DbAdapter::record_market_update(
         tx,
         user_id,
         update.event_id,
@@ -324,6 +339,9 @@ async fn update_market_transaction(
         shares_acquired,
         side,
         hold_until,
+        update.referral_post_id,
+        update.referral_click_id,
+        had_prior_position,
     )
     .await?;
 
@@ -358,6 +376,7 @@ async fn update_market_transaction(
         hold_until,
         expected_payout_if_yes: expected_if_yes,
         expected_payout_if_no: expected_if_no,
+        market_update_id,
     })
 }
 
