@@ -55,8 +55,30 @@ The implementation should cover three tiers:
   - `docker exec intellacc_frontend npm test`
   - targeted Playwright checks for `#settings/verification`
 
+## Provider account plan
+- Phone verification provider: Twilio Verify.
+  - In production, use Twilio only if you want SMS verification for tier-2 unlocks.
+  - Cost model: pay-as-you-go API checks; typically low volume is cheap, but local rates and compliance charges can vary.
+- Payment verification provider: Stripe SetupIntents.
+  - In production, enable payment verification only when you need tier-3 controls and card-based verification.
+  - Costs are mostly payment-network fees and possible processing charges for attached cards; avoid turning this on unless needed.
+- Recommended startup configuration:
+  - `REQUIRE_TWILIO_VERIFICATION=false`
+  - `REQUIRE_STRIPE_VERIFICATION=false`
+  - Keep features hidden/disabled via provider availability messages when providers are not configured.
+
 ## Acceptance criteria
 - Protected routes consistently enforce the expected minimum tier.
 - Verification status/upgrade flow is clear and deterministic.
 - Production starts cleanly when required verification provider flags are satisfied.
 - Incomplete provider config in production fails fast only when explicitly required.
+
+## Active implementation work
+- [x] Block tier-2 and tier-3 verification start/setup flows when providers are missing in production.
+- [x] Extend provider status payload with `required` and availability metadata.
+- [x] Add backend regression tests for production provider-missing behavior.
+
+## Current work-in-progress
+- [x] Surface provider availability in `/api/verification/status` so UI can explicitly handle missing credentials outside dev.
+- [x] Show a clear, non-blocking UI state when Phone/Payment verification is temporarily unavailable.
+- [x] Add backend tests for status payload and verification routing behavior (including webhook edge cases and missing provider configs).

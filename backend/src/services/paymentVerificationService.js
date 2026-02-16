@@ -9,6 +9,31 @@ const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY;
 
 let stripeClient = null;
 
+const isStripeConfigured = () => !!(STRIPE_SECRET_KEY && STRIPE_PUBLISHABLE_KEY);
+const isProduction = () => process.env.NODE_ENV === 'production';
+
+const assertProviderAvailable = () => {
+  if (isProduction() && !isStripeConfigured()) {
+    throw new Error('Stripe verification is not configured in production');
+  }
+};
+
+const getProviderStatus = () => {
+  const configured = isStripeConfigured();
+  const available = !isProduction() || configured;
+  const requiresConfig = process.env.REQUIRE_STRIPE_VERIFICATION === 'true';
+
+  return {
+    provider: configured ? 'stripe' : 'dev',
+    configured,
+    required: requiresConfig,
+    available,
+    reason: available
+      ? null
+      : 'Stripe verification credentials are not configured.'
+  };
+};
+
 const getStripeClient = () => {
   if (!STRIPE_SECRET_KEY) {
     throw new Error('Stripe is not configured');
@@ -32,6 +57,7 @@ const ensurePhoneVerified = async (userId) => {
 };
 
 exports.createVerificationSession = async (userId) => {
+  assertProviderAvailable();
   const user = await ensurePhoneVerified(userId);
 
   if (!STRIPE_PUBLISHABLE_KEY) {
@@ -180,3 +206,5 @@ exports.constructWebhookEvent = (payload, signature, webhookSecret) => {
   const stripe = getStripeClient();
   return stripe.webhooks.constructEvent(payload, signature, webhookSecret);
 };
+
+exports.getProviderStatus = getProviderStatus;

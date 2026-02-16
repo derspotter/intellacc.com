@@ -61,9 +61,44 @@ describe('Tiered verification routes and middleware', () => {
       name: 'email',
       unlocks: ['Post', 'Comment', 'Send messages']
     });
+    expect(typeof statusRes.body.provider_capabilities).toBe('object');
+    expect(statusRes.body.provider_capabilities.phone).toMatchObject({
+      provider: expect.any(String),
+      configured: expect.any(Boolean),
+      available: expect.any(Boolean),
+      required: expect.any(Boolean)
+    });
+    expect(statusRes.body.provider_capabilities.payment).toMatchObject({
+      provider: expect.any(String),
+      configured: expect.any(Boolean),
+      available: expect.any(Boolean),
+      required: expect.any(Boolean)
+    });
+    expect(statusRes.body.provider_capabilities.phone.reason === null || typeof statusRes.body.provider_capabilities.phone.reason === 'string').toBe(true);
+    expect(statusRes.body.provider_capabilities.payment.reason === null || typeof statusRes.body.provider_capabilities.payment.reason === 'string').toBe(true);
     expect(statusRes.body.email_verified).toBe(false);
     expect(statusRes.body.phone_verified).toBe(false);
     expect(statusRes.body.payment_verified).toBe(false);
+  });
+
+  test('reports provider availability from verification status', async () => {
+    const user = await createUser();
+    users.push(user.id);
+
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+
+    try {
+      const statusRes = await request(app)
+        .get('/api/verification/status')
+        .set('Authorization', `Bearer ${user.token}`);
+
+      expect(statusRes.statusCode).toBe(200);
+      expect(statusRes.body.provider_capabilities.phone.available).toBe(false);
+      expect(statusRes.body.provider_capabilities.payment.available).toBe(false);
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
   });
 
   test('enforces email verification before posting', async () => {
@@ -171,5 +206,46 @@ describe('Tiered verification routes and middleware', () => {
 
     const userAfter = await db.query('SELECT verification_tier FROM users WHERE id = $1', [user.id]);
     expect(userAfter.rows[0].verification_tier).toBe(3);
+  });
+
+  test('blocks phone verification when Twilio is missing in production', async () => {
+    const user = await createUser();
+    users.push(user.id);
+
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    await db.query('UPDATE users SET verification_tier = 1 WHERE id = $1', [user.id]);
+
+    try {
+      const phoneStartRes = await request(app)
+        .post('/api/verification/phone/start')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ phoneNumber: '+15555550000' });
+
+      expect(phoneStartRes.statusCode).toBe(400);
+      expect(phoneStartRes.body.error).toMatch(/Twilio verification is not configured/i);
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  test('blocks payment verification when Stripe is missing in production', async () => {
+    const user = await createUser();
+    users.push(user.id);
+
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    await db.query('UPDATE users SET verification_tier = 2 WHERE id = $1', [user.id]);
+
+    try {
+      const setupRes = await request(app)
+        .post('/api/verification/payment/setup')
+        .set('Authorization', `Bearer ${user.token}`);
+
+      expect(setupRes.statusCode).toBe(400);
+      expect(setupRes.body.error).toMatch(/Stripe verification is not configured/i);
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
   });
 });

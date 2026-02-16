@@ -217,6 +217,25 @@
   margin-bottom: 1rem;
 }
 
+.verification-blocked {
+  text-align: center;
+  padding: 1rem;
+  border: 1px dashed var(--border-color);
+  border-radius: 10px;
+  background: var(--card-bg);
+  margin-top: 0.75rem;
+}
+
+.verification-blocked .blocked-icon {
+  font-size: 1.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.verification-blocked .blocked-message {
+  color: var(--secondary-text);
+  margin: 0;
+}
+
 .device-id-display {
   font-family: monospace;
   font-size: 0.8rem;

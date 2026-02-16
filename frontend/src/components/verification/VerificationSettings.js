@@ -66,10 +66,38 @@ export default function VerificationSettings() {
     }
 
     if (targetTier === 2) {
+      const phoneCapability = status.val?.provider_capabilities?.phone;
+      if (phoneCapability && phoneCapability.available === false) {
+        return div({ class: 'verification-blocked' },
+          div({ class: 'blocked-icon' }, '⚠️'),
+          p({ class: 'error-message' }, 'Phone verification is unavailable right now.'),
+          p({ class: 'blocked-message' },
+            phoneCapability.reason || 'Check back later or contact support.'
+          ),
+          p({ class: 'blocked-message' },
+            'You can still use public feed features until a provider becomes available.'
+          )
+        );
+      }
+
       return PhoneVerification({ onSuccess: refreshStatus });
     }
 
     if (targetTier === 3) {
+      const paymentCapability = status.val?.provider_capabilities?.payment;
+      if (paymentCapability && paymentCapability.available === false) {
+        return div({ class: 'verification-blocked' },
+          div({ class: 'blocked-icon' }, '⚠️'),
+          p({ class: 'error-message' }, 'Payment verification is unavailable right now.'),
+          p({ class: 'blocked-message' },
+            paymentCapability.reason || 'Check back later or contact support.'
+          ),
+          p({ class: 'blocked-message' },
+            'This is required for market creation and governance actions only.'
+          )
+        );
+      }
+
       return PaymentVerification({ onSuccess: refreshStatus });
     }
 

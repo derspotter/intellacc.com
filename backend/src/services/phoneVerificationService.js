@@ -14,6 +14,29 @@ const TWILIO_VERIFY_SID = process.env.TWILIO_VERIFY_SID;
 let twilioClient = null;
 
 const useTwilio = () => !!(TWILIO_SID && TWILIO_AUTH_TOKEN && TWILIO_VERIFY_SID);
+const isProduction = () => process.env.NODE_ENV === 'production';
+
+const assertProviderAvailable = () => {
+  if (isProduction() && !useTwilio()) {
+    throw new Error('Twilio verification is not configured in production');
+  }
+};
+
+const getProviderStatus = () => {
+  const configured = useTwilio();
+  const available = !isProduction() || configured;
+  const requiresConfig = process.env.REQUIRE_TWILIO_VERIFICATION === 'true';
+
+  return {
+    provider: configured ? 'twilio' : 'dev',
+    configured,
+    required: requiresConfig,
+    available,
+    reason: available
+      ? null
+      : 'Twilio verification credentials are not configured.'
+  };
+};
 
 const getTwilioClient = () => {
   if (!useTwilio()) {
@@ -59,6 +82,7 @@ const ensurePhoneAvailable = async (userId, phoneHash) => {
 };
 
 exports.startPhoneVerification = async (userId, phoneNumber) => {
+  assertProviderAvailable();
   await ensureEmailVerified(userId);
 
   const phoneHash = hashPhone(phoneNumber);
@@ -95,6 +119,7 @@ exports.startPhoneVerification = async (userId, phoneNumber) => {
 };
 
 exports.confirmPhoneVerification = async (userId, phoneNumber, code) => {
+  assertProviderAvailable();
   await ensureEmailVerified(userId);
 
   const phoneHash = hashPhone(phoneNumber);
@@ -143,3 +168,4 @@ exports.confirmPhoneVerification = async (userId, phoneNumber, code) => {
 };
 
 exports.normalizePhone = normalizePhone;
+exports.getProviderStatus = getProviderStatus;
