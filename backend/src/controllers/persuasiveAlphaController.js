@@ -57,7 +57,7 @@ exports.createPostMarketClick = async (req, res) => {
        WHERE post_id = $1
          AND event_id = $2
          AND user_id = $3
-         AND consumed_by_market_update_id IS NULL
+         AND (consumed_by_market_update_id IS NULL OR consumed_by_market_update_id = 0)
          AND consumed_at IS NULL
          AND expires_at <= NOW()`,
       [postId, eventId, userId]

@@ -3,14 +3,17 @@ const IN_PROGRESS_MARKER = 0;
 const claimReferralClick = async ({ dbClient, userId, eventId }) => {
   const result = await dbClient.query(
     `WITH ranked_clicks AS (
-       SELECT pmc.id, pmc.post_id
-       FROM post_market_clicks pmc
-       JOIN posts p ON p.id = pmc.post_id
-       WHERE pmc.user_id = $1
-         AND pmc.event_id = $2
-         AND pmc.consumed_by_market_update_id IS NULL
-         AND pmc.expires_at > NOW()
-         AND p.user_id <> $1
+      SELECT pmc.id, pmc.post_id
+      FROM post_market_clicks pmc
+      JOIN posts p ON p.id = pmc.post_id
+      WHERE pmc.user_id = $1
+        AND pmc.event_id = $2
+        AND (
+          pmc.consumed_by_market_update_id IS NULL
+          OR (pmc.consumed_by_market_update_id = 0 AND pmc.expires_at <= NOW())
+        )
+        AND pmc.expires_at > NOW()
+        AND p.user_id <> $1
        ORDER BY pmc.clicked_at DESC
        LIMIT 1
        FOR UPDATE SKIP LOCKED
