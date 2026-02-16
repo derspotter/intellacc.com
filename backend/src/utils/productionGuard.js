@@ -10,6 +10,11 @@ const isPlaceholderValue = (value) => {
   );
 };
 
+const parseBool = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes';
+};
+
 const validateProductionSecret = (name, minimumLength = 16) => {
   const value = process.env[name];
   if (!value) {
@@ -22,6 +27,18 @@ const validateProductionSecret = (name, minimumLength = 16) => {
     return `${name} appears to be a placeholder/default value`;
   }
   return null;
+};
+
+const validateOptionalProviderVars = (vars, serviceName, minimumLength = 16) => {
+  const issues = [];
+  vars.forEach((name) => {
+    const error = validateProductionSecret(name, minimumLength);
+    if (error) {
+      issues.push(error.replace(`${name} is required in production`, `${name} is required when ${serviceName} is required in production`));
+    }
+  });
+
+  return issues;
 };
 
 const validateProductionConfig = () => {
@@ -57,6 +74,33 @@ const validateProductionConfig = () => {
     issues.push('SMTP_FROM must be a valid email address in production');
   } else if (isPlaceholderValue(process.env.SMTP_FROM)) {
     issues.push(`SMTP_FROM appears to be a placeholder/default value (${process.env.SMTP_FROM})`);
+  }
+
+  if (parseBool(process.env.REQUIRE_TWILIO_VERIFICATION)) {
+    issues.push(...validateOptionalProviderVars(
+      ['TWILIO_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SID'],
+      'phone verification',
+      10
+    ));
+  }
+
+  if (parseBool(process.env.REQUIRE_STRIPE_VERIFICATION)) {
+    const stripeIssues = validateOptionalProviderVars(
+      ['STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY'],
+      'payment verification',
+      10
+    );
+    const webhookError = validateProductionSecret('STRIPE_WEBHOOK_SECRET', 10);
+    if (webhookError) {
+      issues.push(
+        webhookError.replace(
+          'STRIPE_WEBHOOK_SECRET is required in production',
+          'STRIPE_WEBHOOK_SECRET is required when payment verification is required in production'
+        )
+      );
+    }
+
+    issues.push(...stripeIssues);
   }
 
   const resetDelay = Number(process.env.PASSWORD_RESET_DELAY_HOURS || '168');

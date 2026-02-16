@@ -43,4 +43,31 @@ describe('Production configuration guard', () => {
     process.env.FRONTEND_URL = 'http://localhost:5173';
     expect(() => validateProductionConfig()).toThrow(/should not be localhost/i);
   });
+
+  it('does not require Twilio vars unless explicitly required', () => {
+    withBaseProdEnv();
+    expect(() => validateProductionConfig()).not.toThrow();
+  });
+
+  it('requires Twilio vars when REQUIRE_TWILIO_VERIFICATION=true', () => {
+    withBaseProdEnv();
+    process.env.REQUIRE_TWILIO_VERIFICATION = 'true';
+    process.env.TWILIO_SID = '';
+    process.env.TWILIO_AUTH_TOKEN = '';
+    process.env.TWILIO_VERIFY_SID = '';
+    expect(() => validateProductionConfig()).toThrow(/TWILIO_SID/i);
+    expect(() => validateProductionConfig()).toThrow(/TWILIO_AUTH_TOKEN/i);
+    expect(() => validateProductionConfig()).toThrow(/TWILIO_VERIFY_SID/i);
+  });
+
+  it('requires Stripe vars when REQUIRE_STRIPE_VERIFICATION=true', () => {
+    withBaseProdEnv();
+    process.env.REQUIRE_STRIPE_VERIFICATION = 'true';
+    process.env.STRIPE_SECRET_KEY = '';
+    process.env.STRIPE_PUBLISHABLE_KEY = '';
+    process.env.STRIPE_WEBHOOK_SECRET = '';
+    expect(() => validateProductionConfig()).toThrow(/STRIPE_SECRET_KEY/i);
+    expect(() => validateProductionConfig()).toThrow(/STRIPE_PUBLISHABLE_KEY/i);
+    expect(() => validateProductionConfig()).toThrow(/STRIPE_WEBHOOK_SECRET/i);
+  });
 });

@@ -35,8 +35,10 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Done` Home feed infinite scroll:
   cursor pagination + frontend virtualization/windowed rendering are implemented.
 - `Partial` Tiered verification (phone + payment):
-  phone + Stripe SetupIntent flows, verification middleware, webhook route, and `VerificationSettings` UI exist.
-  Remaining risk is env/provider readiness in deployment (Twilio/Stripe keys/webhook config).
+  email, phone, and payment flows plus middleware and UI exist.
+  Production readiness is mostly present via feature-flagged provider validation and docs/checklist:
+  `docs/verification-implementation-plan.md`, `docs/verification-production-checklist.md`.
+  Remaining risk is full webhook idempotency/error-path hardening and production-e2e coverage.
 - `Partial` PWA foundation:
   service worker exists (currently push-focused), but manifest/offline page/install prompt/offline caching are not fully implemented.
 - `Open` MLS key rotation UX:
