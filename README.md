@@ -51,8 +51,8 @@ Intellacc is a prediction-market social network that combines a social feed, LMS
 
 4. Open the app.
 
-   Frontend: http://localhost:5175  
-   Backend API: http://localhost:3005  
+   Frontend: http://localhost:5175
+   Backend API: http://localhost:3005
    Prediction engine: http://localhost:3006
 
 Production runs separately on ports 5173/3000/3001.
