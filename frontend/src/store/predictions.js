@@ -14,6 +14,7 @@ const predictionsStore = {
     loadingAssigned: van.state(false), // Added specific loading state for assigned predictions
     error: van.state(null),
     verificationNotice: van.state(localStorage.getItem('verificationNotice') || null),
+    verificationNoticeLoading: van.state(false),
     verificationNoticeLoaded: van.state(false),
     userPredictions: van.state([]),
     initialFetchDone: van.state(false) // Flag to track if initial fetch has been attempted
@@ -362,6 +363,10 @@ const predictionsStore = {
     },
 
     async fetchVerificationNotice() {
+      if (this.state.verificationNoticeLoading?.val) {
+        return;
+      }
+
       if (this.state.verificationNoticeLoaded.val) {
         return;
       }
@@ -371,6 +376,8 @@ const predictionsStore = {
         this.state.verificationNoticeLoaded.val = true;
         return;
       }
+
+      this.state.verificationNoticeLoading.val = true;
 
       try {
         const status = await api.verification.getStatus();
@@ -384,6 +391,12 @@ const predictionsStore = {
         this.state.verificationNoticeLoaded.val = true;
       } catch (error) {
         console.error('Error fetching verification status:', error);
+        this.state.verificationNotice.val = null;
+        localStorage.removeItem('verificationNotice');
+        // Avoid repeated requests if endpoint is unavailable (e.g. not logged in yet).
+        this.state.verificationNoticeLoaded.val = true;
+      } finally {
+        this.state.verificationNoticeLoading.val = false;
       }
     },
 
@@ -398,6 +411,7 @@ const predictionsStore = {
       this.state.error.val = null;
       this.state.verificationNotice.val = null;
       this.state.verificationNoticeLoaded.val = false;
+      this.state.verificationNoticeLoading.val = false;
       localStorage.removeItem('verificationNotice');
       this.state.userPredictions.val = [];
       this.state.initialFetchDone.val = false;

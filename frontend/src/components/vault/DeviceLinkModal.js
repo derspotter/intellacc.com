@@ -3,7 +3,7 @@ import vaultStore from '../../stores/vaultStore.js';
 import api from '../../services/api.js';
 import { clearPendingDeviceId, getPendingDeviceId, setPendingDeviceId } from '../../services/deviceIdStore.js';
 
-const { div, h2, h3, p, button, span, code, strong } = van.tags;
+const { div, h2, h3, p, button, span, strong } = van.tags;
 
 // Module-level state to prevent race conditions across component re-renders
 // These are singleton because DeviceLinkModal is only rendered once in MainLayout
@@ -17,8 +17,7 @@ const timeRemaining = van.state('');
 let moduleState = {
     linkingStarted: false,
     lastModalVisible: false,
-    countdownTimer: null,
-    autoStartLoop: null
+    countdownTimer: null
 };
 
 const getDevicePublicId = () => {
@@ -214,26 +213,10 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
         tryStartLinking();
     };
 
-    const stopAutoStartLoop = () => {
-        if (moduleState.autoStartLoop) {
-            clearInterval(moduleState.autoStartLoop);
-            moduleState.autoStartLoop = null;
-        }
-    };
-
-    const startAutoStartLoop = () => {
-        if (moduleState.autoStartLoop) return;
-        moduleState.autoStartLoop = setInterval(() => {
-            if (!vaultStore.showDeviceLinkModal) return;
-            ensureLinkingStarted();
-        }, 250);
-    };
-
     const syncModalLifecycle = () => {
         if (!vaultStore.showDeviceLinkModal) {
             if (moduleState.lastModalVisible) {
                 moduleState.lastModalVisible = false;
-                stopAutoStartLoop();
                 resetModalState();
             }
             return;
@@ -248,7 +231,6 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
             error.val = 'An error occurred while setting up verification.';
         }
 
-        startAutoStartLoop();
         ensureLinkingStarted();
     };
 
@@ -283,8 +265,8 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                             ),
 
                             currentToken ? div({ class: 'verification-code-wrap' },
-                                div({ class: 'token-label' }, 'Pairing code'),
-                                span({ class: 'verification-code' }, formatToken(currentToken)),
+                                p({ class: 'token-label' }, 'Pairing code'),
+                                div({ class: 'verification-code' }, formatToken(currentToken)),
                                 button({
                                     type: 'button',
                                     class: 'btn btn-sm btn-copy',

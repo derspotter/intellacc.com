@@ -25,7 +25,7 @@
   position: relative;
   z-index: 10001;
   max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-  overflow: auto;
+  overflow: hidden;
 }
 
 .modal-content h2 {
@@ -81,11 +81,15 @@
 }
 
 .verification-code-wrap > .verification-code {
-  display: block;
   margin-bottom: 0.5rem;
 }
 
 .verification-code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0 0 0.5rem 0;
+  display: inline-block;
   font-family: 'Courier New', monospace;
   font-size: 1.6rem;
   font-weight: 700;

@@ -3,7 +3,7 @@ import MainLayout from '../components/layout/MainLayout';
 import NotificationsPage from '../pages/Notifications.js';
 import MessagesPage from '../pages/Messages.js';
 import { currentPageState } from '../store';
-import { isLoggedInState, isAdminState } from '../services/auth';
+import { isLoggedInState } from '../services/auth';
 import { getStore } from '../store';
 
 // Import all components directly
@@ -12,15 +12,7 @@ import ForgotPasswordPage from '../components/auth/ForgotPasswordPage';
 import ResetPasswordPage from '../components/auth/ResetPasswordPage';
 import PostsList from '../components/posts/PostsList';
 import CreatePostForm from '../components/posts/CreatePostForm';
-// Replace PredictionsList with ProfilePredictions
-import EventsList from '../components/predictions/EventsList.js';
-import EventCard from '../components/predictions/EventCard.js';
-import LeaderboardCard from '../components/predictions/LeaderboardCard.js';
-import RPBalance from '../components/predictions/RPBalance.js';
-import WeeklyAssignment from '../components/predictions/WeeklyAssignment.js';
-import AdminEventManagement from '../components/predictions/AdminEventManagement.js';
-import MarketQuestionHub from '../components/predictions/MarketQuestionHub.js';
-import predictionsStore from '../store/predictions.js';
+import PredictionsPage from '../pages/PredictionsPage.js';
 import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
 import ProfilePredictions from '../components/profile/ProfilePredictions';
@@ -137,33 +129,7 @@ export default function Router() {
     'verify-email': () => VerifyEmailPage(),
     settings: () => SettingsPage(),
     
-    predictions: () => {
-      van.derive(() => {
-        if (isLoggedInState.val && predictionsStore.actions.fetchVerificationNotice) {
-          predictionsStore.actions.fetchVerificationNotice.call(predictionsStore);
-        }
-      });
-      return div({ class: "predictions-page" }, [
-      h1("Predictions & Betting"),
-      () => {
-        const msg = predictionsStore.state.verificationNotice?.val;
-        if (!msg) return null;
-        return div({ class: 'predictions-phone-banner' }, msg);
-      },
-      div({ class: "predictions-header" }, [
-        RPBalance({ horizontal: true })
-      ]),
-      div({ class: "predictions-main" }, [
-        div({ class: "predictions-top-grid" }, [
-          div({ class: "events-list-column" }, [EventsList()]),
-          div({ class: "leaderboard-column" }, [LeaderboardCard()])
-        ]),
-        MarketQuestionHub()
-      ]),
-      () => isAdminState.val ? AdminEventManagement() : null,
-      // Deprecated "Make a New Prediction" card removed from Predictions page
-    ]);
-    },
+    predictions: () => PredictionsPage(),
     
     profile: () => {
       // Fetching logic is now handled by updatePageFromHash on route change

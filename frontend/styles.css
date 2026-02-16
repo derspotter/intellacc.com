@@ -1449,9 +1449,13 @@ body.dark-mode .post-action.liked:hover {
 
 .predictions-top-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  grid-template-columns: 1fr;
   gap: 1rem;
   align-items: start;
+}
+
+.predictions-bottom-leaderboard {
+  margin-top: 0.75rem;
 }
 
 .market-question-hub {
@@ -1583,11 +1587,11 @@ body.dark-mode .post-action.liked:hover {
   min-width: 0; /* allow children to shrink instead of forcing overflow */
 }
 
-/* Medium screens: flatten inner events layout */
+/* Medium screens: keep side-by-side layout until mobile */
 @media (max-width: 1200px) {
-  /* Avoid the nested 2-col layout inside EventsList when screen is already tight */
+  /* Keep both columns visible side-by-side on tablet-laptop widths. */
   .events-container {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     height: auto;
   }
 
@@ -3471,6 +3475,8 @@ body.dark-mode .weekly-assignment-badge.pending {
 .events-list-card {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  min-width: 0;
   background: transparent;
   border: none;
   border-radius: var(--border-radius);
@@ -4428,10 +4434,12 @@ body.dark-mode .belief-slider::-moz-range-thumb {
   display: grid;
   /* Keep the list usable (search + filters) while keeping the selected event readable
      on common laptop widths. */
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.5rem;
   align-items: start;
   height: auto;
+  width: 100%;
+  min-width: 0;
 }
 
 /* Events Simple List */
@@ -4549,6 +4557,8 @@ body.dark-mode .belief-slider::-moz-range-thumb {
   display: flex;
   height: 780px;
   flex-direction: column;
+  width: 100%;
+  min-width: 0;
   background: transparent;
   border: none;
   border-radius: var(--border-radius);
@@ -4953,7 +4963,7 @@ body.dark-mode .market-link:hover {
 }
 
 /* Responsive Layout */
-@media (max-width: 1200px) {
+@media (max-width: 900px) {
   .events-container {
     grid-template-columns: 1fr;
   }
