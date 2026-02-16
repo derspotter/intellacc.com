@@ -1,6 +1,6 @@
 import van from "vanjs-core";
 import Button from '../common/Button.js';
-import api from '../../services/api.js';
+import { tokenState } from '../../services/tokenService';
 
 const { div, h3, h4, p, span, small, ul, li } = van.tags;
 
@@ -8,6 +8,7 @@ export default function RPBalance({ horizontal = false }) {
   const balance = van.state(null);
   const loading = van.state(true);
   const error = van.state(null);
+  const lastToken = van.state('__not-set__');
 
   const loadBalance = async () => {
     try {
@@ -52,8 +53,21 @@ export default function RPBalance({ horizontal = false }) {
     }
   };
 
-  // Load balance on component mount
-  loadBalance();
+  // Load balance once on mount and when auth token changes.
+  van.derive(() => {
+    const token = tokenState.val || '';
+    if (lastToken.val === token) return;
+    lastToken.val = token;
+
+    if (!token) {
+      balance.val = null;
+      loading.val = false;
+      error.val = null;
+      return;
+    }
+
+    loadBalance();
+  });
 
   const formatRP = (value) => {
     if (typeof value === 'string') return parseFloat(value).toFixed(2);

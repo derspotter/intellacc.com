@@ -2,7 +2,7 @@ import van from "vanjs-core";
 import Button from '../common/Button.js';
 import api from '../../services/api.js';
 import { registerSocketEventHandler } from '../../services/socket.js';
-import { getUserId } from '../../services/auth.js';
+import { getUserId, tokenState } from '../../services/auth.js';
 import predictionsStore from '../../store/predictions.js';
 
 const { div, h3, p, span, small, input, label, form, button } = van.tags;
@@ -13,6 +13,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
   const kellyData = van.state(null);
   const loading = van.state(false);
   const error = van.state(null);
+  const lastPositionLoadKey = van.state('');
 
   const isPhoneVerificationMessage = (msg) =>
     typeof msg === 'string' && msg.toLowerCase().includes('verify your phone');
@@ -564,12 +565,31 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
   const debugUserId = getUserId();
   console.log('DEBUG EventCard - userId (cached):', debugUserId, 'token exists:', !!localStorage.getItem('token'));
   
-  // Load user position once on mount
-  console.log('🚀 Loading user position on mount');
-  loadUserPosition().then(() => {
-    console.log('🚀 loadUserPosition completed successfully');
-  }).catch(err => {
-    console.error('🚀 loadUserPosition failed:', err);
+  // Load user position on mount and when auth user changes.
+  van.derive(() => {
+    const token = tokenState.val || '';
+    if (!token) {
+      lastPositionLoadKey.val = '';
+      userPosition.val = null;
+      return;
+    }
+
+    const userId = getUserId();
+    if (!userId) {
+      userPosition.val = null;
+      lastPositionLoadKey.val = '';
+      return;
+    }
+
+    const loadKey = `${userId}:${event.id}`;
+    if (lastPositionLoadKey.val === loadKey) return;
+    lastPositionLoadKey.val = loadKey;
+
+    loadUserPosition().then(() => {
+      console.log('🚀 loadUserPosition completed successfully');
+    }).catch(err => {
+      console.error('🚀 loadUserPosition failed:', err);
+    });
   });
 
   const formatDate = (dateString) => {

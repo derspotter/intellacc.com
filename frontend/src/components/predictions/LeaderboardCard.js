@@ -2,7 +2,7 @@ import van from 'vanjs-core';
 const { div, span, button, h3, p, a, ul, li } = van.tags;
 import Card from '../common/Card';
 import api from '../../services/api';
-import { getTokenData } from '../../services/auth';
+import { getTokenData, isLoggedInState, tokenState } from '../../services/auth';
 
 export default function LeaderboardCard() {
   // State for view type and data
@@ -13,6 +13,7 @@ export default function LeaderboardCard() {
   const loading = van.state(false);
   const error = van.state(null);
   const userRank = van.state(null);
+  const lastLoadToken = van.state('__not-loaded__');
 
   // Tab configuration - simplified to 3 toggleable options
   const tabs = [
@@ -96,8 +97,13 @@ export default function LeaderboardCard() {
     return tokenData?.userId;
   };
 
-  // Initial load
-  fetchLeaderboard();
+  // Initial load and reload after auth changes.
+  van.derive(() => {
+    const token = tokenState.val || (isLoggedInState.val ? '__logged-in-no-token__' : '__guest__');
+    if (lastLoadToken.val === token) return;
+    lastLoadToken.val = token;
+    fetchLeaderboard();
+  });
 
   // Render tab buttons
   const renderTabs = () => {

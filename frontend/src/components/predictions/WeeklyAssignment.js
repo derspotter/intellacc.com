@@ -2,6 +2,7 @@ import van from "vanjs-core";
 import Card from '../common/Card.js';
 import Button from '../common/Button.js';
 import api from '../../services/api.js';
+import { isLoggedInState, tokenState } from '../../services/auth.js';
 
 const { div, h3, h4, p, span, small, a } = van.tags;
 
@@ -9,6 +10,7 @@ export default function WeeklyAssignment() {
   const assignment = van.state(null);
   const loading = van.state(true);
   const error = van.state(null);
+  const loadedToken = van.state('__not-set__');
 
   const loadAssignment = async () => {
     try {
@@ -33,8 +35,21 @@ export default function WeeklyAssignment() {
     }
   };
 
-  // Load assignment on component mount
-  loadAssignment();
+  // Load assignment on mount and when auth token changes.
+  van.derive(() => {
+    const token = tokenState.val || '';
+    if (loadedToken.val === token) return;
+    loadedToken.val = token;
+
+    if (!isLoggedInState.val) {
+      assignment.val = null;
+      loading.val = false;
+      error.val = null;
+      return;
+    }
+
+    loadAssignment();
+  });
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';

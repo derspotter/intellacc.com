@@ -24,6 +24,10 @@ export default function EventsList() {
   const weeklyAssignment = van.state(null);
   const weeklyLoading = van.state(true);
   const weeklyError = van.state(null);
+
+  const hasLoadedEvents = van.state(false);
+  const loadedWeeklyUserId = van.state('');
+  const loadedPositionsUserId = van.state('');
   
   // Cache EventCard components to prevent recreation and preserve slider state
   const eventCardCache = new Map();
@@ -227,32 +231,33 @@ export default function EventsList() {
     return `${(parseFloat(prob) * 100).toFixed(1)}%`;
   };
 
-  // Load events and weekly assignment on component mount
-  const initializeData = async () => {
-    await loadEvents(''); // Start with no search filter
-    if (isLoggedInState.val) {
-      await loadWeeklyAssignment();
-      await loadUserPositions();
+  // Load events + user-specific prediction state once per mount / token user change.
+  van.derive(() => {
+    if (!hasLoadedEvents.val) {
+      hasLoadedEvents.val = true;
+      loadEvents('');
     }
-  };
-  
-  initializeData();
 
-  // Watch for filter changes and load positions when needed
-  const watchFilter = () => {
-    console.log('🔍 watchFilter called, filter.val:', filter.val);
-    console.log('🔍 isLoggedInState.val:', isLoggedInState.val);
-    console.log('🔍 userPositions.val.length:', userPositions.val.length);
-    
-    if (filter.val === 'my-positions' && isLoggedInState.val && userPositions.val.length === 0) {
-      console.log('🔍 watchFilter: Loading user positions...');
+    if (!isLoggedInState.val) {
+      userPositions.val = [];
+      weeklyAssignment.val = null;
+      loadedWeeklyUserId.val = '';
+      loadedPositionsUserId.val = '';
+      return;
+    }
+
+    const userId = getUserId();
+    if (!userId) return;
+
+    if (!weeklyLoading.val && loadedWeeklyUserId.val !== userId && weeklyError.val === null) {
+      loadedWeeklyUserId.val = userId;
+      loadWeeklyAssignment();
+    }
+
+    if (!positionsLoading.val && loadedPositionsUserId.val !== userId) {
+      loadedPositionsUserId.val = userId;
       loadUserPositions();
     }
-  };
-
-  // Watch for filter changes directly
-  van.derive(() => {
-    watchFilter();
   });
 
   return () => div({ class: 'events-container' }, [
