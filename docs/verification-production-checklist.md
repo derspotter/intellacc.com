@@ -37,3 +37,5 @@ If enabled:
 - Register a fresh user, open mail link, confirm Tier 1 unlock.
 - For Tier 2/3 (if enabled), run the flow using a real device and confirm tier upgrades in settings.
 - Verify protected actions still return `Higher verification required` with upgrade metadata for lower tiers.
+- Backend verification regression tests:
+  - `docker exec intellacc_backend npm test -- production_guard.test.js verification.test.js --runInBand`

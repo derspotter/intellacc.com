@@ -94,10 +94,11 @@ exports.createVerificationSession = async (userId) => {
   };
 };
 
-exports.handleSetupIntentSucceeded = async (setupIntent) => {
+exports.handleSetupIntentSucceeded = async (setupIntent, eventId = null) => {
   let resolvedUserId = setupIntent.metadata?.user_id
     ? parseInt(setupIntent.metadata.user_id, 10)
     : null;
+  const setupIntentId = setupIntent?.id || null;
 
   if (!resolvedUserId && setupIntent.customer) {
     const lookup = await db.query(
@@ -108,9 +109,32 @@ exports.handleSetupIntentSucceeded = async (setupIntent) => {
   }
 
   if (!resolvedUserId) {
-    console.warn('[PaymentVerification] Unable to resolve user for SetupIntent:', setupIntent.id);
-    return;
+    console.warn('[PaymentVerification] Unable to resolve user for SetupIntent:', setupIntentId);
+    return {
+      status: 'unresolved_user',
+      event_id: eventId || null
+    };
   }
+
+  const existingVerified = await db.query(`
+    SELECT 1 FROM user_verifications
+    WHERE user_id = $1
+      AND tier = 3
+      AND verification_type = 'payment'
+      AND status = 'verified'
+    LIMIT 1
+  `, [resolvedUserId]);
+
+  if (existingVerified.rows.length > 0) {
+    return {
+      status: 'already_verified',
+      event_id: eventId || null,
+      setup_intent_id: setupIntentId,
+      alreadyVerified: true
+    };
+  }
+
+  const providerCustomerId = setupIntent.customer || null;
 
   await db.query(`
     UPDATE payment_verifications
@@ -118,19 +142,38 @@ exports.handleSetupIntentSucceeded = async (setupIntent) => {
     WHERE user_id = $1 AND provider = 'stripe'
   `, [resolvedUserId]);
 
+  if (providerCustomerId) {
+    await db.query(`
+      INSERT INTO payment_verifications (user_id, provider, provider_customer_id, verification_method, verified_at)
+      VALUES ($1, 'stripe', $2, 'card_check', NOW())
+      ON CONFLICT (user_id, provider) DO UPDATE SET
+        provider_customer_id = EXCLUDED.provider_customer_id,
+        verification_method = 'card_check',
+        verified_at = NOW()
+    `, [resolvedUserId, providerCustomerId]);
+  }
+
   await db.query(`
     INSERT INTO user_verifications (user_id, tier, verification_type, provider, status, verified_at)
     VALUES ($1, 3, 'payment', 'stripe', 'verified', NOW())
     ON CONFLICT (user_id, tier) DO UPDATE SET
       status = 'verified',
+      provider_id = $2,
       verified_at = NOW(),
       updated_at = NOW()
-  `, [resolvedUserId]);
+  `, [resolvedUserId, setupIntentId]);
 
   await db.query(`
     UPDATE users SET verification_tier = GREATEST(verification_tier, 3)
     WHERE id = $1
   `, [resolvedUserId]);
+
+  return {
+    status: 'verified',
+    event_id: eventId || null,
+    setup_intent_id: setupIntentId,
+    alreadyVerified: false
+  };
 };
 
 exports.constructWebhookEvent = (payload, signature, webhookSecret) => {

@@ -216,7 +216,7 @@ exports.createPaymentSetup = async (req, res) => {
 exports.handleStripeWebhook = async (req, res) => {
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     const signature = req.headers['stripe-signature'];
-    const unknownEventMessage = 'Webhook event received but no handler configured';
+    const noHandlerMessage = 'Webhook event received but ignored';
 
     let event = req.body;
 
@@ -235,15 +235,25 @@ exports.handleStripeWebhook = async (req, res) => {
         }
 
         if (event.type === 'setup_intent.succeeded') {
-            await paymentVerificationService.handleSetupIntentSucceeded(event.data.object);
-            return res.json({ received: true });
+            const setupIntent = event.data?.object;
+            if (!setupIntent || typeof setupIntent !== 'object') {
+                return res.status(400).json({ error: 'Invalid setup_intent payload' });
+            }
+
+            const result = await paymentVerificationService.handleSetupIntentSucceeded(setupIntent, event.id);
+
+            return res.json({
+                received: true,
+                status: result.status,
+                already_verified: result.alreadyVerified || false
+            });
         }
 
         console.log('[VerificationController] Unhandled Stripe webhook event:', event.type);
         res.json({
             received: true,
             ignored: true,
-            message: unknownEventMessage,
+            message: noHandlerMessage,
             event_type: event.type
         });
     } catch (err) {

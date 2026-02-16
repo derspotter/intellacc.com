@@ -38,7 +38,7 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   email, phone, and payment flows plus middleware and UI exist.
   Production readiness is mostly present via feature-flagged provider validation and docs/checklist:
   `docs/verification-implementation-plan.md`, `docs/verification-production-checklist.md`.
-  Remaining risk is full webhook idempotency/error-path hardening and production-e2e coverage.
+  Remaining risk is production-e2e coverage (automated user-level flow for webhooks + provider staging checks).
 - `Partial` PWA foundation:
   service worker exists (currently push-focused), but manifest/offline page/install prompt/offline caching are not fully implemented.
 - `Open` MLS key rotation UX:

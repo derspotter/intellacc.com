@@ -32,7 +32,7 @@ The implementation should cover three tiers:
 
 ## Stability hardening (next pass)
 - Stripe webhook:
-  - confirm idempotency and unknown event handling in `backend/src/controllers/verificationController.js`
+  - confirm idempotency and unknown event handling in `backend/src/controllers/verificationController.js` via `paymentVerificationService.handleSetupIntentSucceeded`.
 - Phone/payment start flows:
   - return clear errors when provider keys are missing or misconfigured.
 
