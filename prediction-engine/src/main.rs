@@ -912,6 +912,16 @@ async fn update_market_endpoint(
         event_id,
         target_prob,
         stake,
+        referral_post_id: payload
+            .get("referral_post_id")
+            .and_then(|value| value.as_i64())
+            .filter(|value| *value > 0)
+            .map(|value| value as i32),
+        referral_click_id: payload
+            .get("referral_click_id")
+            .and_then(|value| value.as_i64())
+            .filter(|value| *value > 0)
+            .map(|value| value as i32),
     };
 
     match lmsr_api::update_market(&app_state.db, &app_state.config, user_id, update).await {

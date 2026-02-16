@@ -128,7 +128,7 @@ Users receive +50 RP bonus if they:
 
 1. **"Backend container not running"**
    ```bash
-   docker compose -f docker-compose-dev.yml up -d
+   ./scripts/dev-stack.sh up
    ```
 
 2. **"No suitable events available"**

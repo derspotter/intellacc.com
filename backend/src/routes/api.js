@@ -23,7 +23,10 @@ const aiModerationController = require('../controllers/aiModerationController');
 const federationController = require('../controllers/federationController');
 const atprotoController = require('../controllers/atprotoController');
 const socialAuthController = require('../controllers/socialAuthController');
+const persuasiveAlphaController = require('../controllers/persuasiveAlphaController');
+const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
+const db = require('../db');
 const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
 const predictionEngineHeaders = {
     'Content-Type': 'application/json',
@@ -187,6 +190,8 @@ router.get("/bets/stats", authenticateJWT, predictionsController.getMonthlyBetti
 
 // Post Routes (require email verification - Tier 1)
 router.post("/posts", authenticateJWT, requireEmailVerified, postController.createPost);
+router.post("/posts/:postId/market-click", authenticateJWT, persuasiveAlphaController.createPostMarketClick);
+router.get("/posts/:postId/markets", authenticateJWT, persuasiveAlphaController.getPostMarkets);
 router.get("/posts", postController.getPosts);                                 // Get all posts (public)
 router.get("/feed", authenticateJWT, postController.getFeed);                  // Get personalized feed
 router.get("/posts/:id", authenticateJWT, postController.getPostById);         // Get a single post
@@ -369,20 +374,72 @@ router.post("/events/:eventId/sell", authenticateJWT, requirePhoneVerified, asyn
 });
 
 router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, async (req, res) => {
+    const { eventId } = req.params;
+    const { stake, target_prob } = req.body;
+    const userId = req.user.id;
+    const eventIdNumber = Number(eventId);
+    let client = null;
+    let inTransaction = false;
+    let referralPayload = null;
+
+    if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
+        return res.status(400).json({ message: 'Invalid event id' });
+    }
+
     try {
-        const { eventId } = req.params;
-        const { stake, target_prob } = req.body;
-        const userId = req.user.id;
+        client = await db.getPool().connect();
+        await client.query('BEGIN');
+        inTransaction = true;
+        try {
+            referralPayload = await persuasiveAlphaService.claimReferralClick({
+                dbClient: client,
+                userId,
+                eventId: eventIdNumber
+            });
+        } catch (err) {
+            console.error('Failed to load attribution click:', err.message);
+            await client.query('ROLLBACK');
+            inTransaction = false;
+        }
+
+        const updatePayload = { user_id: userId, stake, target_prob };
+        if (referralPayload) {
+            updatePayload.referral_post_id = referralPayload.postId;
+            updatePayload.referral_click_id = referralPayload.clickId;
+        }
 
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/update`, {
             method: 'POST',
             headers: predictionEngineHeaders,
-            body: JSON.stringify({ user_id: userId, stake, target_prob })
+            body: JSON.stringify(updatePayload)
         });
 
         const data = await response.json();
 
         if (response.ok) {
+            if (data.market_update_id && referralPayload) {
+                const didClaim = await persuasiveAlphaService.finalizeReferralClick({
+                    dbClient: client,
+                    clickId: referralPayload.clickId,
+                    marketUpdateId: Number(data.market_update_id)
+                });
+                if (!didClaim) {
+                    console.warn('Failed to finalize referral click after market update:', referralPayload.clickId);
+                }
+            } else if (referralPayload) {
+                const didRelease = await persuasiveAlphaService.releaseReferralClick({
+                    dbClient: client,
+                    clickId: referralPayload.clickId
+                });
+                if (!didRelease) {
+                    console.warn('Failed to release referral click without market_update_id:', referralPayload.clickId);
+                }
+            }
+            if (inTransaction) {
+                await client.query('COMMIT');
+                inTransaction = false;
+            }
+
             // Broadcast market update to all connected clients
             const io = req.app.get('io');
             if (io && data.new_prob !== undefined) {
@@ -401,11 +458,43 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
 
             res.json(data);
         } else {
+            if (referralPayload) {
+                const didRelease = await persuasiveAlphaService.releaseReferralClick({
+                    dbClient: client,
+                    clickId: referralPayload.clickId
+                });
+                if (!didRelease) {
+                    console.warn('Failed to release referral click after non-OK engine response:', referralPayload.clickId);
+                }
+            }
+            if (inTransaction) {
+                await client.query('COMMIT');
+                inTransaction = false;
+            }
             res.status(response.status).json(data);
         }
     } catch (error) {
         console.error('Market update proxy error:', error);
+        try {
+            if (inTransaction) {
+                await client.query('ROLLBACK');
+                inTransaction = false;
+            }
+        } catch (rollbackError) {
+            console.error('Failed to rollback market update transaction:', rollbackError.message);
+        }
         res.status(500).json({ error: 'Failed to update market' });
+    } finally {
+        try {
+            if (client) {
+                if (inTransaction) {
+                    await client.query('ROLLBACK');
+                }
+                client.release();
+            }
+        } catch (releaseError) {
+            console.error('Failed to cleanup market update DB client:', releaseError.message);
+        }
     }
 });
 

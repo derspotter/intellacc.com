@@ -198,6 +198,9 @@ pub async fn setup_test_database(pool: &PgPool) -> Result<()> {
             stake_amount_ledger BIGINT NOT NULL,
             shares_acquired DOUBLE PRECISION NOT NULL CHECK (shares_acquired > 0),
             share_type VARCHAR(10) NOT NULL CHECK (share_type IN ('yes', 'no')),
+            referral_post_id INTEGER,
+            referral_click_id INTEGER,
+            had_prior_position BOOLEAN NOT NULL DEFAULT FALSE,
             hold_until TIMESTAMP WITH TIME ZONE NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
@@ -413,6 +416,8 @@ async fn try_execute_trade(
         event_id,
         target_prob: belief,
         stake,
+        referral_post_id: None,
+        referral_click_id: None,
     };
 
     // Execute the trade

@@ -30,6 +30,7 @@ services:
       dockerfile: Dockerfile
     container_name: intellacc_backend
     environment:
+      INTELLACC_STACK: production
       NODE_ENV: ${NODE_ENV}
       PORT: ${NODE_PORT}
       DATABASE_URL: ${DATABASE_URL}
