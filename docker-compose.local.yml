@@ -1,16 +1,16 @@
-# Local-first compose for feature development.
+# Local-only compose for feature development.
 # Usage: docker compose -f docker-compose.local.yml up -d --build
 
 services:
   db:
     image: postgres:17-alpine
-    container_name: intellacc_db_local
+    container_name: intellacc_db_dev
     environment:
       POSTGRES_USER: intellacc_user
       POSTGRES_PASSWORD: intellacc_password
       POSTGRES_DB: intellaccdb
     ports:
-      - "5432:5432"
+      - "15432:5432"
     volumes:
       - intellacc_db_local_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,12 +19,12 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - intellacc-local
+      - intellacc-local-dev
 
   backend:
     build:
       context: ./backend
-    container_name: intellacc_backend
+    container_name: intellacc_backend_dev
     working_dir: /usr/src/app
     command: ["./scripts/docker-dev-entrypoint.sh"]
     environment:
@@ -32,7 +32,7 @@ services:
       NODE_PORT: 3000
       DATABASE_URL: postgres://intellacc_user:intellacc_password@db:5432/intellaccdb
       JWT_SECRET: local-dev-jwt-secret
-      FRONTEND_URL: http://localhost:5173
+      FRONTEND_URL: http://localhost:5175
       PREDICTION_ENGINE_AUTH_TOKEN: local-dev-prediction-engine-token
     volumes:
       - ./backend/src:/usr/src/app/src
@@ -40,50 +40,50 @@ services:
       - ./backend/migrations:/usr/src/app/migrations
       - ./backend/uploads:/usr/src/app/uploads
     ports:
-      - "3000:3000"
+      - "3005:3000"
     depends_on:
       db:
         condition: service_healthy
     networks:
-      - intellacc-local
+      - intellacc-local-dev
 
   prediction-engine:
     build:
       context: ./prediction-engine
-    container_name: intellacc_prediction_engine
+    container_name: intellacc_prediction_engine_dev
     environment:
       DATABASE_URL: postgres://intellacc_user:intellacc_password@db:5432/intellaccdb
       RUST_LOG: info
       PREDICTION_ENGINE_AUTH_TOKEN: local-dev-prediction-engine-token
     ports:
-      - "3001:3001"
+      - "3006:3001"
     depends_on:
       db:
         condition: service_healthy
       backend:
         condition: service_started
     networks:
-      - intellacc-local
+      - intellacc-local-dev
 
   frontend:
     build:
       context: ./frontend
-    container_name: intellacc_frontend
+    container_name: intellacc_frontend_dev
     command: sh -lc "npm install && npm install @rollup/rollup-linux-x64-musl --save-optional && npm run dev -- --host 0.0.0.0"
     ports:
-      - "5173:5173"
+      - "5175:5173"
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
     depends_on:
       - backend
     networks:
-      - intellacc-local
+      - intellacc-local-dev
 
 volumes:
   intellacc_db_local_data:
   frontend_node_modules:
 
 networks:
-  intellacc-local:
+  intellacc-local-dev:
     driver: bridge
