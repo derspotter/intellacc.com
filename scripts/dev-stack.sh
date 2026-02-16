@@ -12,7 +12,7 @@ Usage:
   ./scripts/dev-stack.sh logs [extra docker compose args]
   ./scripts/dev-stack.sh status
 
-Set INTELLACC_ALLOW_PRODUCTION=1 to run this command while production containers are running.
+Set INTELLACC_ALLOW_PROD_STACK_OVERLAP=1 to run this command while production containers are running.
 EOF
 }
 
@@ -36,7 +36,7 @@ ensure_not_running_on_production() {
     docker ps --filter "name=^/(intellacc_backend|intellacc_frontend|intellacc_db|intellacc_prediction_engine)$" \
       --format '  {{.Names}} ({{.Status}})'
     echo
-    echo "If you know this is expected, run with INTELLACC_ALLOW_PRODUCTION=1."
+    echo "If you know this is expected, run with INTELLACC_ALLOW_PROD_STACK_OVERLAP=1."
     exit 1
   fi
 }

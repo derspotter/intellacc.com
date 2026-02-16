@@ -14,8 +14,8 @@ if [ "$intellacc_stack" = "development" ] && [ "$HOSTNAME" != "intellacc_backend
   exit 1
 fi
 
-if [ "$intellacc_stack" = "production" ] && [ "$HOSTNAME" != "intellacc_backend" ]; then
-  echo "FATAL: production stack must run as container intellacc_backend."
+if [ "$intellacc_stack" = "production" ] && [ -n "${INTELLACC_BACKEND_HOSTNAME:-}" ] && [ "$HOSTNAME" != "$INTELLACC_BACKEND_HOSTNAME" ]; then
+  echo "FATAL: production stack must run as container ${INTELLACC_BACKEND_HOSTNAME}."
   echo "Current container: $HOSTNAME"
   exit 1
 fi
