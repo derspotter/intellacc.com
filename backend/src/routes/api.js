@@ -374,23 +374,23 @@ router.post("/events/:eventId/sell", authenticateJWT, requirePhoneVerified, asyn
 });
 
 router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, async (req, res) => {
+    const { eventId } = req.params;
+    const { stake, target_prob } = req.body;
+    const userId = req.user.id;
+    const eventIdNumber = Number(eventId);
+    let client = null;
+    let inTransaction = false;
+    let referralPayload = null;
+
+    if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
+        return res.status(400).json({ message: 'Invalid event id' });
+    }
+
     try {
-        const { eventId } = req.params;
-        const { stake, target_prob } = req.body;
-        const userId = req.user.id;
-        const eventIdNumber = Number(eventId);
-        let client = null;
-        let inTransaction = false;
-        let referralPayload = null;
         client = await db.getPool().connect();
-
-        if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
-            return res.status(400).json({ message: 'Invalid event id' });
-        }
-
+        await client.query('BEGIN');
+        inTransaction = true;
         try {
-            await client.query('BEGIN');
-            inTransaction = true;
             referralPayload = await persuasiveAlphaService.claimReferralClick({
                 dbClient: client,
                 userId,
@@ -398,10 +398,8 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
             });
         } catch (err) {
             console.error('Failed to load attribution click:', err.message);
-            if (inTransaction) {
-                await client.query('ROLLBACK');
-                inTransaction = false;
-            }
+            await client.query('ROLLBACK');
+            inTransaction = false;
         }
 
         const updatePayload = { user_id: userId, stake, target_prob };
@@ -487,8 +485,15 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
         }
         res.status(500).json({ error: 'Failed to update market' });
     } finally {
-        if (client) {
-            client.release();
+        try {
+            if (client) {
+                if (inTransaction) {
+                    await client.query('ROLLBACK');
+                }
+                client.release();
+            }
+        } catch (releaseError) {
+            console.error('Failed to cleanup market update DB client:', releaseError.message);
         }
     }
 });

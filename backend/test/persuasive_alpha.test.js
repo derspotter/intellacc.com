@@ -372,7 +372,7 @@ describe('Persuasive alpha attribution APIs', () => {
 
   test('Market update uses the latest non-self click for referral and ignores fallback self clicks', async () => {
     const postAuthor = await makeUser('pa_post_author', 1);
-    const trader = await makeUser('pa_trader_fallback', 1);
+    const trader = await makeUser('pa_trader_fallback', 2);
     cleanup.users.add(postAuthor.id);
     cleanup.users.add(trader.id);
 
@@ -418,7 +418,7 @@ describe('Persuasive alpha attribution APIs', () => {
 
   test('Concurrent market update requests consume at most one active click', async () => {
     const author = await makeUser('pa_author_concurrency', 1);
-    const trader = await makeUser('pa_trader_concurrency', 1);
+    const trader = await makeUser('pa_trader_concurrency', 2);
     cleanup.users.add(author.id);
     cleanup.users.add(trader.id);
 

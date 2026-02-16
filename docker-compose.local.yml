@@ -25,6 +25,7 @@ services:
     build:
       context: ./backend
     container_name: intellacc_backend_dev
+    hostname: intellacc_backend_dev
     working_dir: /usr/src/app
     command: ["./scripts/docker-dev-entrypoint.sh"]
     environment:
