@@ -40,7 +40,18 @@ const ensurePersuasiveSchema = async () => {
       consumed_by_market_update_id INTEGER,
       CONSTRAINT post_market_clicks_post_event_user_unique_once_per_click_window
         UNIQUE (post_id, event_id, user_id, clicked_at)
-    )
+        )
+  `);
+
+  await db.query(`
+    ALTER TABLE post_market_clicks
+      DROP CONSTRAINT IF EXISTS post_market_clicks_post_event_user_unique_once_per_click_window
+  `);
+
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_post_market_clicks_active_user_post_event
+      ON post_market_clicks (post_id, event_id, user_id)
+      WHERE consumed_at IS NULL
   `);
 
   await db.query(`
@@ -261,6 +272,30 @@ describe('Persuasive alpha attribution APIs', () => {
     cleanup.clicks.add(res.body.click.id);
   });
 
+  test('POST /api/posts/:postId/market-click is idempotent for an active unconsumed click', async () => {
+    const author = await makeUser('pa_author_idempotent', 1);
+    const trader = await makeUser('pa_trader_idempotent', 1);
+    cleanup.users.add(author.id);
+    cleanup.users.add(trader.id);
+
+    const event = await createEvent();
+    const post = await createPost(author);
+    cleanup.events.add(event.id);
+    cleanup.posts.add(post.id);
+
+    const match = await createMatch({ postId: post.id, eventId: event.id });
+    cleanup.matches.add(match.id);
+
+    const first = await createClick({ postId: post.id, eventId: event.id, token: trader.token });
+    const second = await createClick({ postId: post.id, eventId: event.id, token: trader.token });
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(200);
+    expect(second.body.click.id).toBe(first.body.click.id);
+
+    cleanup.clicks.add(first.body.click.id);
+  });
+
   test('GET /api/posts/:postId/markets returns ordered matches', async () => {
     const author = await makeUser('pa_author2', 1);
     cleanup.users.add(author.id);
@@ -333,5 +368,109 @@ describe('Persuasive alpha attribution APIs', () => {
 
     const clickConsumed = await waitForClickConsumed(clickId, marketUpdateId);
     expect(clickConsumed).toBe(true);
+  });
+
+  test('Market update uses the latest non-self click for referral and ignores fallback self clicks', async () => {
+    const postAuthor = await makeUser('pa_post_author', 1);
+    const trader = await makeUser('pa_trader_fallback', 1);
+    cleanup.users.add(postAuthor.id);
+    cleanup.users.add(trader.id);
+
+    const event = await createEvent();
+    const ownPost = await createPost(trader);
+    const targetPost = await createPost(postAuthor);
+    cleanup.events.add(event.id);
+    cleanup.posts.add(ownPost.id);
+    cleanup.posts.add(targetPost.id);
+
+    const matchForOwn = await createMatch({ postId: ownPost.id, eventId: event.id, matchScore: 0.85 });
+    const matchForTarget = await createMatch({ postId: targetPost.id, eventId: event.id, matchScore: 0.9 });
+    cleanup.matches.add(matchForOwn.id);
+    cleanup.matches.add(matchForTarget.id);
+
+    const fallbackClickRes = await createClick({ postId: targetPost.id, eventId: event.id, token: trader.token });
+    const selfClickRes = await createClick({ postId: ownPost.id, eventId: event.id, token: trader.token });
+    expect(selfClickRes.statusCode).toBe(201);
+    expect(fallbackClickRes.statusCode).toBe(201);
+
+    const selfClickId = selfClickRes.body.click.id;
+    const fallbackClickId = fallbackClickRes.body.click.id;
+    cleanup.clicks.add(selfClickId);
+    cleanup.clicks.add(fallbackClickId);
+
+    const marketUpdateId = 9001;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ new_prob: 0.66, cumulative_stake: 5.5, market_update_id: marketUpdateId })
+    });
+
+    const updateRes = await request(app)
+      .post(`/api/events/${event.id}/update`)
+      .set('Authorization', `Bearer ${trader.token}`)
+      .send({ user_id: trader.id, stake: 2.5, target_prob: 0.72 });
+
+    expect(updateRes.statusCode).toBe(200);
+    const payload = JSON.parse(global.fetch.mock.calls[0]?.[1]?.body || '{}');
+    expect(payload.referral_post_id).toBe(targetPost.id);
+    expect(payload.referral_click_id).toBe(fallbackClickId);
+    expect(payload.referral_click_id).not.toBe(selfClickId);
+  });
+
+  test('Concurrent market update requests consume at most one active click', async () => {
+    const author = await makeUser('pa_author_concurrency', 1);
+    const trader = await makeUser('pa_trader_concurrency', 1);
+    cleanup.users.add(author.id);
+    cleanup.users.add(trader.id);
+
+    const event = await createEvent();
+    const post = await createPost(author);
+    cleanup.events.add(event.id);
+    cleanup.posts.add(post.id);
+    const match = await createMatch({ postId: post.id, eventId: event.id, matchScore: 0.93 });
+    cleanup.matches.add(match.id);
+
+    const clickRes = await createClick({ postId: post.id, eventId: event.id, token: trader.token });
+    expect(clickRes.statusCode).toBe(201);
+    cleanup.clicks.add(clickRes.body.click.id);
+
+    const marketUpdateIds = [1111, 2222];
+    global.fetch = jest.fn().mockImplementation(async () => {
+      const index = global.fetch.mock.calls.length - 1;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return {
+        ok: true,
+        json: async () => ({
+          new_prob: 0.71,
+          cumulative_stake: 6.0,
+          market_update_id: marketUpdateIds[index % marketUpdateIds.length]
+        })
+      };
+    });
+
+    const [firstRes, secondRes] = await Promise.all([
+      request(app)
+        .post(`/api/events/${event.id}/update`)
+        .set('Authorization', `Bearer ${trader.token}`)
+        .send({ user_id: trader.id, stake: 1.0, target_prob: 0.65 }),
+      request(app)
+        .post(`/api/events/${event.id}/update`)
+        .set('Authorization', `Bearer ${trader.token}`)
+        .send({ user_id: trader.id, stake: 1.0, target_prob: 0.65 })
+    ]);
+
+    expect(firstRes.statusCode).toBe(200);
+    expect(secondRes.statusCode).toBe(200);
+
+    const payloads = global.fetch.mock.calls.map(([, options]) => JSON.parse(options.body || '{}'));
+    const referralPayloads = payloads.filter((payload) => payload.referral_click_id !== undefined);
+    expect(referralPayloads).toHaveLength(1);
+    expect(Number(referralPayloads[0].referral_click_id)).toBe(clickRes.body.click.id);
+
+    const clickRow = await db.query(
+      'SELECT consumed_by_market_update_id, consumed_at FROM post_market_clicks WHERE id = $1',
+      [clickRes.body.click.id]
+    );
+    expect(clickRow.rows[0].consumed_by_market_update_id).toBeDefined();
+    expect(clickRow.rows[0].consumed_at).toBeTruthy();
   });
 });

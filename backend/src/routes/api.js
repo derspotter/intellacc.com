@@ -24,6 +24,7 @@ const federationController = require('../controllers/federationController');
 const atprotoController = require('../controllers/atprotoController');
 const socialAuthController = require('../controllers/socialAuthController');
 const persuasiveAlphaController = require('../controllers/persuasiveAlphaController');
+const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
 const db = require('../db');
 const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
@@ -378,34 +379,29 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
         const { stake, target_prob } = req.body;
         const userId = req.user.id;
         const eventIdNumber = Number(eventId);
+        let client = null;
+        let inTransaction = false;
+        let referralPayload = null;
+        client = await db.getPool().connect();
 
         if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
             return res.status(400).json({ message: 'Invalid event id' });
         }
 
-        let referralPayload = null;
         try {
-            const clickRes = await db.query(
-                `SELECT pmc.id, pmc.post_id, p.user_id AS post_author_id
-                 FROM post_market_clicks pmc
-                 JOIN posts p ON p.id = pmc.post_id
-                 WHERE pmc.user_id = $1
-                   AND pmc.event_id = $2
-                   AND pmc.consumed_at IS NULL
-                   AND pmc.expires_at > NOW()
-                 ORDER BY pmc.clicked_at DESC
-                 LIMIT 1`,
-                [userId, eventIdNumber]
-            );
-
-            if (clickRes.rows.length > 0 && Number(clickRes.rows[0].post_author_id) !== Number(userId)) {
-                referralPayload = {
-                    postId: Number(clickRes.rows[0].post_id),
-                    clickId: Number(clickRes.rows[0].id)
-                };
-            }
+            await client.query('BEGIN');
+            inTransaction = true;
+            referralPayload = await persuasiveAlphaService.claimReferralClick({
+                dbClient: client,
+                userId,
+                eventId: eventIdNumber
+            });
         } catch (err) {
             console.error('Failed to load attribution click:', err.message);
+            if (inTransaction) {
+                await client.query('ROLLBACK');
+                inTransaction = false;
+            }
         }
 
         const updatePayload = { user_id: userId, stake, target_prob };
@@ -424,15 +420,26 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
 
         if (response.ok) {
             if (data.market_update_id && referralPayload) {
-                db.query(
-                    `UPDATE post_market_clicks
-                     SET consumed_by_market_update_id = $1,
-                         consumed_at = NOW()
-                     WHERE id = $2`,
-                    [Number(data.market_update_id), referralPayload.clickId]
-                ).catch((err) => {
-                    console.error('Failed to consume market click:', err.message);
+                const didClaim = await persuasiveAlphaService.finalizeReferralClick({
+                    dbClient: client,
+                    clickId: referralPayload.clickId,
+                    marketUpdateId: Number(data.market_update_id)
                 });
+                if (!didClaim) {
+                    console.warn('Failed to finalize referral click after market update:', referralPayload.clickId);
+                }
+            } else if (referralPayload) {
+                const didRelease = await persuasiveAlphaService.releaseReferralClick({
+                    dbClient: client,
+                    clickId: referralPayload.clickId
+                });
+                if (!didRelease) {
+                    console.warn('Failed to release referral click without market_update_id:', referralPayload.clickId);
+                }
+            }
+            if (inTransaction) {
+                await client.query('COMMIT');
+                inTransaction = false;
             }
 
             // Broadcast market update to all connected clients
@@ -453,11 +460,36 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
 
             res.json(data);
         } else {
+            if (referralPayload) {
+                const didRelease = await persuasiveAlphaService.releaseReferralClick({
+                    dbClient: client,
+                    clickId: referralPayload.clickId
+                });
+                if (!didRelease) {
+                    console.warn('Failed to release referral click after non-OK engine response:', referralPayload.clickId);
+                }
+            }
+            if (inTransaction) {
+                await client.query('COMMIT');
+                inTransaction = false;
+            }
             res.status(response.status).json(data);
         }
     } catch (error) {
         console.error('Market update proxy error:', error);
+        try {
+            if (inTransaction) {
+                await client.query('ROLLBACK');
+                inTransaction = false;
+            }
+        } catch (rollbackError) {
+            console.error('Failed to rollback market update transaction:', rollbackError.message);
+        }
         res.status(500).json({ error: 'Failed to update market' });
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 });
 

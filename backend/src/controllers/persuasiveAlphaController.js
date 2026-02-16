@@ -52,18 +52,58 @@ exports.createPostMarketClick = async (req, res) => {
     const now = Date.now();
     const ttlMinutes = parseClickWindowMinutes();
     const expiresAt = new Date(now + ttlMinutes * 60 * 1000);
-
-    const insertResult = await db.query(
-      `INSERT INTO post_market_clicks (
-         post_id,
-         event_id,
-         user_id,
-         clicked_at,
-         expires_at
-       ) VALUES ($1, $2, $3, NOW(), $4)
-       RETURNING id, clicked_at, expires_at`,
-      [postId, eventId, userId, expiresAt]
+    await db.query(
+      `DELETE FROM post_market_clicks
+       WHERE post_id = $1
+         AND event_id = $2
+         AND user_id = $3
+         AND consumed_by_market_update_id IS NULL
+         AND consumed_at IS NULL
+         AND expires_at <= NOW()`,
+      [postId, eventId, userId]
     );
+
+    let insertResult;
+    try {
+      insertResult = await db.query(
+        `INSERT INTO post_market_clicks (
+           post_id,
+           event_id,
+           user_id,
+           clicked_at,
+           expires_at
+         ) VALUES ($1, $2, $3, NOW(), $4)
+         RETURNING id, clicked_at, expires_at`,
+        [postId, eventId, userId, expiresAt]
+      );
+    } catch (insertError) {
+      if (insertError.code !== '23505') {
+        throw insertError;
+      }
+
+      const duplicateResult = await db.query(
+        `SELECT id, clicked_at, expires_at
+           FROM post_market_clicks
+          WHERE post_id = $1
+            AND event_id = $2
+            AND user_id = $3
+            AND consumed_at IS NULL
+            AND consumed_by_market_update_id IS NULL
+            AND expires_at > NOW()
+          ORDER BY clicked_at DESC
+          LIMIT 1`,
+        [postId, eventId, userId]
+      );
+
+      if (duplicateResult.rows.length === 0) {
+        throw insertError;
+      }
+
+      return res.status(200).json({
+        success: true,
+        click: duplicateResult.rows[0]
+      });
+    }
 
     res.status(201).json({
       success: true,
