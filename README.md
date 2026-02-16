@@ -43,19 +43,27 @@ Intellacc is a prediction-market social network that combines a social feed, LMS
    prediction-engine/.env
    ```
 
-3. Start the stack.
+3. Start your local development stack (safe, isolated from production containers).
 
    ```sh
-   docker compose up -d
+   ./scripts/dev-stack.sh up
    ```
 
 4. Open the app.
 
-   Frontend: http://localhost:5173  
-   Backend API: http://localhost:3000  
-   Prediction engine: http://localhost:3001
+   Frontend: http://localhost:5175  
+   Backend API: http://localhost:3005  
+   Prediction engine: http://localhost:3006
+
+Production runs separately on ports 5173/3000/3001.
 
 ## Useful Commands
+
+- Local stack up: `./scripts/dev-stack.sh up`
+- Local stack down: `./scripts/dev-stack.sh down`
+- Local stack logs: `./scripts/dev-stack.sh logs`
+- Local stack status: `./scripts/dev-stack.sh status`
+- Production stack (from this repo): `docker compose up -d` (only if that's intentionally desired)
 
 - Logs: `docker logs -f intellacc_backend`
 - Logs: `docker logs -f intellacc_frontend`

@@ -1,6 +1,25 @@
 #!/bin/sh
 set -e
 
+intellacc_stack="${INTELLACC_STACK:-}"
+if [ "$intellacc_stack" != "production" ] && [ "$intellacc_stack" != "development" ]; then
+  echo "FATAL: INTELLACC_STACK must be one of: production | development"
+  echo "Refusing to start backend without explicit environment mode."
+  exit 1
+fi
+
+if [ "$intellacc_stack" = "development" ] && [ "$HOSTNAME" != "intellacc_backend_dev" ]; then
+  echo "FATAL: development stack must run as container intellacc_backend_dev."
+  echo "Current container: $HOSTNAME"
+  exit 1
+fi
+
+if [ "$intellacc_stack" = "production" ] && [ "$HOSTNAME" != "intellacc_backend" ]; then
+  echo "FATAL: production stack must run as container intellacc_backend."
+  echo "Current container: $HOSTNAME"
+  exit 1
+fi
+
 # Wait for Postgres to become available
 until pg_isready -h db -p 5432 >/dev/null 2>&1; do
   echo "Waiting for DB"

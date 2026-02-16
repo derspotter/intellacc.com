@@ -23,7 +23,7 @@ fi
 if ! docker ps | grep -q intellacc_db; then
     echo "❌ Database container is not running!"
     echo "Please start the database first with:"
-    echo "   docker compose -f docker-compose-dev.yml up -d"
+    echo "   ./scripts/dev-stack.sh up"
     exit 1
 fi
 
