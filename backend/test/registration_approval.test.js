@@ -142,6 +142,52 @@ describe('Admin registration approval flow', () => {
     expect(finalState.rows[0].is_approved).toBe(true);
   });
 
+  test('returns "link replaced" when an older token is presented', async () => {
+    const originalCooldown = process.env.REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES;
+    process.env.REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES = '0';
+
+    try {
+      const { user } = await createPendingUser();
+      const userResult = await db.query('SELECT id, is_approved FROM users WHERE email = $1', [user.email]);
+      expect(userResult.rows.length).toBe(1);
+
+      const userId = userResult.rows[0].id;
+      createdUserIds.push(userId);
+      expect(userResult.rows[0].is_approved).toBe(false);
+
+      const firstRequest = await createApprovalRequest(userId, user);
+      expect(firstRequest?.token).toBeTruthy();
+
+      await db.query(
+        'UPDATE registration_approval_tokens SET last_notified_at = NOW() - INTERVAL \'1 day\' WHERE user_id = $1',
+        [userId]
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+
+      const secondRequest = await createApprovalRequest(userId, user);
+      expect(secondRequest?.token).toBeTruthy();
+      expect(secondRequest.token).not.toBe(firstRequest.token);
+
+      const staleApproveRes = await request(app)
+        .get(`/api/admin/users/approve?token=${encodeURIComponent(firstRequest.token)}`);
+      expect(staleApproveRes.statusCode).toBe(400);
+      expect(staleApproveRes.text).toContain('Registration Approval');
+      expect(staleApproveRes.text).toContain('A newer approval link has been issued');
+
+      const approveRes = await request(app)
+        .get(`/api/admin/users/approve?token=${encodeURIComponent(secondRequest.token)}`);
+      expect(approveRes.statusCode).toBe(200);
+      expect(approveRes.text).toContain('Registration approved for user');
+    } finally {
+      if (originalCooldown === undefined) {
+        delete process.env.REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES;
+      } else {
+        process.env.REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES = originalCooldown;
+      }
+    }
+  });
+
   test('does not resend approval email within cooldown window', async () => {
     const { registerRes, user } = await createPendingUser();
 

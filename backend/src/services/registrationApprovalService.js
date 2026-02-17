@@ -301,8 +301,21 @@ const createApprovalRequest = async (userId, user) => {
   return { token, messageId: null, expiresAt, approverEmail };
 };
 
+const resolveFallbackApprovalState = async (userId) => {
+  const latestForUserResult = await db.query(`
+    SELECT id, user_id, status, expires_at
+    FROM registration_approval_tokens
+    WHERE user_id = $1
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [userId]);
+
+  return latestForUserResult.rows[0] || null;
+};
+
 const verifyApprovalToken = async (token) => {
-  const payload = jwt.verify(token, REGISTRATION_APPROVAL_SECRET);
+  const sanitizedToken = String(token).replace(/\s+/g, '');
+  const payload = jwt.verify(sanitizedToken, REGISTRATION_APPROVAL_SECRET);
 
   if (payload?.type !== 'registration_approval' || !payload?.userId) {
     throw new Error('Invalid approval token');
@@ -318,7 +331,7 @@ const verifyApprovalToken = async (token) => {
     throw new Error('Invalid approver email in token');
   }
 
-  const tokenHash = hashToken(token);
+  const tokenHash = hashToken(sanitizedToken);
   const approvalResult = await db.query(`
     SELECT id, user_id, status, expires_at
     FROM registration_approval_tokens
@@ -326,10 +339,35 @@ const verifyApprovalToken = async (token) => {
   `, [tokenHash]);
 
   if (approvalResult.rows.length === 0) {
+    const latestForUser = await resolveFallbackApprovalState(payload.userId);
+    if (!latestForUser) {
+      return {
+        success: false,
+        code: 'TOKEN_NOT_FOUND',
+        message: 'Approval token not found'
+      };
+    }
+
+    if (latestForUser.status === 'approved') {
+      return {
+        success: true,
+        userId: latestForUser.user_id,
+        alreadyApproved: true
+      };
+    }
+
+    if (latestForUser.status === 'pending') {
+      return {
+        success: false,
+        code: 'TOKEN_REPLACED',
+        message: 'A newer approval link has been issued. Please use the most recent email.'
+      };
+    }
+
     return {
       success: false,
-      code: 'TOKEN_NOT_FOUND',
-      message: 'Approval token not found'
+      code: 'TOKEN_EXPIRED',
+      message: 'This approval link has expired'
     };
   }
 
