@@ -25,6 +25,7 @@ const atprotoController = require('../controllers/atprotoController');
 const socialAuthController = require('../controllers/socialAuthController');
 const persuasiveAlphaController = require('../controllers/persuasiveAlphaController');
 const persuasiveAlphaService = require('../services/persuasiveAlphaService');
+const moderationController = require('../controllers/moderationController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
 const db = require('../db');
 const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
@@ -52,6 +53,10 @@ router.use('/devices', require('./device'));
 router.post("/users", userController.createUser);
 router.post("/users/register", userController.createUser); // Alias for registration
 router.get("/users/search", authenticateJWT, userController.searchUsers); // User search (before :id to avoid conflict)
+router.post('/users/:id/block', authenticateJWT, userController.blockUser);
+router.delete('/users/:id/block', authenticateJWT, userController.unblockUser);
+router.get('/users/:id/block', authenticateJWT, userController.getBlockStatus);
+router.get('/users/me/blocks', authenticateJWT, userController.getBlockedUsers);
 router.get('/users/master-key', authenticateJWT, userController.getMasterKey);
 router.post('/users/master-key', authenticateJWT, userController.setMasterKey);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
@@ -246,6 +251,9 @@ router.post("/scoring/time-weights", authenticateJWT, scoringController.calculat
 
 // Admin AI moderation routes
 router.get('/admin/ai-flags', authenticateJWT, aiModerationController.getFlaggedContent);
+router.post('/moderation/reports', authenticateJWT, moderationController.createReport);
+router.get('/admin/moderation/reports', authenticateJWT, requireAdmin, moderationController.getReports);
+router.patch('/admin/moderation/reports/:id', authenticateJWT, requireAdmin, moderationController.reviewReport);
 
 // Weekly Assignment Routes (admin-only for ops)
 router.post("/weekly/assign", authenticateJWT, requireAdmin, weeklyAssignmentController.assignWeeklyPredictions);
