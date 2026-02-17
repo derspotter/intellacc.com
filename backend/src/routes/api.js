@@ -389,6 +389,29 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
     }
 
     try {
+      const eventResult = await db.query(
+        'SELECT outcome, closing_date FROM events WHERE id = $1',
+        [eventIdNumber]
+      );
+
+      if (eventResult.rows.length === 0) {
+        return res.status(404).json({ message: 'Event not found' });
+      }
+
+      const { outcome, closing_date } = eventResult.rows[0];
+      if (outcome) {
+        return res.status(400).json({ error: 'Market resolved', event_id: eventIdNumber });
+      }
+
+      if (closing_date && new Date(closing_date).getTime() <= Date.now()) {
+        return res.status(400).json({ error: 'Market closed', event_id: eventIdNumber });
+      }
+    } catch (error) {
+      console.error('Error loading event lifecycle state:', error);
+      return res.status(500).json({ error: 'Failed to validate event state' });
+    }
+
+    try {
         client = await db.getPool().connect();
         await client.query('BEGIN');
         inTransaction = true;

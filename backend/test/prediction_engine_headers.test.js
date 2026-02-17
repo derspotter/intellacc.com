@@ -8,9 +8,10 @@ const bcrypt = require('bcryptjs');
 jest.setTimeout(10000);
 
 describe('Prediction engine proxy headers', () => {
-  let originalFetch;
-  let testUser;
-  let authToken;
+let originalFetch;
+let testUser;
+let authToken;
+let testEventId;
 
   beforeAll(async () => {
     // Create a test user with phone verification for the prediction routes
@@ -37,11 +38,21 @@ describe('Prediction engine proxy headers', () => {
       .post('/api/login')
       .send({ email, password: 'testpass123' });
     authToken = loginRes.body.token;
+
+    const eventResult = await db.query(
+      `INSERT INTO events (title, details, closing_date) 
+       VALUES ($1, $2, NOW() + INTERVAL '1 day') RETURNING id`,
+      ['Engine header test event', 'Event for prediction engine proxy tests']
+    );
+    testEventId = eventResult.rows[0].id;
   });
 
   afterAll(async () => {
     if (testUser) {
       await db.query('DELETE FROM users WHERE id = $1', [testUser.id]);
+    }
+    if (testEventId) {
+      await db.query('DELETE FROM events WHERE id = $1', [testEventId]);
     }
   });
 
@@ -59,7 +70,7 @@ describe('Prediction engine proxy headers', () => {
 
   test('market update proxy forwards engine token header', async () => {
     const res = await request(app)
-      .post('/api/events/123/update')
+      .post(`/api/events/${testEventId}/update`)
       .set('Authorization', `Bearer ${authToken}`)
       .send({ user_id: testUser.id, stake: 1, target_prob: 0.6 });
 
