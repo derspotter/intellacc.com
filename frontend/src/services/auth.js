@@ -425,6 +425,13 @@ export async function register(username, email, password) {
     }
     
     const user = await api.auth.register(username, email, password);
+    if (user?.requiresApproval) {
+      return {
+        success: true,
+        requiresApproval: true,
+        message: user.message
+      };
+    }
     return login(email, password);
   } catch (error) {
     console.error('Registration error:', error);

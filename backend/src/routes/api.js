@@ -51,6 +51,8 @@ router.use('/devices', require('./device'));
 // User Routes
 router.post("/users", userController.createUser);
 router.post("/users/register", userController.createUser); // Alias for registration
+router.get('/admin/users/approve', userController.approveRegistration);
+router.post('/admin/users/approve', userController.approveRegistration);
 router.get("/users/search", authenticateJWT, userController.searchUsers); // User search (before :id to avoid conflict)
 router.get('/users/master-key', authenticateJWT, userController.getMasterKey);
 router.post('/users/master-key', authenticateJWT, userController.setMasterKey);

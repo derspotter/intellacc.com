@@ -10,7 +10,9 @@ import auth from '../../services/auth';
  */
 const SignUpForm = () => {
   const submitting = van.state(false);
+  const stage = van.state('form'); // form | pending
   const error = van.state('');
+  const pendingMessage = van.state('');
   const validationErrors = van.state({});
 
   let usernameInputRef = null;
@@ -77,7 +79,16 @@ const SignUpForm = () => {
       const result = await auth.register(username, email, password);
       if (!result.success) {
         error.val = result.error || 'Registration failed';
+        return;
       }
+
+      if (result.requiresApproval) {
+        stage.val = 'pending';
+        pendingMessage.val = result.message || 'Registration is pending admin approval.';
+        return;
+      }
+
+      window.location.hash = 'home';
     } catch (err) {
       console.error('Registration error:', err);
       error.val = err.message || 'Registration failed';
@@ -86,13 +97,11 @@ const SignUpForm = () => {
     }
   };
 
-  return div({ class: 'signup-page' },
+  const renderForm = () => div({ class: 'signup-page' },
     div({ class: 'signup-container' }, [
       h1('Create Account'),
-
       () => error.val ?
         div({ class: 'error-message' }, error.val) : null,
-
       form({ onsubmit: handleSubmit, autocomplete: 'on' }, [
         div({ class: 'form-group' }, [
           label({ for: 'signup-username' }, 'Username'),
@@ -177,6 +186,27 @@ const SignUpForm = () => {
         ])
       ])
     ])
+  );
+
+  const renderPending = () => div({ class: 'signup-page' },
+    div({ class: 'signup-container' }, [
+      h1('Registration Submitted'),
+      div({
+        style: 'margin: 0.75rem 0; padding: 0.75rem; border-radius: 8px; background: rgba(34, 197, 94, 0.12); border: 1px solid #22c55e; color: #0f5132;'
+      }, pendingMessage.val),
+      p({ class: 'login-link' }, [
+        'Need another account? ',
+        a({ href: '#signup' }, 'Register another')
+      ]),
+      p({ class: 'login-link' }, [
+        'Already registered? ',
+        a({ href: '#login' }, 'Sign in now')
+      ])
+    ])
+  );
+
+  return div(
+    () => stage.val === 'pending' ? renderPending() : renderForm()
   );
 };
 

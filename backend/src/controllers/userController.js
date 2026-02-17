@@ -6,9 +6,15 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { generateToken } = require('../utils/jwt');
-const { isRegistrationEnabled, REGISTRATION_CLOSED_MESSAGE } = require('../utils/registration');
+const {
+  isRegistrationEnabled,
+  isRegistrationApprovalRequired,
+  REGISTRATION_CLOSED_MESSAGE,
+  REGISTRATION_APPROVAL_MESSAGE
+} = require('../utils/registration');
 const notificationService = require('../services/notificationService');
 const emailVerificationService = require('../services/emailVerificationService');
+const { createApprovalRequest, approveByToken } = require('../services/registrationApprovalService');
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
 
@@ -66,17 +72,50 @@ exports.createUser = async (req, res) => {
     }
     
     const hashedPassword = await bcrypt.hash(password, 10);
-    const result = await db.query(
-      'INSERT INTO users (username, email, password_hash, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, username, email, created_at',
-      [username, email, hashedPassword]
-    );
+    let approvalRequired = isRegistrationApprovalRequired();
+    const insertQuery = approvalRequired
+      ? 'INSERT INTO users (username, email, password_hash, is_approved, approved_at, created_at, updated_at) VALUES ($1, $2, $3, FALSE, NULL, NOW(), NOW()) RETURNING id, username, email, is_approved, created_at'
+      : 'INSERT INTO users (username, email, password_hash, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, username, email, is_approved, created_at';
+
+    let result;
+    try {
+      result = await db.query(
+        insertQuery,
+        [username, email, hashedPassword]
+      );
+    } catch (err) {
+      if (approvalRequired && err.code === '42703') {
+        approvalRequired = false;
+        const fallback = await db.query(
+          'INSERT INTO users (username, email, password_hash, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, username, email, FALSE as is_approved, created_at',
+          [username, email, hashedPassword]
+        );
+        result = fallback;
+      } else {
+        throw err;
+      }
+    }
 
     const newUser = result.rows[0];
+
+    if (approvalRequired) {
+      await createApprovalRequest(newUser.id, newUser).catch((err) => {
+        console.error(`[Signup] Failed to create admin approval request for user ${newUser.id}:`, err);
+      });
+    }
 
     // Send verification email (async, don't block response)
     emailVerificationService.sendVerificationEmail(newUser.id, newUser.email)
       .then(() => console.log(`[Signup] Verification email sent to ${newUser.email}`))
       .catch(err => console.error(`[Signup] Failed to send verification email:`, err));
+
+    if (approvalRequired) {
+      return res.status(201).json({
+        user: newUser,
+        requiresApproval: true,
+        message: REGISTRATION_APPROVAL_MESSAGE
+      });
+    }
 
     res.status(201).json({
       user: newUser,
@@ -190,6 +229,13 @@ exports.loginUser = async (req, res) => {
       return res.status(400).json({ message: 'Incorrect password' });
     }
 
+    if (user.is_approved === false) {
+      return res.status(403).json({
+        message: REGISTRATION_APPROVAL_MESSAGE,
+        requiresApproval: true
+      });
+    }
+
     // Use the centralized JWT utility to generate a token
     const token = generateToken({
       userId: user.id,
@@ -201,6 +247,87 @@ exports.loginUser = async (req, res) => {
     console.error(err);
     res.status(500).json({ message: 'Error logging in' });
   }
+};
+
+const renderApprovalPage = (message) => {
+  const safeMessage = String(message?.message || message || 'Invalid or expired approval request.').replace(/[&<>"]|'/g, (match) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[match]);
+
+  return `<!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset=\"UTF-8\" />
+        <title>Registration Approval</title>
+        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px; }
+          .card { max-width: 640px; margin: 0 auto; padding: 24px; border: 1px solid #ddd; border-radius: 8px; background: #f8f9fa; }
+          h1 { margin-top: 0; color: #111827; font-size: 1.4rem; }
+          p { color: #374151; }
+          .ok { color: #065f46; }
+          .err { color: #b91c1c; }
+        </style>
+      </head>
+      <body>
+        <div class=\"card\">
+          <h1>Registration Approval</h1>
+          <p class=\"${message?.success ? 'ok' : 'err'}\">${safeMessage}</p>
+          <p>
+            You can now return to the app:
+            <a href=\"${process.env.FRONTEND_URL || '/'}\">${(process.env.FRONTEND_URL || 'the app').replace(/"/g, '&quot;')}</a>.
+          </p>
+        </div>
+      </body>
+    </html>`;
+};
+
+// Approve a pending account from email link (no auth required).
+exports.approveRegistration = async (req, res) => {
+  const token = req.method === 'GET' ? req.query.token : req.body?.token;
+
+  const normalizedToken = String(token || '').trim();
+  if (!normalizedToken) {
+    const message = 'Approval token is required.';
+    if (req.accepts('html')) {
+      return res.status(400).type('html').send(renderApprovalPage({ success: false, message }));
+    }
+    return res.status(400).json({ message, code: 'TOKEN_REQUIRED' });
+  }
+
+  let result = null;
+  try {
+    result = await approveByToken(normalizedToken);
+  } catch (err) {
+    const message = err?.message || 'Failed to process registration approval.';
+    if (req.accepts('html')) {
+      return res.status(500).type('html').send(renderApprovalPage({ success: false, message }));
+    }
+    return res.status(500).json({ message });
+  }
+
+  if (!result.success) {
+    const message = result.message || 'Unable to process approval.';
+    const status = result.status || 400;
+    if (req.accepts('html')) {
+      return res.status(status).type('html').send(renderApprovalPage({ success: false, message }));
+    }
+    return res.status(status).json({ code: result.code || 'APPROVAL_FAILED', message });
+  }
+
+  const baseMessage = result.message || `Registration approved for user ${result.userId}.`;
+  const message = result.alreadyApproved
+    ? 'This registration request has already been approved.'
+    : baseMessage;
+  if (req.accepts('html')) {
+    return res.type('html').send(renderApprovalPage({ success: true, message }));
+  }
+
+  return res.json({ success: true, message, userId: result.userId });
 };
 
 // Get current user profile

@@ -66,6 +66,17 @@ const initTransporter = () => {
     return transporter;
 };
 
+const sendEmail = async ({ to, subject, html, text }) => {
+    const transport = initTransporter();
+    return transport.sendMail({
+        from: `"Intellacc" <${process.env.SMTP_FROM || 'noreply@intellacc.com'}>`,
+        to,
+        subject,
+        html,
+        text
+    });
+};
+
 /**
  * Generate a verification token for a user
  */
@@ -309,3 +320,5 @@ exports.getVerificationStatus = async (userId) => {
         payment_verified: parseInt(row.payment_verified) > 0
     };
 };
+
+exports.sendEmail = sendEmail;
