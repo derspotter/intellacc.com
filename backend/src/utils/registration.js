@@ -38,10 +38,20 @@ const getRegistrationApproverEmail = () => {
   return process.env.REGISTRATION_APPROVER_EMAIL || 'jayjag@posteo.de';
 };
 
+const getMaxPendingRegistrationApprovals = () => {
+  const rawValue = Number(process.env.REGISTRATION_APPROVAL_MAX_PENDING);
+  if (!Number.isFinite(rawValue)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor(rawValue));
+};
+
 module.exports = {
   REGISTRATION_CLOSED_MESSAGE,
   REGISTRATION_APPROVAL_MESSAGE,
   isRegistrationEnabled,
   isRegistrationApprovalRequired,
-  getRegistrationApproverEmail
+  getRegistrationApproverEmail,
+  getMaxPendingRegistrationApprovals
 };

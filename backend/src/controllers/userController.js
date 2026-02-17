@@ -10,7 +10,8 @@ const {
   isRegistrationEnabled,
   isRegistrationApprovalRequired,
   REGISTRATION_CLOSED_MESSAGE,
-  REGISTRATION_APPROVAL_MESSAGE
+  REGISTRATION_APPROVAL_MESSAGE,
+  getMaxPendingRegistrationApprovals
 } = require('../utils/registration');
 const notificationService = require('../services/notificationService');
 const emailVerificationService = require('../services/emailVerificationService');
@@ -73,6 +74,25 @@ exports.createUser = async (req, res) => {
     
     const hashedPassword = await bcrypt.hash(password, 10);
     let approvalRequired = isRegistrationApprovalRequired();
+
+    if (approvalRequired) {
+      const maxPendingApprovals = getMaxPendingRegistrationApprovals();
+      if (maxPendingApprovals > 0) {
+        const pendingApprovals = await db.query(
+          'SELECT COUNT(*)::int AS count FROM registration_approval_tokens WHERE status = $1',
+          ['pending']
+        );
+
+        const activePendingApprovals = pendingApprovals.rows[0]?.count || 0;
+        if (activePendingApprovals >= maxPendingApprovals) {
+          return res.status(429).json({
+            code: 'REGISTRATION_QUEUE_FULL',
+            message: `There is already ${activePendingApprovals} registration(s) waiting for approval. Please wait until one is approved before creating a new account.`
+          });
+        }
+      }
+    }
+
     const insertQuery = approvalRequired
       ? 'INSERT INTO users (username, email, password_hash, is_approved, approved_at, created_at, updated_at) VALUES ($1, $2, $3, FALSE, NULL, NOW(), NOW()) RETURNING id, username, email, is_approved, created_at'
       : 'INSERT INTO users (username, email, password_hash, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, username, email, is_approved, created_at';

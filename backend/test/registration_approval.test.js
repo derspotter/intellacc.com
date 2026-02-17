@@ -39,6 +39,7 @@ const createPendingUser = async () => {
 describe('Admin registration approval flow', () => {
   const createdUserIds = [];
   const sendEmailSpy = jest.spyOn(emailVerificationService, 'sendEmail');
+  const originalMaxPending = process.env.REGISTRATION_APPROVAL_MAX_PENDING;
 
   beforeAll(async () => {
     sendEmailSpy.mockClear();
@@ -69,11 +70,19 @@ describe('Admin registration approval flow', () => {
     `);
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sendEmailSpy.mockClear();
+    process.env.REGISTRATION_APPROVAL_MAX_PENDING = '0';
+    await db.query(`DELETE FROM registration_approval_tokens WHERE status = 'pending'`);
   });
 
   afterAll(async () => {
+    if (originalMaxPending === undefined) {
+      delete process.env.REGISTRATION_APPROVAL_MAX_PENDING;
+    } else {
+      process.env.REGISTRATION_APPROVAL_MAX_PENDING = originalMaxPending;
+    }
+
     if (!createdUserIds.length) return;
     const placeholders = createdUserIds.map((_, index) => `$${index + 1}`).join(', ');
     await db.query(`DELETE FROM users WHERE id IN (${placeholders})`, createdUserIds);
@@ -147,5 +156,35 @@ describe('Admin registration approval flow', () => {
     await createApprovalRequest(userId, user);
 
     expect(sendEmailSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test('blocks additional registrations when approval queue is at capacity', async () => {
+    const originalQueueLimit = process.env.REGISTRATION_APPROVAL_MAX_PENDING;
+    process.env.REGISTRATION_APPROVAL_MAX_PENDING = '1';
+
+    try {
+      const first = await createPendingUser();
+      const second = await createPendingUser();
+
+      expect(first.registerRes.statusCode).toBe(201);
+      expect(first.registerRes.body.requiresApproval).toBe(true);
+
+      const userResult = await db.query('SELECT id FROM users WHERE email = $1', [first.user.email]);
+      expect(userResult.rows.length).toBe(1);
+      createdUserIds.push(userResult.rows[0].id);
+
+      expect(second.registerRes.statusCode).toBe(429);
+      expect(second.registerRes.body.code).toBe('REGISTRATION_QUEUE_FULL');
+      expect(second.registerRes.body.message).toMatch(/already 1 registration/);
+
+      const secondUserResult = await db.query('SELECT id FROM users WHERE email = $1', [second.user.email]);
+      expect(secondUserResult.rows.length).toBe(0);
+    } finally {
+      if (originalQueueLimit === undefined) {
+        delete process.env.REGISTRATION_APPROVAL_MAX_PENDING;
+      } else {
+        process.env.REGISTRATION_APPROVAL_MAX_PENDING = originalQueueLimit;
+      }
+    }
   });
 });
