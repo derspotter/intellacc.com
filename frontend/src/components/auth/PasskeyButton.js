@@ -34,7 +34,7 @@ export default function PasskeyButton({ email, onSuccess, onError }) {
                 // If we got PRF output, attempt to unlock vault immediately
                 if (result.prfOutput) {
                     try {
-                        await vaultService.unlockWithPrf(result.prfOutput);
+                        await vaultService.unlockWithPrf(result.prfOutput, result.userId);
                         console.log('Vault unlocked via PRF');
                     } catch (e) {
                         console.warn('Vault PRF unlock failed:', e);

@@ -27,6 +27,35 @@ const MESSAGES_STORE_NAME = 'encrypted_messages';
 const MLS_GRANULAR_STORE_NAME = 'mls_granular_storage';
 const CONTACT_FINGERPRINTS_STORE = 'contact_fingerprints';
 
+const normalizePrfInput = (input) => {
+    if (input === null || typeof input === 'undefined') return null;
+    if (input instanceof Uint8Array) return input;
+    if (input instanceof ArrayBuffer) return new Uint8Array(input);
+    if (Array.isArray(input)) return new Uint8Array(input);
+
+    if (typeof input === 'string') {
+        const b64 = input.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+        try {
+            const binary = atob(padded);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return bytes;
+        } catch (e) {
+            return new TextEncoder().encode(input);
+        }
+    }
+
+    return null;
+};
+
+const serializePrfInput = (input) => {
+    const bytes = normalizePrfInput(input);
+    return bytes ? Array.from(bytes) : null;
+};
+
 class VaultService {
     constructor() {
         this.db = null;
@@ -1085,10 +1114,32 @@ class VaultService {
     }
     
     // PRF placeholders
-    async getPrfInput() { return null; }
-    async unlockWithPrf(prfOutput) {
-        const userId = vaultStore.userId;
-        if (!userId) throw new Error('User ID required');
+    async getPrfInput() {
+        await this.initDB();
+        const deviceIds = await this.getLocalDeviceIds({ includePending: true });
+        const seen = new Set();
+
+        for (const recordId of [this.deviceId, ...deviceIds]) {
+            if (!recordId || seen.has(recordId)) continue;
+            seen.add(recordId);
+
+            const record = await new Promise((resolve) => {
+                const tx = this.db.transaction([KEYSTORE_STORE_NAME], 'readonly');
+                const req = tx.objectStore(KEYSTORE_STORE_NAME).get(recordId);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => resolve(null);
+            });
+
+            if (record?.deviceKeyWrapped?.prf?.input) {
+                return normalizePrfInput(record.deviceKeyWrapped.prf.input);
+            }
+        }
+
+        return null;
+    }
+    async unlockWithPrf(prfOutput, userId = null) {
+        const effectiveUserId = userId || vaultStore.userId;
+        if (!effectiveUserId) throw new Error('User ID required');
 
         // 1. Get Master Key using PRF
         const deviceIds = await this.getLocalDeviceIds();
@@ -1128,13 +1179,13 @@ class VaultService {
         // 2. Find and Unlock Local Key using PRF
         // Optimistic check
         if (this.deviceId) {
-            if (await this.tryUnlockRecordPrf(this.deviceId, userId, prfOutput)) return true;
+            if (await this.tryUnlockRecordPrf(this.deviceId, effectiveUserId, prfOutput)) return true;
         }
         
         const records = await this.getLocalDeviceIds();
         for (const id of records) {
             if (id === this.deviceId) continue;
-            if (await this.tryUnlockRecordPrf(id, userId, prfOutput)) return true;
+            if (await this.tryUnlockRecordPrf(id, effectiveUserId, prfOutput)) return true;
         }
         
         throw new Error('PRF Unlock Failed (Local)');
@@ -1189,7 +1240,7 @@ class VaultService {
         });
     }
 
-    async setupPrfWrapping(prfOutput, credentialId) {
+    async setupPrfWrapping(prfOutput, credentialId, prfInput = null) {
         if (!this.masterKey || !this.localKey || !this.deviceId) throw new Error('Vault locked');
         
         // 1. Wrap Master Key
@@ -1234,7 +1285,8 @@ class VaultService {
             credentialId,
             salt: Array.from(lkSalt),
             iv: wrappedLK.iv,
-            ciphertext: wrappedLK.ciphertext
+            ciphertext: wrappedLK.ciphertext,
+            input: serializePrfInput(prfInput)
         };
         record.updatedAt = Date.now();
         await new Promise(r => store.put(record).onsuccess = r);

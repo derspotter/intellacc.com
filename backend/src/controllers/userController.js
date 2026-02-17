@@ -772,7 +772,10 @@ exports.getMasterKey = async (req, res) => {
     // So they MUST Link first.
     
     // Check key last updated time
-    const keyRes = await db.query('SELECT wrapped_key, salt, iv, updated_at FROM user_master_keys WHERE user_id = $1', [userId]);
+    const keyRes = await db.query(
+        'SELECT wrapped_key, salt, iv, wrapped_key_prf, salt_prf, iv_prf, updated_at FROM user_master_keys WHERE user_id = $1',
+        [userId]
+    );
     if (keyRes.rows.length === 0) return res.status(404).json({ error: 'Key not found' }); // User has no key (first device)
     
     const masterKey = keyRes.rows[0];

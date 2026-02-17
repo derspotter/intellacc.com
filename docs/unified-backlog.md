@@ -54,8 +54,8 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   username + bio editing exists; avatar/display-name/visibility settings are still missing.
 - `Open` Two-factor auth (TOTP):
   no TOTP setup/login/backup-code flow found.
-- `Partial` Passkey PRF vault unlock:
-  WebAuthn/passkey management exists, but PRF flow is incomplete (`getPrfInput()` placeholder still returns `null`).
+- `Done` Passkey PRF vault unlock:
+  WebAuthn/passkey management now persists PRF seed input, uses server-verified PRF output in passkey login responses, and supports local PRF unlock flow.
 - `Open` MLS proposal wrappers:
   `propose_add_member`, `propose_remove_member`, `propose_self_update`, `add_members_without_update`, `self_update_with_new_signer` wrappers not implemented in app-facing JS.
 - `Open` MLS CommitBuilder JS wrapper:

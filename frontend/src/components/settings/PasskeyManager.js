@@ -35,10 +35,16 @@ export default function PasskeyManager() {
             const prfInput = await webauthnService.isAvailable() ? await vaultService.getPrfInput() : null;
 
             const result = await webauthnService.register(name, prfInput);
-            
-            // If PRF supported and we are unlocked, setup wrapping
-            if (result.prfOutput) {
-                await vaultService.setupPrfWrapping(result.prfOutput, result.credentialID);
+
+            // If PRF supported and vault is currently unlocked, persist PRF wrapping.
+            // If the vault is locked, registration still succeeds and PRF wrapping can be
+            // established later after an explicit unlock flow.
+            if (result.prfOutput && vaultService.isUnlocked()) {
+                try {
+                    await vaultService.setupPrfWrapping(result.prfOutput, result.credentialID, result.prfInput);
+                } catch (e) {
+                    console.warn('Passkey added, but PRF wrapping was not updated:', e);
+                }
             }
 
             await loadCredentials();
