@@ -15,6 +15,7 @@ const REGISTRATION_APPROVAL_SECRET =
   'dev-registration-approval-secret';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const APPROVAL_PATH = '/api/admin/users/approve';
+const REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES = Number(process.env.REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES || 10);
 
 const getExpiryDate = () => {
   const ttlMs = Math.max(1, REGISTRATION_APPROVAL_TTL_HOURS) * 60 * 60 * 1000;
@@ -37,96 +38,166 @@ const buildApprovalToken = (userId, approverEmail) => {
   );
 };
 
-const toHtml = (text) => {
-  const safeText = String(text || '').replace(/[&<>"]|'/g, (match) => ({
+const escapeHtml = (value) => {
+  return String(value || '').replace(/[&<>"]|'/g, (match) => ({
     '&': '&amp;',
     '<': '&lt;',
     '>': '&gt;',
     '"': '&quot;',
     "'": '&#39;'
   })[match]);
+};
 
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
-        .container { max-width: 640px; margin: 0 auto; padding: 20px; }
-        .card { background: #f8f9fa; border: 1px solid #ddd; border-radius: 8px; padding: 20px; }
-        .button {
-          display: inline-block;
-          background: #2563eb;
-          color: #fff;
-          text-decoration: none;
-          padding: 10px 16px;
-          border-radius: 4px;
-          font-weight: 600;
-          margin: 10px 0;
-        }
-        .muted {
-          color: #6b7280;
-          font-size: 12px;
-          word-break: break-all;
-          margin-top: 8px;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <h2>Intellacc Registration Approval</h2>
-        <div class="card">
-          <p>${safeText}</p>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
+const toHtml = ({ username, email, userId, approvalUrl, ttlHours }) => {
+  const safeUsername = escapeHtml(username || '(no username)');
+  const safeEmail = escapeHtml(email || 'no email');
+  const safeApprovalUrl = escapeHtml(approvalUrl);
+
+  return `<!doctype html>
+<html>
+<body style="margin:0; padding:0; background:#f8fafc; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#111827;">
+  <div style="max-width: 640px; margin: 0 auto; padding: 24px;">
+    <h2 style="margin:0 0 12px 0;">Intellacc Registration Approval</h2>
+    <p style="margin:0 0 12px 0; color:#1f2937;">A new user account is waiting for approval.</p>
+    <div style="background:#ffffff; border:1px solid #e5e7eb; border-radius:8px; padding:16px;">
+      <div style="margin-bottom: 12px;">User: <strong>${safeUsername}</strong></div>
+      <div style="margin-bottom: 12px;">Email: <strong>${safeEmail}</strong></div>
+      <div style="margin-bottom: 12px;">User ID: <strong>${Number(userId)}</strong></div>
+    </div>
+    <p style="margin:16px 0;">
+      <a href="${safeApprovalUrl}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 18px;border-radius:6px;font-weight:600;">Approve this user</a>
+    </p>
+    <div style="color:#6b7280; font-size:13px; line-height:1.5;">
+      <p style="margin:0 0 10px 0;">If the button does not work, open this link:</p>
+      <p style="margin:0 0 8px 0; word-break:break-all;">${safeApprovalUrl}</p>
+      <p style="margin:0 0 0 0;">This link expires in ${ttlHours} hour(s).</p>
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
+const toText = ({ username, email, userId, approvalUrl, ttlHours }) => {
+  return [
+    'Intellacc Registration Approval',
+    '',
+    'A new user account is waiting for approval.',
+    `User: ${username || '(no username)'}`,
+    `Email: ${email || 'no email'}`,
+    `User ID: ${userId}`,
+    '',
+    'Approve this user:',
+    approvalUrl,
+    '',
+    `This link expires in ${ttlHours} hour(s).`
+  ].join('\n');
 };
 
 const formatAdminApprovalMessage = ({ approverEmail, username, email, token, userId }) => {
   const approvalUrl = `${FRONTEND_URL}${APPROVAL_PATH}?token=${encodeURIComponent(token)}`;
-  const details = `New user account request: ${username || '(no username)'} (${email || 'no email'}), ID: ${userId}.`;
+  const ttlHours = Math.max(1, REGISTRATION_APPROVAL_TTL_HOURS);
   const subject = `Intellacc: New user pending approval: ${username}`;
-  const text = `
-You have a new user registration request on Intellacc.
 
-${details}
+  const text = toText({
+    username,
+    email,
+    userId,
+    approvalUrl,
+    ttlHours
+  });
 
-Approve user: ${approvalUrl}
-
-This link expires in ${Math.max(1, REGISTRATION_APPROVAL_TTL_HOURS)} hour(s).
-  `.trim();
-
-  const html = toHtml(`
-    <p>You have a new user registration request on Intellacc.</p>
-    <p>${details}</p>
-    <p><a class="button" href="${approvalUrl}">Approve this user</a></p>
-    <p class="muted">If the button does not work, open this link: ${approvalUrl}</p>
-    <p class="muted">This link expires in ${Math.max(1, REGISTRATION_APPROVAL_TTL_HOURS)} hour(s).</p>
-  `);
+  const html = toHtml({
+    username,
+    email,
+    userId,
+    approvalUrl,
+    ttlHours
+  });
 
   return { subject, text, html, approverEmail };
 };
 
 const createApprovalRequest = async (userId, user) => {
   const approverEmail = getRegistrationApproverEmail();
-  const token = buildApprovalToken(userId, approverEmail);
-  const tokenHash = hashToken(token);
-  const expiresAt = getExpiryDate();
+  let token = null;
+  let expiresAt = null;
+  let shouldSendNotification = true;
+  const cooldownMs = Math.max(0, REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES) * 60 * 1000;
 
-  await db.query(`
-    DELETE FROM registration_approval_tokens
-    WHERE user_id = $1
-      AND status = 'pending'
-  `, [userId]);
+  try {
+    const pending = await db.query(`
+      SELECT id, token, token_hash, approver_email, created_at, expires_at
+      FROM registration_approval_tokens
+      WHERE user_id = $1
+        AND status = 'pending'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [userId]);
 
-  await db.query(`
-    INSERT INTO registration_approval_tokens (user_id, token_hash, approver_email, status, expires_at)
-    VALUES ($1, $2, $3, 'pending', $4)
-  `, [userId, tokenHash, approverEmail, expiresAt]);
+    if (pending.rows.length > 0) {
+      const existing = pending.rows[0];
+      const createdAt = new Date(existing.created_at);
+      const isRecent = Number.isFinite(createdAt.getTime()) &&
+        Date.now() - createdAt.getTime() <= cooldownMs;
+      const isValidToken = existing.token && (!existing.expires_at || new Date(existing.expires_at) > new Date());
+
+      expiresAt = existing.expires_at;
+
+      if (isRecent && isValidToken) {
+        token = existing.token;
+        shouldSendNotification = false;
+      } else {
+        token = buildApprovalToken(userId, existing.approver_email || approverEmail);
+        const newExpiresAt = getExpiryDate();
+        expiresAt = newExpiresAt;
+
+        if (existing.expires_at && new Date(existing.expires_at) > new Date()) {
+          await db.query(`
+            UPDATE registration_approval_tokens
+            SET token = $1,
+                token_hash = $2,
+                approver_email = COALESCE(NULLIF($3, ''), approver_email),
+                expires_at = $4
+            WHERE id = $5
+          `, [token, hashToken(token), existing.approver_email || approverEmail, newExpiresAt, existing.id]);
+        } else {
+          await db.query(`DELETE FROM registration_approval_tokens WHERE user_id = $1 AND status = 'pending'`, [userId]);
+        }
+      }
+    }
+  } catch (err) {
+    if (err.code !== '42703') {
+      throw err;
+    }
+  }
+
+  if (!token) {
+    token = buildApprovalToken(userId, approverEmail);
+    expiresAt = getExpiryDate();
+    const tokenHash = hashToken(token);
+
+    await db.query(`
+      DELETE FROM registration_approval_tokens
+      WHERE user_id = $1
+        AND status = 'pending'
+    `, [userId]);
+
+    try {
+      await db.query(`
+        INSERT INTO registration_approval_tokens (user_id, token_hash, approver_email, status, expires_at, token)
+        VALUES ($1, $2, $3, 'pending', $4, $5)
+      `, [userId, tokenHash, approverEmail, expiresAt, token]);
+    } catch (err) {
+      if (err.code === '42703') {
+        await db.query(`
+          INSERT INTO registration_approval_tokens (user_id, token_hash, approver_email, status, expires_at)
+          VALUES ($1, $2, $3, 'pending', $4)
+        `, [userId, tokenHash, approverEmail, expiresAt]);
+      } else {
+        throw err;
+      }
+    }
+  }
 
   const message = formatAdminApprovalMessage({
     approverEmail,
@@ -136,12 +207,14 @@ const createApprovalRequest = async (userId, user) => {
     userId
   });
 
-  await emailVerificationService.sendEmail({
-    to: approverEmail,
-    subject: message.subject,
-    html: message.html,
-    text: message.text
-  });
+  if (shouldSendNotification) {
+    await emailVerificationService.sendEmail({
+      to: approverEmail,
+      subject: message.subject,
+      html: message.html,
+      text: message.text
+    });
+  }
 
   return { token, messageId: null, expiresAt, approverEmail };
 };
@@ -217,12 +290,12 @@ const verifyApprovalToken = async (token) => {
   `, [approvalRow.id]);
 
   try {
-  await db.query(`
-    UPDATE users
-    SET is_approved = true,
-        approved_at = NOW()
-    WHERE id = $1
-  `, [approvalRow.user_id]);
+    await db.query(`
+      UPDATE users
+      SET is_approved = true,
+          approved_at = NOW()
+      WHERE id = $1
+    `, [approvalRow.user_id]);
   } catch (err) {
     if (err.code !== '42703') {
       throw err;

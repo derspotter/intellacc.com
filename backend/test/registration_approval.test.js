@@ -12,6 +12,7 @@ jest.mock('../src/utils/registration', () => {
 const { app } = require('../src/index');
 const db = require('../src/db');
 const { createApprovalRequest } = require('../src/services/registrationApprovalService');
+const emailVerificationService = require('../src/services/emailVerificationService');
 
 jest.setTimeout(30000);
 
@@ -37,8 +38,10 @@ const createPendingUser = async () => {
 
 describe('Admin registration approval flow', () => {
   const createdUserIds = [];
+  const sendEmailSpy = jest.spyOn(emailVerificationService, 'sendEmail');
 
   beforeAll(async () => {
+    sendEmailSpy.mockClear();
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT TRUE`);
     await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP`);
     await db.query(`UPDATE users SET is_approved = TRUE WHERE is_approved IS NULL`);
@@ -56,6 +59,14 @@ describe('Admin registration approval flow', () => {
           CHECK (status IN ('pending', 'approved', 'expired'))
       )
     `);
+    await db.query(`
+      ALTER TABLE registration_approval_tokens
+      ADD COLUMN IF NOT EXISTS token TEXT
+    `);
+  });
+
+  beforeEach(() => {
+    sendEmailSpy.mockClear();
   });
 
   afterAll(async () => {
@@ -116,5 +127,21 @@ describe('Admin registration approval flow', () => {
     const finalState = await db.query('SELECT is_approved FROM users WHERE id = $1', [userId]);
     expect(finalState.rows.length).toBe(1);
     expect(finalState.rows[0].is_approved).toBe(true);
+  });
+
+  test('does not resend approval email within cooldown window', async () => {
+    const { registerRes, user } = await createPendingUser();
+
+    expect(registerRes.statusCode).toBe(201);
+
+    const userResult = await db.query('SELECT id FROM users WHERE email = $1', [user.email]);
+    expect(userResult.rows.length).toBe(1);
+    const userId = userResult.rows[0].id;
+    createdUserIds.push(userId);
+
+    await createApprovalRequest(userId, user);
+    await createApprovalRequest(userId, user);
+
+    expect(sendEmailSpy).toHaveBeenCalledTimes(1);
   });
 });

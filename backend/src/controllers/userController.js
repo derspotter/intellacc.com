@@ -105,9 +105,12 @@ exports.createUser = async (req, res) => {
     }
 
     // Send verification email (async, don't block response)
-    emailVerificationService.sendVerificationEmail(newUser.id, newUser.email)
-      .then(() => console.log(`[Signup] Verification email sent to ${newUser.email}`))
-      .catch(err => console.error(`[Signup] Failed to send verification email:`, err));
+    // In admin-approval mode, verification is done after login approval.
+    if (!approvalRequired) {
+      emailVerificationService.sendVerificationEmail(newUser.id, newUser.email)
+        .then(() => console.log(`[Signup] Verification email sent to ${newUser.email}`))
+        .catch(err => console.error(`[Signup] Failed to send verification email:`, err));
+    }
 
     if (approvalRequired) {
       return res.status(201).json({
