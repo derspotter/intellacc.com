@@ -9,6 +9,25 @@ const { getRequestBaseUrl } = require('../services/activitypub/url');
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
 
+const getViewerId = (req) => {
+  const rawViewerId = req.user?.id ?? req.user?.userId;
+  const parsed = parseInt(rawViewerId, 10);
+  return Number.isInteger(parsed) ? parsed : null;
+};
+
+const isAdminViewer = (req) => req.user?.role === 'admin';
+
+const buildPostVisibilityClause = (viewerIdParamName = '$3') => {
+  return `
+       AND p.is_hidden = FALSE
+       AND (${viewerIdParamName}::int IS NULL OR NOT EXISTS (
+         SELECT 1
+         FROM user_blocks ub
+         WHERE (ub.blocker_id = p.user_id AND ub.blocked_user_id = ${viewerIdParamName}::int)
+            OR (ub.blocker_id = ${viewerIdParamName}::int AND ub.blocked_user_id = p.user_id)
+       ))`;
+};
+
 const removeAttachmentFile = (storagePath) => {
   if (!storagePath) return;
   const filePath = path.join(UPLOADS_DIR, storagePath);
@@ -31,6 +50,7 @@ exports.createPost = async (req, res) => {
 
     // Get user ID from authenticated user
     const userId = req.user.id;
+    const viewerId = isAdminViewer(req) ? null : getViewerId(req);
 
     // Default values for a regular post
     let parentId = null;
@@ -41,7 +61,12 @@ exports.createPost = async (req, res) => {
     // If parent_id exists, this is a comment
     if (parent_id) {
       // Verify parent exists and get its depth
-      const parentResult = await db.query('SELECT * FROM posts WHERE id = $1', [parent_id]);
+      const parentResult = await db.query(
+        `SELECT * FROM posts p
+         WHERE p.id = $1
+         ${buildPostVisibilityClause('$2')}`,
+        [parent_id, viewerId]
+      );
 
       if (parentResult.rows.length === 0) {
         return res.status(404).json({ message: 'Parent post not found' });
@@ -183,6 +208,7 @@ exports.getPosts = async (req, res) => {
   console.log("--- ENTERING getPosts function ---"); // Add entry log
   // Public feed endpoint: when unauthenticated, keep liked_by_user false.
   const userId = req.user?.id || null;
+  const viewerId = isAdminViewer(req) ? null : userId;
   try {
     console.log("getPosts called with userId:", userId);
 
@@ -227,10 +253,11 @@ exports.getPosts = async (req, res) => {
        ) ai ON true
        WHERE p.parent_id IS NULL
          AND p.is_comment = FALSE
+         ${buildPostVisibilityClause('$1')}
          ${cursor ? 'AND (p.created_at, p.id) < ($3, $4)' : ''}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $2`,
-      cursor ? [userId, limit + 1, cursor.createdAt, cursor.id] : [userId, limit + 1]
+      cursor ? [viewerId, limit + 1, cursor.createdAt, cursor.id] : [viewerId, limit + 1]
     );
 
     // Log the raw result which should now include reputation data
@@ -262,6 +289,7 @@ exports.getPosts = async (req, res) => {
 // Retrieve a single post by ID
 exports.getPostById = async (req, res) => {
   const postId = req.params.id;
+  const viewerId = isAdminViewer(req) ? null : getViewerId(req);
   try {
     const result = await db.query(
       `SELECT p.*,
@@ -276,9 +304,10 @@ exports.getPostById = async (req, res) => {
            AND content_id = p.id
          ORDER BY analyzed_at DESC
          LIMIT 1
-       ) ai ON true
-       WHERE p.id = $1`,
-      [postId]
+        ) ai ON true
+       WHERE p.id = $1
+         ${buildPostVisibilityClause('$2')}`,
+      [postId, viewerId]
     );
     if (result.rows.length === 0) {
       return res.status(404).send('Post not found');
@@ -467,6 +496,7 @@ exports.deletePost = async (req, res) => {
 exports.getFeed = async (req, res) => {
   console.log("--- ENTERING getFeed function ---"); // Add entry log
   const userId = req.user.id; // Using standardized user object
+  const viewerId = isAdminViewer(req) ? null : userId;
 
   try {
     console.log("getFeed called with userId:", userId);
@@ -518,10 +548,11 @@ exports.getFeed = async (req, res) => {
        OR p.user_id = $1)
        AND p.parent_id IS NULL
        AND p.is_comment = FALSE
+       ${buildPostVisibilityClause('$1')}
        ${cursor ? 'AND (p.created_at, p.id) < ($3, $4)' : ''}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $2`,
-      cursor ? [userId, limit + 1, cursor.createdAt, cursor.id] : [userId, limit + 1]
+      cursor ? [viewerId, limit + 1, cursor.createdAt, cursor.id] : [viewerId, limit + 1]
     );
 
     // Log the raw result which should include reputation data
@@ -551,13 +582,19 @@ exports.getFeed = async (req, res) => {
 // Get comments for a post (direct replies only)
 exports.getComments = async (req, res) => {
   const postId = req.params.id;
+  const viewerId = isAdminViewer(req) ? null : getViewerId(req);
 
   console.log(`--- GETTING COMMENTS for post ID: ${postId} ---`);
 
   try {
     // Verify post exists
     console.log(`Checking if post ${postId} exists...`);
-    const postCheck = await db.query('SELECT * FROM posts WHERE id = $1', [postId]);
+    const postCheck = await db.query(
+      `SELECT * FROM posts p
+       WHERE p.id = $1
+       ${buildPostVisibilityClause('$2')}`,
+      [postId, viewerId]
+    );
 
     console.log(`Post check result: Found ${postCheck.rows.length} post(s)`);
 
@@ -585,8 +622,9 @@ exports.getComments = async (req, res) => {
            LIMIT 1
          ) ai ON true
          WHERE p.parent_id = $1
+         ${buildPostVisibilityClause('$2')}
          ORDER BY p.created_at ASC`,
-        [postId]
+        [postId, viewerId]
       );
 
       console.log(`Found ${result.rows.length} comments for post ${postId}`);
@@ -606,10 +644,16 @@ exports.getComments = async (req, res) => {
 exports.getCommentTree = async (req, res) => {
   const postId = req.params.id;
   const maxDepth = req.query.maxDepth ? parseInt(req.query.maxDepth, 10) : 10; // Default max depth to 10
+  const viewerId = isAdminViewer(req) ? null : getViewerId(req);
 
   try {
     // Verify post exists
-    const postCheck = await db.query('SELECT * FROM posts WHERE id = $1', [postId]);
+    const postCheck = await db.query(
+      `SELECT * FROM posts p
+       WHERE p.id = $1
+       ${buildPostVisibilityClause('$2')}`,
+      [postId, viewerId]
+    );
 
     if (postCheck.rows.length === 0) {
       return res.status(404).json({ message: 'Post not found' });
@@ -617,7 +661,7 @@ exports.getCommentTree = async (req, res) => {
 
     // Get all comments for this post with their depth, up to maxDepth
     const result = await db.query(
-      `WITH RECURSIVE comment_tree AS (
+        `WITH RECURSIVE comment_tree AS (
          -- Base case: direct replies to the post
          SELECT 
            p.*, 
@@ -626,11 +670,12 @@ exports.getCommentTree = async (req, res) => {
          FROM posts p
          JOIN users u ON p.user_id = u.id
          WHERE p.parent_id = $1
+         ${buildPostVisibilityClause('$3')}
          
          UNION ALL
          
          -- Recursive case: replies to comments
-         SELECT 
+       SELECT 
            p.*, 
            u.username,
            ct.level + 1
@@ -638,6 +683,7 @@ exports.getCommentTree = async (req, res) => {
          JOIN users u ON p.user_id = u.id
          JOIN comment_tree ct ON p.parent_id = ct.id
          WHERE ct.level < $2
+         ${buildPostVisibilityClause('$3')}
        )
        SELECT ct.*,
               ai.ai_probability,
@@ -652,7 +698,7 @@ exports.getCommentTree = async (req, res) => {
          LIMIT 1
        ) ai ON true
        ORDER BY level ASC, created_at ASC`,
-      [postId, maxDepth]
+      [postId, maxDepth, viewerId]
     );
 
     // Organize comments into a nested structure

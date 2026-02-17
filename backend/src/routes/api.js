@@ -25,6 +25,7 @@ const atprotoController = require('../controllers/atprotoController');
 const socialAuthController = require('../controllers/socialAuthController');
 const persuasiveAlphaController = require('../controllers/persuasiveAlphaController');
 const persuasiveAlphaService = require('../services/persuasiveAlphaService');
+const moderationController = require('../controllers/moderationController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
 const db = require('../db');
 const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
@@ -54,6 +55,10 @@ router.post("/users/register", userController.createUser); // Alias for registra
 router.get('/admin/users/approve', userController.approveRegistration);
 router.post('/admin/users/approve', userController.approveRegistration);
 router.get("/users/search", authenticateJWT, userController.searchUsers); // User search (before :id to avoid conflict)
+router.post('/users/:id/block', authenticateJWT, userController.blockUser);
+router.delete('/users/:id/block', authenticateJWT, userController.unblockUser);
+router.get('/users/:id/block', authenticateJWT, userController.getBlockStatus);
+router.get('/users/me/blocks', authenticateJWT, userController.getBlockedUsers);
 router.get('/users/master-key', authenticateJWT, userController.getMasterKey);
 router.post('/users/master-key', authenticateJWT, userController.setMasterKey);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
@@ -248,6 +253,9 @@ router.post("/scoring/time-weights", authenticateJWT, scoringController.calculat
 
 // Admin AI moderation routes
 router.get('/admin/ai-flags', authenticateJWT, aiModerationController.getFlaggedContent);
+router.post('/moderation/reports', authenticateJWT, moderationController.createReport);
+router.get('/admin/moderation/reports', authenticateJWT, requireAdmin, moderationController.getReports);
+router.patch('/admin/moderation/reports/:id', authenticateJWT, requireAdmin, moderationController.reviewReport);
 
 // Weekly Assignment Routes (admin-only for ops)
 router.post("/weekly/assign", authenticateJWT, requireAdmin, weeklyAssignmentController.assignWeeklyPredictions);
@@ -386,6 +394,29 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
 
     if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
         return res.status(400).json({ message: 'Invalid event id' });
+    }
+
+    try {
+      const eventResult = await db.query(
+        'SELECT outcome, closing_date FROM events WHERE id = $1',
+        [eventIdNumber]
+      );
+
+      if (eventResult.rows.length === 0) {
+        return res.status(404).json({ message: 'Event not found' });
+      }
+
+      const { outcome, closing_date } = eventResult.rows[0];
+      if (outcome) {
+        return res.status(400).json({ error: 'Market resolved', event_id: eventIdNumber });
+      }
+
+      if (closing_date && new Date(closing_date).getTime() <= Date.now()) {
+        return res.status(400).json({ error: 'Market closed', event_id: eventIdNumber });
+      }
+    } catch (error) {
+      console.error('Error loading event lifecycle state:', error);
+      return res.status(500).json({ error: 'Failed to validate event state' });
     }
 
     try {

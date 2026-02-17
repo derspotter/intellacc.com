@@ -41,6 +41,8 @@ const removeChallenge = (challenge) => {
   challengeStore.delete(challenge);
 };
 
+const toBase64URL = (value) => Buffer.from(value).toString('base64url');
+
 // --- Registration ---
 
 exports.generateRegistrationOptions = async (req, res) => {
@@ -136,7 +138,10 @@ exports.verifyRegistration = async (req, res) => {
       );
 
       removeChallenge(expectedChallenge);
-      res.json({ verified: true });
+      res.json({
+          verified: true,
+          credentialID: toBase64URL(credentialID)
+      });
     } else {
       res.status(400).json({ verified: false, error: 'Verification failed' });
     }
@@ -226,6 +231,7 @@ exports.verifyAuthentication = async (req, res) => {
     if (verification.verified) {
         const { authenticationInfo } = verification;
         const { newCounter } = authenticationInfo;
+        const prfOutput = authenticationInfo.authenticatorExtensionResults?.prf?.results?.first;
         
         await db.query('UPDATE webauthn_credentials SET counter = $1, last_used_at = NOW() WHERE id = $2', [newCounter, credential.id]);
         
@@ -235,7 +241,12 @@ exports.verifyAuthentication = async (req, res) => {
         });
         
         removeChallenge(expectedChallenge);
-        res.json({ verified: true, token, userId: user.id });
+        res.json({
+            verified: true,
+            token,
+            userId: user.id,
+            prfOutput: prfOutput ? Array.from(new Uint8Array(prfOutput)) : null
+        });
     } else {
         res.status(400).json({ verified: false, error: 'Verification failed' });
     }

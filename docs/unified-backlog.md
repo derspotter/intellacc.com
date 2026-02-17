@@ -46,16 +46,16 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   low-level `selfUpdate()` exists, but no periodic scheduler and no manual "Refresh Keys" settings UI found.
 - `Partial` MLS staged-welcome inspection UI:
   pending invite accept/reject exists, but member fingerprint inspection before acceptance is still missing.
-- `Partial` Market lifecycle tests:
-  resolved-market rejection is covered in prediction-engine integration tests, but explicit closed-market rejection integration coverage is still missing.
+- `Done` Market lifecycle tests:
+  backend coverage now verifies closed-market and resolved-market trade rejection in `/api/events/:eventId/update` plus open-market pass-through behavior.
 
 ## Priority 2 - Medium
 - `Partial` Profile editing:
   username + bio editing exists; avatar/display-name/visibility settings are still missing.
 - `Open` Two-factor auth (TOTP):
   no TOTP setup/login/backup-code flow found.
-- `Partial` Passkey PRF vault unlock:
-  WebAuthn/passkey management exists, but PRF flow is incomplete (`getPrfInput()` placeholder still returns `null`).
+- `Done` Passkey PRF vault unlock:
+  WebAuthn/passkey management now persists PRF seed input, uses server-verified PRF output in passkey login responses, and supports local PRF unlock flow.
 - `Open` MLS proposal wrappers:
   `propose_add_member`, `propose_remove_member`, `propose_self_update`, `add_members_without_update`, `self_update_with_new_signer` wrappers not implemented in app-facing JS.
 - `Open` MLS CommitBuilder JS wrapper:

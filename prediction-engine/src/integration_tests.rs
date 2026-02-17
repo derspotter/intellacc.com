@@ -990,7 +990,52 @@ mod tests {
         println!("✅ Invalid probabilities correctly rejected");
 
         // Test 6: Post-resolution trading attempts
-        println!("🎯 Test 6: Post-resolution trading test");
+        println!("🔒 Test 6: Closed-market trading test");
+
+        // Move closing date to the past
+        sqlx::query(
+            "UPDATE events SET closing_date = NOW() - INTERVAL '1 minute' WHERE id = $1",
+        )
+        .bind(event_id)
+        .execute(&pool)
+        .await?;
+
+        let closed_market_trade = lmsr_api::update_market(
+            &pool,
+            &config,
+            users[1].id,
+            MarketUpdate {
+                event_id,
+                target_prob: 0.7,
+                stake: 20.0,
+                referral_post_id: None,
+                referral_click_id: None,
+            },
+        )
+        .await;
+
+        assert!(
+            closed_market_trade.is_err(),
+            "Trading on closed event should be rejected"
+        );
+
+        let closed_err = closed_market_trade.err().expect("Expected closed market update error");
+        assert!(
+            closed_err.to_string().contains("Market closed"),
+            "Expected 'Market closed' error, got: {closed_err}"
+        );
+        println!("✅ Closed-market trading correctly rejected");
+
+        // Test 7: Post-resolution trading attempts
+        println!("🎯 Test 7: Post-resolution trading test");
+
+        // Re-open market before resolving so resolved-state error is tested distinctly
+        sqlx::query(
+            "UPDATE events SET closing_date = NOW() + INTERVAL '7 days' WHERE id = $1",
+        )
+        .bind(event_id)
+        .execute(&pool)
+        .await?;
 
         // Resolve the event
         lmsr_api::resolve_event(&pool, event_id, true).await?;
@@ -1014,10 +1059,15 @@ mod tests {
             post_resolution_trade.is_err(),
             "Trading on resolved event should be rejected"
         );
+        let resolved_trade_err = post_resolution_trade.err().expect("Expected resolved market update error");
+        assert!(
+            resolved_trade_err.to_string().contains("Market resolved"),
+            "Expected 'Market resolved' error, got: {resolved_trade_err}"
+        );
         println!("✅ Post-resolution trading correctly rejected");
 
-        // Test 7: Database consistency under failures
-        println!("🔗 Test 7: Database consistency test");
+        // Test 8: Database consistency under failures
+        println!("🔗 Test 8: Database consistency test");
 
         // Create new event for this test
         let consistency_event_id = create_test_event(&pool, "Consistency Test").await?;

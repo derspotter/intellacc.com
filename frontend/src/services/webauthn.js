@@ -13,14 +13,15 @@ export const webauthnService = {
         const options = await api.webauthn.registerStart();
         
         const challenge = options.challenge;
+        const registrationPrfInput = prfInput || options?.extensions?.prf?.eval?.first || null;
         
         // Add PRF extension if we have prfInput (which we should for keystore wrapping)
-        if (prfInput) {
+        if (registrationPrfInput) {
             options.extensions = {
                 ...options.extensions,
                 prf: {
                     eval: {
-                        first: prfInput
+                        first: registrationPrfInput
                     }
                 }
             };
@@ -40,7 +41,11 @@ export const webauthnService = {
         
         // Return PRF result if available
         const prfResults = response.clientExtensionResults?.prf?.results?.first;
-        return { ...result, prfOutput: prfResults ? new Uint8Array(prfResults) : null };
+        return {
+            ...result,
+            prfOutput: prfResults ? new Uint8Array(prfResults) : null,
+            prfInput: registrationPrfInput || null
+        };
     },
 
     login: async (email, prfInput = null) => {
@@ -73,8 +78,14 @@ export const webauthnService = {
         const result = await api.webauthn.authFinish(body);
         
         // Return PRF output if available
-        const prfResults = response.clientExtensionResults?.prf?.results?.first;
-        return { ...result, prfOutput: prfResults ? new Uint8Array(prfResults) : null };
+        const prfResults = result.prfOutput ? new Uint8Array(result.prfOutput) : null;
+        const fallbackPrfResults = response.clientExtensionResults?.prf?.results?.first
+            ? new Uint8Array(response.clientExtensionResults.prf.results.first)
+            : null;
+        return {
+            ...result,
+            prfOutput: prfResults || fallbackPrfResults
+        };
     },
     
     getCredentials: async () => {

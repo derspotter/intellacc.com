@@ -473,4 +473,92 @@ describe('Persuasive alpha attribution APIs', () => {
     expect(clickRow.rows[0].consumed_by_market_update_id).toBeDefined();
     expect(clickRow.rows[0].consumed_at).toBeTruthy();
   });
+
+  test('Market update route returns engine closed-market rejection and releases click attribution', async () => {
+    const author = await makeUser('pa_author_closed', 1);
+    const trader = await makeUser('pa_trader_closed', 2);
+    cleanup.users.add(author.id);
+    cleanup.users.add(trader.id);
+
+    const event = await createEvent();
+    const post = await createPost(author);
+    cleanup.events.add(event.id);
+    cleanup.posts.add(post.id);
+
+    const match = await createMatch({ postId: post.id, eventId: event.id });
+    cleanup.matches.add(match.id);
+
+    const clickRes = await createClick({ postId: post.id, eventId: event.id, token: trader.token });
+    expect(clickRes.statusCode).toBe(201);
+    const clickId = clickRes.body.click.id;
+    cleanup.clicks.add(clickId);
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'Market closed' })
+    });
+
+    const updateRes = await request(app)
+      .post(`/api/events/${event.id}/update`)
+      .set('Authorization', `Bearer ${trader.token}`)
+      .send({ user_id: trader.id, stake: 1.5, target_prob: 0.6 });
+
+    expect(updateRes.statusCode).toBe(400);
+    expect(updateRes.body).toMatchObject({ error: 'Market closed' });
+
+    const payload = JSON.parse(global.fetch.mock.calls[0]?.[1]?.body || '{}');
+    expect(payload.referral_click_id).toBe(clickId);
+
+    const clickRow = await db.query(
+      'SELECT consumed_by_market_update_id, consumed_at FROM post_market_clicks WHERE id = $1',
+      [clickId]
+    );
+    expect(clickRow.rows[0].consumed_by_market_update_id).toBeNull();
+    expect(clickRow.rows[0].consumed_at).toBeNull();
+  });
+
+  test('Market update route returns engine resolved-market rejection and releases click attribution', async () => {
+    const author = await makeUser('pa_author_resolved', 1);
+    const trader = await makeUser('pa_trader_resolved', 2);
+    cleanup.users.add(author.id);
+    cleanup.users.add(trader.id);
+
+    const event = await createEvent();
+    const post = await createPost(author);
+    cleanup.events.add(event.id);
+    cleanup.posts.add(post.id);
+
+    const match = await createMatch({ postId: post.id, eventId: event.id });
+    cleanup.matches.add(match.id);
+
+    const clickRes = await createClick({ postId: post.id, eventId: event.id, token: trader.token });
+    expect(clickRes.statusCode).toBe(201);
+    const clickId = clickRes.body.click.id;
+    cleanup.clicks.add(clickId);
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'Market resolved' })
+    });
+
+    const updateRes = await request(app)
+      .post(`/api/events/${event.id}/update`)
+      .set('Authorization', `Bearer ${trader.token}`)
+      .send({ user_id: trader.id, stake: 1.5, target_prob: 0.6 });
+
+    expect(updateRes.statusCode).toBe(409);
+    expect(updateRes.body).toMatchObject({ error: 'Market resolved' });
+
+    const payload = JSON.parse(global.fetch.mock.calls[0]?.[1]?.body || '{}');
+    expect(payload.referral_click_id).toBe(clickId);
+
+    const clickRow = await db.query(
+      'SELECT consumed_by_market_update_id, consumed_at FROM post_market_clicks WHERE id = $1',
+      [clickId]
+    );
+    expect(clickRow.rows[0].consumed_by_market_update_id).toBeNull();
+    expect(clickRow.rows[0].consumed_at).toBeNull();
+  });
 });
