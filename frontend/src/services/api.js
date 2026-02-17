@@ -397,8 +397,16 @@ export const api = {
           headers: deviceIds ? { 'x-device-ids': deviceIds.join(',') } : {} 
       }),
 
-    setMasterKey: (wrapped_key, salt, iv) =>
-      request('/users/master-key', { method: 'POST', body: { wrapped_key, salt, iv } }),
+    setMasterKey: (wrapped_key, salt, iv, wrapped_key_prf, salt_prf, iv_prf) => {
+      const body = {};
+      if (wrapped_key || wrapped_key === '') body.wrapped_key = wrapped_key;
+      if (salt || salt === '') body.salt = salt;
+      if (iv || iv === '') body.iv = iv;
+      if (wrapped_key_prf || wrapped_key_prf === '') body.wrapped_key_prf = wrapped_key_prf;
+      if (salt_prf || salt_prf === '') body.salt_prf = salt_prf;
+      if (iv_prf || iv_prf === '') body.iv_prf = iv_prf;
+      return request('/users/master-key', { method: 'POST', body });
+    },
 
     follow: (id) =>
       request(`/users/${id}/follow`, { method: 'POST' }),

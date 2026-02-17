@@ -29,6 +29,13 @@ const removeAttachmentFile = (storagePath) => {
   });
 };
 
+const getViewerId = (req) => req.user?.id || req.user?.userId;
+
+const parseUserId = (value) => {
+  const parsed = parseInt(value, 10);
+  return Number.isInteger(parsed) ? parsed : null;
+};
+
 // Create a new user
 exports.createUser = async (req, res) => {
   if (!isRegistrationEnabled()) {
@@ -660,6 +667,135 @@ exports.getFollowers = async (req, res) => {
   }
 };
 
+// Block another user
+exports.blockUser = async (req, res) => {
+  const blockerId = getViewerId(req);
+  const blockedUserId = parseUserId(req.params.id);
+
+  if (!Number.isInteger(blockerId)) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  if (!Number.isInteger(blockedUserId)) {
+    return res.status(400).json({ message: 'Invalid user id' });
+  }
+
+  if (blockerId === blockedUserId) {
+    return res.status(400).json({ message: 'You cannot block yourself' });
+  }
+
+  try {
+    const userResult = await db.query('SELECT id FROM users WHERE id = $1', [blockedUserId]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const result = await db.query(
+      `INSERT INTO user_blocks (blocker_id, blocked_user_id)
+       VALUES ($1, $2)
+       ON CONFLICT (blocker_id, blocked_user_id) DO NOTHING`,
+      [blockerId, blockedUserId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(200).json({ blocked: false, message: 'Already blocked' });
+    }
+
+    return res.status(201).json({ blocked: true, message: 'User blocked' });
+  } catch (err) {
+    console.error('Error blocking user:', err);
+    return res.status(500).json({ message: 'Error blocking user' });
+  }
+};
+
+// Unblock another user
+exports.unblockUser = async (req, res) => {
+  const blockerId = getViewerId(req);
+  const blockedUserId = parseUserId(req.params.id);
+
+  if (!Number.isInteger(blockerId)) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  if (!Number.isInteger(blockedUserId)) {
+    return res.status(400).json({ message: 'Invalid user id' });
+  }
+
+  try {
+    const result = await db.query(
+      `DELETE FROM user_blocks
+       WHERE blocker_id = $1 AND blocked_user_id = $2`,
+      [blockerId, blockedUserId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Block relationship not found' });
+    }
+
+    return res.status(200).json({ blocked: false, message: 'User unblocked' });
+  } catch (err) {
+    console.error('Error unblocking user:', err);
+    return res.status(500).json({ message: 'Error unblocking user' });
+  }
+};
+
+// Check blocking relationship between two users
+exports.getBlockStatus = async (req, res) => {
+  const viewerId = getViewerId(req);
+  const targetUserId = parseUserId(req.params.id);
+
+  if (!Number.isInteger(viewerId)) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  if (!Number.isInteger(targetUserId)) {
+    return res.status(400).json({ message: 'Invalid user id' });
+  }
+
+  try {
+    const result = await db.query(
+      `SELECT
+        EXISTS (SELECT 1 FROM user_blocks WHERE blocker_id = $1 AND blocked_user_id = $2) AS blocked_by_you,
+        EXISTS (SELECT 1 FROM user_blocks WHERE blocker_id = $2 AND blocked_user_id = $1) AS blocked_by_them`,
+      [viewerId, targetUserId]
+    );
+
+    const status = result.rows[0] || {};
+    res.status(200).json({
+      blockedByYou: status.blocked_by_you,
+      blockedByThem: status.blocked_by_them
+    });
+  } catch (err) {
+    console.error('Error getting block status:', err);
+    return res.status(500).json({ message: 'Error getting block status' });
+  }
+};
+
+// List users currently blocked by the viewer
+exports.getBlockedUsers = async (req, res) => {
+  const viewerId = getViewerId(req);
+
+  if (!Number.isInteger(viewerId)) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+
+  try {
+    const result = await db.query(
+      `SELECT u.id, u.username, ub.created_at
+       FROM user_blocks ub
+       JOIN users u ON u.id = ub.blocked_user_id
+       WHERE ub.blocker_id = $1
+       ORDER BY ub.created_at DESC`,
+      [viewerId]
+    );
+
+    return res.status(200).json(result.rows);
+  } catch (err) {
+    console.error('Error getting blocked users:', err);
+    return res.status(500).json({ message: 'Error getting blocked users' });
+  }
+};
+
 // Get users that a user is following
 exports.getFollowing = async (req, res) => {
   const userId = req.params.id;
@@ -786,7 +922,10 @@ exports.getMasterKey = async (req, res) => {
     // So they MUST Link first.
     
     // Check key last updated time
-    const keyRes = await db.query('SELECT wrapped_key, salt, iv, updated_at FROM user_master_keys WHERE user_id = $1', [userId]);
+    const keyRes = await db.query(
+        'SELECT wrapped_key, salt, iv, wrapped_key_prf, salt_prf, iv_prf, updated_at FROM user_master_keys WHERE user_id = $1',
+        [userId]
+    );
     if (keyRes.rows.length === 0) return res.status(404).json({ error: 'Key not found' }); // User has no key (first device)
     
     const masterKey = keyRes.rows[0];
