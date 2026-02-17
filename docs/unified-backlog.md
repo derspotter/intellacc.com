@@ -46,8 +46,8 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   low-level `selfUpdate()` exists, but no periodic scheduler and no manual "Refresh Keys" settings UI found.
 - `Partial` MLS staged-welcome inspection UI:
   pending invite accept/reject exists, but member fingerprint inspection before acceptance is still missing.
-- `Partial` Market lifecycle tests:
-  resolved-market rejection is covered in prediction-engine integration tests, but explicit closed-market rejection integration coverage is still missing.
+- `Done` Market lifecycle tests:
+  backend coverage now verifies closed-market and resolved-market trade rejection in `/api/events/:eventId/update` plus open-market pass-through behavior.
 
 ## Priority 2 - Medium
 - `Partial` Profile editing:
