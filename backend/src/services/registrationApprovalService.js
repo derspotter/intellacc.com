@@ -15,7 +15,8 @@ const REGISTRATION_APPROVAL_SECRET =
   'dev-registration-approval-secret';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const APPROVAL_PATH = '/api/admin/users/approve';
-const REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES = Number(process.env.REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES || 10);
+const rawResendCooldown = Number(process.env.REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES);
+const REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES = Number.isFinite(rawResendCooldown) ? rawResendCooldown : 10;
 
 const getExpiryDate = () => {
   const ttlMs = Math.max(1, REGISTRATION_APPROVAL_TTL_HOURS) * 60 * 60 * 1000;
@@ -120,49 +121,100 @@ const formatAdminApprovalMessage = ({ approverEmail, username, email, token, use
 const createApprovalRequest = async (userId, user) => {
   const approverEmail = getRegistrationApproverEmail();
   let token = null;
+  let tokenHash = null;
   let expiresAt = null;
   let shouldSendNotification = true;
+  let hasLastNotifiedColumn = true;
   const cooldownMs = Math.max(0, REGISTRATION_APPROVAL_RESEND_COOLDOWN_MINUTES) * 60 * 1000;
+  const now = new Date();
 
   try {
-    const pending = await db.query(`
-      SELECT id, token, token_hash, approver_email, created_at, expires_at
-      FROM registration_approval_tokens
-      WHERE user_id = $1
-        AND status = 'pending'
-      ORDER BY created_at DESC
-      LIMIT 1
-    `, [userId]);
+    try {
+      const pending = await db.query(`
+        SELECT id, token, token_hash, approver_email, created_at, expires_at, last_notified_at
+        FROM registration_approval_tokens
+        WHERE user_id = $1
+          AND status = 'pending'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [userId]);
+      hasLastNotifiedColumn = true;
+      if (pending.rows.length > 0) {
+        const existing = pending.rows[0];
+        const isRecentNotification = existing.last_notified_at &&
+          Number.isFinite(new Date(existing.last_notified_at).getTime()) &&
+          (now.getTime() - new Date(existing.last_notified_at).getTime() <= cooldownMs);
 
-    if (pending.rows.length > 0) {
-      const existing = pending.rows[0];
-      const createdAt = new Date(existing.created_at);
-      const isRecent = Number.isFinite(createdAt.getTime()) &&
-        Date.now() - createdAt.getTime() <= cooldownMs;
-      const isValidToken = existing.token && (!existing.expires_at || new Date(existing.expires_at) > new Date());
+        expiresAt = existing.expires_at;
 
-      expiresAt = existing.expires_at;
-
-      if (isRecent && isValidToken) {
-        token = existing.token;
-        shouldSendNotification = false;
-      } else {
-        token = buildApprovalToken(userId, existing.approver_email || approverEmail);
-        const newExpiresAt = getExpiryDate();
-        expiresAt = newExpiresAt;
-
-        if (existing.expires_at && new Date(existing.expires_at) > new Date()) {
-          await db.query(`
-            UPDATE registration_approval_tokens
-            SET token = $1,
-                token_hash = $2,
-                approver_email = COALESCE(NULLIF($3, ''), approver_email),
-                expires_at = $4
-            WHERE id = $5
-          `, [token, hashToken(token), existing.approver_email || approverEmail, newExpiresAt, existing.id]);
+        if (existing.token && isRecentNotification) {
+          token = existing.token;
+          shouldSendNotification = false;
         } else {
-          await db.query(`DELETE FROM registration_approval_tokens WHERE user_id = $1 AND status = 'pending'`, [userId]);
+          token = buildApprovalToken(userId, existing.approver_email || approverEmail);
+          tokenHash = hashToken(token);
+          const newExpiresAt = getExpiryDate();
+          expiresAt = newExpiresAt;
+
+          if (existing.expires_at && new Date(existing.expires_at) > now) {
+            await db.query(`
+              UPDATE registration_approval_tokens
+              SET token = $1,
+                  token_hash = $2,
+                  approver_email = COALESCE(NULLIF($3, ''), approver_email),
+                  expires_at = $4
+              WHERE id = $5
+            `, [token, tokenHash, existing.approver_email || approverEmail, newExpiresAt, existing.id]);
+          } else {
+            await db.query(`DELETE FROM registration_approval_tokens WHERE user_id = $1 AND status = 'pending'`, [userId]);
+          }
         }
+      }
+    } catch (err) {
+      if (err.code === '42703') {
+        hasLastNotifiedColumn = false;
+        const legacyPending = await db.query(`
+          SELECT id, token, token_hash, approver_email, created_at, expires_at
+          FROM registration_approval_tokens
+          WHERE user_id = $1
+            AND status = 'pending'
+          ORDER BY created_at DESC
+          LIMIT 1
+        `, [userId]);
+
+        if (legacyPending.rows.length > 0) {
+          const existing = legacyPending.rows[0];
+          const isRecent = Number.isFinite(new Date(existing.created_at).getTime()) &&
+            now.getTime() - new Date(existing.created_at).getTime() <= cooldownMs;
+          const hasValidToken = existing.token && (!existing.expires_at || new Date(existing.expires_at) > now);
+
+          expiresAt = existing.expires_at;
+
+          if (isRecent && hasValidToken) {
+            token = existing.token;
+            shouldSendNotification = false;
+          } else {
+            token = buildApprovalToken(userId, existing.approver_email || approverEmail);
+            tokenHash = hashToken(token);
+            const newExpiresAt = getExpiryDate();
+            expiresAt = newExpiresAt;
+
+            if (existing.expires_at && new Date(existing.expires_at) > now) {
+              await db.query(`
+                UPDATE registration_approval_tokens
+                SET token = $1,
+                    token_hash = $2,
+                    approver_email = COALESCE(NULLIF($3, ''), approver_email),
+                    expires_at = $4
+                WHERE id = $5
+              `, [token, tokenHash, existing.approver_email || approverEmail, newExpiresAt, existing.id]);
+            } else {
+              await db.query(`DELETE FROM registration_approval_tokens WHERE user_id = $1 AND status = 'pending'`, [userId]);
+            }
+          }
+        }
+      } else {
+        throw err;
       }
     }
   } catch (err) {
@@ -174,7 +226,7 @@ const createApprovalRequest = async (userId, user) => {
   if (!token) {
     token = buildApprovalToken(userId, approverEmail);
     expiresAt = getExpiryDate();
-    const tokenHash = hashToken(token);
+    tokenHash = hashToken(token);
 
     await db.query(`
       DELETE FROM registration_approval_tokens
@@ -183,10 +235,25 @@ const createApprovalRequest = async (userId, user) => {
     `, [userId]);
 
     try {
-      await db.query(`
+      const insertColumns = hasLastNotifiedColumn
+        ? '(user_id, token_hash, approver_email, status, expires_at, token, last_notified_at)'
+        : '(user_id, token_hash, approver_email, status, expires_at, token)';
+      const insertValues = hasLastNotifiedColumn
+        ? '($1, $2, $3, \'pending\', $4, $5, NOW())'
+        : '($1, $2, $3, \'pending\', $4, $5)';
+      const insertSql = `
         INSERT INTO registration_approval_tokens (user_id, token_hash, approver_email, status, expires_at, token)
         VALUES ($1, $2, $3, 'pending', $4, $5)
-      `, [userId, tokenHash, approverEmail, expiresAt, token]);
+      `;
+      await db.query(
+        hasLastNotifiedColumn
+          ? `
+            INSERT INTO registration_approval_tokens ${insertColumns}
+            VALUES ${insertValues}
+          `
+          : insertSql,
+        [userId, tokenHash, approverEmail, expiresAt, token]
+      );
     } catch (err) {
       if (err.code === '42703') {
         await db.query(`
@@ -214,6 +281,21 @@ const createApprovalRequest = async (userId, user) => {
       html: message.html,
       text: message.text
     });
+    if (hasLastNotifiedColumn) {
+      try {
+        await db.query(`
+          UPDATE registration_approval_tokens
+          SET last_notified_at = NOW()
+          WHERE user_id = $1
+            AND status = 'pending'
+            AND token_hash = $2
+        `, [userId, tokenHash]);
+      } catch (err) {
+        if (err.code !== '42703') {
+          console.warn('[RegistrationApproval] Failed to update last_notified_at:', err.message);
+        }
+      }
+    }
   }
 
   return { token, messageId: null, expiresAt, approverEmail };
