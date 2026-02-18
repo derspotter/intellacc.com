@@ -3603,6 +3603,10 @@ body.dark-mode .weekly-assignment-badge.pending {
   gap: 0.5rem;
 }
 
+.search-tab-row button {
+  border-radius: 0 !important;
+}
+
 .search-tab {
   border: 1px solid var(--border-color);
   background: transparent;
@@ -3650,6 +3654,10 @@ body.dark-mode .weekly-assignment-badge.pending {
   display: inline-flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.search-scope-row button {
+  border-radius: 0 !important;
 }
 
 .search-scope {
