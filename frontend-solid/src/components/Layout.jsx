@@ -1,77 +1,152 @@
-import { children, createSignal, onCleanup, onMount, Show } from 'solid-js';
-import { skinState } from '../services/skinProvider';
-import { setSkin } from '../services/skinProvider';
+import {
+  createSignal,
+  onCleanup,
+  onMount,
+  Show
+} from 'solid-js';
 import { isAuthenticated, logout } from '../services/auth';
+import { setSkin, skinState } from '../services/skinProvider';
 
-function SkinPill({ label, value, active, onClick }) {
+const refreshAuth = () => isAuthenticated();
+
+function TerminalSkinToggle() {
   return (
-    <button
-      classList={{ active: active === value }}
-      type="button"
-      onClick={() => onClick(value)}
-    >
-      {label}
-    </button>
+    <div class="skin-toggle">
+      <span>Skin:</span>
+      <button
+        type="button"
+        classList={{ active: skinState() === 'van' }}
+        onClick={() => setSkin('van')}
+      >
+        Van
+      </button>
+      <button
+        type="button"
+        classList={{ active: skinState() === 'terminal' }}
+        onClick={() => setSkin('terminal')}
+      >
+        Terminal
+      </button>
+    </div>
+  );
+}
+
+function VanSidebar() {
+  return (
+    <aside class="sidebar">
+      <div class="sidebar-logo">INTELLACC</div>
+      <div class="sidebar-content">
+        <div class="sidebar-item">
+          <a href="#home">Home</a>
+        </div>
+        <div class="sidebar-item">
+          <a href="#predictions">Predictions</a>
+        </div>
+        <div class="sidebar-item">
+          <a href="#messages">Messages</a>
+        </div>
+        <div class="sidebar-item">
+          <a href="#notifications">Notifications</a>
+        </div>
+        <div class="sidebar-item">
+          <a href="#settings">Settings</a>
+        </div>
+        <Show when={isAuthenticated()}>
+          <div class="auth-items">
+            <div class="sidebar-item">
+              <a href="#profile">My Profile</a>
+            </div>
+            <div class="sidebar-item">
+              <button type="button" class="logout-btn" onClick={logout}>
+                Logout
+              </button>
+            </div>
+          </div>
+        </Show>
+        <Show when={!isAuthenticated()}>
+          <div class="sidebar-item">
+            <a href="#login">Login</a>
+          </div>
+        </Show>
+      </div>
+    </aside>
+  );
+}
+
+function VanLayout(props) {
+  return (
+    <div class="app-container">
+      <div class="wrapper">
+        <div class="content-container">
+          <VanSidebar />
+          <main class={`main-content page-${props.page || 'home'}`}>{props.children}</main>
+        </div>
+      </div>
+    </div>
   );
 }
 
 export default function Layout(props) {
-  const getChildren = children(() => props.children);
-  const [authed, setAuthed] = createSignal(isAuthenticated());
-  const handleLogout = () => {
-    logout();
+  const [authed, setAuthed] = createSignal(refreshAuth());
+
+  const handleAuthChange = () => {
+    setAuthed(refreshAuth());
   };
-  const onLogout = (event) => {
-    event.preventDefault();
-    handleLogout();
-  };
-  const refreshAuth = () => setAuthed(isAuthenticated());
 
   onMount(() => {
-    refreshAuth();
-    window.addEventListener('solid-auth-changed', refreshAuth);
-    window.addEventListener('storage', refreshAuth);
+    window.addEventListener('storage', handleAuthChange);
+    window.addEventListener('solid-auth-changed', handleAuthChange);
   });
 
   onCleanup(() => {
-    window.removeEventListener('solid-auth-changed', refreshAuth);
-    window.removeEventListener('storage', refreshAuth);
+    window.removeEventListener('storage', handleAuthChange);
+    window.removeEventListener('solid-auth-changed', handleAuthChange);
   });
 
   return (
-    <div class="app-shell">
+    <Show
+      when={skinState() === 'van'}
+      fallback={
+        <div>
       <header class="top-nav">
         <a href="#home" class="brand">Intellacc</a>
         <nav>
           <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'home')}>
             Home
           </button>
+          <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'messages')}>
+            Messages
+          </button>
+          <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'notifications')}>
+            Notifications
+          </button>
+          <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'settings')}>
+            Settings
+          </button>
+          <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'profile')}>
+            Profile
+          </button>
           <Show when={!authed()}>
             <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'login')}>
               Login
             </button>
-            <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'signup')}>
-              Sign Up
-            </button>
-          </Show>
-          <Show when={authed()}>
-            <button type="button" class="nav-btn" onClick={onLogout}>
-              Sign Out
-            </button>
-          </Show>
-        </nav>
-        <div class="skin-toggle">
-          <span>Skin:</span>
-          <SkinPill label="Van" value="van" active={skinState()} onClick={setSkin} />
-          <SkinPill
-            label="Terminal"
-            value="terminal"
-            active={skinState()}
-            onClick={setSkin}
-          />
+                <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'signup')}>
+                  Sign Up
+                </button>
+              </Show>
+              <Show when={authed()}>
+                <button type="button" class="nav-btn" onClick={logout}>
+                  Sign Out
+                </button>
+              </Show>
+            </nav>
+            <TerminalSkinToggle />
+          </header>
+          <main class={`main-content page-${props.page || 'home'}`}>{props.children}</main>
         </div>
-      </header>
-      <main>{getChildren()}</main>
-    </div>
+      }
+    >
+      <VanLayout page={props.page}>{props.children}</VanLayout>
+    </Show>
   );
 }

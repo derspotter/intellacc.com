@@ -301,4 +301,84 @@ export const getPostsPaging = (payload) => ({
 export const getPostById = (postId) =>
   request(`/posts/${postId}`);
 
+export const getUser = (id) =>
+  request(`/users/${id}`);
+
+export const updateProfile = ({ username, bio }) => {
+  const body = {};
+  if (typeof username !== 'undefined') {
+    body.username = username;
+  }
+  if (typeof bio !== 'undefined') {
+    body.bio = bio;
+  }
+  return request('/users/profile', {
+    method: 'PATCH',
+    body
+  });
+};
+
+export const followUser = (id) =>
+  request(`/users/${id}/follow`, { method: 'POST' });
+
+export const unfollowUser = (id) =>
+  request(`/users/${id}/follow`, { method: 'DELETE' });
+
+export const getFollowingStatus = (id) =>
+  request(`/users/${id}/following-status`);
+
+export const getFollowers = (id) =>
+  request(`/users/${id}/followers`);
+
+export const getFollowing = (id) =>
+  request(`/users/${id}/following`);
+
+export const getUserReputation = (userId) =>
+  request(`/scoring/user/${userId}/reputation`);
+
+export const getUiPreferences = () =>
+  request('/users/me/preferences');
+
+export const updateUiPreferences = (skin) =>
+  request('/users/me/preferences', {
+    method: 'PUT',
+    body: { skin }
+  });
+
+export const getNotifications = ({ limit = DEFAULT_LIMIT, offset = 0, unreadOnly = false } = {}) => {
+  const params = new URLSearchParams({
+    limit: String(clampLimit(limit)),
+    offset: String(Math.max(0, Number(offset) || 0)),
+    unreadOnly: unreadOnly ? 'true' : 'false'
+  });
+  return request(`/notifications?${params.toString()}`);
+};
+
+export const getUnreadNotificationCount = () =>
+  request('/notifications/count');
+
+export const markNotificationRead = (notificationId) =>
+  request(`/notifications/${notificationId}/read`, { method: 'PUT' });
+
+export const markAllNotificationsRead = () =>
+  request('/notifications/mark-all-read', { method: 'PUT' });
+
+export const deleteNotification = (notificationId) =>
+  request(`/notifications/${notificationId}`, { method: 'DELETE' });
+
+export const getDirectMessages = () =>
+  request('/mls/direct-messages');
+
+export const createDirectMessage = (targetUserId) =>
+  request(`/mls/direct-messages/${targetUserId}`, { method: 'POST' });
+
+export const getGroupMessages = (groupId, afterId = null) => {
+  const params = new URLSearchParams();
+  if (afterId) {
+    params.set('afterId', String(afterId));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  return request(`/mls/messages/group/${groupId}${suffix}`);
+};
+
 export { requestBlob };

@@ -1017,6 +1017,239 @@ body.skin-terminal .prediction-card {
   border: 0;
 }
 
+.settings-page {
+  width: 100%;
+  display: grid;
+  gap: 1rem;
+}
+
+.settings-group {
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: #fff;
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.settings-group h2 {
+  margin: 0;
+}
+
+.settings-row {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.skin-buttons {
+  display: inline-flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.profile-page,
+.messages-page,
+.notifications-page {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.profile-container {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 2fr 1fr;
+  align-items: start;
+}
+
+.profile-card,
+.profile-side,
+.messages-conversations,
+.messages-content,
+.notifications-toolbar,
+.notification-item-row {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 0.65rem;
+  padding: 0.85rem;
+}
+
+.profile-header h2 {
+  margin-top: 0;
+}
+
+.profile-stats {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.profile-stats p {
+  margin: 0;
+}
+
+.profile-bio h3,
+.profile-side h3 {
+  margin-top: 0;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.profile-users {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.profile-users li {
+  margin: 0;
+}
+
+.profile-edit-form {
+  display: grid;
+  gap: 0.6rem;
+  border-top: 1px dashed var(--border);
+  padding-top: 0.65rem;
+}
+
+.form-input {
+  width: 100%;
+}
+
+.form-textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+}
+
+.notification-link {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 0;
+  color: var(--signature-blue);
+  text-decoration: underline;
+}
+
+.messages-layout {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.messages-compose {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.message-thread-list {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.message-thread-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: #fff;
+  color: inherit;
+  padding: 0.5rem 0.65rem;
+  cursor: pointer;
+}
+
+.message-thread-item.active {
+  border-color: var(--signature-blue);
+  outline: 2px solid rgba(0, 0, 255, 0.2);
+}
+
+.message-content-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.message-content-item,
+.notification-item-row {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.message-meta {
+  display: flex;
+  gap: 0.65rem;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.message-body {
+  font-weight: 600;
+}
+
+.message-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notifications-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.notifications-filter {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.notification-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.notification-item-row {
+  border-left: 0.35rem solid transparent;
+}
+
+.notification-item-row.unread {
+  border-left-color: var(--signature-blue);
+  background: rgba(0, 0, 255, 0.02);
+}
+
+.notification-main h3 {
+  margin: 0;
+}
+
+.notification-actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.profile-page .notification-link {
+  padding: 0;
+}
+
 @media (max-width: 768px) {
   .wrapper {
     padding-top: calc(56px + env(safe-area-inset-top));
@@ -1065,5 +1298,13 @@ body.skin-terminal .prediction-card {
   .login-page,
   .signup-page {
     padding: 1rem;
+  }
+
+  .profile-container {
+    grid-template-columns: 1fr;
+  }
+
+  .messages-layout {
+    grid-template-columns: 1fr;
   }
 }

@@ -78,55 +78,68 @@ export default function CreatePostForm(props) {
   };
 
   return (
-    <section class="create-post">
-      <h3>Create a post</h3>
+    <section class="create-post-card">
       <form onSubmit={handleSubmit}>
-        <label htmlFor="solid-post-content" class="sr-only">
-          Post content
-        </label>
-        <textarea
+        <div class="form-group">
+          <label for="solid-post-content" class="sr-only">
+            Post content
+          </label>
+          <textarea
           id="solid-post-content"
           value={content()}
+          class="comment-input"
           onInput={(event) => setContent(event.target.value)}
           placeholder="Share a thought..."
           rows={4}
           disabled={submitting()}
-        />
-        <div class="post-attachment-row">
-          <label class="file-picker">
+          />
+        </div>
+        <div class="create-post-attachments">
+          <div class="file-row">
+            <button
+              type="button"
+              class="file-button"
+              onClick={() => {
+                const input = document.getElementById('solid-post-attachment');
+                input?.click();
+              }}
+            >
+              {attachment() ? 'Change File' : 'Browse...'}
+            </button>
             <input
               id="solid-post-attachment"
               type="file"
+              class="file-input"
               accept="image/*"
               onChange={handleFileChange}
               disabled={submitting()}
             />
-            <span>{attachment() ? 'Change image' : 'Attach image'}</span>
-          </label>
-          <Show when={attachment()}>
-            <button
-              type="button"
-              class="ghost"
-              onClick={clearAttachment}
-              disabled={submitting()}
-            >
-              Remove
-            </button>
-          </Show>
+            <Show when={attachment()}>
+              <span class="file-name">{attachment().name}</span>
+            </Show>
+            <Show when={attachment()}>
+              <button type="button" class="attachment-remove" onClick={clearAttachment}>
+                Remove
+              </button>
+            </Show>
+          </div>
         </div>
         <Show when={previewUrl()}>
-          <img
-            src={previewUrl()}
-            class="post-attachment-preview"
-            alt="Image preview"
-          />
+          <div class="attachment-preview">
+            <img src={previewUrl()} alt="Image preview" />
+            <button type="button" class="attachment-remove" onClick={clearAttachment}>
+              Remove
+            </button>
+          </div>
         </Show>
         <Show when={error()}>
           <p class="error">{error()}</p>
         </Show>
-        <button type="submit" disabled={submitting()}>
-          {submitting() ? 'Posting…' : 'Post'}
-        </button>
+        <div class="form-actions">
+          <button type="submit" class="post-action submit-button" disabled={submitting()}>
+            {submitting() ? 'Posting…' : 'Post'}
+          </button>
+        </div>
       </form>
     </section>
   );

@@ -82,70 +82,83 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <section class="auth-page">
-      <h1>Reset Password</h1>
+    <section class="login-page">
+      <div class="login-container">
+        <h1>Reset Password</h1>
 
       <Show when={stage() === 'invalid'}>
-        <p class="error">This reset link is invalid or has expired.</p>
+        <p class="error-message">This reset link is invalid or has expired.</p>
         <div class="auth-links">
           <a href="#forgot-password">Request a new link</a>
         </div>
       </Show>
 
       <Show when={stage() === 'warning'}>
-        <p>Resetting your password will remove your encrypted vault and MLS group state.</p>
-        <p>You will lose encrypted messages and need to be re-invited to encrypted conversations.</p>
-        <label class="field">
-          <span>I understand the impact and want to continue</span>
-          <input
-            type="checkbox"
-            checked={acknowledged()}
-            onChange={(event) => setAcknowledged(event.target.checked)}
-          />
-        </label>
-        <div class="auth-links">
-          <button type="button" onClick={handleContinue}>
-            Continue
-          </button>
-          <a href="#forgot-password">Back</a>
-        </div>
-      </Show>
-
-      <Show when={stage() === 'form' || stage() === 'resetting'}>
-        <form class="auth-form" onSubmit={handleSubmit}>
+        <div class="reset-warning">
+          <p>Resetting your password will remove your encrypted vault and MLS group state.</p>
+          <p>You will lose encrypted messages and need to be re-invited to encrypted conversations.</p>
           <label class="field">
-            <span>New password</span>
-            <input
-              type="password"
-              value={newPassword()}
-              onInput={(event) => setNewPassword(event.target.value)}
-              placeholder="Enter new password"
-              required
-              disabled={pending()}
-            />
-          </label>
-          <label class="field">
-            <span>Confirm password</span>
-            <input
-              type="password"
-              value={confirmPassword()}
-              onInput={(event) => setConfirmPassword(event.target.value)}
-              placeholder="Re-enter new password"
-              required
-              disabled={pending()}
-            />
-          </label>
-          <label class="field">
-            <span>I confirm I understand the impact</span>
+            <span>I understand the impact and want to continue</span>
             <input
               type="checkbox"
               checked={acknowledged()}
               onChange={(event) => setAcknowledged(event.target.checked)}
             />
           </label>
-          <button type="submit" disabled={pending()}>
-            {pending() ? 'Resetting…' : 'Reset password'}
-          </button>
+          <div class="form-actions">
+            <button type="button" onClick={handleContinue}>
+              Continue
+            </button>
+          </div>
+          <div class="auth-links">
+            <a href="#forgot-password">Back</a>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={stage() === 'form' || stage() === 'resetting'}>
+        <form class="auth-form" onSubmit={handleSubmit}>
+          <div class="form-group">
+            <label class="field">
+              <span>New password</span>
+              <input
+                type="password"
+                value={newPassword()}
+                onInput={(event) => setNewPassword(event.target.value)}
+                placeholder="Enter new password"
+                required
+                disabled={pending()}
+              />
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="field">
+              <span>Confirm password</span>
+              <input
+                type="password"
+                value={confirmPassword()}
+                onInput={(event) => setConfirmPassword(event.target.value)}
+                placeholder="Re-enter new password"
+                required
+                disabled={pending()}
+              />
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="field">
+              <span>I confirm I understand the impact</span>
+              <input
+                type="checkbox"
+                checked={acknowledged()}
+                onChange={(event) => setAcknowledged(event.target.checked)}
+              />
+            </label>
+          </div>
+          <div class="form-actions">
+            <button type="submit" disabled={pending()}>
+              {pending() ? 'Resetting…' : 'Reset password'}
+            </button>
+          </div>
         </form>
       </Show>
 
@@ -171,8 +184,9 @@ export default function ResetPasswordPage() {
       </Show>
 
       <Show when={error()}>
-        <p class="error">{error()}</p>
+        <p class="error-message">{error()}</p>
       </Show>
+      </div>
     </section>
   );
 }

@@ -1,0 +1,23 @@
+services:
+  frontend-solid:
+    build:
+      context: ./frontend-solid
+    container_name: intellacc_frontend_solid_local
+    command: sh -lc "npm install && npm install @rollup/rollup-linux-x64-musl --save-optional && npm run dev -- --host 0.0.0.0 --port 4174"
+    environment:
+      VITE_API_PROXY_TARGET: http://intellacc_backend_dev:3000
+    ports:
+      - "4174:4174"
+    volumes:
+      - ./frontend-solid:/app
+      - frontend_solid_node_modules:/app/node_modules
+    networks:
+      - intellacc-local-dev
+
+volumes:
+  frontend_solid_node_modules:
+
+networks:
+  intellacc-local-dev:
+    external: true
+    name: intellacc-local-dev

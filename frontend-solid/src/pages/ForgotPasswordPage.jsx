@@ -35,45 +35,51 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <section class="auth-page">
-      <h1>Reset Password</h1>
-      <p>Enter your email address to receive a password reset link.</p>
+    <section class="login-page">
+      <div class="login-container">
+        <h1>Reset Password</h1>
+        <p>Enter your email address to receive a password reset link.</p>
 
-      <Show when={!sent()}>
-        <form class="auth-form" onSubmit={handleSubmit}>
-          <label class="field">
-            <span>Email</span>
-            <input
-              type="email"
-              value={email()}
-              onInput={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              autocomplete="email"
-              required
-              disabled={sending()}
-            />
-          </label>
-          <button type="submit" disabled={sending()}>
-            {sending() ? 'Sending…' : 'Send reset link'}
-          </button>
-        </form>
-      </Show>
+        <Show when={!sent()}>
+          <form class="auth-form" onSubmit={handleSubmit}>
+            <div class="form-group">
+              <label class="field">
+                <span>Email</span>
+                <input
+                  type="email"
+                  value={email()}
+                  onInput={(event) => setEmail(event.target.value)}
+                  placeholder="you@example.com"
+                  autocomplete="email"
+                  required
+                  disabled={sending()}
+                />
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" disabled={sending()}>
+                {sending() ? 'Sending…' : 'Send reset link'}
+              </button>
+            </div>
+          </form>
+        </Show>
 
-      <Show when={error()}>
-        <p class="error">{error()}</p>
-      </Show>
-      <Show when={message()}>
-        <p class="success">{message()}</p>
-      </Show>
+        <Show when={error()}>
+          <p class="error-message">{error()}</p>
+        </Show>
+        <Show when={message()}>
+          <p class="success">{message()}</p>
+        </Show>
 
-      <Show when={sent()}>
-        <div class="reset-note">
-          <p>Check your inbox and spam folder for the reset link.</p>
+        <Show when={sent()}>
+          <div class="reset-note">
+            <p>Check your inbox and spam folder for the reset link.</p>
+          </div>
+        </Show>
+
+        <div class="auth-links">
+          <a href="#login">Back to sign in</a>
         </div>
-      </Show>
-
-      <div class="auth-links">
-        <a href="#login">Back to sign in</a>
       </div>
     </section>
   );

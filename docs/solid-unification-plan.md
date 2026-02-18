@@ -249,6 +249,37 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
   - Next target for this route:
     - parity pass for admin/admin-only controls, status/resolution UX, and prediction history actions.
 
+- `2026-02-18`: Extended route-level parity for core user areas.
+  - Added routing support in `frontend-solid/src/App.jsx` for:
+    - `#profile`
+    - `#user/:id`
+    - `#messages`
+    - `#notifications`
+    - `#settings`
+  - Added pages:
+    - `frontend-solid/src/pages/ProfilePage.jsx`
+    - `frontend-solid/src/pages/MessagesPage.jsx`
+    - `frontend-solid/src/pages/NotificationsPage.jsx`
+    - `frontend-solid/src/pages/SettingsPage.jsx`
+  - Added missing API client methods for:
+    - users: profile lookup/edit, follow/following-status, followers/following, reputation
+    - notifications: list/read/mark-all-read/delete
+    - preferences: get/update UI skin
+    - mls: direct/group messages
+  - Added route/navigation styling support in `frontend-solid/src/components/Layout.jsx` and `frontend-solid/src/styles.css`.
+  - Current status:
+    - Route shell and page-level behavior are in place.
+    - Next item: end-to-end parity checks for messaging and notifications behaviors (including send/consume and mark actions) plus visual delta validation with playwright.
+- `2026-02-18`: Completed local dev-stack verification for the expanded route slice.
+  - Added `docker-compose.solid-local.yml` for source-mounted `frontend-solid` runs on port `4174` against `intellacc_backend_dev` (network `intellacc-local-dev`).
+  - Ran Playwright CLI sanity passes on new core routes (`home`, `login`, `profile`, `messages`, `notifications`, `settings`) for both `van` and `terminal` skin modes.
+  - Captured verification artifacts under `parity-shots/verification/`:
+    - `solid-*-yaml` for snapshots
+    - `solid-*.png` for baseline screenshots
+  - Current status:
+    - Route shell and auth gating states are validated (including not-logged-in behavior).
+    - Remaining item: authenticated-end messaging/notification action parity still needs end-to-end validation once a valid seed user token is available in the solid-local stack.
+
 ## Assumptions
 
 - Van-style remains default for continuity.

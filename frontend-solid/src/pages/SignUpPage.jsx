@@ -58,76 +58,86 @@ export default function SignUpPage() {
   };
 
   return (
-    <section class="auth-page">
-      <h1>Create account</h1>
+    <section class="signup-page">
+      <div class="signup-container">
+        <h1>Create Account</h1>
 
-      <Show when={alreadySignedIn()} fallback={(
-        <>
-          <form class="auth-form" onSubmit={handleSubmit}>
-            <label class="field">
-              <span>Username</span>
-              <input
-                type="text"
-                value={username()}
-                onInput={(event) => setUsername(event.target.value)}
-                placeholder="Choose a username"
-                required
-              />
-            </label>
-            <label class="field">
-              <span>Email</span>
-              <input
-                type="email"
-                value={email()}
-                onInput={(event) => setEmail(event.target.value)}
-                placeholder="you@example.com"
-                required
-              />
-            </label>
-            <label class="field">
-              <span>Password</span>
-              <input
-                type="password"
-                value={password()}
-                onInput={(event) => setPassword(event.target.value)}
-                placeholder="Create password"
-                required
-              />
-            </label>
-            <label class="field">
-              <span>Confirm password</span>
-              <input
-                type="password"
-                value={confirm()}
-                onInput={(event) => setConfirm(event.target.value)}
-                placeholder="Re-enter password"
-                required
-              />
-            </label>
-            <button type="submit" disabled={pending()}>
-              {pending() ? 'Creating account…' : 'Sign up'}
-            </button>
-          </form>
+        <Show when={alreadySignedIn()} fallback={
+          <>
+            <form class="auth-form" onSubmit={handleSubmit}>
+              <div class="form-group">
+                <label class="field">
+                  <span>Username</span>
+                  <input
+                    type="text"
+                    value={username()}
+                    onInput={(event) => setUsername(event.target.value)}
+                    placeholder="Choose a username"
+                    required
+                  />
+                </label>
+              </div>
+              <div class="form-group">
+                <label class="field">
+                  <span>Email</span>
+                  <input
+                    type="email"
+                    value={email()}
+                    onInput={(event) => setEmail(event.target.value)}
+                    placeholder="you@example.com"
+                    required
+                  />
+                </label>
+              </div>
+              <div class="form-group">
+                <label class="field">
+                  <span>Password</span>
+                  <input
+                    type="password"
+                    value={password()}
+                    onInput={(event) => setPassword(event.target.value)}
+                    placeholder="Create password"
+                    required
+                  />
+                </label>
+              </div>
+              <div class="form-group">
+                <label class="field">
+                  <span>Confirm password</span>
+                  <input
+                    type="password"
+                    value={confirm()}
+                    onInput={(event) => setConfirm(event.target.value)}
+                    placeholder="Re-enter password"
+                    required
+                  />
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn-primary" disabled={pending()}>
+                  {pending() ? 'Creating account…' : 'Sign up'}
+                </button>
+              </div>
+            </form>
 
-          <Show when={error()}>
-            <p class="error">{error()}</p>
-          </Show>
-          <Show when={resultMessage()}>
-            <p class={requiresApproval() ? 'info' : 'success'}>
-              {resultMessage()}
-            </p>
-          </Show>
+            <Show when={error()}>
+              <p class="error-message">{error()}</p>
+            </Show>
+            <Show when={resultMessage()}>
+              <p class={requiresApproval() ? 'info' : 'success'}>{resultMessage()}</p>
+            </Show>
 
-          <div class="auth-links">
-            <button type="button" onClick={() => (window.location.hash = 'login')}>
-              Already have an account? Sign in
-            </button>
-          </div>
-        </>
-      )}>
-        <p class="success">You are already signed in.</p>
-        <button type="button" onClick={() => (window.location.hash = 'home')}>Go to feed</button>
-      </Show>
+            <div class="auth-links">
+              <a href="#login">Already have an account? Sign in</a>
+            </div>
+          </>
+        }>
+          <p class="success">You are already signed in.</p>
+          <button type="button" onClick={() => (window.location.hash = 'home')}>
+            Go to feed
+          </button>
+        </Show>
+      </div>
     </section>
   );
 }

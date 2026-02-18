@@ -105,13 +105,16 @@ export default function HomePage() {
 
   return (
     <section class="home-page">
-      <h1>Home Feed (Solid Migration)</h1>
-      <p>Feature slice: posts list + create-post parity baseline.</p>
+      <Show when={!isAuthenticated()}>
+        <div class="login-notice">
+          <p>Sign in to create posts and see personalized content.</p>
+          <button type="button" onClick={() => (window.location.hash = 'login')}>
+            Log in
+          </button>
+        </div>
+      </Show>
       <Show when={isAuthenticated()}>
         <CreatePostForm onCreated={handlePostCreated} />
-      </Show>
-      <Show when={!isAuthenticated()}>
-        <p class="muted">Sign in to post and use your personalized feed.</p>
       </Show>
       <Show when={error()}>
         <p class="error">{error()}</p>
@@ -128,9 +131,9 @@ export default function HomePage() {
           loadingMore={loadingMore}
           hasMore={hasMore}
         />
-        <div class="load-more-row">
+        <div class="form-actions">
           <Show when={hasMore() && posts().length > 0}>
-            <button onClick={loadMore} disabled={loadingMore()}>
+            <button class="post-action" onClick={loadMore} disabled={loadingMore()}>
               {loadingMore() ? 'Loading…' : 'Load more'}
             </button>
           </Show>

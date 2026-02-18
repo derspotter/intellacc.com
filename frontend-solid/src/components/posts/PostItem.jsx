@@ -1,10 +1,8 @@
 import {
   createEffect,
-  createMemo,
   createSignal,
   For,
   onCleanup,
-  onMount,
   Show
 } from 'solid-js';
 import {
@@ -46,12 +44,15 @@ export default function PostItem(props) {
   const [commentCount, setCommentCount] = createSignal(0);
   const [commentText, setCommentText] = createSignal('');
   const [commentSubmitting, setCommentSubmitting] = createSignal(false);
+  const [commentListVisible, setCommentListVisible] = createSignal(false);
+  const [commentFormVisible, setCommentFormVisible] = createSignal(false);
   const [commentsLoading, setCommentsLoading] = createSignal(false);
-  const [commentsVisible, setCommentsVisible] = createSignal(false);
-  const [comments, setComments] = createSignal([]);
   const [commentsLoaded, setCommentsLoaded] = createSignal(false);
+  const [comments, setComments] = createSignal([]);
   const [actionError, setActionError] = createSignal('');
   const [commentsError, setCommentsError] = createSignal('');
+  const [contentExpanded, setContentExpanded] = createSignal(false);
+  const [allCommentsExpanded, setAllCommentsExpanded] = createSignal(!!props.autoExpand);
 
   const [isEditing, setIsEditing] = createSignal(false);
   const [editContent, setEditContent] = createSignal('');
@@ -61,6 +62,8 @@ export default function PostItem(props) {
   const [editSubmitting, setEditSubmitting] = createSignal(false);
   const [editError, setEditError] = createSignal('');
 
+  const autoExpand = () => !!props.autoExpand;
+
   createEffect(() => {
     const current = post();
     setLikeCount(Number(current.like_count) || 0);
@@ -68,14 +71,45 @@ export default function PostItem(props) {
     setCommentCount(Number(current.comment_count) || 0);
   });
 
-  const author = () => post().username || `user-${post().user_id || 'unknown'}`;
-  const meta = createMemo(() => {
-    const date = post().created_at ? new Date(post().created_at).toLocaleString() : '';
-    return `${likeCount()} likes · ${date}`;
+  createEffect(() => {
+    if (!autoExpand()) return;
+    if (!commentListVisible()) {
+      setCommentListVisible(true);
+    }
+    setAllCommentsExpanded(true);
+    if (!commentsLoaded() && !commentsLoading() && currentCommentCount() > 0) {
+      void loadComments();
+    }
   });
 
+  createEffect(() => {
+    const shouldExpandAll = autoExpand();
+    if (allCommentsExpanded() === shouldExpandAll) {
+      return;
+    }
+
+    setAllCommentsExpanded(shouldExpandAll);
+    setCommentListVisible(shouldExpandAll);
+    if (!shouldExpandAll) {
+      return;
+    }
+
+    if (!commentsLoaded() && !commentsLoading() && currentCommentCount() > 0) {
+      void loadComments();
+    }
+  });
+
+  const author = () => post().username || `user-${post().user_id || 'unknown'}`;
   const isMine = () => String(post().user_id) === getCurrentUserId();
   const canEdit = () => isMine() || isAdmin();
+  const currentCommentCount = () => Number(post().comment_count || 0);
+  const commentCountText = () => `${commentCount()} comment${commentCount() === 1 ? '' : 's'}`;
+  const likeText = () => `${likeCount()} like${likeCount() === 1 ? '' : 's'}`;
+  const postDate = () => (post().created_at ? new Date(post().created_at).toLocaleDateString() : '');
+  const isLongContent = () => {
+    const content = String(post().content || '');
+    return content.length > 240 || content.split('\n').length > 6;
+  };
 
   const applyPostPatch = (patch) => {
     const nextPost = typeof patch === 'function' ? patch(post()) : patch;
@@ -85,14 +119,22 @@ export default function PostItem(props) {
   const clearActionError = () => setActionError('');
   const clearEditError = () => setEditError('');
 
-  const resetEditState = () => {
+  const clearEditAttachmentPreview = () => {
     const current = editAttachmentPreview();
     if (current) {
       safeUrl()?.revokeObjectURL(current);
     }
-
     setEditAttachment(null);
     setEditAttachmentPreview(null);
+  };
+
+  const clearCommentForm = () => {
+    setCommentText('');
+    setCommentSubmitting(false);
+  };
+
+  const resetEditState = () => {
+    clearEditAttachmentPreview();
     setEditRemovingAttachment(false);
     setEditContent('');
     setEditSubmitting(false);
@@ -151,7 +193,8 @@ export default function PostItem(props) {
       setCommentsLoading(true);
       setCommentsError('');
       const response = await getPostComments(post().id);
-      setComments(normalizePosts(response));
+      const fetched = normalizePosts(response);
+      setComments(fetched);
       setCommentsLoaded(true);
     } catch (error) {
       setCommentsError(error?.message || 'Failed to load comments.');
@@ -160,11 +203,110 @@ export default function PostItem(props) {
     }
   };
 
-  const toggleComments = async () => {
-    setCommentsVisible((next) => !next);
-    if (!commentsVisible()) {
+  const toggleCommentList = async () => {
+    const willOpen = !commentListVisible();
+    setCommentListVisible(willOpen);
+    if (willOpen && !commentsLoaded()) {
       await loadComments();
     }
+  };
+
+  const toggleCommentForm = () => {
+    setCommentFormVisible((next) => !next);
+  };
+
+  const handleToggleExpandCollapseAll = async () => {
+    const shouldExpand = !allCommentsExpanded();
+    setAllCommentsExpanded(shouldExpand);
+    setCommentListVisible(shouldExpand);
+    if (!shouldExpand) {
+      return;
+    }
+
+    await loadComments();
+  };
+
+  const updateCommentTree = (nodes, targetId, patch) => {
+    const nextPatch = (comment) => {
+      if (String(comment.id) === String(targetId)) {
+        const update = typeof patch === 'function' ? patch(comment) : patch;
+        return { ...comment, ...update };
+      }
+
+      const children = comment.replies || [];
+      const [nextChildren, didUpdate] = updateCommentTree(children, targetId, patch);
+      if (!didUpdate) {
+        return comment;
+      }
+      return { ...comment, replies: nextChildren };
+    };
+
+    let didUpdate = false;
+    const nextNodes = nodes.map((comment) => {
+      const nextComment = nextPatch(comment);
+      if (nextComment !== comment) {
+        didUpdate = true;
+      }
+      return nextComment;
+    });
+
+    return [nextNodes, didUpdate];
+  };
+
+  const removeFromCommentTree = (nodes, targetId) => {
+    let removed = false;
+    const nextNodes = [];
+
+    nodes.forEach((comment) => {
+      if (String(comment.id) === String(targetId)) {
+        removed = true;
+        return;
+      }
+
+      const children = comment.replies || [];
+      const [nextChildren, didRemove] = removeFromCommentTree(children, targetId);
+      if (didRemove) {
+        removed = true;
+      }
+
+      if (nextChildren === children) {
+        nextNodes.push(comment);
+      } else {
+        nextNodes.push({
+          ...comment,
+          replies: nextChildren
+        });
+      }
+    });
+
+    return [nextNodes, removed];
+  };
+
+  const updateCommentInList = (targetId, patch) => {
+    setComments((current) => {
+      const [nextNodes, updated] = updateCommentTree(current, targetId, patch);
+      return updated ? nextNodes : current;
+    });
+  };
+
+  const removeCommentFromList = (targetId) => {
+    let didRemove = false;
+    setComments((current) => {
+      const [nextNodes, removed] = removeFromCommentTree(current, targetId);
+      didRemove = removed;
+      return removed ? nextNodes : current;
+    });
+
+    if (!didRemove) {
+      return;
+    }
+
+    const nextCount = Math.max(0, commentCount() - 1);
+    setCommentCount(nextCount);
+    applyPostPatch({
+      ...post(),
+      comment_count: nextCount
+    });
   };
 
   const submitComment = async (event) => {
@@ -184,14 +326,12 @@ export default function PostItem(props) {
       setCommentsError('');
       const newComment = await createComment(post().id, content);
       setComments((current) => [newComment, ...current]);
-      setCommentText('');
+      setCommentFormVisible(false);
+      clearCommentForm();
       const nextCount = commentCount() + 1;
       setCommentCount(nextCount);
       if (!commentsLoaded()) {
         setCommentsLoaded(true);
-      }
-      if (!commentsVisible()) {
-        setCommentsVisible(true);
       }
       applyPostPatch({ ...post(), comment_count: nextCount });
     } catch (error) {
@@ -204,14 +344,18 @@ export default function PostItem(props) {
   const handleStartEdit = () => {
     clearEditError();
     setEditContent(post().content || '');
-    setEditAttachment(null);
-    setEditAttachmentPreview(null);
+    clearEditAttachmentPreview();
     setEditRemovingAttachment(false);
     setIsEditing(true);
   };
 
   const handleCancelEdit = () => {
-    resetEditState();
+    clearEditAttachmentPreview();
+    setEditRemovingAttachment(false);
+    setEditError('');
+    setIsEditing(false);
+    setEditContent('');
+    setEditSubmitting(false);
   };
 
   const handleEditAttachmentChange = (event) => {
@@ -237,6 +381,14 @@ export default function PostItem(props) {
     setEditAttachmentPreview(safeUrl()?.createObjectURL(file) || null);
     setEditRemovingAttachment(false);
     setEditError('');
+  };
+
+  const handleClearEditAttachment = () => {
+    setEditRemovingAttachment((next) => !next);
+    if (editRemovingAttachment()) {
+      setEditAttachment(null);
+      setEditAttachmentPreview(null);
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -266,13 +418,12 @@ export default function PostItem(props) {
       const updated = await updatePost(post().id, payload);
       if (updated) {
         applyPostPatch(updated);
-        setEditAttachmentPreview(null);
       } else {
         applyPostPatch({
           ...post(),
           content,
-          image_attachment_id: payload.image_attachment_id || post().image_attachment_id,
-          image_url: payload.image_url || post().image_url
+          image_attachment_id: payload.image_attachment_id ?? post().image_attachment_id,
+          image_url: payload.image_url ?? post().image_url
         });
       }
 
@@ -295,6 +446,37 @@ export default function PostItem(props) {
     } catch (error) {
       setActionError(error?.message || 'Failed to delete post.');
     }
+  };
+
+  const renderComments = () => {
+    if (commentsLoading()) {
+      return <p class="loading-inline muted">Loading comments…</p>;
+    }
+
+    if (!commentsLoaded() && comments().length === 0) {
+      return <p class="empty-comments">No comments yet.</p>;
+    }
+
+    if (comments().length === 0) {
+      return <p class="empty-comments">No comments yet.</p>;
+    }
+
+    return (
+      <ul class="comments-list">
+        <For each={comments()}>
+          {(comment) => (
+            <li>
+              <PostItem
+                post={comment}
+                onPostUpdate={updateCommentInList}
+                onPostDelete={removeCommentFromList}
+                autoExpand={allCommentsExpanded()}
+              />
+            </li>
+          )}
+        </For>
+      </ul>
+    );
   };
 
   createEffect(() => {
@@ -333,136 +515,249 @@ export default function PostItem(props) {
   });
 
   return (
-    <article class="feed-item">
-      <header class="feed-item-header">
-        <h2>{author()}</h2>
-        <span class="meta">{meta()}</span>
+    <article class="post-card">
+      <header class="post-header">
+        <div class="post-header-main">
+          <div class="post-author">
+            {post().user_id ? (
+              <a href={`#user/${post().user_id}`} class="username-link" onClick={(event) => {
+                event.preventDefault();
+                window.location.hash = `user/${post().user_id}`;
+              }}>
+                {author()}
+              </a>
+            ) : (
+              <span class="username-link">{author()}</span>
+            )}
+          </div>
+          <div class="post-meta post-meta-main">
+            <span class="post-header-likes">{likeText()}</span>
+            <span
+              class="post-header-comments"
+              role="button"
+              tabindex="0"
+              onClick={toggleCommentList}
+            >
+              {commentCountText()}
+            </span>
+            <span class="post-date">{postDate()}</span>
+          </div>
+        </div>
+        <div class="post-header-sub">
+          <div class="post-meta post-meta-sub">
+            <div class="post-header-expand-wrap">
+              <Show when={currentCommentCount() > 0}>
+                <span
+                  class="post-header-expand"
+                  role="button"
+                  tabindex="0"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void handleToggleExpandCollapseAll();
+                  }}
+                >
+                  {allCommentsExpanded() ? 'Collapse All' : 'Expand All'}
+                </span>
+              </Show>
+            </div>
+            <Show when={post().ai_is_flagged}>
+              <span class="ai-content-badge">AI Flagged</span>
+            </Show>
+          </div>
+        </div>
       </header>
 
       <Show when={isEditing()} fallback={
-        <p class="post-content-block">{post().content || 'No content'}</p>
+        <div class="post-content-area">
+          <div class="post-content-wrapper">
+            <div class={`post-content ${contentExpanded() ? 'expanded' : 'clamped'}${(!contentExpanded() && isLongContent()) ? ' has-hover-overlay' : ''}`}>
+              <div class="post-content-text">{post().content || 'No content'}</div>
+              <Show when={!contentExpanded() && isLongContent()}>
+                <div class="post-content-hover-overlay">
+                  {post().content || 'No content'}
+                </div>
+              </Show>
+            </div>
+            <Show when={isLongContent()}>
+              <button
+                type="button"
+                class="post-content-toggle"
+                onClick={(event) => {
+                  event.preventDefault();
+                  setContentExpanded((next) => !next);
+                }}
+              >
+                {contentExpanded() ? 'Show less' : 'Show more'}
+              </button>
+            </Show>
+            <div class="edit-file-row browse-placeholder" />
+          </div>
+        </div>
       }>
-        <section class="post-edit-form">
-          <textarea
-            value={editContent()}
-            onInput={(event) => setEditContent(event.target.value)}
-            disabled={editSubmitting()}
-            rows={4}
-          />
-          <div class="edit-attachment-controls">
-            <label class="file-picker">
+        <div class="post-content-area">
+          <div class="edit-content-wrapper">
+            <textarea
+              class="edit-textarea"
+              value={editContent()}
+              onInput={(event) => setEditContent(event.target.value)}
+              disabled={editSubmitting()}
+              rows={Math.max(1, (post().content || '').split('\n').length)}
+            />
+            <div class="edit-file-row">
+              <button
+                type="button"
+                class="file-button"
+                onClick={() => {
+                  const input = document.getElementById(`solid-post-edit-file-${post().id}`);
+                  if (input) {
+                    input.click();
+                  }
+                }}
+                disabled={editSubmitting()}
+              >
+                {editAttachment() ? 'Change File' : 'Browse...'}
+              </button>
               <input
+                id={`solid-post-edit-file-${post().id}`}
                 type="file"
+                class="file-input"
                 accept="image/*"
                 onChange={handleEditAttachmentChange}
                 disabled={editSubmitting()}
               />
-              <span>{editAttachment() ? 'Change image' : 'Replace image'}</span>
-            </label>
-            <Show when={hasAttachment() || editAttachment()}>
+              <Show when={hasAttachment() || editAttachment() || editAttachmentPreview()}>
+                <button
+                  type="button"
+                  class="attachment-remove"
+                  onClick={handleClearEditAttachment}
+                  disabled={editSubmitting()}
+                >
+                  {editRemovingAttachment() ? 'Undo remove' : 'Remove image'}
+                </button>
+              </Show>
+            </div>
+            <Show when={editError()}>
+              <p class="error">{editError()}</p>
+            </Show>
+            <div class="post-edit-actions">
               <button
                 type="button"
-                class="ghost"
-                onClick={() => setEditRemovingAttachment((value) => !value)}
+                class="post-action submit-button"
+                onClick={handleSaveEdit}
                 disabled={editSubmitting()}
               >
-                {editRemovingAttachment() ? 'Undo remove' : 'Remove image'}
+                {editSubmitting() ? 'Saving…' : 'Save'}
               </button>
-            </Show>
+              <button type="button" class="post-action" onClick={handleCancelEdit} disabled={editSubmitting()}>
+                Cancel
+              </button>
+            </div>
           </div>
-          <Show when={editAttachmentPreview()}>
-            <img
-              src={editAttachmentPreview()}
-              class="post-attachment-preview"
-              alt="Updated attachment"
-            />
-          </Show>
-          <Show when={editRemovingAttachment() && !editAttachmentPreview()}>
-            <p class="muted">Image will be removed.</p>
-          </Show>
-          <Show when={editError()}>
-            <p class="error">{editError()}</p>
-          </Show>
-          <div class="post-edit-actions">
-            <button type="button" onClick={handleSaveEdit} disabled={editSubmitting()}>
-              {editSubmitting() ? 'Saving…' : 'Save'}
-            </button>
-            <button type="button" onClick={handleCancelEdit} disabled={editSubmitting()}>
-              Cancel
-            </button>
-          </div>
-        </section>
+        </div>
       </Show>
 
-      <Show when={post().ai_is_flagged}>
-        <p class="ai-warning">AI-flagged content</p>
+      <Show when={isEditing()}>
+        <div class="post-image-area">
+          <Show when={editAttachmentPreview()}>
+            <div class="attachment-preview">
+              <img src={editAttachmentPreview()} alt="Updated attachment" />
+            </div>
+          </Show>
+          <Show when={hasAttachment() && !editAttachmentPreview() && !editRemovingAttachment()}>
+            <div class="attachment-preview">
+              <img src={attachmentSrc() || post().image_url} alt="Current attachment" />
+            </div>
+          </Show>
+          <Show when={editRemovingAttachment()}>
+            <div class="attachment-removed">
+              Image removed. <button type="button" class="attachment-remove" onClick={handleClearEditAttachment}>Undo</button>
+            </div>
+          </Show>
+        </div>
       </Show>
-      <Show when={attachmentSrc()}>
-        <img src={attachmentSrc()} alt="" class="post-attachment" />
+
+      <Show when={!isEditing()}>
+        <Show when={attachmentSrc()}>
+          <div class="post-image">
+            <img src={attachmentSrc()} alt="Post image" />
+          </div>
+        </Show>
+        <Show when={hasAttachment() && !attachmentSrc()}>
+          <p class="muted">Image failed to load.</p>
+        </Show>
       </Show>
-      <p class="meta">posted by {author()}</p>
+
+      <Show when={actionError()}>
+        <p class="error-message">{actionError()}</p>
+      </Show>
 
       <div class="post-actions">
-        <button type="button" class={`like-btn ${likedByUser() ? 'active' : ''}`} onClick={handleLike}>
-          {likedByUser() ? 'Liked' : 'Like'} ({likeCount()})
-        </button>
-        <button type="button" class="comment-toggle-btn" onClick={toggleComments}>
-          {commentsVisible() ? 'Hide comments' : `Comments (${commentCount()})`}
-        </button>
-        <Show when={canEdit()}>
-          <button type="button" class="edit-btn" onClick={handleStartEdit}>
-            Edit
+        <div class="post-actions-left">
+          <Show when={isEditing()} fallback={
+            <Show when={canEdit()}>
+              <button type="button" class="post-action edit" onClick={handleStartEdit}>
+                Edit
+              </button>
+              <Show when={isAdmin()}>
+                <button type="button" class="post-action delete" onClick={handleDelete}>
+                  Delete
+                </button>
+              </Show>
+            </Show>
+          }>
+            <span />
+          </Show>
+        </div>
+        <div class="post-actions-center">
+          <button
+            type="button"
+            class="post-action like-button"
+            classList={{ liked: likedByUser() }}
+            onClick={handleLike}
+          >
+            {likedByUser() ? `Liked (${likeCount()})` : `Like (${likeCount()})`}
           </button>
-          <button type="button" class="delete-btn" onClick={handleDelete}>
-            Delete
+        </div>
+        <div class="post-actions-right">
+          <button
+            type="button"
+            class="post-action comment-button"
+            onClick={toggleCommentForm}
+          >
+            Comment
           </button>
-        </Show>
+        </div>
       </div>
-      <Show when={actionError()}>
-        <p class="error">{actionError()}</p>
-      </Show>
 
-      <Show when={commentsVisible()}>
-        <section class="comment-section">
-          <Show when={commentsLoading()}>
-            <p class="muted">Loading comments…</p>
+      <div class="comments-section">
+        <div class="comment-form-container">
+          <Show when={commentFormVisible()}>
+            <form class="comment-form" onSubmit={submitComment}>
+              <label htmlFor={`solid-post-comment-${post().id}`} class="sr-only">
+                Add a comment
+              </label>
+              <textarea
+                id={`solid-post-comment-${post().id}`}
+                rows={2}
+                class="comment-input"
+                value={commentText()}
+                onInput={(event) => setCommentText(event.target.value)}
+                disabled={commentSubmitting()}
+                placeholder="Write a comment..."
+              />
+              <button type="submit" class="post-action" disabled={commentSubmitting()}>
+                {commentSubmitting() ? 'Posting…' : 'Post comment'}
+              </button>
+            </form>
           </Show>
           <Show when={commentsError()}>
             <p class="error">{commentsError()}</p>
           </Show>
-
-          <form class="comment-form" onSubmit={submitComment}>
-            <label htmlFor={`solid-post-comment-${post().id}`} class="sr-only">
-              Add a comment
-            </label>
-            <textarea
-              id={`solid-post-comment-${post().id}`}
-              rows={2}
-              value={commentText()}
-              onInput={(event) => setCommentText(event.target.value)}
-              disabled={commentSubmitting()}
-              placeholder="Write a comment..."
-            />
-            <button type="submit" disabled={commentSubmitting()}>
-              {commentSubmitting() ? 'Posting…' : 'Post comment'}
-            </button>
-          </form>
-
-          <ul class="comments-list">
-            <For each={comments()}>
-              {(comment) => (
-                <li>
-                  <p class="comment-author">{comment.username || `user-${comment.user_id || 'unknown'}`}</p>
-                  <p>{comment.content || ''}</p>
-                </li>
-              )}
-            </For>
-            <Show when={!commentsLoading() && comments().length === 0}>
-              <li class="empty-comments">No comments yet.</li>
-            </Show>
-          </ul>
-        </section>
-      </Show>
+        </div>
+        <div class="comments-list-container">
+          <Show when={commentListVisible()}>{renderComments()}</Show>
+        </div>
+      </div>
     </article>
   );
 }
