@@ -99,6 +99,11 @@ Per route:
 - Van-style tokens + parity CSS until visual match.
 - Ensure terminal skin remains functional.
 
+Current status in this branch:
+- Backend and API work for skin preference is complete.
+- Skin provider now supports both hash-query and standard query-string overrides (`?skin=`) with `popstate/hashchange` reactivity in `frontend/src/services/skinProvider.js`.
+- No Solid runtime scaffold exists yet; migration slice remains at "framework swap planning" stage.
+
 ### Phase 4: Existing Solid skin reconciliation
 
 1. Map current `frontend-solid` styling into terminal token set.
@@ -147,6 +152,13 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
 - Van-style passes Playwright visual parity signoff vs VanJS baseline.
 - Terminal skin has no P1 regressions.
 - VanJS runtime removed from mainline.
+
+## Current Sprint Log
+
+- `2026-02-18`: Continued from stable backend-focused state on `feat/solid-unified-skins`.
+  - Added production-safe migration checkpoint and updated plan status.
+  - Skin resolver now accepts `?skin=van|terminal` from either `location.search` or hash query while preserving existing behavior.
+  - Next slice: create a dedicated `frontend-solid` migration scaffold and complete first route-by-route parity slice (`home/feed`) under Playwright parity checks.
 
 ## Assumptions
 

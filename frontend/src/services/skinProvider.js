@@ -25,6 +25,18 @@ const parseSkinFromHash = () => {
   return isValidSkin(skin) ? skin : null;
 };
 
+const parseSkinFromQuery = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search || '');
+  const skin = params.get('skin');
+  return isValidSkin(skin) ? skin : null;
+};
+
+const parseSkinFromLocation = () => parseSkinFromQuery() || parseSkinFromHash();
+
 const readStoredSkin = () => {
   if (typeof window === 'undefined') {
     return null;
@@ -82,11 +94,18 @@ export const initializeSkinProvider = () => {
   }
 
   state.initialized = true;
-  state.querySkin = parseSkinFromHash();
+  state.querySkin = parseSkinFromLocation();
 
   if (typeof window !== 'undefined') {
     window.addEventListener('hashchange', () => {
-      state.querySkin = parseSkinFromHash();
+      state.querySkin = parseSkinFromLocation();
+      applyActiveSkin();
+    });
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('popstate', () => {
+      state.querySkin = parseSkinFromLocation();
       applyActiveSkin();
     });
   }
