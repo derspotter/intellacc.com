@@ -197,6 +197,57 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
   - Implemented password reset warning/acknowledgment flow, token parsing from hash, and pending/completion state handling.
   - Added reset status messaging styles and restored forgot-password navigation from login.
   - Added verification checklist update to run the new slice with `playwright-cli`.
+- `2026-02-18`: Continued VanJS visual parity pass on solid-auth slice.
+  - Reworked `frontend-solid` layout routing to mount auth pages without layout shell and updated Van-style shell wrappers.
+  - Added/updated auth/forgot/reset/login/signup route markup to match VanJS class conventions.
+  - Added a focused `frontend-solid` auth/feed style block set (`login-page`, `signup-page`, `create-post-card`, `.sidebar`, `.main-content`, `post-*` form/action classes).
+  - Captured Playwright verification screenshots for auth/home routes in both stacks:
+    - Solid: `/tmp/solid-home.png`, `/tmp/solid-login.png`, `/tmp/solid-signup.png`, `/tmp/solid-forgot-password.png`, `/tmp/solid-reset-password.png`
+    - VanJS: `/tmp/van-home.png`, `/tmp/van-login.png`, `/tmp/van-signup.png`, `/tmp/van-forgot-password.png`, `/tmp/van-reset-password.png`
+  - Next parity item: align `PostItem` markup/actions to fully match van `post-card` behavior and refresh diff pass.
+
+- `2026-02-18`: Completed `PostItem` structural parity slice.
+  - Refactored `frontend-solid/src/components/posts/PostItem.jsx` to Van-style `post-card` structure:
+    - `post-header` with author/date/like/comment metadata and optional AI badge.
+    - Separate edit mode content, image area, and action columns (`post-actions-left`, `post-actions-center`, `post-actions-right`).
+    - Split comment interactions into toggled comment list/form containers (`comment-form-container`, `comments-list-container`).
+  - Added parity class coverage in `frontend-solid/src/styles.css` for post metadata, edit states, and comments:
+    - `post-header-sub`, `post-header-expand-wrap`, `post-content-area`, `edit-textarea`, `post-image-area`, `comments-section`.
+  - Captured refreshed parity screenshots:
+    - Solid (latest): `parity-shots/solid-home-latest.png`, `parity-shots/solid-login-latest.png`, `parity-shots/solid-signup-latest.png`, `parity-shots/solid-forgot-password-latest.png`, `parity-shots/solid-reset-password-latest.png`
+    - VanJS: `parity-shots/van-home-latest.png`, `parity-shots/van-login-latest.png`, `parity-shots/van-signup-latest.png`, `parity-shots/van-forgot-password-latest.png`, `parity-shots/van-reset-password-latest.png`
+- `2026-02-18`: Deeper `PostItem` parity pass for nested comments and behavioral edge cases.
+  - Implemented nested comment rendering using recursive `PostItem` usage, so child replies inherit the same action surface (like, edit, delete, reply form).
+  - Added expand/collapse-all controls per post card and comment-tree hydration behavior.
+  - Added content-preview parity controls (clamp/overlay + show more/less) and safer edit-image states (`remove` + `undo`, existing attachment previews).
+  - Added fallback behavior when `user_id` is missing on author links.
+  - Added supporting style hooks (`.comments-list > li`, `.attachment-removed`) for nested rendering and edit-state visibility.
+  - Captured latest feed screenshots:
+    - Solid: `parity-shots/solid-home-latest-postitem.png`, `parity-shots/van-home-latest-postitem.png`
+  - Fixed edge cases for deep-comment mutation and expand propagation:
+    - comment updates/deletes now recurse into full reply trees.
+    - collapse/expand-all state is now synchronized for nested children without losing local comment state.
+    - Added verification captures:
+      - `parity-shots/verification/van-landing.png`, `parity-shots/verification/solid-landing.png`
+  - Applied final nested interaction parity refinements:
+    - `PostItem` expand/collapse behavior no longer force-hides active comment forms.
+    - comment submission now closes the form and updates counts without force-opening the comment list.
+    - `Comment` button keeps a stable label for consistency with VanJS interaction patterns.
+- `2026-02-18`: Started `predictions` route migration slice in `frontend-solid`.
+  - Added `frontend-solid/src/pages/PredictionsPage.jsx` and integrated it into route handling.
+  - Added event fetch/search + local prediction submission flow:
+    - `/events` list with search.
+    - `/predict` with yes/no + confidence input.
+    - `/predictions` history from the authenticated user feed.
+  - Added admin market creation form posting to `/events`.
+  - Added `/scoring/leaderboard` readout with `/leaderboard/global` fallback.
+  - Expanded `frontend-solid/src/services/api.js` with prediction and leaderboard endpoint helpers.
+  - Added styles for `predictions-*` layout/cards/forms and mobile stacking in `styles.css`.
+  - Playwright verification:
+    - `playwright-cli` smoke run on `http://127.0.0.1:4174/#predictions`
+    - screenshot: `/tmp/solid-predictions-full.png`
+  - Next target for this route:
+    - parity pass for admin/admin-only controls, status/resolution UX, and prediction history actions.
 
 ## Assumptions
 

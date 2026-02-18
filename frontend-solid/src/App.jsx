@@ -5,14 +5,19 @@ import LoginPage from './pages/LoginPage';
 import SignUpPage from './pages/SignUpPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import PredictionsPage from './pages/PredictionsPage';
 
 const ROUTES = {
   home: 'home',
   login: 'login',
   signup: 'signup',
   'forgot-password': 'forgot-password',
-  'reset-password': 'reset-password'
+  'reset-password': 'reset-password',
+  predictions: 'predictions',
+  settings: 'settings'
 };
+
+const AUTH_ROUTES = ['login', 'signup', 'forgot-password', 'reset-password'];
 
 const sanitizeRoute = (raw) => {
   const value = (raw || '').replace(/^#/, '') || 'home';
@@ -22,6 +27,7 @@ const sanitizeRoute = (raw) => {
 
 export default function App() {
   const [page, setPage] = createSignal(sanitizeRoute(window.location.hash || 'home'));
+  const isAuthPage = () => AUTH_ROUTES.includes(page());
 
   const renderPage = () => {
     if (page() === 'home') {
@@ -38,6 +44,16 @@ export default function App() {
     }
     if (page() === 'reset-password') {
       return <ResetPasswordPage />;
+    }
+    if (page() === 'predictions') {
+      return <PredictionsPage />;
+    }
+
+    if (page() === 'settings') {
+      return <div class="not-found">
+        <h1>Settings</h1>
+        <p>Settings route is pending in the Solid migration.</p>
+      </div>;
     }
 
     return (
@@ -62,8 +78,12 @@ export default function App() {
     window.removeEventListener('hashchange', handleHash);
   });
 
+  if (isAuthPage()) {
+    return renderPage();
+  }
+
   return (
-    <Layout>
+    <Layout page={page()}>
       {renderPage()}
     </Layout>
   );

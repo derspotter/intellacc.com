@@ -240,6 +240,50 @@ export const getPosts = (limit = DEFAULT_LIMIT) => {
   return request(`/posts?${query.toString()}`);
 };
 
+export const getEvents = (search = null) => {
+  const query = new URLSearchParams();
+  if (search && search.trim()) {
+    query.set('search', search.trim());
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return request(`/events${suffix}`);
+};
+
+export const createEvent = (title, details, closingDate) => {
+  return request('/events', {
+    method: 'POST',
+    body: {
+      title,
+      details,
+      closing_date: closingDate
+    }
+  });
+};
+
+export const getPredictions = () =>
+  request('/predictions');
+
+export const createPrediction = (eventId, predictionValue, confidence, predictionType = 'binary') => {
+  return request('/predict', {
+    method: 'POST',
+    body: {
+      event_id: eventId,
+      prediction_value: predictionValue,
+      confidence: Number(confidence),
+      prediction_type: predictionType
+    }
+  });
+};
+
+export const getScoringLeaderboard = (limit = 10) => {
+  const query = new URLSearchParams();
+  query.set('limit', String(limit));
+  return request(`/scoring/leaderboard?${query.toString()}`);
+};
+
+export const getPredictionLeaderboardFallback = () =>
+  request('/leaderboard/global?limit=10');
+
 export const getPostsPayloadItems = (payload) => {
   if (!payload) return [];
   if (Array.isArray(payload)) return payload;
