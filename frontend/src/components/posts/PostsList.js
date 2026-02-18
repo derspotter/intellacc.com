@@ -8,7 +8,7 @@ let feedHoverController = null;
 /**
  * List of posts component
  */
-export default function PostsList({ hideSearchControls = false } = {}) {
+export default function PostsList({ hideSearchControls = false, emptyStatePlacement = 'default' } = {}) {
   const canVirtualize = typeof ResizeObserver !== 'undefined' && typeof requestAnimationFrame !== 'undefined';
 
   class Fenwick {
@@ -570,7 +570,8 @@ export default function PostsList({ hideSearchControls = false } = {}) {
   };
   
   // Render the component
-  return van.tags.div({ class: "posts-list" }, [
+  const listClass = emptyStatePlacement === 'home-bottom' ? "posts-list posts-list--home-bottom" : "posts-list";
+  return van.tags.div({ class: listClass }, [
     () => hideSearchControls ? null : renderSearchBar(),
     renderLoading,
     renderError,

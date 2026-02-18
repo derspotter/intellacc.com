@@ -116,7 +116,7 @@ export default function Router() {
             ]),
         SearchPage(),
         () => isLoggedInState.val ? CreatePostForm() : null,
-        PostsList({ hideSearchControls: true })
+        PostsList({ hideSearchControls: true, emptyStatePlacement: 'home-bottom' })
       ]);
     },
     
