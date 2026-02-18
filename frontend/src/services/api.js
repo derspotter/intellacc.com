@@ -408,6 +408,15 @@ export const api = {
       return request('/users/master-key', { method: 'POST', body });
     },
 
+    getUiPreferences: () =>
+      request('/users/me/preferences'),
+
+    updateUiPreferences: (skin) =>
+      request('/users/me/preferences', {
+        method: 'PUT',
+        body: { skin }
+      }),
+
     follow: (id) =>
       request(`/users/${id}/follow`, { method: 'POST' }),
 

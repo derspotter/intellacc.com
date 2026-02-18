@@ -6872,3 +6872,56 @@ body.dark-mode .verification-card .error-help {
 .ai-flags-table th {
   font-weight: 600;
 }
+
+/* Text helpers */
+.text-muted {
+  color: var(--secondary-text);
+}
+
+.text-success {
+  color: var(--success-color);
+}
+
+/* UI skin variants */
+body.skin-van {
+  --blue-bg: #fff;
+  --black-bg: #000;
+  --text-color: #000;
+  --border-color: #000;
+  --card-bg: #f9f9f9;
+  --secondary-text: #555;
+  --hover-bg: rgba(0, 0, 0, 0.03);
+
+  --button-bg: #fff;
+  --button-fg: #000;
+  --button-border: #000;
+  --button-hover-bg: #f0f0f0;
+  --button-disabled-bg: #d0d0d0;
+  --button-disabled-fg: #555;
+}
+
+body.skin-terminal {
+  --blue-bg: #0d1117;
+  --black-bg: #0b0f14;
+  --text-color: #e6edf3;
+  --border-color: #2d3740;
+  --card-bg: #101723;
+  --secondary-text: #94a3b8;
+  --hover-bg: rgba(148, 163, 184, 0.12);
+  --warning-color: #f59e0b;
+
+  --button-bg: #131a22;
+  --button-fg: #e2e8f0;
+  --button-border: #334155;
+  --button-hover-bg: #1f2937;
+  --button-disabled-bg: #1a2330;
+  --button-disabled-fg: #64748b;
+
+  --focus-ring: rgba(59, 130, 246, 0.4);
+  --font-family: 'Courier New', monospace;
+}
+
+body.skin-terminal,
+body.skin-terminal * {
+  font-family: var(--font-family, inherit);
+}
