@@ -26,7 +26,7 @@ const searchState = {
   followError: van.state('')
 };
 
-export default function SearchPage() {
+export default function SearchPage({ showHeader = true, showHints = true } = {}) {
   const {
     activeTab,
     query,
@@ -275,7 +275,7 @@ const postScopeOptions = () => {
     const currentQuery = String(query.val || '').trim();
     const hasPosts = posts.val.length > 0;
     if (!currentQuery) {
-      return p({ class: "search-hint" }, 'Type a term to search posts.');
+      return showHints ? p({ class: "search-hint" }, 'Type a term to search posts.') : null;
     }
     if (loadingPosts.val && !hasPosts) {
       return div({ class: "loading" }, 'Searching posts...');
@@ -303,7 +303,7 @@ const postScopeOptions = () => {
     const currentQuery = String(query.val || '').trim();
     const hasUsers = users.val.length > 0;
     if (!currentQuery) {
-      return p({ class: "search-hint" }, 'Type a term to search people.');
+      return showHints ? p({ class: "search-hint" }, 'Type a term to search people.') : null;
     }
     if (loadingUsers.val && !hasUsers) {
       return div({ class: "loading" }, 'Searching users...');
@@ -318,7 +318,7 @@ const postScopeOptions = () => {
   };
 
   return div({ class: "search-page" }, [
-    h2("Search"),
+    showHeader ? h2("Search") : null,
     div({ class: "search-toolbar" }, [
       div({ class: "search-tab-row" }, [
         button({
