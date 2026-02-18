@@ -59,6 +59,8 @@ router.post('/users/:id/block', authenticateJWT, userController.blockUser);
 router.delete('/users/:id/block', authenticateJWT, userController.unblockUser);
 router.get('/users/:id/block', authenticateJWT, userController.getBlockStatus);
 router.get('/users/me/blocks', authenticateJWT, userController.getBlockedUsers);
+router.get('/users/me/preferences', authenticateJWT, userController.getUserUiPreferences);
+router.put('/users/me/preferences', authenticateJWT, userController.updateUserUiPreferences);
 router.get('/users/master-key', authenticateJWT, userController.getMasterKey);
 router.post('/users/master-key', authenticateJWT, userController.setMasterKey);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);

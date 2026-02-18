@@ -36,6 +36,8 @@ const parseUserId = (value) => {
   return Number.isInteger(parsed) ? parsed : null;
 };
 
+const ALLOWED_UI_SKINS = new Set(['van', 'terminal']);
+
 // Create a new user
 exports.createUser = async (req, res) => {
   if (!isRegistrationEnabled()) {
@@ -390,6 +392,61 @@ exports.approveRegistration = async (req, res) => {
   }
 
   return res.json({ success: true, message, userId: result.userId });
+};
+
+exports.getUserUiPreferences = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await db.query(
+      'SELECT ui_skin_preference FROM users WHERE id = $1 AND deleted_at IS NULL',
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    return res.json({
+      skin: result.rows[0].ui_skin_preference || null
+    });
+  } catch (err) {
+    console.error('Error fetching UI preferences:', err);
+    return res.status(500).json({ message: 'Error fetching UI preferences' });
+  }
+};
+
+exports.updateUserUiPreferences = async (req, res) => {
+  const { skin } = req.body || {};
+
+  if (!ALLOWED_UI_SKINS.has(skin)) {
+    return res.status(400).json({
+      message: 'Skin must be one of: van, terminal'
+    });
+  }
+
+  try {
+    const userId = req.user.id;
+    const result = await db.query(
+      `UPDATE users
+       SET ui_skin_preference = $1,
+           updated_at = NOW()
+       WHERE id = $2
+         AND deleted_at IS NULL
+       RETURNING ui_skin_preference`,
+      [skin, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    return res.json({
+      skin: result.rows[0].ui_skin_preference
+    });
+  } catch (err) {
+    console.error('Error updating UI preferences:', err);
+    return res.status(500).json({ message: 'Error updating UI preferences' });
+  }
 };
 
 // Get current user profile
