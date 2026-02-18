@@ -1,28 +1,39 @@
 # Intellacc
 
-Intellacc is a prediction-market social network that combines a social feed, LMSR-based markets, and end-to-end encrypted messaging.
+Intellacc is a prediction-market social network with encrypted social messaging, community-driven signal scoring, and prediction-market trading infrastructure.
 
 ## Current Features
 
-- Social feed with posts, comments, and media attachments
-- Prediction markets powered by a Rust LMSR engine
-- End-to-end encrypted messaging (DMs and groups) via OpenMLS (WASM)
-- User profiles with accuracy tracking and leaderboards
-- Realtime updates over Socket.IO
+- Social feed with posts, comments, media attachments, and profile timelines.
+- Prediction markets powered by a Rust LMSR engine, with order books, event updates, and wallet-based balances.
+- **Persuasive Alpha / market-question validation flow**:
+  - Users can submit their own prediction questions.
+  - Community validators review submissions.
+  - Automatic approval/reward logic based on configurable quorum/bond rules.
+  - Creator and validator payouts are handled automatically for approved questions.
+- User reputation and scoring with monthly assignment + decay logic.
+- End-to-end encrypted messaging (DMs and groups) via OpenMLS (WASM), including staged welcome, safety-number UX, and contact verification flows.
+- Device linking and verification for trust across devices.
+- Passkey-based authentication with WebAuthn PRF unlock path.
+- Tiered verification framework (email, phone, payment provider-gated tiers), currently in production-ready hardening phase.
+- AI moderation pipeline (Pangram-backed analysis) with flagged-content surfaces and review workflows.
+- Realtime updates and presence via Socket.IO.
+- Moderation/reporting, account settings/security controls, and admin workflows for approvals.
 
 ## Architecture
 
 - Frontend: VanJS + Vite (port 5173)
-- Backend: Express + Socket.IO, with Caddy as reverse proxy (port 3000, Caddy on 80/443)
-- Prediction engine: Rust (Axum) service for LMSR markets (port 3001)
-- Database: PostgreSQL (container: `intellacc_db`)
+- Backend API: Express + Socket.IO (port 3000)
+- Prediction engine: Rust (Axum) LMSR service (port 3001)
+- Database: PostgreSQL (`intellacc_db`)
+- Reverse proxy: Caddy (80/443)
 
 ## Repository Layout
 
-- `frontend/` VanJS client and styles
-- `backend/` Express API, Socket.IO, DB migrations, uploads
+- `frontend/` VanJS client, service layer, styles, tests
+- `backend/` Express API, Socket.IO, services, DB migrations, tests
 - `prediction-engine/` Rust LMSR service
-- `openmls-wasm/` OpenMLS WASM package
+- `openmls-wasm/` and `frontend/openmls-pkg/` OpenMLS WASM bindings
 - `docs/` Product and technical docs
 - `tests/` E2E and integration tests
 
@@ -37,7 +48,7 @@ Intellacc is a prediction-market social network that combines a social feed, LMS
 2. Review environment files.
 
    ```sh
-   # Backend + DB + Caddy
+   # Backend + DB + proxy
    backend/.env
    # Prediction engine
    prediction-engine/.env
@@ -46,24 +57,24 @@ Intellacc is a prediction-market social network that combines a social feed, LMS
 3. Start your local development stack (safe, isolated from production containers).
 
    ```sh
-   ./scripts/dev-stack.sh up
+   docker compose up -d
    ```
 
 4. Open the app.
 
-   Frontend: http://localhost:5175
-   Backend API: http://localhost:3005
-   Prediction engine: http://localhost:3006
+   - Frontend: `http://localhost:5173`
+   - Backend API: `http://localhost:3000`
+   - Prediction engine: `http://localhost:3001`
 
-Production runs separately on ports 5173/3000/3001.
+Production may run the same services behind Caddy on public ports.
 
 ## Useful Commands
 
-- Local stack up: `./scripts/dev-stack.sh up`
-- Local stack down: `./scripts/dev-stack.sh down`
-- Local stack logs: `./scripts/dev-stack.sh logs`
-- Local stack status: `./scripts/dev-stack.sh status`
-- Production stack (from this repo): `docker compose up -d` (only if that's intentionally desired)
+- Local stack up: `docker compose up -d`
+- Local stack down: `docker compose down`
+- Local stack logs: `docker compose logs -f`
+- Local stack status: `docker compose ps`
+- Production stack (from this repo): `docker compose up -d` (only if intentionally desired)
 
 - Logs: `docker logs -f intellacc_backend`
 - Logs: `docker logs -f intellacc_frontend`
@@ -82,3 +93,4 @@ Production runs separately on ports 5173/3000/3001.
 
 - Unified backlog: `docs/unified-backlog.md`
 - MLS status: `docs/mls-status.md`
+- Persuasive Alpha plan: `docs/persuasive-alpha-v1-implementation-plan.md`
