@@ -20,6 +20,22 @@ Intellacc is a prediction-market social network with encrypted social messaging,
 - Realtime updates and presence via Socket.IO.
 - Moderation/reporting, account settings/security controls, and admin workflows for approvals.
 
+## What's New (Recent)
+
+- **Persuasive Alpha questions** now support community-sourced events: users can submit prediction questions, validators can approve/reject, and rewards are automatically distributed through the admin-run reward process.
+- **Onboarding + approvals** now has an admin approval flow for new registrations with queue limits, cooldown handling, and one-time approval links.
+- **Messaging trust updates** now include staged-welcome handling, safety-number presentation, and device-link verification flows for cleaner multi-device trust.
+- **Security hardening** now includes production-focused verification provider checks (email baseline, optional phone/payment gates) and stricter auth/middleware paths.
+- **AI moderation** is now tied into moderation workflows with backend endpoints and UI badges/flags for suspect content.
+
+## Default Runtime Assumptions
+
+- Frontend runs at `http://localhost:5173` in local containerized development.
+- Backend API runs at `http://localhost:3000`.
+- Prediction engine runs at `http://localhost:3001`.
+- Caddy can terminate public traffic on ports `80/443` in production setups.
+- Registration gating behavior is driven by environment configuration and service flags (default repo behavior may still allow existing users and login flows to remain unchanged).
+
 ## Architecture
 
 - Frontend: VanJS + Vite (port 5173)
