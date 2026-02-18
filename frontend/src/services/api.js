@@ -3,7 +3,36 @@ import { getToken, clearToken } from './tokenService';
 import { getDeviceId } from './deviceIdStore';
 
 // Base API URL
-const API_BASE = '/api';
+const DEFAULT_API_BASE = 'http://127.0.0.1:3005/api';
+
+const resolveApiBase = () => {
+  const configured = typeof import.meta !== 'undefined'
+    && import.meta.env
+    && import.meta.env.VITE_API_BASE_URL;
+  if (configured) {
+    return configured.replace(/\/$/, '');
+  }
+
+  const windowOrigin =
+    typeof window !== 'undefined' && window.location && window.location.origin
+      ? window.location.origin
+      : null;
+  if (windowOrigin) {
+    return `${windowOrigin}/api`;
+  }
+
+  const globalOrigin =
+    typeof globalThis.location !== 'undefined' && globalThis.location.origin
+      ? globalThis.location.origin
+      : null;
+  if (globalOrigin) {
+    return `${globalOrigin}/api`;
+  }
+
+  return DEFAULT_API_BASE;
+};
+
+const API_BASE = resolveApiBase();
 
 /**
  * Custom API error class
