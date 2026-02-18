@@ -28,6 +28,22 @@ Intellacc is a prediction-market social network with encrypted social messaging,
 - **Security hardening** now includes production-focused verification provider checks (email baseline, optional phone/payment gates) and stricter auth/middleware paths.
 - **AI moderation** is now tied into moderation workflows with backend endpoints and UI badges/flags for suspect content.
 
+## Release Highlights
+
+- `2026-02-18` — Registration approval flow is now active and production-hardened:
+  - single-use approval tokens
+  - queue capacity limits and resend cooldowns
+  - stale/expired token handling
+  - clear pending-registration UI state
+- `2026-02-18` — Persuasive Alpha question system completed end-to-end:
+  - user-created prediction submissions
+  - validator review + quorum rules
+  - automatic creator/validator reward distribution
+- `2026-02-18` — Messaging and trust features expanded:
+  - staged welcome / invite handling
+  - safety-number comparisons in UI
+  - device linking and verification UX improvements
+
 ## Default Runtime Assumptions
 
 - Frontend runs at `http://localhost:5173` in local containerized development.
