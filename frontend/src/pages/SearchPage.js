@@ -6,24 +6,42 @@ import { isLoggedInState } from '../services/auth';
 
 const SEARCH_DEBOUNCE_MS = 300;
 const SEARCH_PAGE_SIZE = 20;
+const followStates = {};
+const followBusyStates = {};
+let searchTimeout = null;
+
+const searchState = {
+  activeTab: van.state('posts'),
+  query: van.state(''),
+  postScope: van.state('global'),
+  posts: van.state([]),
+  users: van.state([]),
+  loadingPosts: van.state(false),
+  loadingUsers: van.state(false),
+  postsError: van.state(''),
+  usersError: van.state(''),
+  postsHasMore: van.state(false),
+  postsCursor: van.state(null),
+  hasSearched: van.state(false),
+  followError: van.state('')
+};
 
 export default function SearchPage() {
-  const activeTab = van.state('posts');
-  const query = van.state('');
-  const postScope = van.state('global');
-  const posts = van.state([]);
-  const users = van.state([]);
-  const loadingPosts = van.state(false);
-  const loadingUsers = van.state(false);
-  const postsError = van.state('');
-  const usersError = van.state('');
-  const postsHasMore = van.state(false);
-  const postsCursor = van.state(null);
-  const hasSearched = van.state(false);
-  const followStates = {};
-  const followBusyStates = {};
-  const followError = van.state('');
-  let searchTimeout = null;
+  const {
+    activeTab,
+    query,
+    postScope,
+    posts,
+    users,
+    loadingPosts,
+    loadingUsers,
+    postsError,
+    usersError,
+    postsHasMore,
+    postsCursor,
+    hasSearched,
+    followError
+  } = searchState;
 
   const postScopeOptions = () => {
     if (!isLoggedInState.val) {
@@ -170,6 +188,10 @@ export default function SearchPage() {
     postsCursor.val = null;
     postsHasMore.val = false;
     hasSearched.val = false;
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+      searchTimeout = null;
+    }
     if (String(query.val || '').trim()) {
       runSearch();
     }
