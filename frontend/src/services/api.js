@@ -635,46 +635,6 @@ export const api = {
 
   // MLS / Core Crypto endpoints
   mls: {
-    publishKeyPackages: (body) =>
-      mlsRequest('/mls/key-packages', { method: 'POST', body }),
-    sendCommitBundle: (body) =>
-      mlsRequest('/mls/commit', { method: 'POST', body }),
-    sendMessage: (body) =>
-      mlsRequest('/mls/message', { method: 'POST', body }),
-    sendHistorySecret: (body) =>
-      mlsRequest('/mls/history-secret', { method: 'POST', body }),
-    migrateConversation: (body) =>
-      mlsRequest('/mls/migrate', { method: 'POST', body }),
-    getKeyPackages: (userId, { ciphersuite, limit } = {}) => {
-      const search = new URLSearchParams();
-      if (ciphersuite != null) search.set('ciphersuite', String(ciphersuite));
-      if (limit != null) search.set('limit', String(limit));
-      const suffix = search.size ? `?${search.toString()}` : '';
-      return mlsRequest(`/mls/key-packages/${userId}${suffix}`);
-    },
-    createCredentialRequest: (body) =>
-      mlsRequest('/mls/credentials/request', { method: 'POST', body }),
-    completeCredential: (body) =>
-      mlsRequest('/mls/credentials/complete', { method: 'POST', body }),
-    listCredentials: (status) => {
-      const suffix = status ? `?status=${encodeURIComponent(status)}` : '';
-      return mlsRequest(`/mls/credentials${suffix}`);
-    },
-    upsertConversation: (body) =>
-      mlsRequest('/mls/conversations', { method: 'POST', body }),
-    updateGroupInfo: (conversationId, body) =>
-      mlsRequest(`/mls/conversations/${conversationId}/group-info`, { method: 'PUT', body }),
-    setHistorySharing: (conversationId, body) =>
-      mlsRequest(`/mls/conversations/${conversationId}/history-sharing`, { method: 'PUT', body }),
-    getConversation: (conversationId) =>
-      mlsRequest(`/mls/conversations/${conversationId}`),
-    getMessages: (conversationId, { limit, before } = {}) => {
-      const search = new URLSearchParams();
-      if (limit != null) search.set('limit', String(limit));
-      if (before) search.set('before', before);
-      const suffix = search.size ? `?${search.toString()}` : '';
-      return mlsRequest(`/mls/messages/${conversationId}${suffix}`);
-    },
     // Direct Messages (DM)
     getDirectMessages: () =>
       mlsRequest('/mls/direct-messages'),
@@ -683,8 +643,7 @@ export const api = {
     getPendingMessages: () =>
       mlsRequest('/mls/queue/pending'),
     ackMessages: (messageIds) =>
-      mlsRequest('/mls/queue/ack', { method: 'POST', body: { messageIds } })
-    ,
+      mlsRequest('/mls/queue/ack', { method: 'POST', body: { messageIds } }),
     syncGroupMembers: (groupId, memberIds) =>
       mlsRequest(`/mls/groups/${encodeURIComponent(groupId)}/members/sync`, { method: 'POST', body: { memberIds } })
   },

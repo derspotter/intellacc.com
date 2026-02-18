@@ -621,17 +621,16 @@ class CoreCryptoClient {
         const commitEpoch = typeof result.epoch === 'bigint' ? Number(result.epoch) : result.epoch;
         const finalGroupId = this.groupIdFromHex(result.group_id_hex || infoMeta.groupIdHex);
 
-        try {
-            await this.mlsFetch('/messages/group', {
-                groupId: finalGroupId,
-                epoch: commitEpoch ?? infoMeta.epoch,
-                messageType: 'commit',
-                data: this.toPostgresHex(commitBytes)
-            });
-        } catch (error) {
-            try { this.removeGroup(finalGroupId); } catch (e) { /* ignore */ }
-            throw error;
-        }
+        await this._sendGroupCommit({
+            groupId: finalGroupId,
+            commitBytes,
+            epoch: commitEpoch ?? infoMeta.epoch,
+            mergePendingCommit: false,
+            onCommitFailure: async () => {
+                try { this.removeGroup(finalGroupId); } catch (e) { /* ignore */ }
+            },
+            context: 'external commit join'
+        });
 
         await this.saveState();
 
@@ -641,13 +640,7 @@ class CoreCryptoClient {
             console.warn('[MLS] Failed to sync group members after external commit:', syncErr);
         }
 
-        // Broadcast confirmation tag for fork detection
-        try {
-            const currentEpoch = this.getGroupEpoch(finalGroupId);
-            await this.broadcastConfirmationTag(finalGroupId, currentEpoch);
-        } catch (tagErr) {
-            console.warn('[MLS] Failed to broadcast confirmation tag after external commit:', tagErr);
-        }
+        await this._broadcastGroupConfirmationTag(finalGroupId, 'after external commit join');
 
         return {
             groupId: finalGroupId,
@@ -810,31 +803,16 @@ class CoreCryptoClient {
 
                     // 4. Upload Commit Message (existing members only)
                     // OpenMLS Book: commit goes to existing members; welcome goes to new members.
-                    try {
-                        await this.mlsFetch('/messages/group', {
-                            groupId, epoch, messageType: 'commit',
-                            data: this.toPostgresHex(commitBytes),
-                            excludeUserIds: [userId]
-                        });
-                    } catch (commitErr) {
-                        try { this.client.clear_pending_commit(groupIdBytes); } catch (e) { /* ignore */ }
-                        if (rollbackState) await this.restoreStateFromVault(rollbackState);
-                        throw commitErr;
-                    }
+                    await this._sendGroupCommit({
+                        groupId,
+                        commitBytes,
+                        epoch,
+                        rollbackState,
+                        excludeUserIds: [userId],
+                        context: 'invite'
+                    });
 
-                    try {
-                        this.client.merge_pending_commit(groupIdBytes);
-                    } catch (mergeErr) {
-                        console.warn('[MLS] Failed to merge pending commit:', mergeErr);
-                        throw mergeErr;
-                    }
-
-                    try {
-                        const currentEpoch = this.getGroupEpoch(groupId);
-                        await this.broadcastConfirmationTag(groupId, currentEpoch);
-                    } catch (tagErr) {
-                        console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
-                    }
+                    await this._broadcastGroupConfirmationTag(groupId, 'after invite commit');
 
                     // 5. Upload Welcome Message (new members only, after commit accepted)
                     await this.mlsFetch('/messages/welcome', {
@@ -1045,12 +1023,7 @@ class CoreCryptoClient {
             console.warn('[MLS] Failed to sync group members:', e);
         }
 
-        try {
-            const currentEpoch = this.getGroupEpoch(groupId);
-            await this.broadcastConfirmationTag(groupId, currentEpoch);
-        } catch (tagErr) {
-            console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
-        }
+        await this._broadcastGroupConfirmationTag(groupId, 'after welcome acceptance');
 
         return groupId;
     }
@@ -1185,22 +1158,15 @@ class CoreCryptoClient {
         const commitBytes = result[0];
         const epoch = this.getGroupEpoch(groupId);
 
-        try {
-            await this.mlsFetch('/messages/group', { groupId: groupIdValue, epoch, messageType: 'commit', data: this.toPostgresHex(commitBytes) });
-        } catch (e) {
-            try { this.client.clear_pending_commit(groupIdBytes); } catch (_) {}
-            if (rollbackState) await this.restoreStateFromVault(rollbackState);
-            throw e;
-        }
-
-        this.client.merge_pending_commit(groupIdBytes);
+        await this._sendGroupCommit({
+            groupId: groupIdValue,
+            commitBytes,
+            epoch,
+            rollbackState,
+            context: 'self update'
+        });
         await this.saveState();
-
-        try {
-            await this.broadcastConfirmationTag(groupIdValue, this.getGroupEpoch(groupIdValue));
-        } catch (tagErr) {
-            console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
-        }
+        await this._broadcastGroupConfirmationTag(groupIdValue, 'after self update');
         return { success: true };
     }
 
@@ -1217,23 +1183,16 @@ class CoreCryptoClient {
         const commitBytes = result[0];
         const epoch = this.getGroupEpoch(groupId);
 
-        try {
-            await this.mlsFetch('/messages/group', { groupId: groupIdValue, epoch, messageType: 'commit', data: this.toPostgresHex(commitBytes) });
-        } catch (e) {
-            try { this.client.clear_pending_commit(groupIdBytes); } catch (_) {}
-            if (rollbackState) await this.restoreStateFromVault(rollbackState);
-            throw e;
-        }
-
-        this.client.merge_pending_commit(groupIdBytes);
+        await this._sendGroupCommit({
+            groupId: groupIdValue,
+            commitBytes,
+            epoch,
+            rollbackState,
+            context: 'member removal'
+        });
         await this.syncGroupMembers(groupIdValue);
         await this.saveState();
-
-        try {
-            await this.broadcastConfirmationTag(groupIdValue, this.getGroupEpoch(groupIdValue));
-        } catch (tagErr) {
-            console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
-        }
+        await this._broadcastGroupConfirmationTag(groupIdValue, 'after member removal');
         return { success: true };
     }
 
@@ -1323,6 +1282,66 @@ class CoreCryptoClient {
                 reason: 'confirmation_tag_mismatch',
                 senderId
             });
+        }
+    }
+
+    async _sendGroupCommit({
+        groupId,
+        commitBytes,
+        epoch,
+        rollbackState = null,
+        excludeUserIds = null,
+        mergePendingCommit = true,
+        context = '',
+        onCommitFailure
+    }) {
+        const normalized = this.normalizeGroupId(groupId);
+        const payload = {
+            groupId: normalized.str,
+            epoch,
+            messageType: 'commit',
+            data: this.toPostgresHex(commitBytes)
+        };
+
+        if (excludeUserIds?.length > 0) {
+            payload.excludeUserIds = excludeUserIds;
+        }
+
+        try {
+            await this.mlsFetch('/messages/group', payload);
+        } catch (commitErr) {
+            if (mergePendingCommit) {
+                try { this.client.clear_pending_commit(normalized.bytes); } catch (e) {}
+            }
+
+            if (rollbackState) {
+                await this.restoreStateFromVault(rollbackState);
+            }
+            if (onCommitFailure) {
+                await onCommitFailure();
+            }
+
+            throw commitErr;
+        }
+
+        if (mergePendingCommit) {
+            try {
+                this.client.merge_pending_commit(normalized.bytes);
+            } catch (mergeErr) {
+                console.warn(`[MLS] Failed to merge pending commit${context ? ` for ${context}` : ''}:`, mergeErr);
+                throw mergeErr;
+            }
+        }
+
+        return normalized.str;
+    }
+
+    async _broadcastGroupConfirmationTag(groupId, context = '') {
+        try {
+            const currentEpoch = this.getGroupEpoch(groupId);
+            await this.broadcastConfirmationTag(groupId, currentEpoch);
+        } catch (tagErr) {
+            console.warn(`[MLS] Failed to broadcast confirmation tag${context ? ` ${context}` : ''}:`, tagErr);
         }
     }
 
@@ -1693,12 +1712,7 @@ class CoreCryptoClient {
         // Save state after processing commit (epoch advanced, keys rotated)
         await this.saveState();
 
-        try {
-            const currentEpoch = this.getGroupEpoch(groupId);
-            await this.broadcastConfirmationTag(groupId, currentEpoch);
-        } catch (tagErr) {
-            console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
-        }
+        await this._broadcastGroupConfirmationTag(groupId, 'after staged commit');
 
         try {
             await this.syncGroupMembers(groupId);
@@ -1767,31 +1781,15 @@ class CoreCryptoClient {
         const groupInfoBytes = result[2] ? new Uint8Array(result[2]) : null;
         const epoch = this.getGroupEpoch(groupId);
 
-        try {
-            await this.mlsFetch('/messages/group', {
-                groupId, epoch, messageType: 'commit',
-                data: this.toPostgresHex(commitBytes)
-            });
-        } catch (commitErr) {
-            try { this.client.clear_pending_commit(groupIdBytes); } catch (e) { /* ignore */ }
-            if (rollbackState) await this.restoreStateFromVault(rollbackState);
-            throw commitErr;
-        }
+        await this._sendGroupCommit({
+            groupId,
+            commitBytes,
+            epoch,
+            rollbackState,
+            context: 'proposal batch',
+        });
 
-        try {
-            this.client.merge_pending_commit(groupIdBytes);
-        } catch (mergeErr) {
-            console.warn('[MLS] Failed to merge pending commit:', mergeErr);
-            throw mergeErr;
-        }
-
-        // Broadcast confirmation tag for fork detection
-        try {
-            const currentEpoch = this.getGroupEpoch(groupId);
-            await this.broadcastConfirmationTag(groupId, currentEpoch);
-        } catch (tagErr) {
-            console.warn('[MLS] Failed to broadcast confirmation tag:', tagErr);
-        }
+        await this._broadcastGroupConfirmationTag(groupId, 'after proposal batch');
 
         // Send welcomes with error tracking
         const failedRecipients = [];

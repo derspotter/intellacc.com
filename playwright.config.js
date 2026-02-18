@@ -5,10 +5,10 @@ const { defineConfig } = require('@playwright/test');
 module.exports = defineConfig({
   testDir: 'tests/e2e',
   outputDir: '.playwright-test-results',
+  workers: 1,
   reporter: [['line']],
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
     trace: 'retain-on-failure'
   }
 });
-
