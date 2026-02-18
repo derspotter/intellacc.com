@@ -514,7 +514,7 @@ export default function PostsList({ hideSearchControls = false, emptyStatePlacem
 
   // Define the rendering functions separately for clarity
   const renderLoading = () => {
-    if (loading.val) return van.tags.div({ class: "loading" }, "Loading posts...");
+    if (loading.val && posts.val.length > 0) return van.tags.div({ class: "loading" }, "Loading posts...");
     return null;
   };
   
@@ -550,7 +550,7 @@ export default function PostsList({ hideSearchControls = false, emptyStatePlacem
   };
 
   const renderEmptyMessage = () => {
-    if (!loading.val && !error.val && posts.val.length === 0) {
+    if (!error.val && posts.val.length === 0 && postsStore.state.initialFetchAttempted.val) {
       return van.tags.div({ class: "empty-list" }, "No posts yet.");
     }
     return null;
