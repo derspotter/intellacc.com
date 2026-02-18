@@ -1,6 +1,7 @@
 import van from 'vanjs-core';
 import postsStore from '../../store/posts';  // Import the store object directly
 import PostItem from './PostItem';
+import { isLoggedInState } from '../../services/auth';
 
 let feedHoverController = null;
 
@@ -59,6 +60,8 @@ export default function PostsList() {
   const range = van.state({ start: 0, end: -1 });
   const topPad = van.state(0);
   const bottomPad = van.state(0);
+  const searchQuery = postsStore.state.searchQuery;
+  const searchScope = postsStore.state.searchScope;
 
   const DEFAULT_ITEM_H = 260;
   const OVERSCAN_PX = 1200;
@@ -73,6 +76,7 @@ export default function PostsList() {
   let resizeObserver = null;
   let observed = new Set();
   let observePending = false;
+  let searchTimeout = null;
   // Keep a stable virtual list root element. Replacing the root on the first scroll
   // can cause Firefox to "snap back" to the top while it recomputes scroll metrics.
   const virtualTopSpacerEl = canVirtualize ? van.tags.div({ class: 'posts-spacer posts-spacer-top' }) : null;
@@ -115,6 +119,46 @@ export default function PostsList() {
       el.__postRef = post;
     }
     return el;
+  };
+
+  const getScopeOptions = () => {
+    if (!isLoggedInState.val) {
+      return [{ value: 'global', label: 'All Posts' }];
+    }
+    return [
+      { value: 'global', label: 'All Posts' },
+      { value: 'following', label: 'Following' },
+      { value: 'seen', label: 'Seen Posts' }
+    ];
+  };
+
+  const triggerSearch = ({ scope = null, q = null } = {}) => {
+    const nextScope = scope !== null ? scope : searchScope.val;
+    const nextQuery = q !== null ? q : searchQuery.val;
+
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+      searchTimeout = null;
+    }
+
+    postsStore.actions.fetchPosts.call(postsStore, {
+      reset: true,
+      scope: nextScope,
+      q: nextQuery
+    });
+  };
+
+  const onSearchInput = (value) => {
+    postsStore.actions.setSearchQuery.call(postsStore, value);
+    if (searchTimeout) clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      triggerSearch();
+    }, 350);
+  };
+
+  const onScopeChange = (scope) => {
+    postsStore.actions.setSearchScope.call(postsStore, scope);
+    triggerSearch({ scope });
   };
 
   const resetVisibleRange = (visiblePosts, start, end) => {
@@ -479,6 +523,32 @@ export default function PostsList() {
     return null;
   };
   
+  const renderSearchBar = () => {
+    const scopeOptions = getScopeOptions();
+    const activeScope = isLoggedInState.val ? searchScope.val : 'global';
+
+    return van.tags.div({ class: "posts-search-controls", style: "margin: 8px 0 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;" }, [
+      van.tags.div({ style: "display:flex; flex: 1; min-width: 210px; gap: 8px; align-items:center;" }, [
+        van.tags.label({ style: "font-size: 0.9rem; color: #555;" }, "Search"),
+        van.tags.input({
+          type: "text",
+          value: searchQuery,
+          placeholder: "Search posts and authors",
+          oninput: e => onSearchInput(e.target.value),
+          style: "flex: 1; min-width: 160px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px;"
+        })
+      ]),
+      van.tags.div({ style: "display:flex; gap: 6px; flex-wrap: wrap;" }, scopeOptions.map(option => {
+        const isActive = option.value === activeScope;
+        return van.tags.button({
+          type: "button",
+          onclick: () => onScopeChange(option.value),
+          style: `padding: 7px 12px; border-radius: 999px; border: 1px solid ${isActive ? '#2d80ff' : '#ccc'}; background: ${isActive ? '#2d80ff' : 'white'}; color: ${isActive ? 'white' : '#222'}; cursor: pointer;`
+        }, option.label);
+      }))
+    ]);
+  };
+
   const renderEmptyMessage = () => {
     if (!loading.val && !error.val && posts.val.length === 0) {
       return van.tags.div({ class: "empty-list" }, "No posts yet.");
@@ -501,6 +571,7 @@ export default function PostsList() {
   
   // Render the component
   return van.tags.div({ class: "posts-list" }, [
+    renderSearchBar,
     renderLoading,
     renderError,
     renderEmptyMessage,

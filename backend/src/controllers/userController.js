@@ -200,12 +200,37 @@ exports.searchUsers = async (req, res) => {
   const query = req.query.q || '';
   const limit = Math.min(parseInt(req.query.limit) || 10, 20);
   const messagingReadyOnly = req.query.messaging_ready === '1' || req.query.messaging_ready === 'true';
+  const includeFollowing = req.query.include_following === '1' || req.query.include_following === 'true';
+  const viewerId = getViewerId(req);
 
   if (!query.trim()) {
     return res.json([]);
   }
 
   try {
+    const viewerFilter = Number.isInteger(viewerId) ? viewerId : null;
+    const viewerFilterIndex = viewerFilter === null ? null : 3;
+    const viewerFilterParam = viewerFilterIndex ? [viewerFilter] : [];
+    const params = [`%${query.toLowerCase()}%`, query, ...viewerFilterParam];
+    const whereParts = [
+      '(LOWER(u.username) LIKE $1 OR u.id::text = $2)',
+      'u.deleted_at IS NULL'
+    ];
+
+    if (viewerFilterIndex) {
+      whereParts.push(`u.id != $${viewerFilterIndex}`);
+    }
+
+    const followingSelect = includeFollowing && viewerFilter
+      ? `,
+          EXISTS (
+            SELECT 1
+            FROM follows f
+            WHERE f.follower_id = $${viewerFilterIndex}
+              AND f.following_id = u.id
+          ) AS is_following`
+      : '';
+
     const whereMessagingReady = messagingReadyOnly
       ? `
         AND EXISTS (
@@ -222,16 +247,23 @@ exports.searchUsers = async (req, res) => {
       `
       : '';
 
+    const whereClause = [
+      ...whereParts,
+      whereMessagingReady
+    ]
+      .filter(Boolean)
+      .join(' AND ');
+
+    const limitParamIndex = viewerFilter ? params.length + 1 : 3;
+    params.push(limit);
+
     const result = await db.query(`
-      SELECT u.id, u.username, u.bio, u.created_at
+      SELECT u.id, u.username, u.bio, u.created_at${followingSelect}
       FROM users u
-      WHERE (LOWER(u.username) LIKE $1 OR u.id::text = $2)
-        AND u.id != $3
-        AND u.deleted_at IS NULL
-        ${whereMessagingReady}
+      WHERE ${whereClause}
       ORDER BY u.username
-      LIMIT $4
-    `, [`%${query.toLowerCase()}%`, query, req.user.id, limit]);
+      LIMIT $${limitParamIndex}
+    `, params);
 
     res.json(result.rows);
   } catch (err) {

@@ -19,8 +19,12 @@
 - Start stack: `docker network create intellacc-network` (once), then `docker compose up -d`.
 - Logs: `docker logs -f intellacc_backend` / `intellacc_frontend` / `intellacc_prediction_engine`.
 - Backend tests: `docker exec intellacc_backend npm test` or `docker exec intellacc_backend npx jest test/messaging_e2e.test.js`.
+  - Always run backend tests in the backend container (`docker exec ...`) unless explicitly working in a dedicated local dev environment.
 - Frontend tests: `docker exec intellacc_frontend npx vitest`.
-- E2E: `./tests/e2e/reset-test-users.sh` then `npx playwright test tests/e2e/messaging-full.spec.js` (host).
+  - Always run frontend tests from the containerized frontend service (`docker exec intellacc_frontend sh -lc 'cd /app && ...'`) unless explicitly working in a dedicated local dev environment.
+- E2E: from project root, run `./tests/e2e/reset-test-users.sh` then
+  `docker exec intellacc_frontend sh -lc 'cd /app && npx playwright test tests/e2e/messaging-full.spec.js'`.
+  - In general, run full test suite commands in containers.
 - Rebuild Rust service: `docker compose up -d --build prediction-engine`.
 - Frontend tooling note: run frontend scripts/tests/builds from the frontend package context, not repo root.
   - From host: `cd frontend && npm run build` or `cd frontend && npm test`

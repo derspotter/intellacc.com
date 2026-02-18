@@ -379,10 +379,11 @@ export const api = {
     getUserByUsername: (username) =>
       request(`/users/username/${username}`),
 
-    search: (query, { messagingReady = false } = {}) => {
+    search: (query, { messagingReady = false, includeFollowing = false } = {}) => {
       const params = new URLSearchParams();
       params.set('q', query);
       if (messagingReady) params.set('messaging_ready', '1');
+      if (includeFollowing) params.set('include_following', '1');
       return request(`/users/search?${params.toString()}`);
     },
 
@@ -429,17 +430,20 @@ export const api = {
     getFeed: () => 
       request('/feed'),
 
-    getPage: ({ cursor = null, limit = 20 } = {}) => {
+    getPage: ({ cursor = null, limit = 20, scope = null, q = '' } = {}) => {
       const params = new URLSearchParams();
       params.set('limit', String(limit));
       if (cursor) params.set('cursor', cursor);
+      if (scope) params.set('scope', scope);
+      if (q && String(q).trim()) params.set('q', String(q).trim());
       return request(`/posts?${params.toString()}`);
     },
 
-    getFeedPage: ({ cursor = null, limit = 20 } = {}) => {
+    getFeedPage: ({ cursor = null, limit = 20, q = '' } = {}) => {
       const params = new URLSearchParams();
       params.set('limit', String(limit));
       if (cursor) params.set('cursor', cursor);
+      if (q && String(q).trim()) params.set('q', String(q).trim());
       return request(`/feed?${params.toString()}`);
     },
       

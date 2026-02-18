@@ -14,6 +14,7 @@ import ResetPasswordPage from '../components/auth/ResetPasswordPage';
 import PostsList from '../components/posts/PostsList';
 import CreatePostForm from '../components/posts/CreatePostForm';
 import PredictionsPage from '../pages/PredictionsPage.js';
+import SearchPage from '../pages/SearchPage.js';
 import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
 import ProfilePredictions from '../components/profile/ProfilePredictions';
@@ -125,6 +126,7 @@ export default function Router() {
     settings: () => SettingsPage(),
     
     predictions: () => PredictionsPage(),
+    search: () => SearchPage(),
     
     profile: () => {
       // Fetching logic is now handled by updatePageFromHash on route change

@@ -6,8 +6,10 @@ const pangramService = require('../services/pangramService');
 const activitypubOutbound = require('../services/activitypub/outboundService');
 const atprotoOutbound = require('../services/atproto/outboundService');
 const { getRequestBaseUrl } = require('../services/activitypub/url');
+const { verifyToken, getUserFromToken } = require('../utils/jwt');
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
+const USER_POST_SEEN_RETENTION_DAYS = 90;
 
 const getViewerId = (req) => {
   const rawViewerId = req.user?.id ?? req.user?.userId;
@@ -15,17 +17,118 @@ const getViewerId = (req) => {
   return Number.isInteger(parsed) ? parsed : null;
 };
 
+const getViewerIdFromAuthHeader = async (req) => {
+  if (req.user) return req.user.id;
+
+  const authHeader = req.headers?.authorization;
+  if (!authHeader) return null;
+
+  const token = authHeader.split(' ')[1];
+  if (!token) return null;
+
+  const decoded = verifyToken(token);
+  if (decoded.error) return null;
+
+  const userId = parseInt(decoded.userId, 10);
+  if (!Number.isInteger(userId)) return null;
+
+  try {
+    const result = await db.query(
+      'SELECT password_changed_at, deleted_at FROM users WHERE id = $1',
+      [userId]
+    );
+    const userRow = result.rows[0];
+    if (!userRow || userRow.deleted_at) return null;
+
+    if (userRow.password_changed_at && decoded.iat) {
+      const tokenIssuedAt = new Date(decoded.iat * 1000);
+      if (tokenIssuedAt < new Date(userRow.password_changed_at)) return null;
+    }
+
+    const user = getUserFromToken(decoded);
+    return user?.id || null;
+  } catch (err) {
+    console.error('[Posts] Failed to resolve optional viewer from token:', err);
+    return null;
+  }
+};
+
 const isAdminViewer = (req) => req.user?.role === 'admin';
 
 const buildPostVisibilityClause = (viewerIdParamName = '$3') => {
   return `
-       AND p.is_hidden = FALSE
+       p.is_hidden = FALSE
        AND (${viewerIdParamName}::int IS NULL OR NOT EXISTS (
          SELECT 1
          FROM user_blocks ub
          WHERE (ub.blocker_id = p.user_id AND ub.blocked_user_id = ${viewerIdParamName}::int)
             OR (ub.blocker_id = ${viewerIdParamName}::int AND ub.blocked_user_id = p.user_id)
        ))`;
+};
+
+const parsePostCursor = (cursorRaw, scope) => {
+  if (!cursorRaw) return null;
+  try {
+    const decoded = JSON.parse(Buffer.from(String(cursorRaw), 'base64url').toString('utf8'));
+    if (scope === 'seen') {
+      const seenAt = new Date(decoded.seenAt);
+      const id = Number(decoded.id);
+      if (!Number.isFinite(seenAt.getTime()) || !Number.isInteger(id)) {
+        throw new Error('Invalid cursor');
+      }
+      return { seenAt, id };
+    }
+
+    const createdAt = new Date(decoded.createdAt);
+    const id = Number(decoded.id);
+    if (!Number.isFinite(createdAt.getTime()) || !Number.isInteger(id)) {
+      throw new Error('Invalid cursor');
+    }
+    return { createdAt, id };
+  } catch {
+    return null;
+  }
+};
+
+const normalizePostScope = (scope) => {
+  const normalized = String(scope || 'global').toLowerCase();
+  return normalized === 'seen' ? 'seen' : 'global';
+};
+
+const recordPostViews = async (userId, posts) => {
+  if (!Number.isInteger(Number(userId)) || !Array.isArray(posts) || posts.length === 0) return;
+
+  const uniquePostIds = [...new Set(posts.map(post => Number(post?.id)).filter(Number.isInteger))];
+  if (uniquePostIds.length === 0) return;
+
+  const values = [];
+  const placeholders = [];
+  let index = 1;
+  for (const postId of uniquePostIds) {
+    values.push(userId, postId);
+    placeholders.push(`($${index}, $${index + 1})`);
+    index += 2;
+  }
+
+  await db.query(
+    `
+      INSERT INTO user_post_views (user_id, post_id)
+      VALUES ${placeholders.join(', ')}
+      ON CONFLICT (user_id, post_id)
+      DO UPDATE SET seen_at = NOW()
+    `,
+    values
+  );
+};
+
+const pruneOldPostViews = async (userId) => {
+  if (!Number.isInteger(Number(userId))) return;
+  await db.query(
+    `DELETE FROM user_post_views
+     WHERE user_id = $1
+       AND seen_at < NOW() - INTERVAL '${USER_POST_SEEN_RETENTION_DAYS} days'`,
+    [userId]
+  );
 };
 
 const removeAttachmentFile = (storagePath) => {
@@ -206,33 +309,66 @@ exports.createPost = async (req, res) => {
 // Retrieve all top-level posts (e.g., a feed)
 exports.getPosts = async (req, res) => {
   console.log("--- ENTERING getPosts function ---"); // Add entry log
-  // Public feed endpoint: when unauthenticated, keep liked_by_user false.
   const userId = req.user?.id || null;
-  const viewerId = isAdminViewer(req) ? null : userId;
+  const scope = normalizePostScope(req.query.scope);
+  const isSeenScope = scope === 'seen';
+  const resolvedUserId = await getViewerIdFromAuthHeader(req).catch(() => null);
+  const effectiveUserId = Number.isInteger(Number(resolvedUserId))
+    ? Number(resolvedUserId)
+    : null;
+
   try {
-    console.log("getPosts called with userId:", userId);
+    console.log("getPosts called with userId:", effectiveUserId || userId || 'anonymous');
+    if (isSeenScope && !effectiveUserId && !userId) {
+      return res.status(401).json({ message: 'Authentication required for seen posts search' });
+    }
 
     const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10) || 20, 1), 50);
     const cursorRaw = req.query.cursor;
-    let cursor = null;
-    if (cursorRaw) {
-      try {
-        const decoded = JSON.parse(Buffer.from(String(cursorRaw), 'base64url').toString('utf8'));
-        const createdAt = new Date(decoded.createdAt);
-        const id = Number(decoded.id);
-        if (!Number.isFinite(createdAt.getTime()) || !Number.isInteger(id)) throw new Error('Invalid cursor');
-        cursor = { createdAt, id };
-      } catch {
-        return res.status(400).json({ message: 'Invalid cursor' });
+    const searchQuery = (req.query.q || '').trim();
+
+    const cursor = parsePostCursor(cursorRaw, isSeenScope ? 'seen' : 'global');
+    if (cursorRaw && !cursor) {
+      return res.status(400).json({ message: 'Invalid cursor' });
+    }
+
+    const effectiveViewerId = isAdminViewer(req) ? null : (effectiveUserId || userId);
+    const params = [effectiveViewerId, limit + 1];
+    const whereClauses = [
+      'p.parent_id IS NULL',
+      'p.is_comment = FALSE',
+      buildPostVisibilityClause('$1')
+    ];
+    const joinClause = isSeenScope
+      ? `JOIN user_post_views upv ON upv.post_id = p.id
+            AND upv.user_id = $1
+            AND upv.seen_at >= NOW() - INTERVAL '${USER_POST_SEEN_RETENTION_DAYS} days'`
+      : 'LEFT JOIN user_post_views upv ON upv.post_id = p.id AND upv.user_id = $1';
+
+    if (searchQuery) {
+      const term = `%${searchQuery}%`;
+      const queryIdx = params.length + 1;
+      params.push(term);
+      whereClauses.push(`(p.content ILIKE $${queryIdx} OR u.username ILIKE $${queryIdx})`);
+    }
+
+    if (cursor) {
+      const cursorAt = isSeenScope ? new Date(cursor.seenAt) : new Date(cursor.createdAt);
+      const cursorIdx = params.length + 1;
+      params.push(cursorAt.toISOString(), cursor.id);
+      if (isSeenScope) {
+        whereClauses.push(`(upv.seen_at, upv.post_id) < ($${cursorIdx}, $${cursorIdx + 1})`);
+      } else {
+        whereClauses.push(`(p.created_at, p.id) < ($${cursorIdx}, $${cursorIdx + 1})`);
       }
     }
 
     const result = await db.query(
       `SELECT p.*, u.username,
-              CASE WHEN EXISTS (SELECT 1 FROM likes 
-                                WHERE post_id = p.id AND user_id = $1) 
-                   THEN true 
-                   ELSE false 
+              CASE WHEN EXISTS (SELECT 1 FROM likes
+                                WHERE post_id = p.id AND user_id = $1)
+                   THEN true
+                   ELSE false
               END AS liked_by_user,
               COALESCE(ur.rep_points, 1.0) as user_rep_points,
               -- Calculate visibility multiplier: higher reputation = more visibility
@@ -251,16 +387,16 @@ exports.getPosts = async (req, res) => {
          ORDER BY analyzed_at DESC
          LIMIT 1
        ) ai ON true
-       WHERE p.parent_id IS NULL
-         AND p.is_comment = FALSE
-         ${buildPostVisibilityClause('$1')}
-         ${cursor ? 'AND (p.created_at, p.id) < ($3, $4)' : ''}
-       ORDER BY p.created_at DESC, p.id DESC
+       ${joinClause}
+       WHERE ${whereClauses.join('\n         AND ')}
+       ORDER BY ${isSeenScope
+         ? 'upv.seen_at DESC, upv.post_id DESC'
+         : 'p.created_at DESC, p.id DESC'}
        LIMIT $2`,
-      cursor ? [viewerId, limit + 1, cursor.createdAt, cursor.id] : [viewerId, limit + 1]
+      params
     );
 
-    // Log the raw result which should now include reputation data
+    // Log the raw query result which should now include reputation data
     console.log("Raw query result:", result.rows.map(post => ({
       id: post.id,
       user_id: post.user_id,
@@ -276,8 +412,21 @@ exports.getPosts = async (req, res) => {
     const items = hasMore ? rows.slice(0, limit) : rows;
     const last = items[items.length - 1];
     const nextCursor = hasMore && last
-      ? Buffer.from(JSON.stringify({ createdAt: new Date(last.created_at).toISOString(), id: last.id })).toString('base64url')
+      ? Buffer.from(JSON.stringify(
+          isSeenScope
+            ? { seenAt: new Date(last.seen_at).toISOString(), id: last.id }
+            : { createdAt: new Date(last.created_at).toISOString(), id: last.id }
+        )).toString('base64url')
       : null;
+
+    if (effectiveViewerId) {
+      recordPostViews(effectiveViewerId, rows).catch((err) => {
+        console.error('[Posts] Failed to record seen posts:', err);
+      });
+      pruneOldPostViews(effectiveViewerId).catch((err) => {
+        console.error('[Posts] Failed to prune seen posts:', err);
+      });
+    }
 
     res.status(200).json({ items, hasMore, nextCursor });
   } catch (err) {
@@ -291,6 +440,7 @@ exports.getPostById = async (req, res) => {
   const postId = req.params.id;
   const viewerId = isAdminViewer(req) ? null : getViewerId(req);
   try {
+    const userId = getViewerId(req);
     const result = await db.query(
       `SELECT p.*,
               ai.ai_probability,
@@ -312,6 +462,16 @@ exports.getPostById = async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).send('Post not found');
     }
+
+    if (userId) {
+      recordPostViews(userId, result.rows).catch((err) => {
+        console.error('[Posts] Failed to record viewed post:', err);
+      });
+      pruneOldPostViews(userId).catch((err) => {
+        console.error('[Posts] Failed to prune seen posts:', err);
+      });
+    }
+
     res.status(200).json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -497,31 +657,42 @@ exports.getFeed = async (req, res) => {
   console.log("--- ENTERING getFeed function ---"); // Add entry log
   const userId = req.user.id; // Using standardized user object
   const viewerId = isAdminViewer(req) ? null : userId;
+  const searchQuery = (req.query.q || '').trim();
 
   try {
     console.log("getFeed called with userId:", userId);
 
     const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10) || 20, 1), 50);
-    const cursorRaw = req.query.cursor;
-    let cursor = null;
-    if (cursorRaw) {
-      try {
-        const decoded = JSON.parse(Buffer.from(String(cursorRaw), 'base64url').toString('utf8'));
-        const createdAt = new Date(decoded.createdAt);
-        const id = Number(decoded.id);
-        if (!Number.isFinite(createdAt.getTime()) || !Number.isInteger(id)) throw new Error('Invalid cursor');
-        cursor = { createdAt, id };
-      } catch {
-        return res.status(400).json({ message: 'Invalid cursor' });
-      }
+    const cursor = parsePostCursor(req.query.cursor, 'global');
+    if (req.query.cursor && !cursor) {
+      return res.status(400).json({ message: 'Invalid cursor' });
+    }
+
+    const params = [viewerId, limit + 1];
+    const whereClauses = [
+      '(p.user_id IN (SELECT following_id FROM follows WHERE follower_id = $1) OR p.user_id = $1)',
+      'p.parent_id IS NULL',
+      'p.is_comment = FALSE',
+      buildPostVisibilityClause('$1')
+    ];
+
+    if (searchQuery) {
+      const term = `%${searchQuery}%`;
+      params.push(term);
+      whereClauses.push(`(p.content ILIKE $${params.length} OR u.username ILIKE $${params.length})`);
+    }
+
+    if (cursor) {
+      params.push(cursor.createdAt, cursor.id);
+      whereClauses.push(`(p.created_at, p.id) < ($${params.length}, $${params.length + 1})`);
     }
 
     const result = await db.query(
       `SELECT p.*, u.username,
-              CASE WHEN EXISTS (SELECT 1 FROM likes 
-                                WHERE post_id = p.id AND user_id = $1) 
-                   THEN true 
-                   ELSE false 
+              CASE WHEN EXISTS (SELECT 1 FROM likes
+                                WHERE post_id = p.id AND user_id = $1)
+                   THEN true
+                   ELSE false
               END AS liked_by_user,
               COALESCE(ur.rep_points, 1.0) as user_rep_points,
               -- Calculate visibility multiplier: higher reputation = more visibility
@@ -540,19 +711,10 @@ exports.getFeed = async (req, res) => {
          ORDER BY analyzed_at DESC
          LIMIT 1
        ) ai ON true
-       WHERE (p.user_id IN (
-         SELECT following_id 
-         FROM follows 
-         WHERE follower_id = $1
-       )
-       OR p.user_id = $1)
-       AND p.parent_id IS NULL
-       AND p.is_comment = FALSE
-       ${buildPostVisibilityClause('$1')}
-       ${cursor ? 'AND (p.created_at, p.id) < ($3, $4)' : ''}
+       WHERE ${whereClauses.join('\n       AND ')}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $2`,
-      cursor ? [viewerId, limit + 1, cursor.createdAt, cursor.id] : [viewerId, limit + 1]
+      params
     );
 
     // Log the raw result which should include reputation data
@@ -571,6 +733,15 @@ exports.getFeed = async (req, res) => {
     const nextCursor = hasMore && last
       ? Buffer.from(JSON.stringify({ createdAt: new Date(last.created_at).toISOString(), id: last.id })).toString('base64url')
       : null;
+
+    if (userId) {
+      recordPostViews(userId, rows).catch((err) => {
+        console.error('[Posts] Failed to record seen posts:', err);
+      });
+      pruneOldPostViews(userId).catch((err) => {
+        console.error('[Posts] Failed to prune seen posts:', err);
+      });
+    }
 
     res.status(200).json({ items, hasMore, nextCursor });
   } catch (err) {

@@ -46,6 +46,14 @@ const STRAIGHT_SVGS = {
       <path d="M7 12h7" />
     </svg>
   `,
+  search: `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"
+      aria-hidden="true" focusable="false">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.35-4.35" />
+    </svg>
+  `,
   profile: `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
       fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="butt" stroke-linejoin="miter"
@@ -88,6 +96,14 @@ const LUCIDE_SVGS = {
       fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
       aria-hidden="true" focusable="false">
       <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5 8.4 8.4 0 0 1-3.7-.8L3 21l1.8-5.8a8.4 8.4 0 0 1-.8-3.7A8.5 8.5 0 0 1 12.5 3H13a8.5 8.5 0 0 1 8 8v.5z" />
+    </svg>
+  `,
+  search: `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"
+      aria-hidden="true" focusable="false">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.35-4.35" />
     </svg>
   `,
   profile: `
@@ -135,6 +151,14 @@ const HEROICONS_SVGS = {
       <path d="M7.5 8.25h9" />
       <path d="M7.5 12h6" />
       <path d="M21 12a8.25 8.25 0 0 1-8.25 8.25H6l-3 3V12A8.25 8.25 0 0 1 11.25 3.75H12A9 9 0 0 1 21 12Z" />
+    </svg>
+  `,
+  search: `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+      aria-hidden="true" focusable="false">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.35-4.35" />
     </svg>
   `,
   profile: `
@@ -193,6 +217,13 @@ export default function BottomNav() {
       iconId: 'messages',
       label: 'Messages',
       requiresAuth: true
+    },
+    {
+      id: 'search',
+      href: '#search',
+      iconId: 'search',
+      label: 'Search',
+      requiresAuth: false
     },
     {
       id: 'profile',

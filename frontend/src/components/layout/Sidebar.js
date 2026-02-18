@@ -179,6 +179,7 @@ export default function Sidebar({ isOpen = van.state(false) } = {}) {
     div({ class: "sidebar-content" }, [
       div({ class: "sidebar-item" }, a({ href: "#home" }, "Home")),
       div({ class: "sidebar-item" }, a({ href: "#predictions" }, "Predictions")),
+      div({ class: "sidebar-item" }, a({ href: "#search" }, "Search")),
 
       // Notifications link (only show when logged in)
       () => isLoggedInState.val

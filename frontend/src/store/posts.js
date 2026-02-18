@@ -26,6 +26,8 @@ const postsStore = {
     error: van.state(null),
     nextCursor: van.state(null),
     hasMore: van.state(true),
+    searchScope: van.state('following'),
+    searchQuery: van.state(''),
     // Tracks whether we're showing real API data or a logged-out placeholder feed.
     feedMode: van.state('unknown'),
     // Persist per-post UI state across virtualization re-mounts.
@@ -82,7 +84,13 @@ const postsStore = {
      * Fetch all posts
      * @returns {Promise<Array>} Posts
      */
-    async fetchPosts({ reset = true } = {}) {
+    async fetchPosts({ reset = true, scope, q = '' } = {}) {
+      const requestedScope = isLoggedInState.val
+        ? ((scope || this.state.searchScope.val || 'following'))
+        : 'global';
+      const normalizedScope = requestedScope === 'following' || requestedScope === 'seen' ? requestedScope : 'global';
+      const query = String(q || '').trim();
+
       this.state.initialFetchAttempted.val = true; // Mark that an attempt to fetch is being made
       if (this.state.loading.val) return this.state.posts.val;
       try {
@@ -92,10 +100,17 @@ const postsStore = {
           this.state.nextCursor.val = null;
           this.state.hasMore.val = true;
         }
+        this.state.searchScope.val = normalizedScope;
+        this.state.searchQuery.val = query;
 
-        const page = isLoggedInState.val
-          ? await api.posts.getFeedPage({ cursor: null, limit: 20 })
-          : await api.posts.getPage({ cursor: null, limit: 20 });
+        const page = normalizedScope === 'following'
+          ? await api.posts.getFeedPage({ cursor: null, limit: 20, q: query })
+          : await api.posts.getPage({
+              cursor: null,
+              limit: 20,
+              ...(normalizedScope === 'global' ? {} : { scope: normalizedScope }),
+              q: query
+            });
 
         const items = Array.isArray(page?.items) ? page.items : [];
         this.state.posts.val = items;
@@ -131,10 +146,21 @@ const postsStore = {
       try {
         this.state.loadingMore.val = true;
         this.state.error.val = null;
+        const scope = isLoggedInState.val
+          ? (this.state.searchScope.val === 'seen'
+            ? 'seen'
+            : (this.state.searchScope.val === 'global' ? 'global' : 'following'))
+          : 'global';
+        const query = String(this.state.searchQuery.val || '').trim();
 
-        const page = isLoggedInState.val
-          ? await api.posts.getFeedPage({ cursor: this.state.nextCursor.val, limit: 20 })
-          : await api.posts.getPage({ cursor: this.state.nextCursor.val, limit: 20 });
+        const page = scope === 'following'
+          ? await api.posts.getFeedPage({ cursor: this.state.nextCursor.val, limit: 20, q: query })
+          : await api.posts.getPage({
+              cursor: this.state.nextCursor.val,
+              limit: 20,
+              ...(scope === 'global' ? {} : { scope }),
+              q: query
+            });
 
         const items = Array.isArray(page?.items) ? page.items : [];
         if (items.length === 0) {
@@ -169,6 +195,21 @@ const postsStore = {
       } finally {
         this.state.loadingMore.val = false;
       }
+    },
+
+    setSearchScope(scope) {
+      const requestedScope = scope === 'seen' || scope === 'global' || scope === 'following'
+        ? scope
+        : 'following';
+      const normalizedScope = isLoggedInState.val ? requestedScope : 'global';
+      this.state.searchScope.val = normalizedScope;
+      if (!isLoggedInState.val) {
+        this.state.searchQuery.val = '';
+      }
+    },
+
+    setSearchQuery(query) {
+      this.state.searchQuery.val = String(query || '').trim();
     },
 
     loadMockPosts() {
