@@ -38,11 +38,29 @@ const cleanupUsers = async (userIds) => {
   await db.query(`DELETE FROM users WHERE id IN (${placeholders})`, userIds);
 };
 
+const createdEvents = [];
+
+const createEvent = async () => {
+  const event = await db.query(
+    `INSERT INTO events (title, details, closing_date)
+     VALUES ($1, $2, NOW() + INTERVAL '2 hours')
+     RETURNING id`,
+    [`Verification test event ${Date.now()}_${Math.random().toString(16).slice(2)}`, 'Verification test event for middleware bypass']
+  );
+
+  createdEvents.push(event.rows[0].id);
+  return event.rows[0];
+};
+
 describe('Tiered verification routes and middleware', () => {
   const users = [];
 
   afterAll(async () => {
     await cleanupUsers(users);
+    if (createdEvents.length > 0) {
+      const eventPlaceholders = createdEvents.map((_, index) => `$${index + 1}`).join(', ');
+      await db.query(`DELETE FROM events WHERE id IN (${eventPlaceholders})`, createdEvents);
+    }
   });
 
   test('returns verification status for authenticated user', async () => {
@@ -246,6 +264,153 @@ describe('Tiered verification routes and middleware', () => {
       expect(setupRes.body.error).toMatch(/Stripe verification is not configured/i);
     } finally {
       process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  test('treats phone verification as disabled when explicitly turned off', async () => {
+    const user = await createUser();
+    users.push(user.id);
+
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalFlag = process.env.PHONE_VERIFICATION_ENABLED;
+    process.env.NODE_ENV = 'production';
+    process.env.PHONE_VERIFICATION_ENABLED = 'false';
+
+    try {
+      const phoneStartRes = await request(app)
+        .post('/api/verification/phone/start')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ phoneNumber: '+15555550000' });
+
+      expect(phoneStartRes.statusCode).toBe(400);
+      expect(phoneStartRes.body.error).toBe('Phone verification is disabled by configuration.');
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+      if (typeof originalFlag === 'undefined') {
+        delete process.env.PHONE_VERIFICATION_ENABLED;
+      } else {
+        process.env.PHONE_VERIFICATION_ENABLED = originalFlag;
+      }
+    }
+  });
+
+  test('treats payment verification as disabled when explicitly turned off', async () => {
+    const user = await createUser();
+    users.push(user.id);
+
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalFlag = process.env.PAYMENT_VERIFICATION_ENABLED;
+    process.env.NODE_ENV = 'production';
+    process.env.PAYMENT_VERIFICATION_ENABLED = 'false';
+
+    try {
+      const setupRes = await request(app)
+        .post('/api/verification/payment/setup')
+        .set('Authorization', `Bearer ${user.token}`);
+
+      expect(setupRes.statusCode).toBe(400);
+      expect(setupRes.body.error).toBe('Payment verification is disabled by configuration.');
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+      if (typeof originalFlag === 'undefined') {
+        delete process.env.PAYMENT_VERIFICATION_ENABLED;
+      } else {
+        process.env.PAYMENT_VERIFICATION_ENABLED = originalFlag;
+      }
+    }
+  });
+
+  test('bypasses phone verification when phone verification is disabled', async () => {
+    const user = await createUser();
+    users.push(user.id);
+
+    const originalFlag = process.env.PHONE_VERIFICATION_ENABLED;
+    process.env.PHONE_VERIFICATION_ENABLED = 'false';
+
+    const event = await createEvent();
+
+    try {
+      await db.query('UPDATE users SET verification_tier = 1 WHERE id = $1', [user.id]);
+
+      const predictionRes = await request(app)
+        .post('/api/predict')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({
+          event_id: event.id,
+          prediction_value: 'yes',
+          confidence: 77
+        });
+
+      expect(predictionRes.statusCode).toBe(201);
+      expect(predictionRes.body).toHaveProperty('id');
+    } finally {
+      if (typeof originalFlag === 'undefined') {
+        delete process.env.PHONE_VERIFICATION_ENABLED;
+      } else {
+        process.env.PHONE_VERIFICATION_ENABLED = originalFlag;
+      }
+    }
+  });
+
+  test('bypasses payment verification when payment verification is disabled', async () => {
+    const user = await createUser();
+    users.push(user.id);
+
+    const originalFlag = process.env.PAYMENT_VERIFICATION_ENABLED;
+    process.env.PAYMENT_VERIFICATION_ENABLED = 'false';
+
+    try {
+      await db.query('UPDATE users SET verification_tier = 2 WHERE id = $1', [user.id]);
+
+      const createRes = await request(app)
+        .post('/api/events')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({
+          title: `Event create test ${Date.now()}`,
+          details: 'Event created during verification bypass test',
+          closing_date: new Date(Date.now() + 3600000).toISOString()
+        });
+
+      expect(createRes.statusCode).toBe(201);
+      expect(createRes.body).toHaveProperty('id');
+    } finally {
+      if (typeof originalFlag === 'undefined') {
+        delete process.env.PAYMENT_VERIFICATION_ENABLED;
+      } else {
+        process.env.PAYMENT_VERIFICATION_ENABLED = originalFlag;
+      }
+    }
+  });
+
+  test('hides upgrade path when higher tiers are disabled', async () => {
+    const user = await createUser();
+    users.push(user.id);
+
+    const originalPhoneFlag = process.env.PHONE_VERIFICATION_ENABLED;
+    const originalPaymentFlag = process.env.PAYMENT_VERIFICATION_ENABLED;
+    process.env.PHONE_VERIFICATION_ENABLED = 'false';
+    process.env.PAYMENT_VERIFICATION_ENABLED = 'true';
+
+    try {
+      await db.query('UPDATE users SET verification_tier = 1 WHERE id = $1', [user.id]);
+
+      const statusRes = await request(app)
+        .get('/api/verification/status')
+        .set('Authorization', `Bearer ${user.token}`);
+
+      expect(statusRes.statusCode).toBe(200);
+      expect(statusRes.body.next_tier).toBeNull();
+    } finally {
+      if (typeof originalPhoneFlag === 'undefined') {
+        delete process.env.PHONE_VERIFICATION_ENABLED;
+      } else {
+        process.env.PHONE_VERIFICATION_ENABLED = originalPhoneFlag;
+      }
+      if (typeof originalPaymentFlag === 'undefined') {
+        delete process.env.PAYMENT_VERIFICATION_ENABLED;
+      } else {
+        process.env.PAYMENT_VERIFICATION_ENABLED = originalPaymentFlag;
+      }
     }
   });
 

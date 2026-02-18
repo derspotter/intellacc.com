@@ -86,6 +86,16 @@ export default function VerificationStatus({ onUpgrade } = {}) {
             }
 
             const currentTier = status.val?.current_tier || 0;
+            const capabilities = status.val?.provider_capabilities || {};
+            const canUpgradeTo = (targetTier) => {
+                if (targetTier === 2) {
+                    return capabilities.phone?.enabled !== false;
+                }
+                if (targetTier === 3) {
+                    return capabilities.payment?.enabled !== false;
+                }
+                return true;
+            };
 
             return div({ class: 'tier-list' },
                 TIER_INFO.map(tier =>
@@ -107,7 +117,7 @@ export default function VerificationStatus({ onUpgrade } = {}) {
                             )
                         ),
                         // Show upgrade button for next tier
-                        currentTier === tier.level - 1 && onUpgrade
+                        currentTier === tier.level - 1 && onUpgrade && canUpgradeTo(tier.level)
                             ? button({
                                 type: 'button',
                                 class: 'btn btn-primary btn-sm upgrade-btn',

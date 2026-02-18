@@ -77,6 +77,9 @@ const validateProductionConfig = () => {
   }
 
   if (parseBool(process.env.REQUIRE_TWILIO_VERIFICATION)) {
+    if (!parseBool(process.env.PHONE_VERIFICATION_ENABLED, true)) {
+      issues.push('PHONE_VERIFICATION_ENABLED is false but REQUIRE_TWILIO_VERIFICATION is true.');
+    }
     issues.push(...validateOptionalProviderVars(
       ['TWILIO_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_VERIFY_SID'],
       'phone verification',
@@ -85,6 +88,9 @@ const validateProductionConfig = () => {
   }
 
   if (parseBool(process.env.REQUIRE_STRIPE_VERIFICATION)) {
+    if (!parseBool(process.env.PAYMENT_VERIFICATION_ENABLED, true)) {
+      issues.push('PAYMENT_VERIFICATION_ENABLED is false but REQUIRE_STRIPE_VERIFICATION is true.');
+    }
     const stripeIssues = validateOptionalProviderVars(
       ['STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY'],
       'payment verification',

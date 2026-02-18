@@ -79,6 +79,11 @@ exports.getVerificationStatus = async (req, res) => {
         const status = await emailVerificationService.getVerificationStatus(userId);
         const phoneProviderStatus = phoneVerificationService.getProviderStatus();
         const paymentProviderStatus = paymentVerificationService.getProviderStatus();
+        const maxTier = phoneProviderStatus?.enabled === false
+            ? 1
+            : paymentProviderStatus?.enabled === false
+                ? 2
+                : 3;
 
         // Add tier names for frontend display
         const tierNames = ['none', 'email', 'phone', 'payment'];
@@ -100,7 +105,7 @@ exports.getVerificationStatus = async (req, res) => {
                 payment: paymentProviderStatus
             },
             unlocks: tierUnlocks[status.tier] || [],
-            next_tier: status.tier < 3 ? {
+            next_tier: status.tier < maxTier ? {
                 tier: status.tier + 1,
                 name: tierNames[status.tier + 1],
                 unlocks: tierUnlocks[status.tier + 1] || []

@@ -10,31 +10,50 @@ const DEV_PHONE_CODE = process.env.DEV_PHONE_CODE || '000000';
 const TWILIO_SID = process.env.TWILIO_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_VERIFY_SID = process.env.TWILIO_VERIFY_SID;
+const getPhoneVerificationEnabledEnv = () => process.env.PHONE_VERIFICATION_ENABLED;
 
 let twilioClient = null;
 
+const parseBool = (value, defaultValue = false) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return defaultValue;
+  return normalized === 'true' || normalized === '1' || normalized === 'yes';
+};
+
 const useTwilio = () => !!(TWILIO_SID && TWILIO_AUTH_TOKEN && TWILIO_VERIFY_SID);
 const isProduction = () => process.env.NODE_ENV === 'production';
+const isEnabled = () => {
+  const explicit = parseBool(getPhoneVerificationEnabledEnv(), true);
+  return explicit;
+};
 
 const assertProviderAvailable = () => {
+  if (!isEnabled()) {
+    throw new Error('Phone verification is disabled by configuration.');
+  }
+
   if (isProduction() && !useTwilio()) {
     throw new Error('Twilio verification is not configured in production');
   }
 };
 
 const getProviderStatus = () => {
+  const enabled = isEnabled();
   const configured = useTwilio();
-  const available = !isProduction() || configured;
+  const available = enabled && (!isProduction() || configured);
   const requiresConfig = process.env.REQUIRE_TWILIO_VERIFICATION === 'true';
 
   return {
     provider: configured ? 'twilio' : 'dev',
     configured,
     required: requiresConfig,
+    enabled,
     available,
     reason: available
       ? null
-      : 'Twilio verification credentials are not configured.'
+      : (!enabled
+        ? 'Phone verification is disabled by configuration.'
+        : 'Twilio verification credentials are not configured.')
   };
 };
 
@@ -169,3 +188,4 @@ exports.confirmPhoneVerification = async (userId, phoneNumber, code) => {
 
 exports.normalizePhone = normalizePhone;
 exports.getProviderStatus = getProviderStatus;
+exports.isEnabled = isEnabled;

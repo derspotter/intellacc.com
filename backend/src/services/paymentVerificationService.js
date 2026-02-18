@@ -6,33 +6,51 @@ const db = require('../db');
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY;
+const getPaymentVerificationEnabledEnv = () => process.env.PAYMENT_VERIFICATION_ENABLED;
 
 let stripeClient = null;
 
+const parseBool = (value, defaultValue = false) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return defaultValue;
+  return normalized === 'true' || normalized === '1' || normalized === 'yes';
+};
+
 const isStripeConfigured = () => !!(STRIPE_SECRET_KEY && STRIPE_PUBLISHABLE_KEY);
 const isProduction = () => process.env.NODE_ENV === 'production';
+const isEnabled = () => parseBool(getPaymentVerificationEnabledEnv(), true);
 
 const assertProviderAvailable = () => {
+  if (!isEnabled()) {
+    throw new Error('Payment verification is disabled by configuration.');
+  }
+
   if (isProduction() && !isStripeConfigured()) {
     throw new Error('Stripe verification is not configured in production');
   }
 };
 
 const getProviderStatus = () => {
+  const enabled = isEnabled();
   const configured = isStripeConfigured();
-  const available = !isProduction() || configured;
+  const available = enabled && (!isProduction() || configured);
   const requiresConfig = process.env.REQUIRE_STRIPE_VERIFICATION === 'true';
 
   return {
     provider: configured ? 'stripe' : 'dev',
     configured,
     required: requiresConfig,
+    enabled,
     available,
     reason: available
       ? null
-      : 'Stripe verification credentials are not configured.'
+      : (!enabled
+        ? 'Payment verification is disabled by configuration.'
+        : 'Stripe verification credentials are not configured.')
   };
 };
+
+exports.isEnabled = isEnabled;
 
 const getStripeClient = () => {
   if (!STRIPE_SECRET_KEY) {

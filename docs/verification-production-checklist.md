@@ -14,6 +14,12 @@
 Set the following based on what you want to support in production:
 - `REQUIRE_TWILIO_VERIFICATION=true` if phone verification is required.
 - `REQUIRE_STRIPE_VERIFICATION=true` if payment verification is required.
+- `PHONE_VERIFICATION_ENABLED=true|false` to make tier-2 verification optional (`false` disables phone and bypasses phone-gated routes).
+- `PAYMENT_VERIFICATION_ENABLED=true|false` to make tier-3 verification optional (`false` disables payment and bypasses payment-gated routes).
+
+Recommended defaults for a no-cost rollout:
+- `PHONE_VERIFICATION_ENABLED=false`
+- `PAYMENT_VERIFICATION_ENABLED=false`
 
 If enabled:
 - Twilio:

@@ -26,6 +26,8 @@ The implementation should cover three tiers:
 - Optional provider requirements:
   - phone verification provider vars (`TWILIO_*`)
   - payment verification provider vars (`STRIPE_*`)
+- Runtime feature toggles:
+  - `PHONE_VERIFICATION_ENABLED` and `PAYMENT_VERIFICATION_ENABLED` control whether tier-2/3 checks are enforced.
 - Use explicit env flags to require providers in production:
   - `REQUIRE_TWILIO_VERIFICATION=true`
   - `REQUIRE_STRIPE_VERIFICATION=true`
@@ -65,6 +67,8 @@ The implementation should cover three tiers:
 - Recommended startup configuration:
   - `REQUIRE_TWILIO_VERIFICATION=false`
   - `REQUIRE_STRIPE_VERIFICATION=false`
+  - `PHONE_VERIFICATION_ENABLED=false`
+  - `PAYMENT_VERIFICATION_ENABLED=false`
   - Keep features hidden/disabled via provider availability messages when providers are not configured.
 
 ## Acceptance criteria
@@ -77,6 +81,7 @@ The implementation should cover three tiers:
 - [x] Block tier-2 and tier-3 verification start/setup flows when providers are missing in production.
 - [x] Extend provider status payload with `required` and availability metadata.
 - [x] Add backend regression tests for production provider-missing behavior.
+- [x] Make phone/payment verification optional via feature toggles and bypass middleware.
 
 ## Current work-in-progress
 - [x] Surface provider availability in `/api/verification/status` so UI can explicitly handle missing credentials outside dev.

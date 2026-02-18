@@ -3,6 +3,8 @@
  * Gates routes based on user's verification tier
  */
 const db = require('../db');
+const { isEnabled: isPhoneVerificationEnabled } = require('../services/phoneVerificationService');
+const { isEnabled: isPaymentVerificationEnabled } = require('../services/paymentVerificationService');
 
 const TIER_NAMES = ['none', 'email', 'phone', 'payment'];
 const TIER_REQUIREMENTS = {
@@ -18,6 +20,13 @@ const TIER_REQUIREMENTS = {
  */
 const requireTier = (minTier) => {
     return async (req, res, next) => {
+        if (minTier === 2 && !isPhoneVerificationEnabled()) {
+            return next();
+        }
+        if (minTier === 3 && !isPaymentVerificationEnabled()) {
+            return next();
+        }
+
         // Must be authenticated first
         if (!req.user) {
             return res.status(401).json({ error: 'Authentication required' });
