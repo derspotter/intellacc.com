@@ -248,4 +248,37 @@ describe('Tiered verification routes and middleware', () => {
       process.env.NODE_ENV = originalNodeEnv;
     }
   });
+
+  test('enforces email verification before MLS and messaging attachment access', async () => {
+    const user = await createUser();
+    users.push(user.id);
+
+    const blockedMls = await request(app)
+      .get('/api/mls/groups')
+      .set('Authorization', `Bearer ${user.token}`);
+
+    expect(blockedMls.statusCode).toBe(403);
+    expect(blockedMls.body.error).toBe('Higher verification required');
+    expect(blockedMls.body.required_tier).toBe(1);
+    expect(blockedMls.body.required_tier_name).toBe('email');
+
+    const blockedMessageUpload = await request(app)
+      .post('/api/attachments/message')
+      .set('Authorization', `Bearer ${user.token}`)
+      .field('mls_group_id', 1);
+
+    expect(blockedMessageUpload.statusCode).toBe(403);
+    expect(blockedMessageUpload.body.error).toBe('Higher verification required');
+    expect(blockedMessageUpload.body.required_tier).toBe(1);
+    expect(blockedMessageUpload.body.required_tier_name).toBe('email');
+
+    await db.query('UPDATE users SET verification_tier = 1 WHERE id = $1', [user.id]);
+
+    const allowedMls = await request(app)
+      .get('/api/mls/groups')
+      .set('Authorization', `Bearer ${user.token}`);
+
+    expect(allowedMls.statusCode).toBe(200);
+    expect(Array.isArray(allowedMls.body)).toBe(true);
+  });
 });

@@ -266,13 +266,13 @@ router.get("/weekly/stats", authenticateJWT, requireAdmin, weeklyAssignmentContr
 router.get("/weekly/user/:userId/status", authenticateJWT, weeklyAssignmentController.getUserWeeklyStatus);
 
 // MLS Routes (Messaging Layer Security - E2EE)
-router.use('/mls', mlsRoutes);
+router.use('/mls', authenticateJWT, requireEmailVerified, mlsRoutes);
 
 // Attachments (pre-signed URL scaffold)
 router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);
 router.get('/attachments/presign-download', authenticateJWT, attachmentsController.presignDownload);
 router.post('/attachments/post', authenticateJWT, requireEmailVerified, attachmentsController.uploadPostImage);
-router.post('/attachments/message', authenticateJWT, attachmentsController.uploadMessageAttachment);
+router.post('/attachments/message', authenticateJWT, requireEmailVerified, attachmentsController.uploadMessageAttachment);
 router.get('/attachments/:id', authenticateJWT, attachmentsController.downloadAttachment);
 
 // LMSR Market API proxy routes (bypass CORS issues)
