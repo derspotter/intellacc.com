@@ -157,6 +157,33 @@ export const uploadPostImage = (file) => {
   return requestForm('/attachments/post', form, { method: 'POST' });
 };
 
+export const getPostComments = (postId) =>
+  request(`/posts/${postId}/comments`);
+
+export const createComment = (postId, content) =>
+  request('/posts', {
+    method: 'POST',
+    body: {
+      parent_id: postId,
+      content
+    }
+  });
+
+export const likePost = (postId) =>
+  request(`/posts/${postId}/like`, {
+    method: 'POST'
+  });
+
+export const unlikePost = (postId) =>
+  request(`/posts/${postId}/like`, {
+    method: 'DELETE'
+  });
+
+export const getLikeStatus = (postId) =>
+  request(`/posts/${postId}/like/status`, {
+    method: 'GET'
+  });
+
 export const getAttachmentUrl = (attachmentId) => {
   const token = getStoredToken();
   const baseUrl = `${resolveApiBase()}/attachments/${attachmentId}`;

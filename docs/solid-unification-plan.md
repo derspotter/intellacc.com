@@ -175,6 +175,10 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
   - Implemented migration slice for home feed: create-post form, posts list component, paginated fetch (`/posts` or `/feed`), and route-level authentication-aware behavior.
   - Added image attachment upload + inline preview support in create-post flow.
   - Extended solid API client with feed/public post pagination and attachment helpers.
+- `2026-02-18`: Extended `frontend-solid` feed slice with post interactions.
+  - Added like toggling + comment loading/submission flow in each feed row.
+  - Added optimistic post-like updates with rollback on API errors.
+  - Added comments list rendering and comment count sync through home feed state.
 
 ## Assumptions
 

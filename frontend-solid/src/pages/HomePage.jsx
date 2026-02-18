@@ -91,6 +91,17 @@ export default function HomePage() {
     });
   };
 
+  const updatePost = (postId, patch) => {
+    setPosts((current) =>
+      current.map((post) => {
+        if (String(post.id) !== String(postId)) {
+          return post;
+        }
+        return { ...post, ...(typeof patch === 'function' ? patch(post) : patch) };
+      })
+    );
+  };
+
   onMount(() => {
     loadPosts({ reset: true });
   });
@@ -114,6 +125,7 @@ export default function HomePage() {
       <Show when={!loading()}>
         <PostsList
           posts={posts}
+          onPostUpdate={updatePost}
           loading={loading}
           loadingMore={loadingMore}
           hasMore={hasMore}
