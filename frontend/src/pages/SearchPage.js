@@ -43,9 +43,12 @@ export default function SearchPage() {
     followError
   } = searchState;
 
-  const postScopeOptions = () => {
+const postScopeOptions = () => {
     if (!isLoggedInState.val) {
-      return [{ value: 'global', label: 'All Posts' }];
+      return [
+        { value: 'global', label: 'All Posts' },
+        { value: 'seen', label: 'Seen Posts', disabled: true }
+      ];
     }
     return [
       { value: 'global', label: 'All Posts' },
@@ -352,8 +355,13 @@ export default function SearchPage() {
       ? div({ class: "search-scope-row" }, [
           ...postScopeOptions().map(option => button({
             type: "button",
+            disabled: () => option.disabled,
+            title: () => option.disabled ? 'Sign in to see seen posts' : '',
             class: () => `search-scope ${postScope.val === option.value ? 'active' : ''}`,
-            onclick: () => handleScopeChange(option.value)
+            onclick: () => {
+              if (option.disabled) return;
+              handleScopeChange(option.value);
+            }
           }, option.label))
         ])
       : null,
