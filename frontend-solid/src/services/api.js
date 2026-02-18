@@ -1,17 +1,45 @@
+import { getDeviceId, setDeviceId as setStoredDeviceId } from './deviceIdStore';
+
 const DEFAULT_API_BASE = 'http://127.0.0.1:3005/api';
 const DEFAULT_LIMIT = 20;
 
 const configuredBase = () => {
   if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) {
-    return String(import.meta.env.VITE_API_BASE_URL).replace(/\/$/, '');
+    const candidate = String(import.meta.env.VITE_API_BASE_URL).trim();
+    if (!candidate) {
+      return null;
+    }
+    return candidate.replace(/\/$/, '');
   }
   return null;
 };
 
 const resolveApiBase = () => {
   const fromEnv = configuredBase();
-  if (fromEnv) {
-    return fromEnv;
+  const normalizeEnvBase = (value) => {
+    if (!value || typeof value !== 'string') {
+      return null;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (/^https?:\/\//i.test(trimmed)) {
+      return trimmed.replace(/\/$/, '');
+    }
+
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+      return `${window.location.origin}${withLeadingSlash}`.replace(/\/$/, '');
+    }
+
+    return null;
+  };
+
+  const resolvedFromEnv = normalizeEnvBase(fromEnv);
+  if (resolvedFromEnv) {
+    return resolvedFromEnv;
   }
 
   if (typeof window !== 'undefined' && window.location?.origin) {
@@ -21,12 +49,78 @@ const resolveApiBase = () => {
   return DEFAULT_API_BASE;
 };
 
+const normalizeEndpoint = (endpoint) => {
+  if (!endpoint || typeof endpoint !== 'string') {
+    return '';
+  }
+
+  const raw = endpoint.trim();
+  if (!raw.startsWith('/')) {
+    return `/${raw}`;
+  }
+
+  if (resolveApiBase().endsWith('/api') && raw.startsWith('/api/')) {
+    return raw.replace(/^\/api/, '');
+  }
+
+  return raw;
+};
+
 const getStoredToken = () => {
   try {
     return localStorage.getItem('token');
   } catch {
     return null;
   }
+};
+
+const getOrCreateDeviceId = () => {
+  const currentId = getDeviceId();
+  if (currentId) {
+    return currentId;
+  }
+
+  const generated = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    ? crypto.randomUUID()
+    : `device_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  setStoredDeviceId(generated);
+  return generated;
+};
+
+const requestWithDeviceId = async (endpoint, options = {}, deviceId = null) => {
+  const resolvedDeviceId = deviceId || getDeviceId();
+  if (!resolvedDeviceId) {
+    return request(endpoint, options);
+  }
+
+  return request(endpoint, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      'x-device-id': resolvedDeviceId
+    }
+  });
+};
+
+const ensureRegisteredDevice = async () => {
+  const deviceId = getOrCreateDeviceId();
+  try {
+    await request('/devices/register', {
+      method: 'POST',
+      body: {
+        device_public_id: deviceId,
+        name: 'Primary Device'
+      }
+    });
+  } catch (error) {
+    // Device may already exist for this ID or have been verified through another flow.
+    const message = String(error?.message || '').toLowerCase();
+    if (!message.includes('device id already exists') && !message.includes('already exists')) {
+      throw error;
+    }
+  }
+
+  return deviceId;
 };
 
 const request = async (endpoint, options = {}) => {
@@ -50,7 +144,7 @@ const request = async (endpoint, options = {}) => {
     config.body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(`${resolveApiBase()}${endpoint}`, config);
+  const response = await fetch(`${resolveApiBase()}${normalizeEndpoint(endpoint)}`, config);
   if (!response.ok) {
     const body = await response.text();
     const message = body?.trim() || `Request failed: ${response.status}`;
@@ -78,7 +172,7 @@ const requestBlob = async (endpoint, options = {}) => {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${resolveApiBase()}${endpoint}`, { ...options, headers });
+  const response = await fetch(`${resolveApiBase()}${normalizeEndpoint(endpoint)}`, { ...options, headers });
   if (!response.ok) {
     const body = await response.text();
     const message = body?.trim() || `Request failed: ${response.status}`;
@@ -97,7 +191,7 @@ const requestForm = async (endpoint, body, options = {}) => {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${resolveApiBase()}${endpoint}`, {
+  const response = await fetch(`${resolveApiBase()}${normalizeEndpoint(endpoint)}`, {
     ...options,
     headers,
     body
@@ -379,6 +473,32 @@ export const getGroupMessages = (groupId, afterId = null) => {
   }
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return request(`/mls/messages/group/${groupId}${suffix}`);
+};
+
+export const sendGroupMessage = async (groupId, messageText) => {
+  const deviceId = await ensureRegisteredDevice();
+  const payload = {
+    groupId,
+    messageType: 'application',
+    data: String(messageText || '')
+  };
+
+  return requestWithDeviceId('/mls/messages/group', {
+    method: 'POST',
+    body: payload
+  }, deviceId);
+};
+
+export const registerActiveDevice = async (name = 'Primary Device') => {
+  const deviceId = getOrCreateDeviceId();
+  await request('/devices/register', {
+    method: 'POST',
+    body: {
+      device_public_id: deviceId,
+      name
+    }
+  });
+  return deviceId;
 };
 
 export { requestBlob };

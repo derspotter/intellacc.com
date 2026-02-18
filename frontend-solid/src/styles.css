@@ -1157,6 +1157,20 @@ body.skin-terminal .prediction-card {
   gap: 0.5rem;
 }
 
+.messages-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.message-thread-title {
+  font-weight: 600;
+}
+
+.message-thread-controls {
+  margin: 0.6rem 0 0.75rem;
+}
+
 .message-thread-item {
   width: 100%;
   text-align: left;
@@ -1187,6 +1201,14 @@ body.skin-terminal .prediction-card {
   gap: 0.45rem;
 }
 
+.message-content-item.sent {
+  background: #f4f8ff;
+}
+
+.message-content-item.received {
+  background: #fff;
+}
+
 .message-meta {
   display: flex;
   gap: 0.65rem;
@@ -1204,6 +1226,12 @@ body.skin-terminal .prediction-card {
 .message-text {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.message-compose-form {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
 }
 
 .notifications-toolbar {

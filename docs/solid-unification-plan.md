@@ -167,6 +167,31 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
   - Added production-safe migration checkpoint and updated plan status.
   - Skin resolver now accepts `?skin=van|terminal` from either `location.search` or hash query while preserving existing behavior.
   - Next slice: create a dedicated `frontend-solid` migration scaffold and complete first route-by-route parity slice (`home/feed`) under Playwright parity checks.
+- `2026-02-18`: Messages/Notifications parity slice completed in Solid migration with verified actions in dev compose.
+  - Added dev-only device-id plumbing in `frontend-solid/src/services/api.js` (`deviceIdStore`, registration + `x-device-id` header usage) and full message send/consume flow in `frontend-solid/src/pages/MessagesPage.jsx`.
+  - Extended `frontend-solid/src/pages/NotificationsPage.jsx` and existing routing to validate authenticated notifications list/actions in parity app.
+  - Ran Playwright CLI checks on local solid stack (`docker-compose.solid-local.yml`) in auth state:
+    - Notifications: list renders, mark as read, and delete flows execute.
+    - Messages: open direct message thread, refresh, and send message flow executes.
+  - Validation artifacts:
+    - `parity-shots/solid-notifications-final.png`
+    - `parity-shots/solid-messages-final.png`
+    - `parity-shots/solid-messages-after-send.png`
+  - Runtime validation:
+    - `frontend-solid` build passes.
+    - Backend `test/messaging_push_integration.test.js` passes in dev container.
+  - Next items: continue with remaining parity route slices and decide when to harden message text rendering (buffer payload decode already handled).
+- `2026-02-18`: Continued parity and API hardening.
+  - Fixed API base normalization in `frontend-solid/src/services/api.js` to avoid absolute URL parse failures when `/api`-style base values are present in runtime config.
+  - Added Playwright CLI validation on `frontend-solid` (local dev compose) for:
+    - messages flow (`#messages`, open thread, refresh, send)
+    - notifications list page state (`#notifications`)
+  - Captured updated parity artifacts:
+    - `parity-shots/solid-messages-flow.png`
+    - `.playwright-cli/page-2026-02-18T20-59-10-070Z.yml`
+    - `.playwright-cli/page-2026-02-18T20-59-21-311Z.yml`
+    - `.playwright-cli/page-2026-02-18T20-59-30-544Z.yml`
+    - `.playwright-cli/page-2026-02-18T20-59-47-808Z.yml`
 - `2026-02-18`: Started first Solid scaffold migration slice.
   - Added `frontend-solid/` app with Vite + Solid runtime, route shell, and home/feed baseline.
   - Added local skin token system and baseline CSS tokens for `van` and `terminal` within the scaffold.
