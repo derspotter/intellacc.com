@@ -3592,6 +3592,15 @@ body.dark-mode .weekly-assignment-badge.pending {
   margin: 0 0 0.25rem 0;
 }
 
+.search-page .search-tab,
+.search-page .search-tab-row button,
+.search-page .search-scope,
+.search-page .search-scope-row button {
+  border-radius: 0 !important;
+  background: var(--card-bg) !important;
+  color: var(--text-color) !important;
+}
+
 .search-toolbar {
   display: flex;
   flex-direction: column;
@@ -3609,7 +3618,7 @@ body.dark-mode .weekly-assignment-badge.pending {
 
 .search-tab {
   border: 1px solid var(--border-color);
-  background: transparent;
+  background: var(--card-bg);
   color: var(--text-color);
   padding: 0.5rem 0.9rem;
   border-radius: 0 !important;
@@ -3629,12 +3638,13 @@ body.dark-mode .weekly-assignment-badge.pending {
 .search-tab:focus-visible {
   border-color: var(--signature-blue);
   color: var(--text-color);
-  background-color: transparent;
+  background-color: var(--card-bg);
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .search-tab.active {
   border-color: var(--signature-blue);
+  background-color: var(--card-bg);
   color: var(--text-color);
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
@@ -3685,6 +3695,7 @@ body.dark-mode .weekly-assignment-badge.pending {
 
 .search-scope.active {
   border-color: var(--signature-blue);
+  background-color: var(--card-bg);
   color: var(--text-color);
   box-shadow: 0 0 0 2px var(--focus-ring);
 }

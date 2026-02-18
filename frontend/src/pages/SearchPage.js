@@ -45,10 +45,7 @@ export default function SearchPage() {
 
 const postScopeOptions = () => {
     if (!isLoggedInState.val) {
-      return [
-        { value: 'global', label: 'All Posts' },
-        { value: 'seen', label: 'Seen Posts', disabled: true }
-      ];
+      return [{ value: 'global', label: 'All Posts' }];
     }
     return [
       { value: 'global', label: 'All Posts' },
@@ -305,9 +302,6 @@ const postScopeOptions = () => {
   const renderUsers = () => {
     const currentQuery = String(query.val || '').trim();
     const hasUsers = users.val.length > 0;
-    if (!isLoggedInState.val) {
-      return p({ class: "search-hint" }, 'Sign in to search users.');
-    }
     if (!currentQuery) {
       return p({ class: "search-hint" }, 'Type a term to search people.');
     }
@@ -329,12 +323,30 @@ const postScopeOptions = () => {
       div({ class: "search-tab-row" }, [
         button({
           type: "button",
-          class: () => `search-tab ${activeTab.val === 'posts' ? 'active' : ''}`,
+          class: "search-tab",
+          style: () => {
+            const isActive = activeTab.val === 'posts';
+            return [
+              "border-radius: 0 !important;",
+              "background: var(--card-bg) !important;",
+              `border-color: ${isActive ? 'var(--signature-blue)' : 'var(--border-color)'} !important;`,
+              `box-shadow: ${isActive ? '0 0 0 2px var(--focus-ring)' : 'none'} !important;`
+            ].join(' ');
+          },
           onclick: () => handleTabChange('posts')
         }, "Posts"),
         button({
           type: "button",
-          class: () => `search-tab ${activeTab.val === 'users' ? 'active' : ''}`,
+          class: "search-tab",
+          style: () => {
+            const isActive = activeTab.val === 'users';
+            return [
+              "border-radius: 0 !important;",
+              "background: var(--card-bg) !important;",
+              `border-color: ${isActive ? 'var(--signature-blue)' : 'var(--border-color)'} !important;`,
+              `box-shadow: ${isActive ? '0 0 0 2px var(--focus-ring)' : 'none'} !important;`
+            ].join(' ');
+          },
           onclick: () => handleTabChange('users')
         }, "Users")
       ]),
@@ -355,11 +367,17 @@ const postScopeOptions = () => {
       ? div({ class: "search-scope-row" }, [
           ...postScopeOptions().map(option => button({
             type: "button",
-            disabled: () => option.disabled,
-            title: () => option.disabled ? 'Sign in to see seen posts' : '',
-            class: () => `search-scope ${postScope.val === option.value ? 'active' : ''}`,
+            class: "search-scope",
+            style: () => {
+              const isActive = postScope.val === option.value;
+              return [
+                "border-radius: 0 !important;",
+                "background: var(--card-bg) !important;",
+                `border-color: ${isActive ? 'var(--signature-blue)' : 'var(--border-color)'} !important;`,
+                `box-shadow: ${isActive ? '0 0 0 2px var(--focus-ring)' : 'none'} !important;`
+              ].join(' ');
+            },
             onclick: () => {
-              if (option.disabled) return;
               handleScopeChange(option.value);
             }
           }, option.label))
