@@ -3722,6 +3722,10 @@ body.dark-mode .weekly-assignment-badge.pending {
   min-height: 45vh;
 }
 
+.home-post-feed {
+  margin-top: 0;
+}
+
 .posts-list--home-bottom .empty-list {
   margin-top: auto;
   margin-bottom: auto;

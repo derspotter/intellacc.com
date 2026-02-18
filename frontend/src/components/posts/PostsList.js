@@ -8,7 +8,13 @@ let feedHoverController = null;
 /**
  * List of posts component
  */
-export default function PostsList({ hideSearchControls = false, emptyStatePlacement = 'default' } = {}) {
+export default function PostsList({
+  hideSearchControls = false,
+  emptyStatePlacement = 'default',
+  className = ''
+} = {}) {
+  const baseClass = emptyStatePlacement === 'home-bottom' ? 'posts-list posts-list--home-bottom' : 'posts-list';
+  const listClass = className ? `${baseClass} ${className}` : baseClass;
   const canVirtualize = typeof ResizeObserver !== 'undefined' && typeof requestAnimationFrame !== 'undefined';
 
   class Fenwick {
@@ -550,9 +556,6 @@ export default function PostsList({ hideSearchControls = false, emptyStatePlacem
   };
 
   const renderEmptyMessage = () => {
-    if (!error.val && posts.val.length === 0 && postsStore.state.initialFetchAttempted.val) {
-      return van.tags.div({ class: "empty-list" }, "No posts yet.");
-    }
     return null;
   };
   
@@ -570,7 +573,6 @@ export default function PostsList({ hideSearchControls = false, emptyStatePlacem
   };
   
   // Render the component
-  const listClass = emptyStatePlacement === 'home-bottom' ? "posts-list posts-list--home-bottom" : "posts-list";
   return van.tags.div({ class: listClass }, [
     () => hideSearchControls ? null : renderSearchBar(),
     renderLoading,

@@ -114,9 +114,11 @@ export default function Router() {
               p("Log in to create posts and see personalized content"),
               button({ onclick: () => { window.location.hash = 'login' }}, "Log In")
             ]),
-        SearchPage({ showHeader: false, showHints: false }),
+        div({ style: "margin-bottom: 2rem;" }, [
+          SearchPage({ showHeader: false, showHints: false })
+        ]),
         () => isLoggedInState.val ? CreatePostForm() : null,
-        PostsList({ hideSearchControls: true, emptyStatePlacement: 'home-bottom' })
+        PostsList({ hideSearchControls: true, emptyStatePlacement: 'home-bottom', className: 'home-post-feed' })
       ]);
     },
     
