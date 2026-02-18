@@ -1,0 +1,142 @@
+:root {
+  --bg: #ffffff;
+  --surface: #f7f7f7;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #d1d5db;
+  --button-bg: #ffffff;
+  --button-fg: #0f172a;
+  --button-border: #9ca3af;
+  --button-hover: #f1f5f9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+body.skin-terminal,
+body.skin-terminal * {
+  font-family: "Courier New", monospace;
+}
+
+body.skin-terminal {
+  --bg: #0d1117;
+  --surface: #101723;
+  --text: #e6edf3;
+  --muted: #94a3b8;
+  --border: #2d3740;
+  --button-bg: #131a22;
+  --button-fg: #e2e8f0;
+  --button-border: #334155;
+  --button-hover: #1f2937;
+}
+
+body.skin-van {
+  --bg: #ffffff;
+  --surface: #f9fafb;
+  --text: #0f172a;
+  --muted: #334155;
+  --border: #e2e8f0;
+  --button-bg: #ffffff;
+  --button-fg: #0f172a;
+  --button-border: #94a3b8;
+  --button-hover: #f8fafc;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.top-nav {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.8rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+}
+
+.top-nav .brand {
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.top-nav nav {
+  margin-right: auto;
+}
+
+.top-nav .nav-btn,
+.skin-toggle button {
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--button-border);
+  border-radius: 0.45rem;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  cursor: pointer;
+}
+
+.top-nav .nav-btn:hover,
+.skin-toggle button:hover {
+  background: var(--button-hover);
+}
+
+.skin-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.skin-toggle button.active {
+  background: var(--button-fg);
+  color: var(--button-bg);
+}
+
+main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.home-page h1 {
+  margin-top: 0;
+}
+
+.feed-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.feed-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  padding: 0.9rem;
+}
+
+.feed-item .meta {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.error {
+  color: #b91c1c;
+}
+
+.not-found {
+  padding: 1rem;
+}

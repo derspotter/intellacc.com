@@ -83,6 +83,9 @@ recherche/2504.01781v2.pdf
 
 # Build artifacts
 /frontend/dist/
+/frontend-solid/dist/
+/frontend-solid/node_modules/
+/frontend-solid/package-lock.json
 
 # Test output
 /test-results/

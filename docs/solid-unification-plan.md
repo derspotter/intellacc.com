@@ -99,6 +99,14 @@ Per route:
 - Van-style tokens + parity CSS until visual match.
 - Ensure terminal skin remains functional.
 
+Current in-scope milestone:
+- Scaffolded a dedicated Solid migration app at `frontend-solid/` with:
+  - Vite + SolidJS runtime,
+  - a route shell,
+  - a first-pass `home` feed page (posts load baseline),
+  - persistent + query-based skin selection (`?skin=van|terminal`) and body token class wiring.
+- This is a migration seed only; behavior parity and full component parity are still to be ported route-by-route from VanJS.
+
 Current status in this branch:
 - Backend and API work for skin preference is complete.
 - Skin provider now supports both hash-query and standard query-string overrides (`?skin=`) with `popstate/hashchange` reactivity in `frontend/src/services/skinProvider.js`.
@@ -159,6 +167,10 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
   - Added production-safe migration checkpoint and updated plan status.
   - Skin resolver now accepts `?skin=van|terminal` from either `location.search` or hash query while preserving existing behavior.
   - Next slice: create a dedicated `frontend-solid` migration scaffold and complete first route-by-route parity slice (`home/feed`) under Playwright parity checks.
+- `2026-02-18`: Started first Solid scaffold migration slice.
+  - Added `frontend-solid/` app with Vite + Solid runtime, route shell, and home/feed baseline.
+  - Added local skin token system and baseline CSS tokens for `van` and `terminal` within the scaffold.
+  - Ran build validation: `npm run build` passes with generated `dist` artifacts.
 
 ## Assumptions
 
