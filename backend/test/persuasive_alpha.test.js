@@ -119,13 +119,12 @@ const makeUser = async (label, verificationTier) => {
   };
 };
 
-const createEvent = async () => {
-  const closingDate = new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString();
+const createEvent = async ({ closingDate = new Date(Date.now() + (24 * 60 * 60 * 1000)), outcome = null } = {}) => {
   const result = await db.query(
-    `INSERT INTO events (title, details, closing_date, event_type, category)
-     VALUES ($1, $2, $3, 'binary', 'test')
+    `INSERT INTO events (title, details, closing_date, outcome, event_type, category)
+     VALUES ($1, $2, $3, $4, 'binary', 'test')
      RETURNING id, title, closing_date`,
-    [`Persuasive alpha event ${Date.now()}_${Math.floor(Math.random() * 10000)}`, 'Will this test pass?', closingDate]
+    [`Persuasive alpha event ${Date.now()}_${Math.floor(Math.random() * 10000)}`, 'Will this test pass?', closingDate, outcome]
   );
   return result.rows[0];
 };
@@ -553,6 +552,81 @@ describe('Persuasive alpha attribution APIs', () => {
 
     const payload = JSON.parse(global.fetch.mock.calls[0]?.[1]?.body || '{}');
     expect(payload.referral_click_id).toBe(clickId);
+
+    const clickRow = await db.query(
+      'SELECT consumed_by_market_update_id, consumed_at FROM post_market_clicks WHERE id = $1',
+      [clickId]
+    );
+    expect(clickRow.rows[0].consumed_by_market_update_id).toBeNull();
+    expect(clickRow.rows[0].consumed_at).toBeNull();
+  });
+
+  test('Market update route rejects closed market before prediction engine for attributed click and keeps click unconsumed', async () => {
+    const author = await makeUser('pa_author_route_closed', 1);
+    const trader = await makeUser('pa_trader_route_closed', 2);
+    cleanup.users.add(author.id);
+    cleanup.users.add(trader.id);
+
+    const event = await createEvent({
+      closingDate: new Date(Date.now() - 5 * 60 * 1000)
+    });
+    const post = await createPost(author);
+    cleanup.events.add(event.id);
+    cleanup.posts.add(post.id);
+
+    const match = await createMatch({ postId: post.id, eventId: event.id });
+    cleanup.matches.add(match.id);
+
+    const clickRes = await createClick({ postId: post.id, eventId: event.id, token: trader.token });
+    expect(clickRes.statusCode).toBe(201);
+    const clickId = clickRes.body.click.id;
+    cleanup.clicks.add(clickId);
+
+    const updateRes = await request(app)
+      .post(`/api/events/${event.id}/update`)
+      .set('Authorization', `Bearer ${trader.token}`)
+      .send({ user_id: trader.id, stake: 1.5, target_prob: 0.6 });
+
+    expect(updateRes.statusCode).toBe(400);
+    expect(updateRes.body).toMatchObject({ error: 'Market closed', event_id: event.id });
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    const clickRow = await db.query(
+      'SELECT consumed_by_market_update_id, consumed_at FROM post_market_clicks WHERE id = $1',
+      [clickId]
+    );
+    expect(clickRow.rows[0].consumed_by_market_update_id).toBeNull();
+    expect(clickRow.rows[0].consumed_at).toBeNull();
+  });
+
+  test('Market update route rejects resolved market before prediction engine for attributed click and keeps click unconsumed', async () => {
+    const author = await makeUser('pa_author_route_resolved', 1);
+    const trader = await makeUser('pa_trader_route_resolved', 2);
+    cleanup.users.add(author.id);
+    cleanup.users.add(trader.id);
+
+    const event = await createEvent();
+    await db.query('UPDATE events SET outcome = $1 WHERE id = $2', ['resolved', event.id]);
+    const post = await createPost(author);
+    cleanup.events.add(event.id);
+    cleanup.posts.add(post.id);
+
+    const match = await createMatch({ postId: post.id, eventId: event.id });
+    cleanup.matches.add(match.id);
+
+    const clickRes = await createClick({ postId: post.id, eventId: event.id, token: trader.token });
+    expect(clickRes.statusCode).toBe(201);
+    const clickId = clickRes.body.click.id;
+    cleanup.clicks.add(clickId);
+
+    const updateRes = await request(app)
+      .post(`/api/events/${event.id}/update`)
+      .set('Authorization', `Bearer ${trader.token}`)
+      .send({ user_id: trader.id, stake: 1.5, target_prob: 0.6 });
+
+    expect(updateRes.statusCode).toBe(400);
+    expect(updateRes.body).toMatchObject({ error: 'Market resolved', event_id: event.id });
+    expect(global.fetch).not.toHaveBeenCalled();
 
     const clickRow = await db.query(
       'SELECT consumed_by_market_update_id, consumed_at FROM post_market_clicks WHERE id = $1',

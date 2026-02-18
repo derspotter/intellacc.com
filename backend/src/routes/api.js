@@ -28,11 +28,13 @@ const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const moderationController = require('../controllers/moderationController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
 const db = require('../db');
+const { ensureEventIsActive } = require('../utils/eventLifecycle');
 const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
 const predictionEngineHeaders = {
     'Content-Type': 'application/json',
     ...(PREDICTION_ENGINE_AUTH_TOKEN ? { 'x-engine-token': PREDICTION_ENGINE_AUTH_TOKEN } : {})
 };
+
 
 // Base test route
 router.get("/", (req, res) => {
@@ -343,11 +345,26 @@ router.get("/events/:eventId/kelly", authenticateJWT, requirePhoneVerified, asyn
 });
 
 router.post("/events/:eventId/sell", authenticateJWT, requirePhoneVerified, async (req, res) => {
-    try {
-        const { eventId } = req.params;
-        const { share_type, amount } = req.body;
-        const userId = req.user.id;
+    const { eventId } = req.params;
+    const { share_type, amount } = req.body;
+    const userId = req.user.id;
+    const eventIdNumber = Number(eventId);
 
+    if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
+        return res.status(400).json({ message: 'Invalid event id' });
+    }
+
+    try {
+        const lifecycleValidation = await ensureEventIsActive(eventIdNumber);
+        if (lifecycleValidation.status !== 200) {
+            return res.status(lifecycleValidation.status).json(lifecycleValidation.payload);
+        }
+    } catch (error) {
+        console.error('Error loading event lifecycle state:', error);
+        return res.status(500).json({ error: 'Failed to validate event state' });
+    }
+
+    try {
         const response = await fetch(`http://prediction-engine:3001/events/${eventId}/sell`, {
             method: 'POST',
             headers: predictionEngineHeaders,
@@ -390,37 +407,24 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
     const { stake, target_prob } = req.body;
     const userId = req.user.id;
     const eventIdNumber = Number(eventId);
-    let client = null;
-    let inTransaction = false;
-    let referralPayload = null;
 
     if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
         return res.status(400).json({ message: 'Invalid event id' });
     }
 
     try {
-      const eventResult = await db.query(
-        'SELECT outcome, closing_date FROM events WHERE id = $1',
-        [eventIdNumber]
-      );
-
-      if (eventResult.rows.length === 0) {
-        return res.status(404).json({ message: 'Event not found' });
-      }
-
-      const { outcome, closing_date } = eventResult.rows[0];
-      if (outcome) {
-        return res.status(400).json({ error: 'Market resolved', event_id: eventIdNumber });
-      }
-
-      if (closing_date && new Date(closing_date).getTime() <= Date.now()) {
-        return res.status(400).json({ error: 'Market closed', event_id: eventIdNumber });
-      }
+        const lifecycleValidation = await ensureEventIsActive(eventIdNumber);
+        if (lifecycleValidation.status !== 200) {
+            return res.status(lifecycleValidation.status).json(lifecycleValidation.payload);
+        }
     } catch (error) {
-      console.error('Error loading event lifecycle state:', error);
-      return res.status(500).json({ error: 'Failed to validate event state' });
+        console.error('Error loading event lifecycle state:', error);
+        return res.status(500).json({ error: 'Failed to validate event state' });
     }
 
+    let client = null;
+    let inTransaction = false;
+    let referralPayload = null;
     try {
         client = await db.getPool().connect();
         await client.query('BEGIN');

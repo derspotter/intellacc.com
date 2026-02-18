@@ -129,4 +129,81 @@ describe('Market lifecycle rejection coverage', () => {
     expect(res.body).toHaveProperty('market_update_id', 99);
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
+
+  test('sell route rejects closed market updates before calling prediction engine', async () => {
+    const user = await makeUser('closed_market_sell_user');
+    const closedEvent = await createEvent({
+      closingDate: new Date(Date.now() - 5 * 60 * 1000)
+    });
+
+    cleanup.users.add(user.id);
+    cleanup.events.add(closedEvent.id);
+
+    const res = await request(app)
+      .post(`/api/events/${closedEvent.id}/sell`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ share_type: 'yes', amount: 1 });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Market closed');
+    expect(res.body.event_id).toBe(closedEvent.id);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('sell route rejects resolved markets before calling prediction engine', async () => {
+    const user = await makeUser('resolved_market_sell_user');
+    const resolvedEvent = await createEvent({
+      outcome: 'resolved'
+    });
+
+    cleanup.users.add(user.id);
+    cleanup.events.add(resolvedEvent.id);
+
+    const res = await request(app)
+      .post(`/api/events/${resolvedEvent.id}/sell`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ share_type: 'yes', amount: 1 });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Market resolved');
+    expect(res.body.event_id).toBe(resolvedEvent.id);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('sell route allows operations when event is still active', async () => {
+    const user = await makeUser('open_market_sell_user');
+    const activeEvent = await createEvent({
+      closingDate: new Date(Date.now() + 5 * 60 * 1000)
+    });
+
+    cleanup.users.add(user.id);
+    cleanup.events.add(activeEvent.id);
+
+    const res = await request(app)
+      .post(`/api/events/${activeEvent.id}/sell`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ share_type: 'yes', amount: 2 });
+
+    expect(res.statusCode).toBe(200);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not block open-market sells when event is still active', async () => {
+    const user = await makeUser('open_market_user_sell');
+    const activeEvent = await createEvent({
+      closingDate: new Date(Date.now() + 5 * 60 * 1000)
+    });
+
+    cleanup.users.add(user.id);
+    cleanup.events.add(activeEvent.id);
+
+    const res = await request(app)
+      .post(`/api/events/${activeEvent.id}/sell`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ share_type: 'yes', amount: 1 });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveProperty('market_update_id', 99);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
 });

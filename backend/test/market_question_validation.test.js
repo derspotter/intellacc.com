@@ -65,7 +65,73 @@ const createMarketUpdate = async ({ userId, eventId, stakeAmount }) => {
 const createAdminUser = async ({ email, username, password, rpBalanceLedger }) => {
   const id = await createUser({ email, username, password, rpBalanceLedger });
   await db.query('UPDATE users SET role = $1 WHERE id = $2', ['admin', id]);
+  cleanup.users.add(id);
   return id;
+};
+
+const createApprovedSubmission = async ({ createdAtSuffix }) => {
+  const password = 'testpass123';
+  const timestamp = createdAtSuffix || Date.now();
+
+  const creatorId = await createUser({
+    email: `mq_auto_creator_${timestamp}@example.com`,
+    username: `mq_auto_creator_${timestamp}`,
+    password,
+    rpBalanceLedger: 1_000n * LEDGER_SCALE
+  });
+
+  const creatorToken = await login(`mq_auto_creator_${timestamp}@example.com`, password);
+  const createRes = await request(app)
+    .post('/api/market-questions')
+    .set('Authorization', `Bearer ${creatorToken}`)
+    .send({
+      title: `Market Question Auto ${timestamp}`,
+      details: 'Will this pass automated resolution checks?',
+      category: 'product',
+      closing_date: new Date(Date.now() + (7 * 24 * 60 * 60 * 1000)).toISOString()
+    });
+
+  expect(createRes.statusCode).toBe(201);
+  const submissionId = createRes.body.submission.id;
+
+  const validatorEmails = [];
+  for (let i = 0; i < 5; i += 1) {
+    validatorEmails.push(`mq_auto_validator_${i}_${timestamp}@example.com`);
+    await createUser({
+      email: validatorEmails[i],
+      username: `mq_auto_validator_${i}_${timestamp}`,
+      password,
+      rpBalanceLedger: 1_000n * LEDGER_SCALE
+    });
+  }
+
+  for (let i = 0; i < validatorEmails.length; i += 1) {
+    const token = await login(validatorEmails[i], password);
+    const reviewRes = await request(app)
+      .post(`/api/market-questions/${submissionId}/reviews`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ vote: 'approve', note: `vote-${i}` });
+
+    expect(reviewRes.statusCode).toBe(200);
+    if (i === validatorEmails.length - 1) {
+      expect(reviewRes.body.finalized).toBe(true);
+      expect(reviewRes.body.approved).toBe(true);
+      expect(reviewRes.body.approved_event_id).toBeDefined();
+    }
+  }
+
+  const approvedEventRes = await request(app)
+    .get(`/api/market-questions/${submissionId}`)
+    .set('Authorization', `Bearer ${creatorToken}`);
+  expect(approvedEventRes.statusCode).toBe(200);
+  expect(approvedEventRes.body.submission.status).toBe('approved');
+
+  return {
+    submissionId,
+    creatorId,
+    approvedEventId: Number(approvedEventRes.body.submission.approved_event_id),
+    creatorToken
+  };
 };
 
 describe('Market question submission and validation', () => {
@@ -295,5 +361,116 @@ describe('Market question submission and validation', () => {
 
     const creatorBalanceAfterResolution = await getBalanceLedger(creatorId);
     expect(creatorBalanceAfterResolution).toBe(1_030n * LEDGER_SCALE);
+  });
+
+  test('automatic market-question reward sweep reports unresolved-linked markets as skipped for resolution', async () => {
+    const ts = Date.now();
+    const password = 'testpass123';
+    await createAdminUser({
+      email: `mq_admin_unresolved_${ts}@example.com`,
+      username: `mq_admin_unresolved_${ts}`,
+      password,
+      rpBalanceLedger: 1_000n * LEDGER_SCALE
+    });
+
+    const { submissionId, approvedEventId } = await createApprovedSubmission({ createdAtSuffix: ts });
+    cleanup.events.add(approvedEventId);
+
+    const bettorIds = [];
+    for (let i = 0; i < 10; i += 1) {
+      const id = await createUser({
+        email: `mq_bettor_unresolved_${i}_${ts}@example.com`,
+        username: `mq_bettor_unresolved_${i}_${ts}`,
+        password,
+        rpBalanceLedger: 1_000n * LEDGER_SCALE
+      });
+      bettorIds.push(id);
+    }
+
+    for (let i = 0; i < bettorIds.length; i += 1) {
+      await createMarketUpdate({
+        userId: bettorIds[i],
+        eventId: approvedEventId,
+        stakeAmount: 1
+      });
+    }
+
+    const adminToken = await login(`mq_admin_unresolved_${ts}@example.com`, password);
+    const rewardRunRes = await request(app)
+      .post('/api/market-questions/rewards/run')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(rewardRunRes.statusCode).toBe(200);
+    expect(rewardRunRes.body.success).toBe(true);
+    expect(rewardRunRes.body.processed).toBeGreaterThanOrEqual(1);
+    expect(rewardRunRes.body.traction_rewarded).toBeGreaterThanOrEqual(1);
+    expect(rewardRunRes.body.resolution_rewarded).toBe(0);
+    expect(rewardRunRes.body.resolution_skipped_unresolved).toBeGreaterThanOrEqual(1);
+
+    const summary = rewardRunRes.body.results.find((item) => Number(item.submission_id) === Number(submissionId));
+    expect(summary).toBeTruthy();
+    expect(summary.resolution_rewarded).toBe(false);
+    expect(summary.resolution_reason).toBe('unresolved');
+    expect(summary.traction_rewarded).toBe(true);
+
+    const submissionState = await db.query(
+      'SELECT creator_resolution_reward_paid, creator_traction_reward_paid FROM market_question_submissions WHERE id = $1',
+      [submissionId]
+    );
+    expect(submissionState.rows[0].creator_resolution_reward_paid).toBe(false);
+    expect(submissionState.rows[0].creator_traction_reward_paid).toBe(true);
+
+  });
+
+  test('manual resolution reward rejects unresolved linked events', async () => {
+    const ts = Date.now();
+    const password = 'testpass123';
+    await createAdminUser({
+      email: `mq_admin_unresolved_manual_${ts}@example.com`,
+      username: `mq_admin_unresolved_manual_${ts}`,
+      password,
+      rpBalanceLedger: 1_000n * LEDGER_SCALE
+    });
+
+    const { submissionId, approvedEventId } = await createApprovedSubmission({ createdAtSuffix: ts });
+    cleanup.events.add(approvedEventId);
+
+    const adminToken = await login(`mq_admin_unresolved_manual_${ts}@example.com`, password);
+    const rewardRes = await request(app)
+      .post(`/api/market-questions/${submissionId}/rewards/resolution`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(rewardRes.statusCode).toBe(409);
+    expect(rewardRes.body.message).toBe('Linked event is not resolved yet');
+
+    const afterRes = await db.query(
+      'SELECT creator_resolution_reward_paid FROM market_question_submissions WHERE id = $1',
+      [submissionId]
+    );
+    expect(afterRes.rows[0].creator_resolution_reward_paid).toBe(false);
+  });
+
+  test('manual resolution reward rejects pending outcome events', async () => {
+    const ts = Date.now();
+    const password = 'testpass123';
+    await createAdminUser({
+      email: `mq_admin_pending_${ts}@example.com`,
+      username: `mq_admin_pending_${ts}`,
+      password,
+      rpBalanceLedger: 1_000n * LEDGER_SCALE
+    });
+
+    const { submissionId, approvedEventId } = await createApprovedSubmission({ createdAtSuffix: ts });
+    cleanup.events.add(approvedEventId);
+
+    await db.query('UPDATE events SET outcome = $1 WHERE id = $2', ['pending', approvedEventId]);
+
+    const adminToken = await login(`mq_admin_pending_${ts}@example.com`, password);
+    const rewardRes = await request(app)
+      .post(`/api/market-questions/${submissionId}/rewards/resolution`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(rewardRes.statusCode).toBe(409);
+    expect(rewardRes.body.message).toBe('Linked event is not resolved yet');
   });
 });
