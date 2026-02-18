@@ -8,7 +8,7 @@ let feedHoverController = null;
 /**
  * List of posts component
  */
-export default function PostsList() {
+export default function PostsList({ hideSearchControls = false } = {}) {
   const canVirtualize = typeof ResizeObserver !== 'undefined' && typeof requestAnimationFrame !== 'undefined';
 
   class Fenwick {
@@ -571,7 +571,7 @@ export default function PostsList() {
   
   // Render the component
   return van.tags.div({ class: "posts-list" }, [
-    renderSearchBar,
+    () => hideSearchControls ? null : renderSearchBar(),
     renderLoading,
     renderError,
     renderEmptyMessage,

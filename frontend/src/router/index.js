@@ -109,12 +109,14 @@ export default function Router() {
       // Fetching logic is now handled by updatePageFromHash on route change
       return div({ class: "home-page" }, [
         () => isLoggedInState.val
-          ? CreatePostForm()
+          ? null
           : div({ class: "login-notice" }, [
               p("Log in to create posts and see personalized content"),
               button({ onclick: () => { window.location.hash = 'login' }}, "Log In")
             ]),
-        PostsList()
+        SearchPage(),
+        () => isLoggedInState.val ? CreatePostForm() : null,
+        PostsList({ hideSearchControls: true })
       ]);
     },
     
