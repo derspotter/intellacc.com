@@ -2,16 +2,9 @@ import { createSignal, onMount, Show } from 'solid-js';
 import { getFeedPage, getPostsPage, getPostsPayloadItems, getPostsPaging } from '../services/api';
 import CreatePostForm from '../components/posts/CreatePostForm';
 import PostsList from '../components/posts/PostsList';
+import { isAuthenticated } from '../services/auth';
 
 const DEFAULT_PAGE_LIMIT = 20;
-
-const isAuthenticated = () => {
-  try {
-    return !!localStorage.getItem('token');
-  } catch {
-    return false;
-  }
-};
 
 const appendUniqueById = (existing, incoming) => {
   const map = new Map(existing.map((post) => [String(post.id), post]));
@@ -102,6 +95,10 @@ export default function HomePage() {
     );
   };
 
+  const removePost = (postId) => {
+    setPosts((current) => current.filter((post) => String(post.id) !== String(postId)));
+  };
+
   onMount(() => {
     loadPosts({ reset: true });
   });
@@ -126,6 +123,7 @@ export default function HomePage() {
         <PostsList
           posts={posts}
           onPostUpdate={updatePost}
+          onPostDelete={removePost}
           loading={loading}
           loadingMore={loadingMore}
           hasMore={hasMore}

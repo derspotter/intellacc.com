@@ -5,7 +5,13 @@ export default function PostsList(props) {
   return (
     <section class="posts-list">
       <For each={props.posts()}>
-        {(post) => <PostItem post={post} onPostUpdate={props.onPostUpdate} />}
+        {(post) => (
+          <PostItem
+            post={post}
+            onPostUpdate={props.onPostUpdate}
+            onPostDelete={props.onPostDelete}
+          />
+        )}
       </For>
       <Show when={props.loadingMore()}>
         <p class="loading-inline">Loading more posts…</p>

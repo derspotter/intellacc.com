@@ -1,11 +1,23 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show
+} from 'solid-js';
 import {
   requestBlob,
   getPostComments,
   createComment,
   likePost,
-  unlikePost
+  unlikePost,
+  updatePost,
+  deletePost,
+  uploadPostImage
 } from '../../services/api';
+import { getCurrentUserId, isAdmin, isAuthenticated } from '../../services/auth';
 
 const normalizePosts = (payload) => {
   if (!payload) return [];
@@ -15,11 +27,13 @@ const normalizePosts = (payload) => {
   return [];
 };
 
-const isAuthenticated = () => {
+const MAX_ATTACHMENT_SIZE = 4_000_000;
+
+const safeUrl = () => {
   try {
-    return !!localStorage.getItem('token');
+    return window?.URL || null;
   } catch {
-    return false;
+    return null;
   }
 };
 
@@ -39,6 +53,14 @@ export default function PostItem(props) {
   const [actionError, setActionError] = createSignal('');
   const [commentsError, setCommentsError] = createSignal('');
 
+  const [isEditing, setIsEditing] = createSignal(false);
+  const [editContent, setEditContent] = createSignal('');
+  const [editAttachment, setEditAttachment] = createSignal(null);
+  const [editAttachmentPreview, setEditAttachmentPreview] = createSignal(null);
+  const [editRemovingAttachment, setEditRemovingAttachment] = createSignal(false);
+  const [editSubmitting, setEditSubmitting] = createSignal(false);
+  const [editError, setEditError] = createSignal('');
+
   createEffect(() => {
     const current = post();
     setLikeCount(Number(current.like_count) || 0);
@@ -52,12 +74,31 @@ export default function PostItem(props) {
     return `${likeCount()} likes · ${date}`;
   });
 
+  const isMine = () => String(post().user_id) === getCurrentUserId();
+  const canEdit = () => isMine() || isAdmin();
+
   const applyPostPatch = (patch) => {
     const nextPost = typeof patch === 'function' ? patch(post()) : patch;
     props.onPostUpdate?.(post().id, nextPost);
   };
 
   const clearActionError = () => setActionError('');
+  const clearEditError = () => setEditError('');
+
+  const resetEditState = () => {
+    const current = editAttachmentPreview();
+    if (current) {
+      safeUrl()?.revokeObjectURL(current);
+    }
+
+    setEditAttachment(null);
+    setEditAttachmentPreview(null);
+    setEditRemovingAttachment(false);
+    setEditContent('');
+    setEditSubmitting(false);
+    setEditError('');
+    setIsEditing(false);
+  };
 
   const handleLike = async () => {
     clearActionError();
@@ -160,20 +201,116 @@ export default function PostItem(props) {
     }
   };
 
-  const resolveAttachmentSrc = () => {
-    if (!hasAttachment()) {
-      return null;
-    }
-    return `/attachments/${post().image_attachment_id}`;
+  const handleStartEdit = () => {
+    clearEditError();
+    setEditContent(post().content || '');
+    setEditAttachment(null);
+    setEditAttachmentPreview(null);
+    setEditRemovingAttachment(false);
+    setIsEditing(true);
   };
 
-  onMount(() => {
-    const src = resolveAttachmentSrc();
-    if (!src) {
+  const handleCancelEdit = () => {
+    resetEditState();
+  };
+
+  const handleEditAttachmentChange = (event) => {
+    const file = event.target?.files?.[0] || null;
+    if (!file) {
       return;
     }
 
-    requestBlob(src)
+    if (!file.type.startsWith('image/')) {
+      setEditError('Only image files are supported.');
+      return;
+    }
+    if (file.size > MAX_ATTACHMENT_SIZE) {
+      setEditError('File is too large. Limit is 4MB.');
+      return;
+    }
+
+    const previous = editAttachmentPreview();
+    if (previous) {
+      safeUrl()?.revokeObjectURL(previous);
+    }
+    setEditAttachment(file);
+    setEditAttachmentPreview(safeUrl()?.createObjectURL(file) || null);
+    setEditRemovingAttachment(false);
+    setEditError('');
+  };
+
+  const handleSaveEdit = async () => {
+    const content = editContent().trim();
+    if (!content) {
+      setEditError('Post content cannot be empty.');
+      return;
+    }
+
+    try {
+      setEditSubmitting(true);
+      setEditError('');
+      const payload = { content };
+
+      const attachmentFile = editAttachment();
+      if (attachmentFile) {
+        const uploaded = await uploadPostImage(attachmentFile);
+        payload.image_attachment_id = uploaded?.attachmentId || null;
+      } else if (editRemovingAttachment()) {
+        payload.image_attachment_id = null;
+      }
+
+      if (attachmentFile || editRemovingAttachment()) {
+        payload.image_url = null;
+      }
+
+      const updated = await updatePost(post().id, payload);
+      if (updated) {
+        applyPostPatch(updated);
+        setEditAttachmentPreview(null);
+      } else {
+        applyPostPatch({
+          ...post(),
+          content,
+          image_attachment_id: payload.image_attachment_id || post().image_attachment_id,
+          image_url: payload.image_url || post().image_url
+        });
+      }
+
+      resetEditState();
+    } catch (error) {
+      setEditError(error?.message || 'Failed to update post.');
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm('Delete this post?')) {
+      return;
+    }
+
+    try {
+      await deletePost(post().id);
+      props.onPostDelete?.(post().id);
+    } catch (error) {
+      setActionError(error?.message || 'Failed to delete post.');
+    }
+  };
+
+  createEffect(() => {
+    const nextAttachmentId = post().image_attachment_id || null;
+    const current = attachmentSrc();
+
+    if (current) {
+      URL.revokeObjectURL(current);
+      setAttachmentSrc(null);
+    }
+
+    if (!nextAttachmentId) {
+      return;
+    }
+
+    requestBlob(`/attachments/${nextAttachmentId}`)
       .then((blob) => {
         const nextUrl = URL.createObjectURL(blob);
         setAttachmentSrc(nextUrl);
@@ -184,9 +321,14 @@ export default function PostItem(props) {
   });
 
   onCleanup(() => {
-    const current = attachmentSrc();
-    if (current) {
-      URL.revokeObjectURL(current);
+    const attachment = attachmentSrc();
+    if (attachment) {
+      URL.revokeObjectURL(attachment);
+    }
+
+    const preview = editAttachmentPreview();
+    if (preview) {
+      URL.revokeObjectURL(preview);
     }
   });
 
@@ -196,7 +338,62 @@ export default function PostItem(props) {
         <h2>{author()}</h2>
         <span class="meta">{meta()}</span>
       </header>
-      <p>{post().content || 'No content'}</p>
+
+      <Show when={isEditing()} fallback={
+        <p class="post-content-block">{post().content || 'No content'}</p>
+      }>
+        <section class="post-edit-form">
+          <textarea
+            value={editContent()}
+            onInput={(event) => setEditContent(event.target.value)}
+            disabled={editSubmitting()}
+            rows={4}
+          />
+          <div class="edit-attachment-controls">
+            <label class="file-picker">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleEditAttachmentChange}
+                disabled={editSubmitting()}
+              />
+              <span>{editAttachment() ? 'Change image' : 'Replace image'}</span>
+            </label>
+            <Show when={hasAttachment() || editAttachment()}>
+              <button
+                type="button"
+                class="ghost"
+                onClick={() => setEditRemovingAttachment((value) => !value)}
+                disabled={editSubmitting()}
+              >
+                {editRemovingAttachment() ? 'Undo remove' : 'Remove image'}
+              </button>
+            </Show>
+          </div>
+          <Show when={editAttachmentPreview()}>
+            <img
+              src={editAttachmentPreview()}
+              class="post-attachment-preview"
+              alt="Updated attachment"
+            />
+          </Show>
+          <Show when={editRemovingAttachment() && !editAttachmentPreview()}>
+            <p class="muted">Image will be removed.</p>
+          </Show>
+          <Show when={editError()}>
+            <p class="error">{editError()}</p>
+          </Show>
+          <div class="post-edit-actions">
+            <button type="button" onClick={handleSaveEdit} disabled={editSubmitting()}>
+              {editSubmitting() ? 'Saving…' : 'Save'}
+            </button>
+            <button type="button" onClick={handleCancelEdit} disabled={editSubmitting()}>
+              Cancel
+            </button>
+          </div>
+        </section>
+      </Show>
+
       <Show when={post().ai_is_flagged}>
         <p class="ai-warning">AI-flagged content</p>
       </Show>
@@ -212,6 +409,14 @@ export default function PostItem(props) {
         <button type="button" class="comment-toggle-btn" onClick={toggleComments}>
           {commentsVisible() ? 'Hide comments' : `Comments (${commentCount()})`}
         </button>
+        <Show when={canEdit()}>
+          <button type="button" class="edit-btn" onClick={handleStartEdit}>
+            Edit
+          </button>
+          <button type="button" class="delete-btn" onClick={handleDelete}>
+            Delete
+          </button>
+        </Show>
       </div>
       <Show when={actionError()}>
         <p class="error">{actionError()}</p>

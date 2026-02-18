@@ -1,6 +1,7 @@
-import { children } from 'solid-js';
+import { children, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { skinState } from '../services/skinProvider';
 import { setSkin } from '../services/skinProvider';
+import { isAuthenticated, logout } from '../services/auth';
 
 function SkinPill({ label, value, active, onClick }) {
   return (
@@ -16,6 +17,26 @@ function SkinPill({ label, value, active, onClick }) {
 
 export default function Layout(props) {
   const getChildren = children(() => props.children);
+  const [authed, setAuthed] = createSignal(isAuthenticated());
+  const handleLogout = () => {
+    logout();
+  };
+  const onLogout = (event) => {
+    event.preventDefault();
+    handleLogout();
+  };
+  const refreshAuth = () => setAuthed(isAuthenticated());
+
+  onMount(() => {
+    refreshAuth();
+    window.addEventListener('solid-auth-changed', refreshAuth);
+    window.addEventListener('storage', refreshAuth);
+  });
+
+  onCleanup(() => {
+    window.removeEventListener('solid-auth-changed', refreshAuth);
+    window.removeEventListener('storage', refreshAuth);
+  });
 
   return (
     <div class="app-shell">
@@ -25,6 +46,19 @@ export default function Layout(props) {
           <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'home')}>
             Home
           </button>
+          <Show when={!authed()}>
+            <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'login')}>
+              Login
+            </button>
+            <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'signup')}>
+              Sign Up
+            </button>
+          </Show>
+          <Show when={authed()}>
+            <button type="button" class="nav-btn" onClick={onLogout}>
+              Sign Out
+            </button>
+          </Show>
         </nav>
         <div class="skin-toggle">
           <span>Skin:</span>
