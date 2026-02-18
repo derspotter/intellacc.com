@@ -3608,7 +3608,7 @@ body.dark-mode .weekly-assignment-badge.pending {
   background: transparent;
   color: var(--text-color);
   padding: 0.5rem 0.9rem;
-  border-radius: 999px;
+  border-radius: 0;
   min-height: 32px;
   cursor: pointer;
   white-space: nowrap;
@@ -3625,7 +3625,7 @@ body.dark-mode .weekly-assignment-badge.pending {
   border: 1px solid var(--border-color);
   background: var(--card-bg);
   color: var(--text-color);
-  border-radius: var(--border-radius);
+  border-radius: 0;
   padding: 0.58rem 0.75rem;
   min-height: 44px;
 }
@@ -3641,7 +3641,7 @@ body.dark-mode .weekly-assignment-badge.pending {
   background: var(--card-bg);
   color: var(--text-color);
   padding: 0.4rem 0.8rem;
-  border-radius: 999px;
+  border-radius: 0;
   cursor: pointer;
 }
 
@@ -3730,7 +3730,7 @@ body.dark-mode .weekly-assignment-badge.pending {
   border: 1px solid var(--border-color);
   padding: 0.45rem 0.75rem;
   min-height: 34px;
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--button-secondary-bg, #f5f5f5);
   color: var(--text-color);
   cursor: pointer;
@@ -3757,7 +3757,7 @@ body.dark-mode .weekly-assignment-badge.pending {
 
 .search-load-more {
   margin: 0.5rem 0 0.75rem;
-  border-radius: 999px;
+  border-radius: 0;
 }
 
 .events-error h3,

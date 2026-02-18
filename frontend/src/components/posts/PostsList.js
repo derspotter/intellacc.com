@@ -535,7 +535,7 @@ export default function PostsList() {
           value: searchQuery,
           placeholder: "Search posts and authors",
           oninput: e => onSearchInput(e.target.value),
-          style: "flex: 1; min-width: 160px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px;"
+          style: "flex: 1; min-width: 160px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 0;"
         })
       ]),
       van.tags.div({ style: "display:flex; gap: 6px; flex-wrap: wrap;" }, scopeOptions.map(option => {
@@ -543,7 +543,7 @@ export default function PostsList() {
         return van.tags.button({
           type: "button",
           onclick: () => onScopeChange(option.value),
-          style: `padding: 7px 12px; border-radius: 999px; border: 1px solid ${isActive ? '#2d80ff' : '#ccc'}; background: ${isActive ? '#2d80ff' : 'white'}; color: ${isActive ? 'white' : '#222'}; cursor: pointer;`
+          style: `padding: 7px 12px; border-radius: 0; border: 1px solid ${isActive ? '#2d80ff' : '#ccc'}; background: ${isActive ? '#2d80ff' : 'white'}; color: ${isActive ? 'white' : '#222'}; cursor: pointer;`
         }, option.label);
       }))
     ]);
