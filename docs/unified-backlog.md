@@ -1,5 +1,5 @@
 # Unified Backlog
-Updated: 2026-02-13 (audited against current codebase)
+Updated: 2026-02-18 (audited against current codebase)
 
 Status legend:
 - `Done`: implemented in app code (may still require production rollout/config).
@@ -48,6 +48,9 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   pending invite accept/reject exists, but member fingerprint inspection before acceptance is still missing.
 - `Done` Market lifecycle tests:
   backend coverage now verifies closed-market and resolved-market trade rejection in `/api/events/:eventId/update` plus open-market pass-through behavior.
+- `Done` Controlled onboarding with admin approval:
+  registration flow supports admin-gated user onboarding, single-use approval tokens, approval queue capacity limits, resend cooldowns, stale/expired token handling, and front-end pending-registration UX.
+  Covered by route/service tests and email notification plumbing.
 
 ## Priority 2 - Medium
 - `Partial` Profile editing:
@@ -64,8 +67,10 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   dedup logic remains in-memory; no vault-backed processed-ID persistence found.
 - `Done` AI moderation pipeline:
   Pangram service + flagged-content admin API/UI + `AiContentBadge` integration are present.
-- `Open` Moderation/reporting/blocking basics:
-  no local report endpoint/admin review workflow/block-user baseline found.
+- `Done` OpenMLS integration surface cleanup:
+  core commit/pending-commit paths are consolidated and API wrappers are de-duplicated; `api.mls` now exposes only active messaging endpoints and messaging-focused e2e coverage is wired with single worker to avoid non-determinism.
+- `Done` Moderation/reporting/blocking basics:
+  local report endpoint, admin report review workflow, and block-user baseline are implemented.
 - `Open` Investigate MLS WASM concurrency issue:
   no dedicated issue doc/worklog found in repo; only small mitigation comments.
 
@@ -90,6 +95,8 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `e2ee-next-steps.md`
 - `docs/mls-status.md`
 - `Intellacc Feature Roadmap.md`
+- `docs/email-plan.md`
+- `backend/test/registration_approval.test.js`
 
 ## Audit Notes
 - This pass validates repository/app implementation state, not production runtime state.
