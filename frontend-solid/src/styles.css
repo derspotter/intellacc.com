@@ -217,6 +217,46 @@ main {
   font-size: 1rem;
 }
 
+.post-content-block {
+  white-space: pre-wrap;
+}
+
+.post-edit-form {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.post-edit-form textarea {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg);
+  color: var(--text);
+  padding: 0.5rem;
+}
+
+.edit-attachment-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.post-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.post-edit-actions .ghost,
+.post-edit-actions button {
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.6rem;
+  background: var(--button-bg);
+  color: var(--button-fg);
+}
+
 .post-actions {
   display: flex;
   gap: 0.5rem;
@@ -241,6 +281,15 @@ main {
 .post-actions .like-btn.active {
   background: var(--button-fg);
   color: var(--button-bg);
+}
+
+.post-actions .edit-btn,
+.post-actions .delete-btn {
+  margin-left: auto;
+}
+
+.post-actions .delete-btn {
+  color: #f43f5e;
 }
 
 .comment-section {
@@ -316,10 +365,91 @@ main {
   color: #b91c1c;
 }
 
+
+.not-found {
+  padding: 1rem;
+}
+
+.auth-page {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.auth-form .field {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.auth-form label span {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.auth-form input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  padding: 0.5rem;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.auth-form button,
+.auth-links button {
+  border: 1px solid var(--button-border);
+  border-radius: 0.45rem;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  padding: 0.45rem 0.75rem;
+  cursor: pointer;
+}
+
+.auth-form button:hover,
+.auth-links button:hover {
+  background: var(--button-hover);
+}
+
+.auth-links {
+  margin-top: 0.85rem;
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.auth-links a {
+  color: #2563eb;
+}
+
+.auth-links a:hover {
+  text-decoration: underline;
+}
+
+.auth-links button {
+  background: transparent;
+  border: 1px solid var(--button-border);
+}
+
+.success,
+.info {
+  color: #065f46;
+}
+
 .muted {
   color: var(--muted);
 }
 
-.not-found {
-  padding: 1rem;
+.reset-note {
+  margin-top: 0.75rem;
+  padding: 0.65rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--muted);
 }

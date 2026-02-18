@@ -179,6 +179,24 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
   - Added like toggling + comment loading/submission flow in each feed row.
   - Added optimistic post-like updates with rollback on API errors.
   - Added comments list rendering and comment count sync through home feed state.
+- `2026-02-18`: Extended `frontend-solid` post-management parity.
+  - Added token-based edit/delete controls with owner/admin gates.
+  - Added `PATCH /posts/:id` post-update flow (content + optional image replacement/removal).
+  - Added `DELETE /posts/:id` removal flow and parent list cleanup callback.
+  - Added auth helper for post ownership checks and expanded migration sprint notes.
+- `2026-02-18`: Added core auth parity slice to Solid migration.
+  - Added login/signup route scaffolding with hash navigation (`#login`, `#signup`).
+  - Added `auth` service primitives (`saveToken`, `clearToken`, `login`, `register`, `logout`).
+  - Added `frontend-solid` API login/register wrappers and `token` persistence integration.
+  - Added nav actions for Login/Sign Up/Sign Out and auth-aware route rendering.
+  - Added styles and form states for auth flows in `styles.css`.
+  - Added dev-server proxy support for `/api` in `vite.config.js` (defaults to `http://127.0.0.1:3000`) for direct local auth/form testing.
+  - Next validation step: run browser parity smoke flow with `playwright-cli` against route and post-auth feed.
+- `2026-02-18`: Extended auth parity in `frontend-solid`.
+  - Added `#forgot-password` and `#reset-password` routes with API wiring for `/auth/forgot-password` and `/auth/reset-password`.
+  - Implemented password reset warning/acknowledgment flow, token parsing from hash, and pending/completion state handling.
+  - Added reset status messaging styles and restored forgot-password navigation from login.
+  - Added verification checklist update to run the new slice with `playwright-cli`.
 
 ## Assumptions
 

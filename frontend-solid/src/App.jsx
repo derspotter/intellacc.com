@@ -1,9 +1,17 @@
 import { createSignal, onCleanup, onMount } from 'solid-js';
 import Layout from './components/Layout';
 import HomePage from './pages/HomePage';
+import LoginPage from './pages/LoginPage';
+import SignUpPage from './pages/SignUpPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 
 const ROUTES = {
   home: 'home',
+  login: 'login',
+  signup: 'signup',
+  'forgot-password': 'forgot-password',
+  'reset-password': 'reset-password'
 };
 
 const sanitizeRoute = (raw) => {
@@ -18,6 +26,18 @@ export default function App() {
   const renderPage = () => {
     if (page() === 'home') {
       return <HomePage />;
+    }
+    if (page() === 'login') {
+      return <LoginPage />;
+    }
+    if (page() === 'signup') {
+      return <SignUpPage />;
+    }
+    if (page() === 'forgot-password') {
+      return <ForgotPasswordPage />;
+    }
+    if (page() === 'reset-password') {
+      return <ResetPasswordPage />;
     }
 
     return (

@@ -117,6 +117,34 @@ const requestForm = async (endpoint, body, options = {}) => {
   }
 };
 
+export const authLogin = (email, password) => request('/login', {
+  method: 'POST',
+  body: { email, password }
+});
+
+export const registerUser = (username, email, password) => request('/users/register', {
+  method: 'POST',
+  body: { username, email, password }
+});
+
+export const forgotPassword = (email) => request('/auth/forgot-password', {
+  method: 'POST',
+  body: { email }
+});
+
+export const resetPassword = (token, newPassword, acknowledged, devicePublicId) => {
+  const body = { token, newPassword, acknowledged };
+  if (devicePublicId) {
+    body.device_public_id = devicePublicId;
+  }
+  return request('/auth/reset-password', {
+    method: 'POST',
+    body
+  });
+};
+
+export const getCurrentUser = () => request('/me');
+
 const clampLimit = (limit = DEFAULT_LIMIT) => {
   return String(Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), 50));
 };
@@ -167,6 +195,17 @@ export const createComment = (postId, content) =>
       parent_id: postId,
       content
     }
+  });
+
+export const updatePost = (postId, updates) =>
+  request(`/posts/${postId}`, {
+    method: 'PATCH',
+    body: updates
+  });
+
+export const deletePost = (postId) =>
+  request(`/posts/${postId}`, {
+    method: 'DELETE'
   });
 
 export const likePost = (postId) =>
