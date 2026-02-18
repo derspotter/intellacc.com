@@ -171,6 +171,10 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
   - Added `frontend-solid/` app with Vite + Solid runtime, route shell, and home/feed baseline.
   - Added local skin token system and baseline CSS tokens for `van` and `terminal` within the scaffold.
   - Ran build validation: `npm run build` passes with generated `dist` artifacts.
+- `2026-02-18`: Completed first parity slice in `frontend-solid`.
+  - Implemented migration slice for home feed: create-post form, posts list component, paginated fetch (`/posts` or `/feed`), and route-level authentication-aware behavior.
+  - Added image attachment upload + inline preview support in create-post flow.
+  - Extended solid API client with feed/public post pagination and attachment helpers.
 
 ## Assumptions
 
