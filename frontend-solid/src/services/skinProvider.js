@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import { api } from './api';
 
 const VALID_SKINS = ['van', 'terminal'];
 const DEFAULT_SKIN = 'van';
@@ -6,75 +7,118 @@ const STORAGE_KEY = 'intellacc.ui.skin';
 
 const isValidSkin = (skin) => VALID_SKINS.includes(skin);
 
-const parseSkinFromLocation = () => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const params = new URLSearchParams(window.location.search || '');
-  const fromQuery = params.get('skin');
-  if (isValidSkin(fromQuery)) {
-    return fromQuery;
-  }
+const parseSkinFromHash = () => {
+  if (typeof window === 'undefined') return null;
 
   const hash = window.location.hash || '';
-  const [, queryPart] = hash.replace(/^#/, '').split('?');
-  if (!queryPart) {
-    return null;
-  }
-  const hashParams = new URLSearchParams(queryPart);
-  const fromHash = hashParams.get('skin');
-  return isValidSkin(fromHash) ? fromHash : null;
-};
+  const hashPayload = hash.startsWith('#') ? hash.slice(1) : hash;
+  const [, hashQuery] = hashPayload.split('?');
+  if (!hashQuery) return null;
 
-const readStoredSkin = () => {
-  if (typeof localStorage === 'undefined') {
-    return null;
-  }
-  const skin = localStorage.getItem(STORAGE_KEY);
+  const params = new URLSearchParams(hashQuery);
+  const skin = params.get('skin');
   return isValidSkin(skin) ? skin : null;
 };
 
-const applySkinToDom = (skin) => {
-  if (typeof document === 'undefined') {
-    return;
+const parseSkinFromQuery = () => {
+  if (typeof window === 'undefined') return null;
+
+  const params = new URLSearchParams(window.location.search || '');
+  const skin = params.get('skin');
+  return isValidSkin(skin) ? skin : null;
+};
+
+const readStoredSkin = () => {
+  if (typeof window === 'undefined') return null;
+  const stored = localStorage.getItem(STORAGE_KEY);
+  return isValidSkin(stored) ? stored : null;
+};
+
+const writeStoredSkin = (skin) => {
+  if (typeof window === 'undefined') return;
+  if (isValidSkin(skin)) {
+    localStorage.setItem(STORAGE_KEY, skin);
+  } else {
+    localStorage.removeItem(STORAGE_KEY);
   }
-  ['van', 'terminal'].forEach((name) => document.body.classList.remove(`skin-${name}`));
+};
+
+let querySkin = parseSkinFromQuery() || parseSkinFromHash();
+let storedSkin = readStoredSkin();
+const [activeSkin, setActiveSkin] = createSignal(storedSkin || querySkin || DEFAULT_SKIN);
+
+const applySkinClass = (skin) => {
+  if (typeof document === 'undefined') return;
+
+  VALID_SKINS.forEach((name) => {
+    document.body.classList.remove(`skin-${name}`);
+  });
   document.body.classList.add(`skin-${skin}`);
   document.body.dataset.skin = skin;
 };
 
-const resolveSkin = () => {
-  const hashSkin = parseSkinFromLocation();
-  const localSkin = readStoredSkin();
-  return hashSkin || localSkin || DEFAULT_SKIN;
+const applyActiveSkin = () => {
+  const skin = querySkin || storedSkin || DEFAULT_SKIN;
+  setActiveSkin(skin);
+  applySkinClass(skin);
+  return skin;
 };
 
-const [skinState, setSkinState] = createSignal(DEFAULT_SKIN);
+let initialized = false;
 
 export const initializeSkinProvider = () => {
-  const initial = resolveSkin();
-  setSkinState(initial);
-  applySkinToDom(initial);
+  if (initialized) {
+    applyActiveSkin();
+    return activeSkin();
+  }
 
-  const reapply = () => {
-    const next = resolveSkin();
-    setSkinState(next);
-    applySkinToDom(next);
+  initialized = true;
+  storedSkin = readStoredSkin();
+  querySkin = parseSkinFromQuery() || parseSkinFromHash();
+
+  applyActiveSkin();
+
+  const syncFromLocation = () => {
+    querySkin = parseSkinFromQuery() || parseSkinFromHash();
+    applyActiveSkin();
   };
 
-  window.addEventListener('hashchange', reapply);
-  window.addEventListener('popstate', reapply);
+  window.addEventListener('hashchange', syncFromLocation);
+  window.addEventListener('popstate', syncFromLocation);
+
+  return activeSkin();
 };
 
-export const setSkin = (skin) => {
+export const setLocalSkinPreference = (skin) => {
   if (!isValidSkin(skin)) {
-    return;
+    throw new Error('Invalid skin');
   }
-  localStorage.setItem(STORAGE_KEY, skin);
-  setSkinState(skin);
-  applySkinToDom(skin);
+  storedSkin = skin;
+  writeStoredSkin(skin);
+  applyActiveSkin();
+  return skin;
 };
 
-export const getSkin = () => skinState();
-export { skinState, setSkinState };
+export const setSkinPreference = async (skin) => {
+  setLocalSkinPreference(skin);
+  try {
+    const response = await api.users.updateUiPreferences(skin);
+    return response?.skin || skin;
+  } catch {
+    // local persistence is the fallback
+    return skin;
+  }
+};
+
+export const syncSkinWithServer = async () => {
+  const response = await api.users.getUiPreferences();
+  if (response && response.skin && VALID_SKINS.includes(response.skin)) {
+    storedSkin = response.skin;
+    writeStoredSkin(response.skin);
+    applyActiveSkin();
+    return response.skin;
+  }
+  return null;
+};
+
+export const getActiveSkin = activeSkin;

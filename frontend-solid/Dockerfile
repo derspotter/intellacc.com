@@ -1,15 +1,18 @@
-FROM node:23-alpine
-
-ENV DOCKER_ENV=true
-ENV NODE_ENV=development
+FROM node:20-alpine
 
 WORKDIR /app
 
+# Copy package files first for better caching
 COPY package*.json ./
-RUN npm install && npm install @rollup/rollup-linux-x64-musl --save-optional
 
+# Install dependencies including devDependencies
+RUN npm install --legacy-peer-deps
+
+# Copy application code
 COPY . .
 
-EXPOSE 4174
+# Expose the port
+EXPOSE 5174
 
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "4174"]
+# Command to run the dev server
+CMD ["npm", "run", "dev", "--", "--host"]

@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: #000000;
+  color: #e0e0e0;
+  font-family: 'JetBrains Mono', monospace;
+  overflow: hidden; /* Prevent body scroll, let panels scroll */
+}
+
+body.skin-van {
+  color-scheme: light;
+  background-color: #f6f7f9;
+  color: #111827;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+}
+
+body.skin-terminal {
+  color-scheme: dark;
+  background-color: #000000;
+  color: #e0e0e0;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE/Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+/* Custom Scrollbar for 'Bloomberg' feel */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #111; 
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #333; 
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #FFB400;
+}

@@ -1,33 +1,22 @@
-const STORAGE_KEY = 'intellacc_device_id_solid';
-let cachedDeviceId = null;
+let deviceId = null;
+let pendingDeviceId = null;
 
-export const getDeviceId = () => {
-  if (cachedDeviceId !== null) {
-    return cachedDeviceId;
-  }
-
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    cachedDeviceId = stored || null;
-    return cachedDeviceId;
-  } catch {
-    return null;
-  }
-};
+export const getDeviceId = () => deviceId;
 
 export const setDeviceId = (id) => {
-  cachedDeviceId = id || null;
-  try {
-    if (cachedDeviceId) {
-      localStorage.setItem(STORAGE_KEY, cachedDeviceId);
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-  } catch {
-    // Ignore storage errors.
-  }
+  deviceId = id || null;
 };
 
 export const clearDeviceId = () => {
-  setDeviceId(null);
+  deviceId = null;
+};
+
+export const getPendingDeviceId = () => pendingDeviceId;
+
+export const setPendingDeviceId = (id) => {
+  pendingDeviceId = id || null;
+};
+
+export const clearPendingDeviceId = () => {
+  pendingDeviceId = null;
 };

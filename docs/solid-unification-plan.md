@@ -305,6 +305,29 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
     - Route shell and auth gating states are validated (including not-logged-in behavior).
     - Remaining item: authenticated-end messaging/notification action parity still needs end-to-end validation once a valid seed user token is available in the solid-local stack.
 
+- `2026-02-19`: Resolved the solid-app MLS resolver break by replacing `@openmls` imports with direct local artifact imports:
+  - `frontend-solid/src/services/mls/coreCryptoClient.js`
+  - `frontend-solid/src/services/mls/vaultService.js`
+  - `frontend-solid` build now passes on the local source-mounted dev compose (`intellacc_frontend_solid_local`) and preserves runtime startup.
+  - Captured fresh Playwright screenshots from `http://127.0.0.1:4174`:
+    - `/tmp/solid-login3.png`
+    - `/tmp/solid-home3.png`
+  - Next milestone:
+    - Establish and wire a reusable skin mode switch (van vs terminal) in Solid with parity checkpoints per route.
+
+- `2026-02-19`: Added skin-mode scaffolding to the Solid runtime:
+  - Reintroduced `frontend-solid/src/services/skinProvider.js` with:
+    - `?skin=` query/hash support for `van|terminal`
+    - localStorage fallback
+    - server preference sync helpers (`syncSkinWithServer`, `setSkinPreference`)
+  - Wired provider initialization in `frontend-solid/src/index.jsx`.
+  - Bound `data-skin`/body class updates from `frontend-solid/src/App.jsx`.
+  - Added `van`/`terminal` body styling hooks in `frontend-solid/src/index.css`.
+  - Updated `frontend-solid` API user methods for `/users/me/preferences`.
+  - Captured smoke screenshots for both query modes:
+    - `/tmp/solid-login-skin-terminal-query.png`
+    - `/tmp/solid-login-skin-van-query.png`
+
 ## Assumptions
 
 - Van-style remains default for continuity.
