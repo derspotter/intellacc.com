@@ -333,3 +333,33 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
 - Van-style remains default for continuity.
 - Skin differences are visual; behavior is shared and identical.
 - New features are implemented once in shared Solid logic and skinned via tokens.
+
+## Current Completion Status
+
+- `frontend-solid` has parity slices implemented for:
+  - auth + reset flow
+  - home feed with comments/likes/edit/delete and nested-comment behavior
+  - posts route surface parity behaviors
+  - profile/users/settings shell and pages
+  - notifications/messages pages and basic actions
+  - predictions/leaderboard/admin create-market entry surface
+  - skin query/local preference resolver (`?skin=` and stored preference sync)
+- Backend preference persistence (`GET/PUT /users/me/preferences`) is in place and consumed in Solid runtime.
+- Dev-only source-mounted solid stack exists and is runnable without touching production containers (`docker-compose.solid-local.yml`, port 4174).
+- Remaining work before unification PR:
+  - finish route-by-route behavioral parity for prediction lifecycle/admin-only controls and edge flows
+  - complete Playwright parity matrix for both `skin=van` and `skin=terminal`
+  - run visual regression pass against VanJS baseline for all covered flows
+  - retire/remove non-Solid runtime from mainline only after above pass passes
+
+## Plan Finish Line (Pre-PR Gate)
+
+Do not open PR until all of the following are true:
+
+1. Both skins are fully reachable in `frontend-solid` with shared logic and complete feature parity for equivalent routes.
+2. Playwright parity suite (auth, feed, posts, messaging, notifications, settings, predictions/trading) passes for both skins against a stable seed fixture.
+3. Visual diff checks for `skin=van` stay within agreed thresholds compared to VanJS reference snapshots.
+4. VanJS runtime is removed from compose/build entrypoint path for mainline.
+5. Migration notes include runbook for production-safe rollback (rebuild + deploy to `frontend-solid` only).
+
+Open PR after this gate is met so that migration, behavior, and visual parity are both auditable and repeatable.
