@@ -64,6 +64,7 @@ recherche/2504.01781v2.pdf
 !/AGENTS.md
 !/CLAUDE.md
 !/GEMINI.md
+!/backlog.md
 !/docs/**/*.md
 !/backend/migrations/README.md
 
@@ -86,6 +87,7 @@ recherche/2504.01781v2.pdf
 /frontend-solid/dist/
 /frontend-solid/node_modules/
 /frontend-solid/package-lock.json
+.vite/
 
 # Test output
 /test-results/
