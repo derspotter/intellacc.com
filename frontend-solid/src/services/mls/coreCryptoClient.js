@@ -720,12 +720,29 @@ class CoreCryptoClient {
                 this.client.create_group(groupIdBytes);
                 await this.saveState();
                 await this.inviteToGroup(groupId, targetUserId);
+            } else if (!this.hasGroup(groupId)) {
+                // If this device doesn't have the group state yet, try pulling pending welcomes.
+                // If it still isn't available, guide the user instead of failing later with "Group not found".
+                try { await this.syncMessages(); } catch {}
+                if (!this.hasGroup(groupId)) {
+                    throw new Error('Conversation exists but is not available on this device yet. If you have a pending invite, accept it. Otherwise link this device from Settings > Linked Devices, or ask the other user to start a new DM.');
+                }
             }
 
             return { groupId, isNew };
         } catch (e) {
             console.error('[MLS] Error starting direct message:', e);
             throw e;
+        }
+    }
+
+    hasGroup(groupId) {
+        this.requireClient();
+        try {
+            this.getGroupEpoch(groupId);
+            return true;
+        } catch {
+            return false;
         }
     }
 
