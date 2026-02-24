@@ -43,9 +43,7 @@ const writeStoredSkin = (skin) => {
   }
 };
 
-let querySkin = parseSkinFromQuery() || parseSkinFromHash();
-let storedSkin = readStoredSkin();
-const [activeSkin, setActiveSkin] = createSignal(storedSkin || querySkin || DEFAULT_SKIN);
+const [skinState, setSkinState] = createSignal(DEFAULT_SKIN);
 
 const applySkinClass = (skin) => {
   if (typeof document === 'undefined') return;
@@ -57,46 +55,63 @@ const applySkinClass = (skin) => {
   document.body.dataset.skin = skin;
 };
 
-const applyActiveSkin = () => {
-  const skin = querySkin || storedSkin || DEFAULT_SKIN;
-  setActiveSkin(skin);
-  applySkinClass(skin);
-  return skin;
+const applyActiveSkin = (querySkin, storedSkin) => {
+  const nextSkin = querySkin || storedSkin || DEFAULT_SKIN;
+  setSkinState(nextSkin);
+  applySkinClass(nextSkin);
+  return nextSkin;
 };
 
 let initialized = false;
 
+export const resolveSkin = () => {
+  const querySkin = parseSkinFromQuery() || parseSkinFromHash();
+  const stored = readStoredSkin();
+  return querySkin || stored || DEFAULT_SKIN;
+};
+
 export const initializeSkinProvider = () => {
   if (initialized) {
-    applyActiveSkin();
-    return activeSkin();
+    applyActiveSkin(resolveSkin(), null);
+    return skinState();
   }
 
   initialized = true;
-  storedSkin = readStoredSkin();
-  querySkin = parseSkinFromQuery() || parseSkinFromHash();
-
-  applyActiveSkin();
+  applyActiveSkin(resolveSkin(), null);
 
   const syncFromLocation = () => {
-    querySkin = parseSkinFromQuery() || parseSkinFromHash();
-    applyActiveSkin();
+    applyActiveSkin(resolveSkin(), null);
   };
 
   window.addEventListener('hashchange', syncFromLocation);
   window.addEventListener('popstate', syncFromLocation);
 
-  return activeSkin();
+  return skinState();
 };
+
+export const setSkin = (skin) => {
+  if (!isValidSkin(skin)) {
+    return skinState();
+  }
+
+  writeStoredSkin(skin);
+  setSkinState(skin);
+  applySkinClass(skin);
+  return skin;
+};
+
+export const setSkinStateForServer = setSkinState;
+
+export const getSkin = () => skinState();
+
+export const getActiveSkin = skinState;
 
 export const setLocalSkinPreference = (skin) => {
   if (!isValidSkin(skin)) {
     throw new Error('Invalid skin');
   }
-  storedSkin = skin;
-  writeStoredSkin(skin);
-  applyActiveSkin();
-  return skin;
+
+  return setSkin(skin);
 };
 
 export const setSkinPreference = async (skin) => {
@@ -105,20 +120,20 @@ export const setSkinPreference = async (skin) => {
     const response = await api.users.updateUiPreferences(skin);
     return response?.skin || skin;
   } catch {
-    // local persistence is the fallback
     return skin;
   }
 };
 
 export const syncSkinWithServer = async () => {
   const response = await api.users.getUiPreferences();
-  if (response && response.skin && VALID_SKINS.includes(response.skin)) {
-    storedSkin = response.skin;
+  if (response?.skin && VALID_SKINS.includes(response.skin)) {
     writeStoredSkin(response.skin);
-    applyActiveSkin();
+    setSkinState(response.skin);
+    applySkinClass(response.skin);
     return response.skin;
   }
+
   return null;
 };
 
-export const getActiveSkin = activeSkin;
+export { skinState, isValidSkin, VALID_SKINS, DEFAULT_SKIN };

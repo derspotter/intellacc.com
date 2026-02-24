@@ -678,6 +678,8 @@ export const api = {
       mlsRequest('/mls/direct-messages'),
     createDirectMessage: (targetUserId) =>
       mlsRequest(`/mls/direct-messages/${targetUserId}`, { method: 'POST' }),
+    rehydrateDirectMessage: (targetUserId) =>
+      mlsRequest(`/mls/direct-messages/${targetUserId}/rehydrate`, { method: 'POST' }),
     getPendingMessages: () =>
       mlsRequest('/mls/queue/pending'),
     ackMessages: (messageIds) =>

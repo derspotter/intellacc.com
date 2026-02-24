@@ -374,6 +374,12 @@ export const api = {
 
     getFollowing: (id) =>
       request(`/users/${id}/following`)
+    ,
+    getPositions: (id) =>
+      request(`/users/${id}/positions`),
+
+    getFollowingStatus: (id) =>
+      request(`/users/${id}/following-status`)
   },
 
   // Posts endpoints
@@ -505,7 +511,16 @@ export const api = {
       request('/events', { method: 'POST', body: eventData }),
 
     resolve: (eventId, outcome) =>
-      request(`/events/${eventId}`, { method: 'PATCH', body: { outcome } })
+      request(`/events/${eventId}`, { method: 'PATCH', body: { outcome } }),
+
+    getShares: (eventId) =>
+      request(`/events/${eventId}/shares`),
+
+    update: (eventId, { stake, target_prob }) =>
+      request(`/events/${eventId}/update`, { method: 'POST', body: { stake, target_prob } }),
+
+    sell: (eventId, { share_type, amount }) =>
+      request(`/events/${eventId}/sell`, { method: 'POST', body: { share_type, amount } })
   },
 
   // Predictions endpoints
@@ -635,6 +650,8 @@ export const api = {
       mlsRequest('/mls/direct-messages'),
     createDirectMessage: (targetUserId) =>
       mlsRequest(`/mls/direct-messages/${targetUserId}`, { method: 'POST' }),
+    rehydrateDirectMessage: (targetUserId) =>
+      mlsRequest(`/mls/direct-messages/${targetUserId}/rehydrate`, { method: 'POST' }),
     getPendingMessages: () =>
       mlsRequest('/mls/queue/pending'),
     ackMessages: (messageIds) =>
@@ -819,3 +836,161 @@ export const api = {
 };
 
 export default api;
+
+const DEFAULT_LIMIT = 20;
+
+const clampLimit = (value = DEFAULT_LIMIT) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return String(DEFAULT_LIMIT);
+  }
+  return String(Math.min(Math.max(parsed, 1), 100));
+};
+
+const buildPagedParams = ({ cursor = null, limit = DEFAULT_LIMIT } = {}) => {
+  const params = new URLSearchParams();
+  params.set('limit', clampLimit(limit));
+  if (cursor) {
+    params.set('cursor', cursor);
+  }
+  return params;
+};
+
+export const authLogin = (email, password) => api.auth.login(email, password);
+
+export const registerUser = (username, email, password) =>
+  api.auth.register(username, email, password);
+
+export const forgotPassword = (email) => api.auth.requestPasswordReset(email);
+
+export const resetPassword = (token, newPassword, acknowledged = false, devicePublicId) =>
+  api.auth.resetPassword(token, newPassword, acknowledged, devicePublicId);
+
+export const confirmEmailVerification = (token) =>
+  api.verification.confirmEmailVerification(token);
+
+export const getCurrentUser = () => api.users.getProfile();
+
+export const getPostsPage = ({ cursor = null, limit = DEFAULT_LIMIT } = {}) => {
+  const params = buildPagedParams({ cursor, limit });
+  return api.posts.getPage({ cursor, limit: Number(clampLimit(limit)) });
+};
+
+export const getFeedPage = ({ cursor = null, limit = DEFAULT_LIMIT } = {}) => {
+  const params = buildPagedParams({ cursor, limit });
+  return api.posts.getFeedPage({ cursor, limit: Number(clampLimit(limit)) });
+};
+
+export const getPostsPayloadItems = (payload) => {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.posts)) return payload.posts;
+  return [];
+};
+
+export const getPostsPaging = (payload) => ({
+  items: getPostsPayloadItems(payload),
+  hasMore: Boolean(payload?.hasMore),
+  nextCursor: payload?.nextCursor || null
+});
+
+export const createPost = (content, imageAttachmentId = null, imageUrl = null) => {
+  return api.posts.create(content, imageAttachmentId, imageUrl);
+};
+
+export const uploadPostImage = (file) => api.attachments.uploadPost(file);
+
+export const getPostComments = (postId) => api.posts.getComments(postId);
+
+export const createComment = (postId, content) => api.posts.createComment(postId, content);
+
+export const updatePost = (postId, updates) => api.posts.update(postId, updates);
+
+export const deletePost = (postId) => api.posts.delete(postId);
+
+export const getPostById = (postId) => api.posts.getById(postId);
+
+export const likePost = (postId) => api.posts.likePost(postId);
+
+export const unlikePost = (postId) => api.posts.unlikePost(postId);
+
+export const getLikeStatus = (postId) => api.posts.getLikeStatus(postId);
+
+export const getEvents = (search = null) => api.events.getAll(search || '');
+
+export const createEvent = (title, details, closingDate) =>
+  api.events.create({
+    title,
+    details,
+    closing_date: closingDate
+  });
+
+export const placeEventUpdate = (eventId, { stake, target_prob }) =>
+  api.events.update(eventId, {
+    stake,
+    target_prob
+  });
+
+export const resolveEvent = (eventId, outcome) => api.events.resolve(eventId, outcome);
+
+export const sellEventShares = (eventId, { share_type, amount }) =>
+  api.events.sell(eventId, {
+    share_type,
+    amount
+  });
+
+export const getUserPositions = (userId) => api.users.getPositions(userId);
+
+export const getPredictions = () => api.predictions.getAll();
+
+export const createPrediction = (eventId, predictionValue, confidence, predictionType = 'binary') =>
+  api.predictions.create(eventId, predictionValue, confidence, predictionType);
+
+export const getScoringLeaderboard = (limit = 10) => api.scoring.getLeaderboard(limit);
+
+export const getPredictionLeaderboardFallback = () => api.leaderboard.getGlobal(10);
+
+export const getFollowingStatus = (userId) => api.users.getFollowingStatus(userId);
+
+export const updateProfile = ({ username, bio }) => api.users.updateProfile({ username, bio });
+
+export const getCurrentUserId = getCurrentUser;
+
+export const followUser = (userId) => api.users.follow(userId);
+
+export const unfollowUser = (userId) => api.users.unfollow(userId);
+
+export const getFollowers = (userId) => api.users.getFollowers(userId);
+
+export const getFollowing = (userId) => api.users.getFollowing(userId);
+
+export const getUser = (userId) => api.users.getUser(userId);
+
+export const getUserByUsername = (username) => api.users.getUserByUsername(username);
+
+export const getUserReputation = (userId) => api.scoring.getUserReputation(userId);
+
+export const createDirectMessage = (targetUserId) => api.mls.createDirectMessage(targetUserId);
+
+export const getDirectMessages = () => api.mls.getDirectMessages();
+
+export const getGroupMessages = (groupId, afterId = null) =>
+  api.mls.getMessages(groupId, { before: afterId });
+
+export const getNotifications = ({ limit = DEFAULT_LIMIT, offset = 0, unreadOnly = false } = {}) =>
+  api.notifications.getAll({ limit, offset, unreadOnly });
+
+export const getUnreadNotificationCount = () => api.notifications.getUnreadCount();
+
+export const markNotificationRead = (notificationId) => api.notifications.markAsRead(notificationId);
+
+export const markAllNotificationsRead = () => api.notifications.markAllAsRead();
+
+export const deleteNotification = (notificationId) => api.notifications.delete(notificationId);
+
+export const getUiPreferences = () => api.users.getUiPreferences();
+
+export const updateUiPreferences = (skin) => api.users.updateUiPreferences(skin);
+
+export { requestBlob };

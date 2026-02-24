@@ -7,6 +7,8 @@ services:
     command: sh -lc "npm run dev -- --host 0.0.0.0 --port 4174"
     environment:
       VITE_API_PROXY_TARGET: http://intellacc_backend_dev:3000
+      VITE_SERVER_PORT: 4174
+      VITE_HMR_CLIENT_PORT: 4174
     ports:
       - "4174:4174"
     volumes:

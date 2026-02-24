@@ -707,10 +707,8 @@ class CoreCryptoClient {
                 await this.saveState();
                 await this.inviteToGroup(groupId, targetUserId);
             } else if (!this.hasGroup(groupId)) {
-                // If this device doesn't have the group state yet, try pulling pending Welcomes.
-                // If it still isn't available, guide the user instead of failing later with "Group not found".
-                try { await this.syncMessages(); } catch {}
-                if (!this.hasGroup(groupId)) {
+                const ready = await this.ensureDirectMessageGroupReady(groupId, targetUserId);
+                if (!ready) {
                     throw new Error('Conversation exists but is not available on this device yet. If you have a pending invite, accept it. Otherwise link this device from Settings > Linked Devices, or ask the other user to start a new DM.');
                 }
             }
@@ -720,6 +718,163 @@ class CoreCryptoClient {
             console.error('[MLS] Error starting direct message:', e);
             throw e;
         }
+    }
+
+    _resolveDmTargetUserId(groupId, targetUserId = null) {
+        if (targetUserId) return Number(targetUserId);
+        const peers = this.getDmParticipantIds(groupId);
+        if (!Array.isArray(peers) || peers.length === 0) return null;
+        const selfId = String(this.identityName || '').trim();
+        const peer = peers.find((id) => String(id) !== selfId);
+        return peer ? Number(peer) : null;
+    }
+
+    async ensureDirectMessageGroupReady(groupId, targetUserId = null) {
+        const normalizedGroupId = this.groupIdFromBytes(this.groupIdToBytes(groupId));
+        if (this.isDirectMessage(normalizedGroupId) && !this.hasGroup(normalizedGroupId)) {
+            const resolvedTargetUserId = this._resolveDmTargetUserId(normalizedGroupId, targetUserId);
+
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                try {
+                    await this.syncMessages();
+                    await this.acceptPendingWelcomeForGroup(normalizedGroupId, resolvedTargetUserId);
+                    if (this.hasGroup(normalizedGroupId)) return true;
+
+                    if (resolvedTargetUserId) {
+                        await this.rehydrateDirectMessageForTarget(resolvedTargetUserId);
+                    }
+                    await this.syncMessages();
+                    await this.acceptPendingWelcomeForGroup(normalizedGroupId, resolvedTargetUserId);
+                    if (this.hasGroup(normalizedGroupId)) return true;
+
+                    await this.resyncGroupsFromServer?.();
+                    if (this.hasGroup(normalizedGroupId)) return true;
+                } catch (err) {
+                    console.warn('[MLS] ensureDirectMessageGroupReady: repair attempt failed', err?.message || err);
+                }
+
+                if (attempt < 2) {
+                    await new Promise((resolve) => setTimeout(resolve, 250 + attempt * 150));
+                }
+            }
+        }
+
+        return this.hasGroup(this.groupIdFromBytes(this.groupIdToBytes(groupId)));
+    }
+
+    async rehydrateDirectMessageForTarget(targetUserId) {
+        if (!targetUserId) return null;
+        try {
+            const response = await api.mls.rehydrateDirectMessage(Number(targetUserId));
+            return response;
+        } catch (err) {
+            console.warn('[MLS] Failed to rehydrate direct message from backend:', err);
+            throw err;
+        }
+    }
+
+    async acceptPendingWelcomeForGroup(groupId, targetUserId = null) {
+        const normalizedGroupId = this.groupIdFromBytes(this.groupIdToBytes(groupId));
+        let accepted = false;
+
+        const tryAccept = async (pending) => {
+            try {
+                await this.acceptWelcome(pending);
+                return true;
+            } catch (err) {
+                console.warn('[MLS] Failed to accept pending welcome directly:', err);
+                return false;
+            }
+        };
+
+        const pickMatches = (record) => record
+            && String(record.groupId || '') === normalizedGroupId
+            && (!targetUserId || !record.senderUserId || Number(record.senderUserId || 0) === Number(targetUserId));
+
+        const inMemoryMatches = Array.from(this.pendingWelcomes.values() || []).filter(pickMatches);
+        for (const pending of inMemoryMatches) {
+            if (await tryAccept(pending)) {
+                accepted = true;
+                break;
+            }
+        }
+
+        if (accepted) return true;
+
+        let pendingByUser = [];
+        try {
+            pendingByUser = await this.mlsFetch('/messages/welcome', null, { method: 'GET' });
+            if (!Array.isArray(pendingByUser)) {
+                pendingByUser = [];
+            }
+        } catch (err) {
+            console.warn('[MLS] Failed to fetch pending welcomes for group recovery:', err);
+        }
+
+        for (const msg of pendingByUser) {
+            if (!msg || !msg.group_id || String(msg.group_id) !== normalizedGroupId) continue;
+            if (
+                targetUserId
+                && msg.sender_user_id !== undefined
+                && msg.sender_user_id !== null
+                && Number(msg.sender_user_id) !== Number(targetUserId)
+            ) continue;
+            if (this.pendingWelcomes?.has?.(msg.id)) {
+                const existing = this.pendingWelcomes.get(msg.id);
+                if (!existing?.welcomeBytes && msg.data) {
+                    const repairedBytes = this._toBytes(msg.data);
+                    if (repairedBytes) {
+                        const staged = await this.stageWelcome(repairedBytes, this._toBytes(msg.group_info));
+                        const validation = this.validateStagedWelcomeMembers(staged.stagingId);
+                        if (!validation.valid) {
+                            this.rejectStagedWelcome(staged.stagingId);
+                        } else {
+                            existing.stagingId = existing.stagingId || staged.stagingId;
+                            existing.welcomeBytes = repairedBytes;
+                            existing.groupInfoBytes = this._toBytes(msg.group_info);
+                            this.pendingWelcomes.set(msg.id, existing);
+                        }
+                    }
+                }
+                if (await tryAccept(existing)) {
+                    accepted = true;
+                    break;
+                }
+                continue;
+            }
+
+            const welcomeBytes = this._toBytes(msg.data);
+            const groupInfoBytes = this._toBytes(msg.group_info);
+            if (!welcomeBytes) continue;
+
+            try {
+                const staged = await this.stageWelcome(welcomeBytes, groupInfoBytes);
+                const validation = this.validateStagedWelcomeMembers(staged.stagingId);
+                if (!validation.valid) {
+                    this.rejectStagedWelcome(staged.stagingId);
+                    continue;
+                }
+
+                const pendingRecord = {
+                    id: msg.id,
+                    groupId: String(msg.group_id),
+                    senderUserId: msg.sender_user_id || null,
+                    senderDeviceId: msg.sender_device_id || null,
+                    welcomeBytes,
+                    groupInfoBytes,
+                    stagingId: staged.stagingId
+                };
+                this.pendingWelcomes.set(msg.id, pendingRecord);
+                if (await tryAccept(pendingRecord)) {
+                    accepted = true;
+                    break;
+                }
+            } catch (err) {
+                console.warn('[MLS] Failed to stage fallback welcome:', err);
+            }
+        }
+
+        return accepted;
     }
 
     isDirectMessage(groupId) {
@@ -1092,6 +1247,13 @@ class CoreCryptoClient {
         await this.ensureReady();
         const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
         await this.requireDeviceId('Device ID not available. Unlock or set up your keystore first.');
+        if (this.isDirectMessage(groupIdValue) && !this.hasGroup(groupIdValue)) {
+            const resolvedTarget = this._resolveDmTargetUserId(groupIdValue, null);
+            const ready = await this.ensureDirectMessageGroupReady(groupIdValue, resolvedTarget);
+            if (!ready) {
+                throw new Error('Conversation exists but is not available on this device yet. If you have a pending invite, accept it. Otherwise link this device from Settings > Linked Devices, or ask the other user to start a new DM.');
+            }
+        }
 
         const plaintextBytes = new TextEncoder().encode(plaintext);
         this.setGroupAad(groupIdValue, 'application');
@@ -1406,10 +1568,13 @@ class CoreCryptoClient {
 
         const vault = await this.getVaultService();
         const deviceId = vault.getDeviceId();
-        if (!deviceId) return [];
+        if (!deviceId) {
+            console.warn('[MLS] syncMessages skipped: device not available in vault');
+            return [];
+        }
 
         try {
-            const pending = await api.mls.getPendingMessages();
+            const pending = await this.mlsFetch('/queue/pending', null, { method: 'GET' });
             if (!pending || pending.length === 0) return [];
 
             const processedIds = [];
@@ -1510,6 +1675,16 @@ class CoreCryptoClient {
 
                         if (welcomeOutcome === 'accepted') {
                             const groupId = await this.acceptStagedWelcome(staged.stagingId);
+                            try {
+                                await this.saveState();
+                            } catch {
+                                // Persisting local MLS state after auto-accept may fail in transient environments.
+                            }
+                            try {
+                                await api.mls.ackMessages([messageId]);
+                            } catch {
+                                // If the ACK fails due network/server blip, keep processing to avoid blocking onboarding.
+                            }
                             this.pendingWelcomes.delete(messageId);
                             this.welcomeHandlers.forEach(h => h({ groupId, groupInfoBytes }));
                             this.markProcessed(messageId);
@@ -2226,6 +2401,11 @@ class CoreCryptoClient {
         this.pendingWelcomes.delete(pendingId);
 
         const groupId = await this.acceptStagedWelcome(stagingId);
+        try {
+            await this.saveState();
+        } catch {
+            // Best effort persistence for recovered group state.
+        }
         this.welcomeHandlers.forEach(h => h({ groupId, groupInfoBytes: record.groupInfoBytes }));
         this.syncMessages().catch(() => {});
         return groupId;

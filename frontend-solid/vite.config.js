@@ -5,6 +5,8 @@ import topLevelAwait from 'vite-plugin-top-level-await';
 import path from 'path';
 
 const proxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://backend:3000';
+const serverPort = Number(process.env.VITE_SERVER_PORT || process.env.PORT || 5174);
+const hmrPort = Number(process.env.VITE_HMR_CLIENT_PORT || process.env.PORT || process.env.VITE_SERVER_PORT || 4174);
 
 export default defineConfig({
   plugins: [
@@ -19,7 +21,7 @@ export default defineConfig({
     }
   },
   server: {
-    port: 5174,
+    port: serverPort,
     strictPort: true,
     host: '0.0.0.0', // Needed for Docker
     proxy: {
@@ -36,7 +38,7 @@ export default defineConfig({
       usePolling: true
     },
     hmr: {
-      clientPort: 5174
+      clientPort: hmrPort
     }
   }
 });

@@ -1,6 +1,26 @@
 // backend/src/controllers/predictionsController.js
 
 const db = require('../db');
+const scoringService = require('../services/scoringService');
+
+const normalizeMarketOutcome = (raw) => {
+  if (typeof raw === 'boolean') {
+    return raw ? 'yes' : 'no';
+  }
+
+  const normalized = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  if (normalized === 'yes' || normalized === 'y' || normalized === 'true' || normalized === '1') {
+    return 'yes';
+  }
+  if (normalized === 'no' || normalized === 'n' || normalized === 'false' || normalized === '0') {
+    return 'no';
+  }
+
+  return null;
+};
 
 // Helper function to generate probability vectors for unified scoring
 function generateProbabilityVector(prediction_type, prediction_value, confidence, numerical_value, lower_bound, upper_bound) {
@@ -251,6 +271,72 @@ exports.resolvePrediction = async (req, res) => {
   } catch (err) {
     console.error("Error resolving prediction:", err);
     res.status(500).send("Database error: " + err.message);
+  }
+};
+
+exports.resolveEvent = async (req, res) => {
+  const { outcome } = req.body;
+  const { id } = req.params;
+  const outcomeValue = normalizeMarketOutcome(outcome);
+  const eventId = Number.parseInt(id, 10);
+
+  if (!Number.isInteger(eventId) || eventId <= 0) {
+    return res.status(400).json({ message: 'Invalid event id' });
+  }
+
+  if (!outcomeValue) {
+    return res.status(400).json({ message: "Outcome must be 'yes' or 'no'" });
+  }
+
+  try {
+    const existingEvent = await db.query('SELECT id, outcome FROM events WHERE id = $1', [eventId]);
+    if (existingEvent.rows.length === 0) {
+      return res.status(404).json({ message: 'Event not found' });
+    }
+    if (existingEvent.rows[0].outcome) {
+      return res.status(409).json({ message: 'Event already resolved' });
+    }
+
+    const resolvedBoolean = outcomeValue === 'yes';
+    const outcomeResponse = await fetch(`http://prediction-engine:3001/events/${eventId}/market-resolve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.PREDICTION_ENGINE_AUTH_TOKEN ? { 'x-engine-token': process.env.PREDICTION_ENGINE_AUTH_TOKEN } : {})
+      },
+      body: JSON.stringify({ outcome: resolvedBoolean })
+    });
+
+    const outcomeResult = await outcomeResponse.json().catch(() => ({}));
+    if (!outcomeResponse.ok) {
+      return res.status(outcomeResponse.status).json(outcomeResult);
+    }
+
+    const update = await db.query(
+      'UPDATE events SET outcome = $1, numerical_outcome = $2, updated_at = NOW() WHERE id = $3 RETURNING id, title, outcome, numerical_outcome, closing_date',
+      [outcomeValue, resolvedBoolean ? 1 : 0, eventId]
+    );
+
+    const resolvedEvent = update.rows[0];
+    scoringService.triggerEventResolutionScoring(eventId).catch((error) => {
+      console.error('Event scoring refresh failed:', error.message);
+    });
+
+    if (req.app.get('io')) {
+      req.app.get('io').to('predictions').emit('marketResolved', {
+        eventId,
+        outcome: outcomeValue,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return res.status(200).json({
+      event: resolvedEvent,
+      message: outcomeResult.message || `Market ${eventId} resolved as ${outcomeValue.toUpperCase()}`
+    });
+  } catch (err) {
+    console.error('Error resolving event:', err);
+    return res.status(500).send('Database error: ' + err.message);
   }
 };
 

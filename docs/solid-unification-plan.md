@@ -163,6 +163,16 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
 
 ## Current Sprint Log
 
+- `2026-02-24`: Prediction market route and local solid parity dev harness tuned.
+  - Updated `frontend-solid/src/pages/PredictionsPage.jsx` to stabilize trade-message lifecycle (no leaked timers), reduce side effects in auth-gated refreshes, and keep position/prediction refreshes aligned after trade actions.
+  - Added resilient HMR defaults in `frontend-solid/vite.config.js` to avoid local websocket host/port mismatches in containerized dev.
+  - Set explicit local compose env in `docker-compose.solid-local.yml`:
+    - `VITE_SERVER_PORT=4174`
+    - `VITE_HMR_CLIENT_PORT=4174`
+  - Verified production-safe local preview with Playwright CLI on `#predictions`:
+    - no 5174 websocket console errors,
+    - successful page open + screenshot capture.
+
 - `2026-02-18`: Continued from stable backend-focused state on `feat/solid-unified-skins`.
   - Added production-safe migration checkpoint and updated plan status.
   - Skin resolver now accepts `?skin=van|terminal` from either `location.search` or hash query while preserving existing behavior.
@@ -328,6 +338,12 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
     - `/tmp/solid-login-skin-terminal-query.png`
     - `/tmp/solid-login-skin-van-query.png`
 
+- `2026-02-24`: Extended route parity with verification deep-link support:
+  - Added `frontend-solid/src/pages/VerifyEmailPage.jsx` and wired `#verify-email` in route handling.
+  - Added shared verification styles and status states (verifying/success/error).
+  - Added `confirmEmailVerification` named API export for `frontend-solid` route usage.
+  - Current status: parity coverage now includes the VanJS email verification landing path as a first-class route.
+
 ## Assumptions
 
 - Van-style remains default for continuity.
@@ -346,6 +362,11 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
   - skin query/local preference resolver (`?skin=` and stored preference sync)
 - Backend preference persistence (`GET/PUT /users/me/preferences`) is in place and consumed in Solid runtime.
 - Dev-only source-mounted solid stack exists and is runnable without touching production containers (`docker-compose.solid-local.yml`, port 4174).
+- 2026-02-24: Prediction lifecycle admin controls in progress for the Solid migration:
+  - Added admin resolve controls in `frontend-solid/src/components/predictions/MarketEventCard.jsx`.
+  - Wired prediction-card level resolve actions in `frontend-solid/src/pages/PredictionsPage.jsx`.
+  - Added event resolution API export (`resolveEvent`) in `frontend-solid/src/services/api.js`.
+  - Added backend tests for `/api/events/:id` resolution flow in `backend/test/event_resolution.test.js` (admin success + permission/payload/duplicate rejections).
 - Remaining work before unification PR:
   - finish route-by-route behavioral parity for prediction lifecycle/admin-only controls and edge flows
   - complete Playwright parity matrix for both `skin=van` and `skin=terminal`

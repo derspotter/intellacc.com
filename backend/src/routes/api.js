@@ -177,6 +177,7 @@ router.post("/events", authenticateJWT, requirePaymentVerified, predictionsContr
 router.get("/events", predictionsController.getEvents); // Temporarily no auth for testing
 router.get("/categories", predictionsController.getCategories); // Get available categories
 router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
+router.patch("/events/:id", authenticateJWT, requireAdmin, predictionsController.resolveEvent);
 router.get("/predictions", authenticateJWT, predictionsController.getUserPredictions);
 
 // Community market question submission + validation

@@ -1,5 +1,18 @@
 import { createSignal } from 'solid-js';
 
+const decodeJwtPayload = (jwtToken) => {
+  if (!jwtToken || typeof jwtToken !== 'string') return null;
+  const encoded = jwtToken.split('.')[1];
+  if (!encoded) return null;
+
+  const padded = encoded
+    .replace(/-/g, '+')
+    .replace(/_/g, '/')
+    .padEnd(encoded.length + ((4 - (encoded.length % 4)) % 4), '=');
+
+  return JSON.parse(atob(padded));
+};
+
 // Create reactive state for token
 const [token, setToken] = createSignal(localStorage.getItem('token') || '');
 const [isLoggedIn, setIsLoggedIn] = createSignal(!!localStorage.getItem('token'));
@@ -26,7 +39,7 @@ async function refreshProfile() {
 const initialToken = token();
 if (initialToken) {
     try {
-        const payload = JSON.parse(atob(initialToken.split('.')[1]));
+        const payload = decodeJwtPayload(initialToken);
         if (!payload || !payload.exp || payload.exp * 1000 < Date.now()) {
             throw new Error("Token expired or invalid");
         }
@@ -60,7 +73,7 @@ export function getToken() {
 export function saveToken(newToken) {
     if (!newToken) return;
     try {
-        const payload = JSON.parse(atob(newToken.split('.')[1]));
+        const payload = decodeJwtPayload(newToken);
         localStorage.setItem('token', newToken);
         setToken(newToken);
         setUserData(payload);
@@ -100,7 +113,7 @@ export function getTokenData() {
     if (!currentToken) return null;
 
     try {
-        const payload = JSON.parse(atob(currentToken.split('.')[1]));
+        const payload = decodeJwtPayload(currentToken);
         return payload;
     } catch (e) {
         console.error('Error decoding token:', e);
@@ -130,4 +143,3 @@ export function getUserId() {
 }
 
 // Fetch full profile from backend to supplement token data
-

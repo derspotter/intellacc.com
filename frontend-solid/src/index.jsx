@@ -1,6 +1,7 @@
 /* @refresh reload */
 import { render } from 'solid-js/web'
 import './index.css'
+import './styles.css'
 import { initializeSkinProvider } from './services/skinProvider'
 import App from './App.jsx'
 
