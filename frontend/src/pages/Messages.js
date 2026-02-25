@@ -45,7 +45,7 @@ const parseAttachmentDescriptor = (plaintext) => {
   try {
     const parsed = JSON.parse(plaintext);
     if (parsed?.type === 'attachment' && parsed?.attachmentId) return parsed;
-  } catch {}
+  } catch { }
   return null;
 };
 
@@ -185,6 +185,7 @@ export default function MessagesPage() {
   const showNewConvoPanel = van.state(false);
   // Local state for fingerprint verification modal (userId to verify, null if closed)
   const verifyingUserId = van.state(null);
+  const verifyingInvite = van.state(null); // Local state for Staged Welcome inspection modal
   const attachmentFile = van.state(null);
   const attachmentPreview = van.state(null);
   // Keep a stable reference so the attach button can open the native picker.
@@ -304,6 +305,40 @@ export default function MessagesPage() {
     }
   };
 
+  const inspectPendingWelcome = async (invite) => {
+    try {
+      messagingStore.setMessagesLoading(true);
+      const info = await coreCryptoClient.inspectPendingWelcome(invite);
+
+      const members = info.members.map(m => {
+        let idStr = 'Unknown';
+        try {
+          if (m.identity) idStr = new TextDecoder().decode(new Uint8Array(m.identity));
+        } catch (e) { }
+        return { ...m, identityStr: idStr };
+      });
+
+      let senderStr = 'Unknown';
+      try {
+        if (info.sender && info.sender.identity) {
+          senderStr = new TextDecoder().decode(new Uint8Array(info.sender.identity));
+        }
+      } catch (e) { }
+
+      verifyingInvite.val = {
+        invite,
+        info,
+        members,
+        senderStr
+      };
+    } catch (err) {
+      console.error('[Messages] Failed to inspect welcome:', err);
+      messagingStore.setError(err.message || 'Failed to inspect invite');
+    } finally {
+      messagingStore.setMessagesLoading(false);
+    }
+  };
+
   const rejectPendingWelcome = async (invite) => {
     try {
       await coreCryptoClient.rejectWelcome(invite);
@@ -323,7 +358,7 @@ export default function MessagesPage() {
       // 1. Load local history from encrypted vault
       const vaultService = (await import('../services/vaultService.js')).default;
       const history = await vaultService.getMessages(groupId);
-      
+
       const formattedHistory = history.map(m => ({
         id: m.id,
         senderId: m.senderId,
@@ -331,13 +366,13 @@ export default function MessagesPage() {
         timestamp: m.timestamp,
         type: String(m.senderId) === String(messagingStore.currentUserId) ? 'sent' : 'received'
       }));
-      
+
       messagingStore.setMlsMessages(groupId, formattedHistory);
 
       // 2. Fetch any pending messages from relay queue
       // Note: syncMessages logic handles this via socket events, but we can trigger a sync just in case
       // coreCryptoClient.syncMessages() is global, not per group.
-      
+
     } catch (err) {
       console.warn('[Messages] Error loading MLS messages:', err);
     } finally {
@@ -553,383 +588,423 @@ export default function MessagesPage() {
     }
 
     return div({ class: "messages-page" }, [
-    div({ class: "messages-container" }, [
+      div({ class: "messages-container" }, [
 
-      // Sidebar - MLS Groups List
-      div({ class: "conversations-sidebar" }, [
-        div({ class: "sidebar-header" }, [
-          h2("E2EE Messages"),
-          button({
-            class: "btn",
-            onclick: () => { showNewConvoPanel.val = !showNewConvoPanel.val; }
-          }, () => showNewConvoPanel.val ? "Cancel" : "+ New")
-        ]),
+        // Sidebar - MLS Groups List
+        div({ class: "conversations-sidebar" }, [
+          div({ class: "sidebar-header" }, [
+            h2("E2EE Messages"),
+            button({
+              class: "btn",
+              onclick: () => { showNewConvoPanel.val = !showNewConvoPanel.val; }
+            }, () => showNewConvoPanel.val ? "Cancel" : "+ New")
+          ]),
 
-        // Inline New Conversation Panel OR Conversations List
-        () => {
-          if (showNewConvoPanel.val) {
-            // Show inline new conversation panel
-            return NewConversationPanel({
-              onClose: () => { showNewConvoPanel.val = false; }
-            });
-          }
+          // Inline New Conversation Panel OR Conversations List
+          () => {
+            if (showNewConvoPanel.val) {
+              // Show inline new conversation panel
+              return NewConversationPanel({
+                onClose: () => { showNewConvoPanel.val = false; }
+              });
+            }
 
-          // Search
-          return div({ class: "sidebar-content" }, [
-            div({ class: "search-box" }, [
-              input({
-                type: "text",
-                placeholder: "Search conversations...",
-                value: () => messagingStore.searchQuery,
-                oninput: (e) => messagingStore.setSearchQuery(e.target.value),
-                class: "form-input"
-              })
-            ]),
+            // Search
+            return div({ class: "sidebar-content" }, [
+              div({ class: "search-box" }, [
+                input({
+                  type: "text",
+                  placeholder: "Search conversations...",
+                  value: () => messagingStore.searchQuery,
+                  oninput: (e) => messagingStore.setSearchQuery(e.target.value),
+                  class: "form-input"
+                })
+              ]),
 
-            // DMs and Groups list
-            div({ class: "conversations-list" }, [
-              () => {
-                if (messagingStore.conversationsLoading) return div({ class: "loading" }, "Loading...");
+              // DMs and Groups list
+              div({ class: "conversations-list" }, [
+                () => {
+                  if (messagingStore.conversationsLoading) return div({ class: "loading" }, "Loading...");
 
-                const dms = messagingStore.dmSidebarItems || [];
-                const groups = (messagingStore.mlsSidebarItems || []).filter(g => !g.isDm);
-                const pendingWelcomes = messagingStore.pendingWelcomes || [];
+                  const dms = messagingStore.dmSidebarItems || [];
+                  const groups = (messagingStore.mlsSidebarItems || []).filter(g => !g.isDm);
+                  const pendingWelcomes = messagingStore.pendingWelcomes || [];
 
-                if (dms.length === 0 && groups.length === 0 && pendingWelcomes.length === 0) {
-                  return div({ class: "empty-state" }, [
-                    p("No E2EE conversations yet"),
-                    p({ class: "text-muted" }, "Click \"+ New\" to start a conversation"),
-                    div({ style: "margin-top: 15px; font-size: 0.9em;" }, [
+                  if (dms.length === 0 && groups.length === 0 && pendingWelcomes.length === 0) {
+                    return div({ class: "empty-state" }, [
+                      p("No E2EE conversations yet"),
+                      p({ class: "text-muted" }, "Click \"+ New\" to start a conversation"),
+                      div({ style: "margin-top: 15px; font-size: 0.9em;" }, [
                         span("Missing history? "),
-                        button({ 
-                            class: "btn-link",
-                            onclick: () => window.location.hash = 'settings'
+                        button({
+                          class: "btn-link",
+                          onclick: () => window.location.hash = 'settings'
                         }, "Link this device")
-                    ])
+                      ])
+                    ]);
+                  }
+
+                  return div([
+                    // Pending Invites Section
+                    pendingWelcomes.length > 0 ? div({ class: "section-header" }, "Pending Invites") : null,
+                    pendingWelcomes.length > 0 ? ul({ class: "invite-list" }, [
+                      ...pendingWelcomes.map(invite => li({
+                        key: invite.id,
+                        class: "invite-item"
+                      }, [
+                        div({ class: "invite-info" }, [
+                          div({ class: "invite-title" }, formatInviteLabel(invite)),
+                          div({ class: "invite-meta text-muted" }, `From user ${invite.senderUserId ?? 'unknown'}`)
+                        ]),
+                        div({ class: "invite-actions" }, [
+                          button({ class: "btn btn-sm btn-primary", onclick: () => inspectPendingWelcome(invite) }, "Inspect"),
+                          button({ class: "btn btn-sm", onclick: () => rejectPendingWelcome(invite) }, "Reject")
+                        ])
+                      ]))
+                    ]) : null,
+
+                    // DMs Section
+                    dms.length > 0 ? div({ class: "section-header" }, "Direct Messages") : null,
+                    dms.length > 0 ? ul({ class: "dm-list" }, [
+                      ...dms.map(item => li({
+                        key: item.id,
+                        'data-group-id': item.id,
+                        class: () => {
+                          const selected = messagingStore.selectedMlsGroupId === item.id;
+                          return `conversation-item dm-item ${selected ? 'selected' : ''}`;
+                        },
+                        onclick: () => selectMlsGroup(item.id)
+                      }, [
+                        div({ class: "conversation-info" }, [
+                          div({ class: "conversation-name" }, [
+                            span({ class: "lock-icon" }, "\uD83D\uDD12 "),
+                            item.name,
+                            // Verification badge for DM contacts
+                            item.otherUserId ? VerificationBadge({ contactUserId: item.otherUserId }) : null
+                          ])
+                        ])
+                      ]))
+                    ]) : null,
+
+                    // Groups Section
+                    groups.length > 0 ? div({ class: "section-header" }, "Groups") : null,
+                    groups.length > 0 ? ul({ class: "group-list" }, [
+                      ...groups.map(item => li({
+                        key: item.id,
+                        'data-group-id': item.id,
+                        class: () => {
+                          const selected = messagingStore.selectedMlsGroupId === item.id;
+                          return `conversation-item mls-group ${selected ? 'selected' : ''}`;
+                        },
+                        onclick: () => selectMlsGroup(item.id)
+                      }, [
+                        div({ class: "conversation-info" }, [
+                          div({ class: "conversation-name" }, [
+                            span({ class: "lock-icon" }, "\uD83D\uDD12 "),
+                            item.name || 'Unnamed Group'
+                          ]),
+                          div({ class: "group-id text-muted" }, item.id?.substring(0, 8) + '...')
+                        ])
+                      ]))
+                    ]) : null
                   ]);
                 }
-
-                return div([
-                  // Pending Invites Section
-                  pendingWelcomes.length > 0 ? div({ class: "section-header" }, "Pending Invites") : null,
-                  pendingWelcomes.length > 0 ? ul({ class: "invite-list" }, [
-                    ...pendingWelcomes.map(invite => li({
-                      key: invite.id,
-                      class: "invite-item"
-                    }, [
-                      div({ class: "invite-info" }, [
-                        div({ class: "invite-title" }, formatInviteLabel(invite)),
-                        div({ class: "invite-meta text-muted" }, `From user ${invite.senderUserId ?? 'unknown'}`)
-                      ]),
-                      div({ class: "invite-actions" }, [
-                        button({ class: "btn btn-sm btn-primary", onclick: () => acceptPendingWelcome(invite) }, "Accept"),
-                        button({ class: "btn btn-sm", onclick: () => rejectPendingWelcome(invite) }, "Reject")
-                      ])
-                    ]))
-                  ]) : null,
-
-                  // DMs Section
-                  dms.length > 0 ? div({ class: "section-header" }, "Direct Messages") : null,
-                  dms.length > 0 ? ul({ class: "dm-list" }, [
-                    ...dms.map(item => li({
-                      key: item.id,
-                      'data-group-id': item.id,
-                      class: () => {
-                        const selected = messagingStore.selectedMlsGroupId === item.id;
-                        return `conversation-item dm-item ${selected ? 'selected' : ''}`;
-                      },
-                      onclick: () => selectMlsGroup(item.id)
-                    }, [
-                      div({ class: "conversation-info" }, [
-                        div({ class: "conversation-name" }, [
-                          span({ class: "lock-icon" }, "\uD83D\uDD12 "),
-                          item.name,
-                          // Verification badge for DM contacts
-                          item.otherUserId ? VerificationBadge({ contactUserId: item.otherUserId }) : null
-                        ])
-                      ])
-                    ]))
-                  ]) : null,
-
-                  // Groups Section
-                  groups.length > 0 ? div({ class: "section-header" }, "Groups") : null,
-                  groups.length > 0 ? ul({ class: "group-list" }, [
-                    ...groups.map(item => li({
-                      key: item.id,
-                      'data-group-id': item.id,
-                      class: () => {
-                        const selected = messagingStore.selectedMlsGroupId === item.id;
-                        return `conversation-item mls-group ${selected ? 'selected' : ''}`;
-                      },
-                      onclick: () => selectMlsGroup(item.id)
-                    }, [
-                      div({ class: "conversation-info" }, [
-                        div({ class: "conversation-name" }, [
-                          span({ class: "lock-icon" }, "\uD83D\uDD12 "),
-                          item.name || 'Unnamed Group'
-                        ]),
-                        div({ class: "group-id text-muted" }, item.id?.substring(0, 8) + '...')
-                      ])
-                    ]))
-                  ]) : null
-                ]);
-              }
-            ])
-          ]);
-        }
-      ]),
-
-      // Main chat area
-      div({ class: "chat-area" }, [
-        () => {
-          if (!messagingStore.selectedMlsGroupId) {
-            return div({ class: "no-conversation" }, [
-              div({ class: "empty-state" }, [
-                i({ class: "icon-message" }),
-                h2("Select an E2EE group"),
-                p("Choose a group from the sidebar or create a new one")
               ])
             ]);
           }
+        ]),
 
-          // MLS Group selected (could be DM or Group)
-          const isDm = coreCryptoClient.isDirectMessage(messagingStore.selectedMlsGroupId);
-          const dmInfo = isDm ? messagingStore.directMessages.find(dm => dm.group_id === messagingStore.selectedMlsGroupId) : null;
-          const chatTitle = isDm
-            ? (dmInfo?.other_username || 'Direct Message')
-            : (messagingStore.selectedMlsGroup?.name || 'E2EE Group');
+        // Main chat area
+        div({ class: "chat-area" }, [
+          () => {
+            if (!messagingStore.selectedMlsGroupId) {
+              return div({ class: "no-conversation" }, [
+                div({ class: "empty-state" }, [
+                  i({ class: "icon-message" }),
+                  h2("Select an E2EE group"),
+                  p("Choose a group from the sidebar or create a new one")
+                ])
+              ]);
+            }
 
-          return div({ class: "conversation-view mls-conversation" }, [
-            // Chat header
-            div({ class: "chat-header" }, [
-              div({ class: "chat-title" }, [
-                h3(chatTitle),
-                div({ class: "encryption-status mls-active" }, [
-                  i({ class: "icon-lock" }),
-                  span("MLS End-to-End Encrypted")
+            // MLS Group selected (could be DM or Group)
+            const isDm = coreCryptoClient.isDirectMessage(messagingStore.selectedMlsGroupId);
+            const dmInfo = isDm ? messagingStore.directMessages.find(dm => dm.group_id === messagingStore.selectedMlsGroupId) : null;
+            const chatTitle = isDm
+              ? (dmInfo?.other_username || 'Direct Message')
+              : (messagingStore.selectedMlsGroup?.name || 'E2EE Group');
+
+            return div({ class: "conversation-view mls-conversation" }, [
+              // Chat header
+              div({ class: "chat-header" }, [
+                div({ class: "chat-title" }, [
+                  h3(chatTitle),
+                  div({ class: "encryption-status mls-active" }, [
+                    i({ class: "icon-lock" }),
+                    span("MLS End-to-End Encrypted")
+                  ])
+                ]),
+                div({ class: "chat-header-actions" }, [
+                  SafetyNumbersButton(),
+                  // Show contact verify button for DMs
+                  isDm && dmInfo?.other_user_id ? ContactVerifyButton({
+                    contactUserId: dmInfo.other_user_id,
+                    contactUsername: dmInfo.other_username || 'Contact'
+                  }) : null,
+                  // Only show invite button for groups, not DMs
+                  isDm ? null : button({
+                    class: "btn btn-sm",
+                    onclick: () => { showInviteForm.val = !showInviteForm.val; }
+                  }, "+ Invite")
                 ])
               ]),
-              div({ class: "chat-header-actions" }, [
-                SafetyNumbersButton(),
-                // Show contact verify button for DMs
-                isDm && dmInfo?.other_user_id ? ContactVerifyButton({
-                  contactUserId: dmInfo.other_user_id,
-                  contactUsername: dmInfo.other_username || 'Contact'
-                }) : null,
-                // Only show invite button for groups, not DMs
-                isDm ? null : button({
-                  class: "btn btn-sm",
-                  onclick: () => { showInviteForm.val = !showInviteForm.val; }
-                }, "+ Invite")
-              ])
-            ]),
 
-            // Fingerprint warning banners (TOFU security alerts)
-            () => {
-              const warnings = messagingStore.fingerprintWarnings || [];
-              if (warnings.length === 0) return null;
-              return div({ class: "fingerprint-warnings" },
-                warnings.map(warning => FingerprintWarningBanner({
-                  message: `Security alert: User ${warning.userId}'s encryption key has changed!`,
-                  onDismiss: () => messagingStore.dismissFingerprintWarning(warning.userId),
-                  onVerify: () => {
-                    // Open verification modal for this user
-                    verifyingUserId.val = warning.userId;
-                  }
-                }))
-              );
-            },
-
-            // Verification modal for fingerprint warnings
-            () => {
-              if (!verifyingUserId.val) return null;
-              return ContactVerificationModal({
-                contactUserId: verifyingUserId.val,
-                contactUsername: `User ${verifyingUserId.val}`,
-                onClose: () => {
-                  verifyingUserId.val = null;
-                },
-                onVerify: () => {
-                  messagingStore.dismissFingerprintWarning(verifyingUserId.val);
-                  verifyingUserId.val = null;
-                }
-              });
-            },
-
-            // Invite form - always rendered but hidden via CSS class
-            div({
-              class: () => `invite-form ${showInviteForm.val ? 'visible' : 'hidden'}`
-            }, [
-              form({ onsubmit: inviteMlsUser }, [
-                input({
-                  type: "text",
-                  placeholder: "User ID to invite...",
-                  value: () => messagingStore.mlsInviteUserId,
-                  oninput: (e) => messagingStore.setMlsInviteUserId(e.target.value),
-                  class: "form-input"
-                }),
-                button({ type: "submit", class: "btn btn-primary btn-sm" }, "Invite")
-              ])
-            ]),
-
-            // Messages list
-            div({ class: "messages-list" },
+              // Fingerprint warning banners (TOFU security alerts)
               () => {
-                if (messagingStore.messagesLoading) {
-                  return div({ class: "loading" }, "Loading encrypted messages...");
-                }
-                const messages = messagingStore.currentMlsMessages || [];
-                if (messages.length === 0) {
-                  return div({ class: "empty-messages" }, "No messages yet. Send an encrypted message!");
-                }
+                const warnings = messagingStore.fingerprintWarnings || [];
+                if (warnings.length === 0) return null;
+                return div({ class: "fingerprint-warnings" },
+                  warnings.map(warning => FingerprintWarningBanner({
+                    message: `Security alert: User ${warning.userId}'s encryption key has changed!`,
+                    onDismiss: () => messagingStore.dismissFingerprintWarning(warning.userId),
+                    onVerify: () => {
+                      // Open verification modal for this user
+                      verifyingUserId.val = warning.userId;
+                    }
+                  }))
+                );
+              },
 
-                const messagesList = ul([
-                  ...messages.map(msg => li({
-                    class: `message-item ${msg.type === 'sent' || msg.senderId === messagingStore.currentUserId ? 'sent' : 'received'}`
-                  }, [
-                    div({ class: "message-content" }, [
-                      (() => {
-                        const attachment = parseAttachmentDescriptor(msg.plaintext);
-                        if (!attachment) {
-                          return div({ class: "message-text" }, msg.plaintext);
-                        }
+              // Verification modal for fingerprint warnings
+              () => {
+                if (!verifyingUserId.val) return null;
+                return ContactVerificationModal({
+                  contactUserId: verifyingUserId.val,
+                  contactUsername: `User ${verifyingUserId.val}`,
+                  onClose: () => {
+                    verifyingUserId.val = null;
+                  },
+                  onVerify: () => {
+                    messagingStore.dismissFingerprintWarning(verifyingUserId.val);
+                    verifyingUserId.val = null;
+                  }
+                });
+              },
 
-                        const entry = attachmentCache.val[attachment.attachmentId] || {};
-                        const status = entry.status || 'idle';
-                        const mime = entry.mime || attachment.mime || 'application/octet-stream';
+              // Verification modal for pending invites
+              () => {
+                const inspection = verifyingInvite.val;
+                if (!inspection) return null;
 
-                        return div({ class: "message-attachment" }, [
-                          div({ class: "attachment-info" }, [
-                            span({ class: "attachment-name" }, attachment.name || 'attachment'),
-                            span({ class: "attachment-size" }, formatBytes(attachment.size || 0))
-                          ]),
-                          attachment.caption ? div({ class: "attachment-caption" }, attachment.caption) : null,
-                          div({ class: "attachment-actions" }, [
-                            button({
-                              type: 'button',
-                              class: 'attachment-button',
-                              onclick: () => handleAttachmentAction(attachment),
-                              disabled: status === 'loading'
-                            }, status === 'loading' ? 'Decrypting…' : 'Download')
-                          ]),
-                          () => {
-                            const updated = attachmentCache.val[attachment.attachmentId] || {};
-                            if (updated.status === 'error') {
-                              return div({ class: 'attachment-error' }, updated.error);
-                            }
-                            if (updated.status === 'ready' && updated.url && mime.startsWith('image/')) {
-                              return div({ class: 'attachment-preview' }, [
-                                van.tags.img({ src: updated.url, alt: attachment.name || 'attachment' })
-                              ]);
-                            }
-                            return null;
-                          }
-                        ]);
-                      })(),
-                      div({ class: "message-meta" }, [
-                        SenderName(msg.senderId),
-                        span({ class: "message-time" }, formatTime(msg.timestamp))
-                      ])
-                    ])
-                  ]))
-                ]);
+                const { invite, info, members, senderStr } = inspection;
 
-                setTimeout(scrollToBottom, 50);
-                return messagesList;
-              }
-            ),
-
-            // Message input
-            div({ class: "message-input-area" }, [
-              form({ onsubmit: sendMessage }, [
-                div({ class: "message-composer" }, [
-                  // Hidden native file input (triggered by Attach button).
-                  (() => {
-                    const el = input({
-                      type: 'file',
-                      class: 'message-attachment-input',
-                      style: 'display:none',
-                      onchange: (e) => {
-                        const file = e.target.files && e.target.files[0];
-                        if (!file) {
-                          clearAttachment(e.target);
-                          return;
-                        }
-                        attachmentFile.val = file;
-                        if (file.type && file.type.startsWith('image/')) {
-                          if (attachmentPreview.val) URL.revokeObjectURL(attachmentPreview.val);
-                          attachmentPreview.val = URL.createObjectURL(file);
-                        } else {
-                          if (attachmentPreview.val) URL.revokeObjectURL(attachmentPreview.val);
-                          attachmentPreview.val = null;
-                        }
-                      }
-                    });
-                    attachmentInputEl = el;
-                    return el;
-                  })(),
-                  div({ class: "input-group" }, [
-                    button({
-                      type: 'button',
-                      class: 'attach-button',
-                      title: 'Attach file',
-                      onclick: () => attachmentInputEl && attachmentInputEl.click()
-                    }, [
-                      i({ class: 'icon-attach' }),
-                      span({ class: 'attach-label' }, 'Attach')
+                return div({ class: "modal-backdrop" },
+                  div({ class: "modal-content", style: "max-width: 500px" }, [
+                    div({ class: "modal-header" }, [
+                      van.tags.h3("Inspect Group Invitation"),
+                      button({ class: "btn-close", onclick: () => verifyingInvite.val = null }, "×")
                     ]),
-                  textarea({
-                    placeholder: "Type an encrypted message...",
-                    value: () => messagingStore.newMessage,
-                    oninput: (e) => messagingStore.setNewMessage(e.target.value),
-                    onkeydown: (e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        sendMessage(e);
-                      }
-                    },
-                    class: "message-textarea",
-                    rows: 1
-                  }),
-                  button({
-                    type: "submit",
-                    class: "send-button",
-                    'aria-label': 'Send message',
-                    disabled: () => !messagingStore.newMessage.trim() && !attachmentFile.val
-                  }, [
-                    i({ class: "icon-send" }),
-                    span({ class: 'send-label' }, "Send")
+                    div({ class: "modal-body" }, [
+                      p(van.tags.strong("Sender: "), senderStr),
+                      p(van.tags.strong("Group Identity Hex: "), info.group_id_hex.substring(0, 16) + '...'),
+                      van.tags.h4("Members (" + members.length + ")"),
+                      van.tags.ul({ class: "contact-list", style: "max-height: 200px; overflow-y: auto; padding-left: 0; list-style: none;" }, members.map(m =>
+                        van.tags.li({ class: "contact-item" }, [
+                          div({ class: "contact-info" }, [
+                            span({ class: "contact-name" }, m.identityStr),
+                            span({ class: "contact-status text-muted" }, m.is_basic_credential ? ' (Basic Credential)' : '')
+                          ])
+                        ])
+                      ))
+                    ]),
+                    div({ class: "modal-footer" }, [
+                      button({
+                        class: "btn btn-primary",
+                        onclick: () => {
+                          acceptPendingWelcome(invite);
+                          verifyingInvite.val = null;
+                        }
+                      }, "Accept & Join"),
+                      button({ class: "btn", onclick: () => verifyingInvite.val = null }, "Cancel")
+                    ])
                   ])
-                  ]),
-                  () => attachmentFile.val ? div({ class: 'attachment-selected' }, [
-                    span({ class: 'attachment-selected-name' }, attachmentFile.val.name),
-                    button({
-                      type: 'button',
-                      class: 'attachment-remove',
-                      onclick: () => clearAttachment(attachmentInputEl)
-                    }, 'Remove')
-                  ]) : null,
-                  () => attachmentPreview.val ? div({ class: 'attachment-inline-preview' }, [
-                    van.tags.img({ src: attachmentPreview.val, alt: 'Attachment preview' })
-                  ]) : null
+                );
+              },
+
+              // Invite form - always rendered but hidden via CSS class
+              div({
+                class: () => `invite-form ${showInviteForm.val ? 'visible' : 'hidden'}`
+              }, [
+                form({ onsubmit: inviteMlsUser }, [
+                  input({
+                    type: "text",
+                    placeholder: "User ID to invite...",
+                    value: () => messagingStore.mlsInviteUserId,
+                    oninput: (e) => messagingStore.setMlsInviteUserId(e.target.value),
+                    class: "form-input"
+                  }),
+                  button({ type: "submit", class: "btn btn-primary btn-sm" }, "Invite")
+                ])
+              ]),
+
+              // Messages list
+              div({ class: "messages-list" },
+                () => {
+                  if (messagingStore.messagesLoading) {
+                    return div({ class: "loading" }, "Loading encrypted messages...");
+                  }
+                  const messages = messagingStore.currentMlsMessages || [];
+                  if (messages.length === 0) {
+                    return div({ class: "empty-messages" }, "No messages yet. Send an encrypted message!");
+                  }
+
+                  const messagesList = ul([
+                    ...messages.map(msg => li({
+                      class: `message-item ${msg.type === 'sent' || msg.senderId === messagingStore.currentUserId ? 'sent' : 'received'}`
+                    }, [
+                      div({ class: "message-content" }, [
+                        (() => {
+                          const attachment = parseAttachmentDescriptor(msg.plaintext);
+                          if (!attachment) {
+                            return div({ class: "message-text" }, msg.plaintext);
+                          }
+
+                          const entry = attachmentCache.val[attachment.attachmentId] || {};
+                          const status = entry.status || 'idle';
+                          const mime = entry.mime || attachment.mime || 'application/octet-stream';
+
+                          return div({ class: "message-attachment" }, [
+                            div({ class: "attachment-info" }, [
+                              span({ class: "attachment-name" }, attachment.name || 'attachment'),
+                              span({ class: "attachment-size" }, formatBytes(attachment.size || 0))
+                            ]),
+                            attachment.caption ? div({ class: "attachment-caption" }, attachment.caption) : null,
+                            div({ class: "attachment-actions" }, [
+                              button({
+                                type: 'button',
+                                class: 'attachment-button',
+                                onclick: () => handleAttachmentAction(attachment),
+                                disabled: status === 'loading'
+                              }, status === 'loading' ? 'Decrypting…' : 'Download')
+                            ]),
+                            () => {
+                              const updated = attachmentCache.val[attachment.attachmentId] || {};
+                              if (updated.status === 'error') {
+                                return div({ class: 'attachment-error' }, updated.error);
+                              }
+                              if (updated.status === 'ready' && updated.url && mime.startsWith('image/')) {
+                                return div({ class: 'attachment-preview' }, [
+                                  van.tags.img({ src: updated.url, alt: attachment.name || 'attachment' })
+                                ]);
+                              }
+                              return null;
+                            }
+                          ]);
+                        })(),
+                        div({ class: "message-meta" }, [
+                          SenderName(msg.senderId),
+                          span({ class: "message-time" }, formatTime(msg.timestamp))
+                        ])
+                      ])
+                    ]))
+                  ]);
+
+                  setTimeout(scrollToBottom, 50);
+                  return messagesList;
+                }
+              ),
+
+              // Message input
+              div({ class: "message-input-area" }, [
+                form({ onsubmit: sendMessage }, [
+                  div({ class: "message-composer" }, [
+                    // Hidden native file input (triggered by Attach button).
+                    (() => {
+                      const el = input({
+                        type: 'file',
+                        class: 'message-attachment-input',
+                        style: 'display:none',
+                        onchange: (e) => {
+                          const file = e.target.files && e.target.files[0];
+                          if (!file) {
+                            clearAttachment(e.target);
+                            return;
+                          }
+                          attachmentFile.val = file;
+                          if (file.type && file.type.startsWith('image/')) {
+                            if (attachmentPreview.val) URL.revokeObjectURL(attachmentPreview.val);
+                            attachmentPreview.val = URL.createObjectURL(file);
+                          } else {
+                            if (attachmentPreview.val) URL.revokeObjectURL(attachmentPreview.val);
+                            attachmentPreview.val = null;
+                          }
+                        }
+                      });
+                      attachmentInputEl = el;
+                      return el;
+                    })(),
+                    div({ class: "input-group" }, [
+                      button({
+                        type: 'button',
+                        class: 'attach-button',
+                        title: 'Attach file',
+                        onclick: () => attachmentInputEl && attachmentInputEl.click()
+                      }, [
+                        i({ class: 'icon-attach' }),
+                        span({ class: 'attach-label' }, 'Attach')
+                      ]),
+                      textarea({
+                        placeholder: "Type an encrypted message...",
+                        value: () => messagingStore.newMessage,
+                        oninput: (e) => messagingStore.setNewMessage(e.target.value),
+                        onkeydown: (e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendMessage(e);
+                          }
+                        },
+                        class: "message-textarea",
+                        rows: 1
+                      }),
+                      button({
+                        type: "submit",
+                        class: "send-button",
+                        'aria-label': 'Send message',
+                        disabled: () => !messagingStore.newMessage.trim() && !attachmentFile.val
+                      }, [
+                        i({ class: "icon-send" }),
+                        span({ class: 'send-label' }, "Send")
+                      ])
+                    ]),
+                    () => attachmentFile.val ? div({ class: 'attachment-selected' }, [
+                      span({ class: 'attachment-selected-name' }, attachmentFile.val.name),
+                      button({
+                        type: 'button',
+                        class: 'attachment-remove',
+                        onclick: () => clearAttachment(attachmentInputEl)
+                      }, 'Remove')
+                    ]) : null,
+                    () => attachmentPreview.val ? div({ class: 'attachment-inline-preview' }, [
+                      van.tags.img({ src: attachmentPreview.val, alt: 'Attachment preview' })
+                    ]) : null
+                  ])
                 ])
               ])
-            ])
-          ]);
-        }
-      ])
-    ]),
+            ]);
+          }
+        ])
+      ]),
 
-    // Error display
-    () => messagingStore.error ? div({ class: "error-message" }, [
-      div({ class: "alert alert-error" }, [
-        messagingStore.error,
-        button({
-          class: "btn-close",
-          onclick: () => messagingStore.clearError()
-        }, "×")
-      ])
-    ]) : null
-  ]);
+      // Error display
+      () => messagingStore.error ? div({ class: "error-message" }, [
+        div({ class: "alert alert-error" }, [
+          messagingStore.error,
+          button({
+            class: "btn-close",
+            onclick: () => messagingStore.clearError()
+          }, "×")
+        ])
+      ]) : null
+    ]);
   };
 }

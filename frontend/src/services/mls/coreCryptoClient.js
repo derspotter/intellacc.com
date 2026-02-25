@@ -1193,6 +1193,44 @@ class CoreCryptoClient {
         return { success: true };
     }
 
+    // Rotate keys for all active groups
+    async rotateKeysAllGroups() {
+        const { default: messagingStore } = await import('../../stores/messagingStore.js');
+        const groupsToUpdate = [];
+
+        if (messagingStore.mlsGroups) {
+            groupsToUpdate.push(...messagingStore.mlsGroups.map(g => g.group_id || g.id));
+        }
+        if (messagingStore.directMessages) {
+            groupsToUpdate.push(...messagingStore.directMessages.map(dm => dm.group_id || dm.id));
+        }
+
+        const uniqueGroups = [...new Set(groupsToUpdate)].filter(Boolean);
+        if (uniqueGroups.length === 0) return { successCount: 0, failCount: 0 };
+
+        console.log(`[MLS] Rotating keys for ${uniqueGroups.length} groups...`);
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const groupId of uniqueGroups) {
+            try {
+                await this.selfUpdate(groupId);
+                successCount++;
+            } catch (err) {
+                console.warn(`[MLS] Failed to rotate keys for group ${groupId}:`, err);
+                failCount++;
+            }
+        }
+
+        console.log(`[MLS] Key rotation complete. Success: ${successCount}, Failed: ${failCount}`);
+
+        if (successCount === 0 && failCount > 0) {
+            throw new Error(`Failed to rotate keys for ${failCount} conversations.`);
+        }
+
+        return { successCount, failCount };
+    }
+
     async removeMember(groupId, leafIndex) {
         await this.ensureReady();
         const { bytes: groupIdBytes, str: groupIdValue } = this.normalizeGroupId(groupId);
@@ -2256,6 +2294,39 @@ class CoreCryptoClient {
         this.welcomeHandlers.forEach(h => h({ groupId, groupInfoBytes: record.groupInfoBytes }));
         this.syncMessages().catch(() => { });
         return groupId;
+    }
+
+    async inspectPendingWelcome(pending) {
+        if (!pending) throw new Error('Pending welcome required');
+        const pendingId = typeof pending === 'object' ? pending.id : pending;
+        if (!pendingId) throw new Error('Pending welcome id missing');
+
+        let record = this.pendingWelcomes.get(pendingId);
+        if (!record && typeof pending === 'object' && pending.welcomeHex) {
+            record = {
+                id: pendingId,
+                welcomeBytes: this.hexToBytes(pending.welcomeHex),
+                stagingId: pending.stagingId,
+                members: pending.members,
+                sender: pending.sender
+            };
+        }
+
+        if (!record || !record.welcomeBytes) {
+            throw new Error('Pending welcome not found');
+        }
+
+        let stagingId = record.stagingId;
+        if (!stagingId) {
+            const staged = await this.stageWelcome(record.welcomeBytes, null);
+            stagingId = staged.stagingId;
+            if (this.pendingWelcomes.has(record.id)) {
+                const updated = this.pendingWelcomes.get(record.id);
+                updated.stagingId = stagingId;
+            }
+        }
+
+        return this.getStagedWelcomeInfo(stagingId);
     }
 
     async rejectWelcome(pending) {
