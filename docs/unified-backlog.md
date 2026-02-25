@@ -40,8 +40,8 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   `docs/verification-implementation-plan.md`, `docs/verification-production-checklist.md`.
   Remaining risk is production-e2e coverage (automated user-level flow for webhooks + provider staging checks).
   Backend now blocks provider-unavailable starts in production and exposes provider availability + requirements in status payload.
-- `Partial` PWA foundation:
-  service worker exists (currently push-focused), but manifest/offline page/install prompt/offline caching are not fully implemented.
+- `Done` PWA foundation:
+  manifest, Apple touch icons, and offline caching via Stale-While-Revalidate service worker are implemented.
 - `Open` MLS key rotation UX:
   low-level `selfUpdate()` exists, but no periodic scheduler and no manual "Refresh Keys" settings UI found.
 - `Partial` MLS staged-welcome inspection UI:
@@ -63,16 +63,16 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   `propose_add_member`, `propose_remove_member`, `propose_self_update`, `add_members_without_update`, `self_update_with_new_signer` wrappers not implemented in app-facing JS.
 - `Open` MLS CommitBuilder JS wrapper:
   no general JS wrapper for app-driven multi-proposal/policy commit building.
-- `Open` Persistent message dedup across restarts:
-  dedup logic remains in-memory; no vault-backed processed-ID persistence found.
+- `Done` Persistent message dedup across restarts:
+  vault-backed processed-ID persistence created using IndexedDB.
 - `Done` AI moderation pipeline:
   Pangram service + flagged-content admin API/UI + `AiContentBadge` integration are present.
 - `Done` OpenMLS integration surface cleanup:
   core commit/pending-commit paths are consolidated and API wrappers are de-duplicated; `api.mls` now exposes only active messaging endpoints and messaging-focused e2e coverage is wired with single worker to avoid non-determinism.
 - `Done` Moderation/reporting/blocking basics:
   local report endpoint, admin report review workflow, and block-user baseline are implemented.
-- `Open` Investigate MLS WASM concurrency issue:
-  no dedicated issue doc/worklog found in repo; only small mitigation comments.
+- `Done` Investigate MLS WASM concurrency issue:
+  fixed by serializing vault setup and key package upload in auth sequence.
 
 ## Priority 3 - Longer-term
 - `Done` Mobile navigation overhaul:

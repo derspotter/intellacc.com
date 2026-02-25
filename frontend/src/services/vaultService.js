@@ -21,11 +21,12 @@ import {
 let wasmInitialized = false;
 
 const KEYSTORE_DB_NAME = 'intellacc_keystore';
-const KEYSTORE_DB_VERSION = 8; // Bump for Contact Fingerprints (TOFU)
+const KEYSTORE_DB_VERSION = 9; // Bump for Contact Fingerprints (TOFU) and processed_messages
 const KEYSTORE_STORE_NAME = 'device_keystore';
 const MESSAGES_STORE_NAME = 'encrypted_messages';
 const MLS_GRANULAR_STORE_NAME = 'mls_granular_storage';
 const CONTACT_FINGERPRINTS_STORE = 'contact_fingerprints';
+const PROCESSED_MESSAGES_STORE = 'processed_messages';
 
 const normalizePrfInput = (input) => {
     if (input === null || typeof input === 'undefined') return null;
@@ -112,7 +113,7 @@ class VaultService {
                     try {
                         if (db.objectStoreNames.contains(KEYSTORE_STORE_NAME)) db.deleteObjectStore(KEYSTORE_STORE_NAME);
                         if (db.objectStoreNames.contains(MESSAGES_STORE_NAME)) db.deleteObjectStore(MESSAGES_STORE_NAME);
-                    } catch (e) {}
+                    } catch (e) { }
                 }
                 if (!db.objectStoreNames.contains(KEYSTORE_STORE_NAME)) {
                     db.createObjectStore(KEYSTORE_STORE_NAME, { keyPath: 'id' });
@@ -135,6 +136,12 @@ class VaultService {
                     store.createIndex('contactUserId', 'contactUserId', { unique: false });
                     store.createIndex('status', 'status', { unique: false });
                     store.createIndex('deviceId', 'deviceId', { unique: false });
+                }
+                // V9: Processed messages deduplication
+                if (!db.objectStoreNames.contains(PROCESSED_MESSAGES_STORE)) {
+                    const store = db.createObjectStore(PROCESSED_MESSAGES_STORE, { keyPath: 'id' });
+                    store.createIndex('deviceId', 'deviceId', { unique: false });
+                    store.createIndex('timestamp', 'timestamp', { unique: false });
                 }
             };
         });
@@ -183,7 +190,7 @@ class VaultService {
             }
         } catch (e) {
             if (e.status === 403 && e.data?.code === 'LINK_REQUIRED') throw e;
-            if (e.status !== 404) throw e; 
+            if (e.status !== 404) throw e;
         }
         const mk = await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
         await this.updateMasterKeyOnServer(mk, password);
@@ -210,11 +217,11 @@ class VaultService {
         // Simple: Key = SHA-256(RawMK || RawLK)
         const rawMK = new Uint8Array(await window.crypto.subtle.exportKey('raw', masterKey));
         const rawLK = new Uint8Array(await window.crypto.subtle.exportKey('raw', localKey));
-        
+
         const combined = new Uint8Array(rawMK.length + rawLK.length);
         combined.set(rawMK);
         combined.set(rawLK, rawMK.length);
-        
+
         const hash = await window.crypto.subtle.digest('SHA-256', combined);
         return window.crypto.subtle.importKey('raw', hash, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
     }
@@ -264,17 +271,17 @@ class VaultService {
                     // No, auth.js logic is: Unlock -> Fail -> Setup.
                     // We need to signal "Found Vault but Password Wrong" vs "No Vault".
                     // For now, simple fail.
-                    return resolve(false); 
+                    return resolve(false);
                 }
 
                 // 2. Derive Composite
                 try {
                     this.compositeKey = await this.deriveCompositeKey(this.masterKey, this.localKey);
-                    
+
                     // 3. Verify Ownership
                     const stateIv = new Uint8Array(record.encryptedDeviceState.iv);
                     const stateCipher = new Uint8Array(record.encryptedDeviceState.ciphertext);
-                    
+
                     const plainBuffer = await window.crypto.subtle.decrypt(
                         { name: 'AES-GCM', iv: stateIv },
                         this.compositeKey,
@@ -293,7 +300,7 @@ class VaultService {
                         initIdleAutoLock();
                         return resolve(true);
                     }
-                } catch (e) {}
+                } catch (e) { }
                 resolve(false);
             };
             req.onerror = () => resolve(false);
@@ -310,10 +317,10 @@ class VaultService {
 
         await this.initDB();
         const deviceId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : 'rand';
-        
+
         // Generate Local Key
         this.localKey = await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
-        
+
         // Wrap Local Key with Password
         const passwordSalt = window.crypto.getRandomValues(new Uint8Array(32));
         const wrappingKey = await this.deriveWrappingKey(password, passwordSalt);
@@ -439,7 +446,7 @@ class VaultService {
     }
 
     async persistMessage(message) {
-        if (!this.compositeKey || !this.deviceId) return; 
+        if (!this.compositeKey || !this.deviceId) return;
         await this.initDB();
         const payload = JSON.stringify({ plaintext: message.plaintext, senderId: message.senderId, type: message.type });
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
@@ -635,6 +642,54 @@ class VaultService {
                 resolve();
             };
             tx.onerror = () => reject(tx.error);
+        });
+    }
+
+    /**
+     * Persist a processed message ID to IndexedDB to prevent replay/duplication across restarts.
+     */
+    async markMessageProcessed(messageId) {
+        if (!this.deviceId) return;
+        await this.initDB();
+        return new Promise((resolve) => {
+            try {
+                const tx = this.db.transaction([PROCESSED_MESSAGES_STORE], 'readwrite');
+                tx.objectStore(PROCESSED_MESSAGES_STORE).put({
+                    id: String(messageId),
+                    deviceId: this.deviceId,
+                    timestamp: Date.now()
+                });
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve(); // Non-fatal
+            } catch (e) {
+                resolve();
+            }
+        });
+    }
+
+    /**
+     * Load recent processed message IDs into memory to prevent duplicates.
+     */
+    async getRecentProcessedMessages(limit = 2000) {
+        if (!this.deviceId) return [];
+        await this.initDB();
+        return new Promise((resolve) => {
+            try {
+                const tx = this.db.transaction([PROCESSED_MESSAGES_STORE], 'readonly');
+                const store = tx.objectStore(PROCESSED_MESSAGES_STORE);
+                const index = store.index('deviceId');
+                const req = index.getAll(this.deviceId);
+
+                req.onsuccess = () => {
+                    const records = req.result || [];
+                    records.sort((a, b) => b.timestamp - a.timestamp);
+                    const recent = records.slice(0, limit).map(r => r.id);
+                    resolve(recent);
+                };
+                req.onerror = () => resolve([]);
+            } catch (e) {
+                resolve([]);
+            }
         });
     }
 
@@ -968,7 +1023,7 @@ class VaultService {
         const keyBytes = MlsClient.derive_key_argon2id(password, salt);
         return window.crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
     }
-    
+
     // Helpers
     async wrapDeviceKey(deviceKey, wrappingKey) {
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
@@ -1008,28 +1063,28 @@ class VaultService {
         vaultStore.setVaultExists(true);
         return true;
     }
-    
+
     // Migration Logic: Unlock with Old Password
     async findAndUnlock(password, userId, isMigration = false) {
         // If migrating, we already have MasterKey (from Current Password)
         // We just need to unlock Local Key with Old Password
         if (isMigration && this.masterKey) {
-             // ... re-use tryUnlockRecord but force check
-             // Actually tryUnlockRecord uses password to unwrap LK.
-             // So calling tryUnlockRecord(..., oldPassword) works!
-             // We need to iterate again.
-             const records = await this.getLocalDeviceIds();
-             for (const id of records) {
-                 if (await this.tryUnlockRecord(id, userId, password)) {
-                     // Success! Now Re-Wrap LK with CURRENT password (implied)?
-                     // Caller handles re-wrap?
-                     // `changePassphrase` handles re-wrap.
-                     return true;
-                 }
-             }
-             return false;
+            // ... re-use tryUnlockRecord but force check
+            // Actually tryUnlockRecord uses password to unwrap LK.
+            // So calling tryUnlockRecord(..., oldPassword) works!
+            // We need to iterate again.
+            const records = await this.getLocalDeviceIds();
+            for (const id of records) {
+                if (await this.tryUnlockRecord(id, userId, password)) {
+                    // Success! Now Re-Wrap LK with CURRENT password (implied)?
+                    // Caller handles re-wrap?
+                    // `changePassphrase` handles re-wrap.
+                    return true;
+                }
+            }
+            return false;
         }
-        
+
         // Standard flow ...
         // (Code from findAndUnlock above)
         this.masterKeyResolved = false;
@@ -1064,33 +1119,33 @@ class VaultService {
         // If migrating: we unlocked with OldPassword.
         // We need to re-wrap LocalKey with NewPassword.
         // AND re-wrap MasterKey with NewPassword (on server) IF we are the password changer.
-        
+
         // Scenario 1: User changing password here.
         // Update Server MK + Update Local LK.
-        
+
         // Scenario 2: User changed password elsewhere. Migrating here.
         // Server MK is already updated (we fetched it with NewPassword).
         // We just need to Update Local LK.
-        
+
         // Check if MK wrapper on server matches NewPassword?
         // We can just overwrite it. It's idempotent.
-        
+
         if (!this.localKey) throw new Error('Must be unlocked');
-        
+
         const newSalt = window.crypto.getRandomValues(new Uint8Array(32));
         const newWrappingKey = await this.deriveWrappingKey(newPassword, newSalt);
         const wrappedLK = await this.wrapDeviceKey(this.localKey, newWrappingKey);
-        
+
         // Update Local
         await this.initDB();
         const tx = this.db.transaction([KEYSTORE_STORE_NAME], 'readwrite');
         const store = tx.objectStore(KEYSTORE_STORE_NAME);
         const record = await new Promise(r => store.get(this.deviceId).onsuccess = e => r(e.target.result));
-        
+
         record.deviceKeyWrapped.password = { salt: Array.from(newSalt), iv: wrappedLK.iv, ciphertext: wrappedLK.ciphertext };
         record.updatedAt = Date.now();
         await new Promise(r => store.put(record).onsuccess = r);
-        
+
         // Update Server
         await this.updateMasterKeyOnServer(this.masterKey, newPassword);
         console.log('[Keystore] Password changed & keys re-wrapped');
@@ -1112,7 +1167,7 @@ class VaultService {
         vaultStore.setLocked(true);
         console.log('[Keystore] Locked - all sensitive data wiped');
     }
-    
+
     // PRF placeholders
     async getPrfInput() {
         await this.initDB();
@@ -1144,14 +1199,14 @@ class VaultService {
         // 1. Get Master Key using PRF
         const deviceIds = await this.getLocalDeviceIds();
         let masterKey;
-        
+
         try {
             const result = await api.users.getMasterKey(deviceIds);
             if (result && result.wrapped_key_prf) {
                 const salt = new Uint8Array(result.salt_prf.split(',').map(Number));
                 const iv = new Uint8Array(result.iv_prf.split(',').map(Number));
                 const ciphertext = new Uint8Array(result.wrapped_key_prf.split(',').map(Number));
-                
+
                 // PRF Key derivation (HKDF from PRF Output + Salt)
                 const prfKey = await window.crypto.subtle.importKey('raw', prfOutput, { name: 'HKDF' }, false, ['deriveKey']);
                 const wrappingKey = await window.crypto.subtle.deriveKey(
@@ -1181,13 +1236,13 @@ class VaultService {
         if (this.deviceId) {
             if (await this.tryUnlockRecordPrf(this.deviceId, effectiveUserId, prfOutput)) return true;
         }
-        
+
         const records = await this.getLocalDeviceIds();
         for (const id of records) {
             if (id === this.deviceId) continue;
             if (await this.tryUnlockRecordPrf(id, effectiveUserId, prfOutput)) return true;
         }
-        
+
         throw new Error('PRF Unlock Failed (Local)');
     }
 
@@ -1202,7 +1257,7 @@ class VaultService {
                 try {
                     const prfWrap = record.deviceKeyWrapped.prf;
                     const salt = new Uint8Array(prfWrap.salt); // Stored in local record
-                    
+
                     const prfKey = await window.crypto.subtle.importKey('raw', prfOutput, { name: 'HKDF' }, false, ['deriveKey']);
                     const wrappingKey = await window.crypto.subtle.deriveKey(
                         { name: 'HKDF', hash: 'SHA-256', salt: salt, info: new TextEncoder().encode('LocalKey_PRF') },
@@ -1214,7 +1269,7 @@ class VaultService {
 
                     this.localKey = await this.unwrapDeviceKey(prfWrap, wrappingKey);
                     this.compositeKey = await this.deriveCompositeKey(this.masterKey, this.localKey);
-                    
+
                     // Verify
                     const stateIv = new Uint8Array(record.encryptedDeviceState.iv);
                     const stateCipher = new Uint8Array(record.encryptedDeviceState.ciphertext);
@@ -1233,7 +1288,7 @@ class VaultService {
                         console.log('[Keystore] Unlocked with PRF');
                         return resolve(true);
                     }
-                } catch (e) {}
+                } catch (e) { }
                 resolve(false);
             };
             req.onerror = () => resolve(false);
@@ -1242,7 +1297,7 @@ class VaultService {
 
     async setupPrfWrapping(prfOutput, credentialId, prfInput = null) {
         if (!this.masterKey || !this.localKey || !this.deviceId) throw new Error('Vault locked');
-        
+
         // 1. Wrap Master Key
         const mkSalt = window.crypto.getRandomValues(new Uint8Array(32));
         const prfKeyMK = await window.crypto.subtle.importKey('raw', prfOutput, { name: 'HKDF' }, false, ['deriveKey']);
@@ -1280,7 +1335,7 @@ class VaultService {
         const tx = this.db.transaction([KEYSTORE_STORE_NAME], 'readwrite');
         const store = tx.objectStore(KEYSTORE_STORE_NAME);
         const record = await new Promise(r => store.get(this.deviceId).onsuccess = e => r(e.target.result));
-        
+
         record.deviceKeyWrapped.prf = {
             credentialId,
             salt: Array.from(lkSalt),
@@ -1290,7 +1345,7 @@ class VaultService {
         };
         record.updatedAt = Date.now();
         await new Promise(r => store.put(record).onsuccess = r);
-        
+
         console.log('[Keystore] PRF wrapping established (Dual-Wrap)');
     }
 }

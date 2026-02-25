@@ -110,7 +110,30 @@ class CoreCryptoClient {
     }
 
     markProcessed(id) {
-        if (id) this.processedMessageIds.add(id);
+        if (!id) return;
+        this.processedMessageIds.add(id);
+        this.processingMessageIds.delete(id);
+
+        this.getVaultService().then(vault => {
+            vault.markMessageProcessed(id).catch(e => console.warn('[MLS] Failed to save processed ID:', e));
+        });
+
+        if (this.processedMessageIds.size > 2000) {
+            const arr = Array.from(this.processedMessageIds);
+            this.processedMessageIds = new Set(arr.slice(arr.length - 1000));
+        }
+    }
+
+    async loadProcessedIDs() {
+        try {
+            const vault = await this.getVaultService();
+            const recentIds = await vault.getRecentProcessedMessages(2000);
+            for (const id of recentIds) {
+                this.processedMessageIds.add(id);
+            }
+        } catch (e) {
+            console.warn('[MLS] Failed to load processed IDs', e);
+        }
     }
 
     // Unified byte parser for all formats (postgres bytea, Buffer, hex, Uint8Array)
@@ -164,7 +187,7 @@ class CoreCryptoClient {
             if (/^dm_\d+_\d+$/.test(text)) {
                 return text;
             }
-        } catch (e) {}
+        } catch (e) { }
         return this.bytesToHex(groupIdBytes);
     }
 
@@ -287,7 +310,7 @@ class CoreCryptoClient {
 
         if (this.client && this.identityName !== username) {
             this.cleanupSocketListeners();
-            try { this.client.free(); } catch (e) {}
+            try { this.client.free(); } catch (e) { }
             this.client = null;
             this.identityName = null;
         }
@@ -709,7 +732,7 @@ class CoreCryptoClient {
             } else if (!this.hasGroup(groupId)) {
                 // If this device doesn't have the group state yet, try pulling pending Welcomes.
                 // If it still isn't available, guide the user instead of failing later with "Group not found".
-                try { await this.syncMessages(); } catch {}
+                try { await this.syncMessages(); } catch { }
                 if (!this.hasGroup(groupId)) {
                     throw new Error('Conversation exists but is not available on this device yet. If you have a pending invite, accept it. Otherwise link this device from Settings > Linked Devices, or ask the other user to start a new DM.');
                 }
@@ -790,7 +813,7 @@ class CoreCryptoClient {
                     this.setGroupAad(groupId, 'commit');
                     // 3. Add member in WASM (creates Proposal + Commit + Welcome)
                     const result = this.client.add_member(groupIdBytes, keyPackageBytes);
-                    
+
                     if (!result || !Array.isArray(result) || result.length < 2) {
                         console.warn('Failed to generate commit/welcome for a device, skipping');
                         continue;
@@ -822,7 +845,7 @@ class CoreCryptoClient {
                     });
 
                     addedCount++;
-                    
+
                     // Save state after EACH member add to persist the new epoch
                     await this.saveState();
                     try {
@@ -1311,7 +1334,7 @@ class CoreCryptoClient {
             await this.mlsFetch('/messages/group', payload);
         } catch (commitErr) {
             if (mergePendingCommit) {
-                try { this.client.clear_pending_commit(normalized.bytes); } catch (e) {}
+                try { this.client.clear_pending_commit(normalized.bytes); } catch (e) { }
             }
 
             if (rollbackState) {
@@ -1407,6 +1430,10 @@ class CoreCryptoClient {
         const vault = await this.getVaultService();
         const deviceId = vault.getDeviceId();
         if (!deviceId) return [];
+
+        if (this.processedMessageIds.size === 0) {
+            await this.loadProcessedIDs();
+        }
 
         try {
             const pending = await api.mls.getPendingMessages();
@@ -1620,13 +1647,13 @@ class CoreCryptoClient {
                 let payload = null;
                 try {
                     payload = JSON.parse(plaintext);
-                } catch (e) {}
+                } catch (e) { }
                 if (payload && payload.__mls_type === 'confirmation_tag') {
                     await this.handleConfirmationTagMessage(group_id, payload, senderUserId);
                     return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
                 }
             }
-            
+
             const messageObj = {
                 id,
                 groupId: group_id,
@@ -1636,13 +1663,13 @@ class CoreCryptoClient {
                 type: 'application',
                 timestamp: new Date().toISOString()
             };
-            
+
             // Persist to encrypted local storage
             if (plaintext && plaintext !== '[Encrypted Message]') {
                 const vault = await this.getVaultService();
                 await vault.persistMessage(messageObj);
             }
-            
+
             return messageObj;
         } else if (content_type === 'proposal') {
             const proposalResult = await this.processProposal(group_id, data);
@@ -1894,7 +1921,7 @@ class CoreCryptoClient {
                 const vault = await this.getVaultService();
                 const events = await vault.loadGranularEvents();
                 if (events?.length > 0) this.client.import_granular_events(events);
-            } catch (e) {}
+            } catch (e) { }
 
             this.setupSocketListeners();
             const processed = await this.syncMessages();
@@ -2123,7 +2150,7 @@ class CoreCryptoClient {
                     currentFingerprint,
                     previousFingerprint: result.previousFingerprint,
                     message: `Security warning: User ${senderId}'s encryption key has changed. ` +
-                             `This could indicate a security issue. Please verify their identity.`
+                        `This could indicate a security issue. Please verify their identity.`
                 };
             }
 
@@ -2152,7 +2179,7 @@ class CoreCryptoClient {
 
     wipeMemory() {
         this.cleanupSocketListeners();
-        if (this.client) { try { this.client.free(); } catch (e) {} }
+        if (this.client) { try { this.client.free(); } catch (e) { } }
         this.client = null;
         this.identityName = null;
         this.confirmationTags.clear();
@@ -2172,7 +2199,7 @@ class CoreCryptoClient {
 
     async clearState() {
         this.wipeMemory();
-        try { indexedDB.deleteDatabase('openmls_storage'); } catch (e) {}
+        try { indexedDB.deleteDatabase('openmls_storage'); } catch (e) { }
     }
 
     // Event handler registration (using factory pattern)
@@ -2227,7 +2254,7 @@ class CoreCryptoClient {
 
         const groupId = await this.acceptStagedWelcome(stagingId);
         this.welcomeHandlers.forEach(h => h({ groupId, groupInfoBytes: record.groupInfoBytes }));
-        this.syncMessages().catch(() => {});
+        this.syncMessages().catch(() => { });
         return groupId;
     }
 
