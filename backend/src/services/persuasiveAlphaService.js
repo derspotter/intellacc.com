@@ -1,5 +1,3 @@
-const IN_PROGRESS_MARKER = 0;
-
 const claimReferralClick = async ({ dbClient, userId, eventId }) => {
   const result = await dbClient.query(
     `WITH ranked_clicks AS (
@@ -8,22 +6,17 @@ const claimReferralClick = async ({ dbClient, userId, eventId }) => {
       JOIN posts p ON p.id = pmc.post_id
       WHERE pmc.user_id = $1
         AND pmc.event_id = $2
-        AND (
-          pmc.consumed_by_market_update_id IS NULL
-          OR (pmc.consumed_by_market_update_id = 0 AND pmc.expires_at <= NOW())
-        )
+        AND pmc.consumed_by_market_update_id IS NULL
+        AND pmc.consumed_at IS NULL
         AND pmc.expires_at > NOW()
         AND p.user_id <> $1
        ORDER BY pmc.clicked_at DESC
        LIMIT 1
        FOR UPDATE SKIP LOCKED
      )
-     UPDATE post_market_clicks pmc
-     SET consumed_by_market_update_id = $3
-     FROM ranked_clicks rc
-     WHERE pmc.id = rc.id
-     RETURNING rc.id AS click_id, rc.post_id`,
-    [userId, eventId, IN_PROGRESS_MARKER]
+     SELECT id AS click_id, post_id
+     FROM ranked_clicks`,
+    [userId, eventId]
   );
 
   if (result.rows.length === 0) {
@@ -42,7 +35,8 @@ const finalizeReferralClick = async ({ dbClient, clickId, marketUpdateId }) => {
      SET consumed_by_market_update_id = $2,
          consumed_at = NOW()
      WHERE id = $1
-       AND consumed_by_market_update_id = 0
+       AND consumed_by_market_update_id IS NULL
+       AND consumed_at IS NULL
      RETURNING id`,
     [clickId, marketUpdateId]
   );
@@ -55,7 +49,8 @@ const releaseReferralClick = async ({ dbClient, clickId }) => {
     `UPDATE post_market_clicks
      SET consumed_by_market_update_id = NULL
      WHERE id = $1
-       AND consumed_by_market_update_id = 0
+       AND consumed_by_market_update_id IS NULL
+       AND consumed_at IS NULL
      RETURNING id`,
     [clickId]
   );

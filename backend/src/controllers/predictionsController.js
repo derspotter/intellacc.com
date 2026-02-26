@@ -1,6 +1,8 @@
 // backend/src/controllers/predictionsController.js
 
 const db = require('../db');
+const { setEventEmbedding } = require('../services/openRouterMatcher/embeddingService');
+const matchConfig = require('../services/openRouterMatcher/config');
 
 // Helper function to generate probability vectors for unified scoring
 function generateProbabilityVector(prediction_type, prediction_value, confidence, numerical_value, lower_bound, upper_bound) {
@@ -166,13 +168,37 @@ exports.createPrediction = async (req, res) => {
 
 // Create a new event
 exports.createEvent = async (req, res) => {
-  const { title, details, closing_date } = req.body;
+  const { title, details, closing_date, domain } = req.body;
+  const normalizedDomain = matchConfig.normalizeDomain(domain);
 
   try {
-    const result = await db.query(
-      "INSERT INTO events (title, details, closing_date) VALUES ($1, $2, $3) RETURNING *",
-      [title, details, closing_date]
-    );
+    let result;
+
+    try {
+      result = await db.query(
+        "INSERT INTO events (title, details, closing_date, domain) VALUES ($1, $2, $3, $4) RETURNING *",
+        [title, details, closing_date, normalizedDomain]
+      );
+    } catch (insertErr) {
+      // Backward compatibility for older test DBs / environments without events.domain yet.
+      if (insertErr.code === '42703') {
+        result = await db.query(
+          "INSERT INTO events (title, details, closing_date) VALUES ($1, $2, $3) RETURNING *",
+          [title, details, closing_date]
+        );
+      } else {
+        throw insertErr;
+      }
+    }
+
+    const newEvent = result.rows[0];
+    setEventEmbedding({
+      eventId: newEvent.id,
+      title: newEvent.title,
+      details: newEvent.details
+    }).catch((error) => {
+      console.error('[Event Embedding] Failed to create embedding:', error.message || error);
+    });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error("Error creating event:", err);

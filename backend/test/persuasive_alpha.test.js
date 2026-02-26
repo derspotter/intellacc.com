@@ -11,7 +11,7 @@ const ensurePersuasiveSchema = async () => {
       post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
       event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
       match_score DECIMAL(10, 6) NOT NULL DEFAULT 0.0,
-      match_method VARCHAR(20) NOT NULL DEFAULT 'fts_v1',
+      match_method VARCHAR(20) NOT NULL DEFAULT 'hybrid_v1',
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
       CONSTRAINT unique_post_market_match UNIQUE (post_id, event_id)
@@ -144,7 +144,7 @@ const createPost = async (user) => {
 const createMatch = async ({ postId, eventId, matchScore = 0.9 }) => {
   const result = await db.query(
     'INSERT INTO post_market_matches (post_id, event_id, match_score, match_method) VALUES ($1, $2, $3, $4) RETURNING id',
-    [postId, eventId, matchScore, 'fts_v1']
+    [postId, eventId, matchScore, 'hybrid_v1']
   );
   return result.rows[0];
 };

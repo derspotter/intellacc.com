@@ -5,6 +5,7 @@ const notificationService = require('../services/notificationService');
 const pangramService = require('../services/pangramService');
 const activitypubOutbound = require('../services/activitypub/outboundService');
 const atprotoOutbound = require('../services/atproto/outboundService');
+const postMatchPipeline = require('../services/openRouterMatcher/postMatchPipeline');
 const { getRequestBaseUrl } = require('../services/activitypub/url');
 const { verifyToken, getUserFromToken } = require('../utils/jwt');
 
@@ -131,6 +132,11 @@ const pruneOldPostViews = async (userId) => {
   );
 };
 
+const sanitizePostId = (value) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) ? parsed : null;
+};
+
 const removeAttachmentFile = (storagePath) => {
   if (!storagePath) return;
   const filePath = path.join(UPLOADS_DIR, storagePath);
@@ -232,6 +238,11 @@ exports.createPost = async (req, res) => {
     }).catch(err => {
       console.error('[Pangram] Analysis failed:', err.message || err);
     });
+    if (!isComment) {
+      postMatchPipeline.processPost(newPost.id, content).catch((err) => {
+        console.error('[PostMatchPipeline] createPost failed:', err.message || err);
+      });
+    }
 
     // If this is a comment, increment the parent's comment_count and create notifications
     if (parentId) {
@@ -479,6 +490,53 @@ exports.getPostById = async (req, res) => {
   }
 };
 
+exports.getPostAnalysisStatus = async (req, res) => {
+  const postId = sanitizePostId(req.params.id);
+  if (!postId) {
+    return res.status(400).json({ message: 'Invalid post id' });
+  }
+
+  try {
+    const result = await db.query(
+      `SELECT
+         processing_status,
+         has_claim,
+         domain,
+         claim_summary,
+         entities,
+         gate_model,
+         reason_model,
+         gate_latency_ms,
+         reason_latency_ms,
+         processing_errors,
+         candidates_count,
+         updated_at
+       FROM post_analysis
+       WHERE post_id = $1`,
+      [postId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ processing_status: 'not_started' });
+    }
+
+    const row = result.rows[0];
+    res.json({
+      ...row,
+      entities: row.entities || []
+    });
+  } catch (error) {
+    if (error?.code === '42P01') {
+      return res.json({
+        processing_status: 'not_started'
+      });
+    }
+
+    console.error('Error loading post analysis status:', error);
+    res.status(500).json({ message: 'Failed to load analysis status' });
+  }
+};
+
 // Update an existing post
 exports.updatePost = async (req, res) => {
   const postId = req.params.id;
@@ -596,6 +654,11 @@ exports.updatePost = async (req, res) => {
     }).catch(err => {
       console.error('[Pangram] Analysis failed:', err.message || err);
     });
+    if (!isComment) {
+      postMatchPipeline.processPost(postId, content).catch((err) => {
+        console.error('[PostMatchPipeline] updatePost failed:', err.message || err);
+      });
+    }
   } catch (err) {
     try {
       await client.query('ROLLBACK');

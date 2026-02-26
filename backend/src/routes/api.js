@@ -199,6 +199,10 @@ router.get("/bets/stats", authenticateJWT, predictionsController.getMonthlyBetti
 router.post("/posts", authenticateJWT, requireEmailVerified, postController.createPost);
 router.post("/posts/:postId/market-click", authenticateJWT, persuasiveAlphaController.createPostMarketClick);
 router.get("/posts/:postId/markets", authenticateJWT, persuasiveAlphaController.getPostMarkets);
+router.get("/posts/:postId/market-link", authenticateJWT, persuasiveAlphaController.getPostMarketLink);
+router.post("/posts/:postId/confirm-market", authenticateJWT, persuasiveAlphaController.confirmMarketLink);
+router.post("/posts/:postId/verify", authenticateJWT, persuasiveAlphaController.submitVerification);
+router.get("/posts/:id/analysis-status", authenticateJWT, postController.getPostAnalysisStatus);
 router.get("/posts", postController.getPosts);                                 // Get all posts (public)
 router.get("/feed", authenticateJWT, postController.getFeed);                  // Get personalized feed
 router.get("/posts/:id", authenticateJWT, postController.getPostById);         // Get a single post
