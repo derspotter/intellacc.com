@@ -1,5 +1,5 @@
 # Unified Backlog
-Updated: 2026-02-18 (audited against current codebase)
+Updated: 2026-02-26 (audited against current codebase)
 
 Status legend:
 - `Done`: implemented in app code (may still require production rollout/config).
@@ -38,8 +38,10 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   email, phone, and payment flows plus middleware and UI exist.
   Production readiness is mostly present via feature-flagged provider validation and docs/checklist:
   `docs/verification-implementation-plan.md`, `docs/verification-production-checklist.md`.
+  Phone verification now supports Twilio or self-hosted SMS gateway, with optional OpenClaw WhatsApp fallback on SMS send failure,
+  plus server-side OTP challenge persistence (TTL + max-attempt controls).
   Remaining risk is production-e2e coverage (automated user-level flow for webhooks + provider staging checks).
-  Backend now blocks provider-unavailable starts in production and exposes provider availability + requirements in status payload.
+  Backend blocks provider-unavailable starts in production and exposes provider availability + requirements in status payload.
 - `Done` PWA foundation:
   manifest, Apple touch icons, and offline caching via Stale-While-Revalidate service worker are implemented.
 - `Open` MLS key rotation UX:
