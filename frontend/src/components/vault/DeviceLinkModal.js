@@ -238,7 +238,6 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
         vaultStore.showDeviceLinkModal ? div({ class: 'modal-overlay' },
             div({ class: 'modal-content device-link-modal' },
                 div({ class: 'modal-header' },
-                    span({ class: 'modal-icon' }, '\uD83D\uDD10'),
                     h2('Verify This Device')
                 ),
 
@@ -269,7 +268,7 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                                 div({ class: 'verification-code' }, formatToken(currentToken)),
                                 button({
                                     type: 'button',
-                                    class: 'btn btn-sm btn-copy',
+                                    class: 'button button-secondary btn-copy',
                                     onclick: copyToken,
                                     title: 'Copy code'
                                 }, 'Copy'),
@@ -282,19 +281,19 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
                                 strong(currentTimeRemaining)
                             ),
 
-                            div({ class: 'instructions' },
+                            div({ class: 'steps-list' },
                                 h3('How to verify:'),
-                                div({ class: 'instruction-step' },
-                                    span({ class: 'step-num' }, '1'),
-                                    span('Open the app on a device where you\'re already logged in')
+                                div({ class: 'step-item' },
+                                    span({ class: 'step-number' }, '1'),
+                                    span({ class: 'step-text' }, 'Open the app on a device where you\'re already logged in')
                                 ),
-                                div({ class: 'instruction-step' },
-                                    span({ class: 'step-num' }, '2'),
-                                    span('Go to Settings > Devices')
+                                div({ class: 'step-item' },
+                                    span({ class: 'step-number' }, '2'),
+                                    span({ class: 'step-text' }, 'Go to Settings > Devices')
                                 ),
-                                div({ class: 'instruction-step' },
-                                    span({ class: 'step-num' }, '3'),
-                                    span('Tap "Device Link Requests" and approve the pending request.')
+                                div({ class: 'step-item' },
+                                    span({ class: 'step-number' }, '3'),
+                                    span({ class: 'step-text' }, 'Tap "Device Link Requests" and approve the pending request.')
                                 )
                             ),
 
@@ -306,7 +305,6 @@ export default function DeviceLinkModal({ onSuccess } = {}) {
 
                         // Approved state
                         currentStatus === 'approved' ? div({ class: 'approved-state' },
-                            span({ class: 'success-icon' }, '\u2713'),
                             p('Device verified successfully!')
                         ) : null,
 

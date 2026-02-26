@@ -29,7 +29,8 @@
   --info-color: #17a2b8;
 
   /* Brand */
-  --signature-blue: #0000ff; /* matches POST button */
+  --signature-blue: #0000ff;
+  /* matches POST button */
   --signature-blue-dark: #0000cc;
   /* Legacy/shared variable names (used by Messages, MLS, etc.) */
   --primary-color: var(--signature-blue);
@@ -247,7 +248,8 @@ input[type="submit"]:disabled {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  min-height: 100svh; /* stable viewport on mobile (prevents first-scroll URL-bar jump) */
+  min-height: 100svh;
+  /* stable viewport on mobile (prevents first-scroll URL-bar jump) */
   width: 100%;
   padding-top: 10vh;
 }
@@ -1018,7 +1020,8 @@ body.dark-mode .ai-content-badge {
   mix-blend-mode: normal;
   isolation: isolate;
   border-radius: var(--border-radius);
-  padding: 0.5rem; /* match .post-content padding so text aligns */
+  padding: 0.5rem;
+  /* match .post-content padding so text aligns */
   box-shadow: var(--box-shadow);
   outline: 1px solid var(--border-color);
 
@@ -1051,7 +1054,7 @@ body.dark-mode .post-content-hover-overlay {
   transition-delay: 0s;
 }
 
-.post-content.clamped.has-hover-overlay.hover-open + .post-content-toggle {
+.post-content.clamped.has-hover-overlay.hover-open+.post-content-toggle {
   opacity: 0;
   pointer-events: none;
   transition-delay: 0s;
@@ -1062,10 +1065,12 @@ body.dark-mode .post-content-hover-overlay {
   .post-content-hover-overlay {
     display: none !important;
   }
+
   .post-content.clamped.has-hover-overlay.hover-open .post-content-text {
     opacity: 1;
   }
-  .post-content.clamped.has-hover-overlay.hover-open + .post-content-toggle {
+
+  .post-content.clamped.has-hover-overlay.hover-open+.post-content-toggle {
     opacity: 1;
     pointer-events: auto;
   }
@@ -1272,12 +1277,12 @@ body.dark-mode .post-content-toggle {
 }
 
 /* In view mode, reserve space so Browse button doesn't displace content */
-.post-content-area:not(:has(.edit-content-wrapper)) + .post-actions {
+.post-content-area:not(:has(.edit-content-wrapper))+.post-actions {
   margin-top: 0.75rem;
 }
 
 /* Tight spacing in edit mode - match Create Post */
-.edit-content-wrapper + .post-actions {
+.edit-content-wrapper+.post-actions {
   margin-top: 0.25rem;
 }
 
@@ -1288,7 +1293,8 @@ body.dark-mode .post-content-toggle {
   margin-top: 0.25rem;
   margin-bottom: 0;
   line-height: 1;
-  min-height: 1.6rem; /* Reserve space for Browse button */
+  min-height: 1.6rem;
+  /* Reserve space for Browse button */
 }
 
 /* Placeholder row in view mode - invisible but reserves space */
@@ -1584,11 +1590,13 @@ body.dark-mode .post-action.liked:hover {
 .events-list-column,
 .market-stakes-column,
 .leaderboard-column {
-  min-width: 0; /* allow children to shrink instead of forcing overflow */
+  min-width: 0;
+  /* allow children to shrink instead of forcing overflow */
 }
 
 /* Medium screens: keep side-by-side layout until mobile */
 @media (max-width: 1200px) {
+
   /* Keep both columns visible side-by-side on tablet-laptop widths. */
   .events-container {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1612,7 +1620,7 @@ body.dark-mode .post-action.liked:hover {
     grid-template-columns: 1fr;
     height: auto;
   }
-  
+
   .events-simple-list,
   .selected-event-container {
     height: auto;
@@ -3823,7 +3831,7 @@ body.dark-mode .weekly-assignment-badge.pending {
   display: block;
 }
 
-.search-post-result > .post-card {
+.search-post-result>.post-card {
   margin: 0;
 }
 
@@ -4587,6 +4595,7 @@ body.dark-mode .balance-note {
     border-color: #28a745;
     box-shadow: 0 0 0 5px rgba(40, 167, 69, 0.28);
   }
+
   100% {
     background-color: var(--blue-bg);
     border-color: var(--border-color);
@@ -6435,29 +6444,23 @@ body.dark-mode .fingerprint-group {
 
 .verification-code {
   font-family: 'Courier New', monospace;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   font-weight: 700;
   letter-spacing: 0.03em;
   color: var(--primary-color);
-  background: linear-gradient(135deg, color-mix(in srgb, var(--blue-bg) 92%, transparent), color-mix(in srgb, var(--card-bg) 85%, transparent));
-  border: 1px solid color-mix(in srgb, var(--border-color) 85%, transparent);
-  border-radius: 10px;
-  padding: 0.68rem 0.75rem;
-  text-align: left;
-  white-space: nowrap;
-  text-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  word-break: normal;
-  flex: 1;
-  min-width: 0;
-  min-height: 2.8rem;
-  box-shadow: 0 6px 18px rgb(0 0 0 / 4%);
-  line-height: 1.2;
-  overflow-wrap: normal;
-  -webkit-overflow-scrolling: touch;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  text-align: center;
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  overflow: visible;
+  line-height: 1.5;
   display: block;
   box-sizing: border-box;
+  margin-bottom: 0.75rem;
 }
 
 .verification-code-display-inner {
@@ -6483,25 +6486,13 @@ body.dark-mode .fingerprint-group {
 }
 
 .btn-copy {
-  flex: 0 0 auto;
-  padding: 0.5rem 0.65rem;
-  background: var(--blue-bg);
-  border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  transition: all 0.2s;
-  line-height: 1.1;
-  align-self: stretch;
-  white-space: nowrap;
-  border-color: color-mix(in srgb, var(--primary-color) 35%, transparent);
-  min-height: 2.8rem;
+  /* inherits standard button styles */
+  margin: 0.25rem auto 0.75rem auto;
+  display: inline-flex;
 }
 
 .btn-copy:hover {
-  background: var(--blue-bg);
-  border-color: var(--primary-color);
+  background: var(--button-hover-bg);
 }
 
 /* Expiry timer */
@@ -6517,42 +6508,7 @@ body.dark-mode .fingerprint-group {
   font-family: monospace;
 }
 
-/* Instructions */
-.device-link-modal .instructions {
-  background: var(--card-bg);
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1.5rem;
-}
 
-.device-link-modal .instructions h3 {
-  margin: 0 0 0.75rem 0;
-  font-size: 0.9rem;
-  color: var(--text-color);
-}
-
-.instruction-step {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0;
-  font-size: 0.875rem;
-  color: var(--secondary-text);
-}
-
-.instruction-step .step-num {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  background: var(--primary-color);
-  color: white;
-  border-radius: 50%;
-  font-size: 0.75rem;
-  font-weight: 600;
-  flex-shrink: 0;
-}
 
 /* Waiting indicator */
 .waiting-indicator {
@@ -6625,13 +6581,11 @@ body.dark-mode .fingerprint-group {
 
 /* Dark mode */
 body.dark-mode .verification-code {
-  background: var(--black-bg);
-  border-color: var(--border-color);
+  background: transparent;
+  border: none;
 }
 
-body.dark-mode .device-link-modal .instructions {
-  background: var(--black-bg);
-}
+
 
 /* Responsive */
 @media (max-width: 480px) {
@@ -6641,13 +6595,13 @@ body.dark-mode .device-link-modal .instructions {
 
   .device-link-modal .verification-code {
     font-size: 0.75rem;
-    padding: 0.7rem 0.75rem;
+    padding: 0;
     letter-spacing: 0;
-    white-space: nowrap;
-    overflow-x: auto;
+    white-space: normal;
+    overflow: visible;
     width: 100%;
-    text-align: left;
-    word-break: normal;
+    text-align: center;
+    word-break: break-all;
   }
 
   .device-id-display {

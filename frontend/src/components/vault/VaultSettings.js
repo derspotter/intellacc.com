@@ -241,10 +241,10 @@ export default function VaultSettings() {
                                     () => isChanging.val ? 'Changing...' : 'Update Password'
                                 )
                             ),
-                            () => changeError.val ? p({ class: 'error-message' }, changeError.val) : null,
-                            () => changeSuccess.val ? p({ class: 'success-message' }, changeSuccess.val) : null
+                            () => changeError.val ? p({ class: 'error-message' }, changeError.val) : span({ style: "display: none" }),
+                            () => changeSuccess.val ? p({ class: 'success-message' }, changeSuccess.val) : span({ style: "display: none" })
                         )
-                    ) : null,
+                    ) : span({ style: "display: none" }),
 
                     // Key Rotation Section
                     div({ class: 'setting-row vault-rotation-section', style: 'margin-bottom: 20px; align-items: start; flex-direction: column; gap: 10px;' },
@@ -257,8 +257,8 @@ export default function VaultSettings() {
                             onclick: handleRotateKeys,
                             disabled: isRotatingKeys
                         }, () => isRotatingKeys.val ? 'Rotating Keys...' : 'Refresh Encryption Keys'),
-                        () => rotationError.val ? p({ class: 'error-message' }, rotationError.val) : null,
-                        () => rotationSuccess.val ? p({ class: 'success-message' }, 'Keys refreshed successfully.') : null
+                        () => rotationError.val ? p({ class: 'error-message' }, rotationError.val) : span({ style: "display: none" }),
+                        () => rotationSuccess.val ? p({ class: 'success-message' }, 'Keys refreshed successfully.') : span({ style: "display: none" })
                     ),
 
                     // Lock now button

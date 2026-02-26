@@ -791,45 +791,6 @@ export default function MessagesPage() {
                 });
               },
 
-              // Verification modal for pending invites
-              () => {
-                const inspection = verifyingInvite.val;
-                if (!inspection) return null;
-
-                const { invite, info, members, senderStr } = inspection;
-
-                return div({ class: "modal-backdrop" },
-                  div({ class: "modal-content", style: "max-width: 500px" }, [
-                    div({ class: "modal-header" }, [
-                      van.tags.h3("Inspect Group Invitation"),
-                      button({ class: "btn-close", onclick: () => verifyingInvite.val = null }, "×")
-                    ]),
-                    div({ class: "modal-body" }, [
-                      p(van.tags.strong("Sender: "), senderStr),
-                      p(van.tags.strong("Group Identity Hex: "), info.group_id_hex.substring(0, 16) + '...'),
-                      van.tags.h4("Members (" + members.length + ")"),
-                      van.tags.ul({ class: "contact-list", style: "max-height: 200px; overflow-y: auto; padding-left: 0; list-style: none;" }, members.map(m =>
-                        van.tags.li({ class: "contact-item" }, [
-                          div({ class: "contact-info" }, [
-                            span({ class: "contact-name" }, m.identityStr),
-                            span({ class: "contact-status text-muted" }, m.is_basic_credential ? ' (Basic Credential)' : '')
-                          ])
-                        ])
-                      ))
-                    ]),
-                    div({ class: "modal-footer" }, [
-                      button({
-                        class: "btn btn-primary",
-                        onclick: () => {
-                          acceptPendingWelcome(invite);
-                          verifyingInvite.val = null;
-                        }
-                      }, "Accept & Join"),
-                      button({ class: "btn", onclick: () => verifyingInvite.val = null }, "Cancel")
-                    ])
-                  ])
-                );
-              },
 
               // Invite form - always rendered but hidden via CSS class
               div({
@@ -1004,7 +965,50 @@ export default function MessagesPage() {
             onclick: () => messagingStore.clearError()
           }, "×")
         ])
-      ]) : null
+      ]) : null,
+
+      // Verification modal for pending invites
+      div({
+        class: "modal-overlay",
+        style: () => verifyingInvite.val ? "display: flex" : "display: none"
+      },
+        () => {
+          const inspection = verifyingInvite.val;
+          if (!inspection) return span(); // Empty placeholder when hidden
+
+          const { invite, info, members, senderStr } = inspection;
+
+          return div({ class: "modal-content", style: "max-width: 500px" }, [
+            div({ class: "modal-header" }, [
+              van.tags.h3("Inspect Group Invitation"),
+              button({ class: "btn-close", onclick: () => verifyingInvite.val = null }, "×")
+            ]),
+            div({ class: "modal-body" }, [
+              p(van.tags.strong("Sender: "), senderStr),
+              p(van.tags.strong("Group Identity Hex: "), info.group_id_hex.substring(0, 16) + '...'),
+              van.tags.h4(`Members (${members.length})`),
+              van.tags.ul({ class: "contact-list", style: "max-height: 200px; overflow-y: auto; padding-left: 0; list-style: none;" }, members.map(m =>
+                van.tags.li({ class: "contact-item" }, [
+                  div({ class: "contact-info" }, [
+                    span({ class: "contact-name" }, m.identityStr),
+                    span({ class: "contact-status text-muted" }, m.is_basic_credential ? ' (Basic Credential)' : '')
+                  ])
+                ])
+              ))
+            ]),
+            div({ class: "modal-footer" }, [
+              button({
+                class: "btn btn-primary",
+                onclick: () => {
+                  acceptPendingWelcome(invite);
+                  verifyingInvite.val = null;
+                }
+              }, "Accept & Join"),
+              button({ class: "btn", onclick: () => verifyingInvite.val = null }, "Cancel")
+            ])
+          ]);
+        }
+      )
     ]);
   };
 }

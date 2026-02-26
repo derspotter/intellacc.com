@@ -25,7 +25,7 @@
   position: relative;
   z-index: 10001;
   max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .modal-content h2 {
@@ -55,11 +55,7 @@
   margin-bottom: 1.5rem;
 }
 
-.device-link-modal .modal-icon {
-  font-size: 3rem;
-  display: block;
-  margin-bottom: 0.5rem;
-}
+
 
 .device-link-modal .description {
   color: var(--secondary-text);
@@ -80,33 +76,27 @@
   margin-bottom: 0.5rem;
 }
 
-.verification-code-wrap > .verification-code {
+.verification-code-wrap>.verification-code {
   margin-bottom: 0.5rem;
 }
 
 .verification-code {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  margin: 0 0 0.5rem 0;
-  display: inline-block;
   font-family: 'Courier New', monospace;
-  font-size: 1.6rem;
+  font-size: 1.1rem;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.05em;
   color: var(--primary-color);
-  white-space: normal;
-  overflow-wrap: anywhere;
-  line-height: 1.2;
+  word-wrap: break-word;
+  word-break: break-all;
+  white-space: pre-wrap;
+  line-height: 1.4;
+  margin: 0 auto 1rem auto;
+  max-width: 100%;
 }
 
 .btn-copy {
-  font-size: 0.8rem;
-  padding: 0.25rem 0.75rem;
-  border-radius: 20px;
-  height: auto;
-  min-height: 28px;
-  margin-top: 0.5rem;
+  margin: 0.25rem auto 1rem auto;
+  display: block;
 }
 
 .verification-code-hint {
@@ -124,6 +114,13 @@
   margin: 1.5rem 0;
 }
 
+.steps-list h3 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+  color: var(--text-color);
+  text-align: center;
+}
+
 .step-item {
   display: flex;
   gap: 1rem;
@@ -135,17 +132,19 @@
 }
 
 .step-number {
-  background: var(--primary-color);
-  color: white;
+  background: var(--primary-color) !important;
+  color: white !important;
   width: 24px;
   height: 24px;
+  min-width: 24px;
   border-radius: 50%;
-  display: flex;
+  display: flex !important;
   align-items: center;
   justify-content: center;
-  font-size: 0.8rem;
-  font-weight: bold;
+  font-size: 0.85rem;
+  font-weight: 700;
   flex-shrink: 0;
+  line-height: 1;
 }
 
 .step-text {
@@ -191,18 +190,7 @@
   padding: 2rem 0;
 }
 
-.success-icon {
-  width: 64px;
-  height: 64px;
-  background: var(--success-color);
-  color: white;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 2rem;
-  margin: 0 auto 1.5rem;
-}
+
 
 .error-state {
   text-align: center;

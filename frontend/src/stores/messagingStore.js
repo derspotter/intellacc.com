@@ -60,7 +60,7 @@ const messagingStore = vanX.reactive({
   userNameCache: {},
 
   // Calculated fields will be added after store creation
-  
+
   // Store methods for managing state
   setCurrentUserId(userId) {
     messagingStore.currentUserId = userId != null ? Number(userId) : null;
@@ -102,12 +102,12 @@ const messagingStore = vanX.reactive({
     messagingStore.conversations = ids.map(id => byId[id]);
   },
   setConversations(conversations) {
-    try { /* dev-only logging removed */ } catch {}
+    try { /* dev-only logging removed */ } catch { }
     // Delegate to upsert for normalization + indexing
     messagingStore.upsertConversations(conversations);
-    try { /* dev-only logging removed */ } catch {}
+    try { /* dev-only logging removed */ } catch { }
   },
-  
+
   addConversation(conversation) {
     const token = localStorage.getItem('token');
     const currentUserId = (() => {
@@ -118,7 +118,7 @@ const messagingStore = vanX.reactive({
     // Delegate to normalized single upsert
     messagingStore.upsertConversation({ ...conversation, id });
   },
-  
+
   updateConversation(conversationId, updates) {
     messagingStore.conversations = messagingStore.conversations.map(conv => {
       if (conv.id !== conversationId) return conv;
@@ -156,7 +156,7 @@ const messagingStore = vanX.reactive({
       messagingStore.conversationsById = { ...messagingStore.conversationsById, [conversationId]: current };
     }
   },
-  
+
   setMessages(conversationId, messages) {
     // Create new object to trigger reactivity
     messagingStore.messagesByConversation = {
@@ -179,40 +179,41 @@ const messagingStore = vanX.reactive({
     if (!invite || invite.id == null) return;
     const existing = messagingStore.pendingWelcomes.find(item => item.id === invite.id);
     if (existing) return;
-    messagingStore.pendingWelcomes = [...messagingStore.pendingWelcomes, invite];
+    messagingStore.pendingWelcomes.push(invite);
   },
 
   removePendingWelcome(inviteId) {
     if (inviteId == null) return;
-    messagingStore.pendingWelcomes = messagingStore.pendingWelcomes.filter(item => item.id !== inviteId);
+    const idx = messagingStore.pendingWelcomes.findIndex(item => item.id === inviteId);
+    if (idx !== -1) messagingStore.pendingWelcomes.splice(idx, 1);
   },
-  
+
   addMessage(conversationId, message) {
     const existingMessages = messagingStore.messagesByConversation[conversationId] || [];
-    
+
     // Check for duplicates by ID
     const messageExists = existingMessages.some(m => m.id === message.id);
-      if (messageExists) return false;
-    
+    if (messageExists) return false;
+
     // Add message in chronological order
     const newMessages = [...existingMessages];
     const insertIndex = newMessages.findIndex(m => new Date(m.created_at) > new Date(message.created_at));
-    
+
     if (insertIndex === -1) {
       newMessages.push(message);
     } else {
       newMessages.splice(insertIndex, 0, message);
     }
-    
+
     // Update object to trigger reactivity
     messagingStore.messagesByConversation = {
       ...messagingStore.messagesByConversation,
       [conversationId]: newMessages
     };
-    
+
     return true;
   },
-  
+
   updateMessage(messageId, updates) {
     // Find and update message across all conversations
     for (const [conversationId, messages] of Object.entries(messagingStore.messagesByConversation)) {
@@ -220,7 +221,7 @@ const messagingStore = vanX.reactive({
       if (messageIndex !== -1) {
         const newMessages = [...messages];
         newMessages[messageIndex] = { ...newMessages[messageIndex], ...updates };
-        
+
         messagingStore.messagesByConversation = {
           ...messagingStore.messagesByConversation,
           [conversationId]: newMessages
@@ -229,7 +230,7 @@ const messagingStore = vanX.reactive({
       }
     }
   },
-  
+
   removeMessage(messageId) {
     // Find and remove message across all conversations
     for (const [conversationId, messages] of Object.entries(messagingStore.messagesByConversation)) {
@@ -243,10 +244,10 @@ const messagingStore = vanX.reactive({
       }
     }
   },
-  
+
   markMessagesAsRead(messageIds) {
     const now = new Date().toISOString();
-    
+
     // Update read status for specified messages
     for (const [conversationId, messages] of Object.entries(messagingStore.messagesByConversation)) {
       let updated = false;
@@ -257,7 +258,7 @@ const messagingStore = vanX.reactive({
         }
         return message;
       });
-      
+
       if (updated) {
         messagingStore.messagesByConversation = {
           ...messagingStore.messagesByConversation,
@@ -266,33 +267,33 @@ const messagingStore = vanX.reactive({
       }
     }
   },
-  
+
   selectConversation(conversationId) {
     const id = String(conversationId ?? '');
     messagingStore.selectedConversationId = id;
     // Clear typing indicators when switching conversations
     messagingStore.typingUsers = [];
   },
-  
+
   clearSelection() {
     messagingStore.selectedConversationId = null;
     messagingStore.typingUsers = [];
   },
-  
+
   setTypingUsers(userIds) {
     messagingStore.typingUsers = [...userIds];
   },
-  
+
   addTypingUser(userId) {
     if (!messagingStore.typingUsers.includes(userId)) {
       messagingStore.typingUsers = [...messagingStore.typingUsers, userId];
     }
   },
-  
+
   removeTypingUser(userId) {
     messagingStore.typingUsers = messagingStore.typingUsers.filter(id => id !== userId);
   },
-  
+
 
   setConversationsLoading(loading) {
     messagingStore.conversationsLoading = loading;
@@ -301,29 +302,28 @@ const messagingStore = vanX.reactive({
   setMessagesLoading(loading) {
     messagingStore.messagesLoading = loading;
   },
-  
+
   setError(error) {
     messagingStore.error = error;
   },
-  
+
   clearError() {
     messagingStore.error = '';
   },
-  
+
   setShowNewConversation(show) {
     messagingStore.showNewConversation = show;
   },
-  
+
   setNewConversationUser(user) {
     messagingStore.newConversationUser = user;
   },
-  
+
   setNewMessage(message) {
     messagingStore.newMessage = message;
   },
-  
+
   setSearchQuery(query) {
-    console.log('[Store.setSearchQuery] ->', query);
     messagingStore.searchQuery = query;
   },
 
@@ -475,26 +475,26 @@ messagingStore.selectedConversationName = vanX.calc(() => {
   return conv?.displayName || '';
 });
 
-  // Plain reactive projection for the sidebar, avoids Proxy aliasing
-  messagingStore.sidebarItems = vanX.calc(() => {
-    const q = (messagingStore.searchQuery || '').toLowerCase();
-    const ids = messagingStore.conversationIds || [];
-    const byId = messagingStore.conversationsById || {};
-    const items = ids.map(id => {
-      const conv = byId[id];
-      const item = conv ? {
-        id: String(conv.id),
-        name: conv.displayName || '',
-        time: conv.lastTime || conv.last_message_created_at || conv.updated_at || conv.created_at || null,
-        ts: conv.lastTs || 0,
-        unread: typeof conv.my_unread_count === 'number' ? conv.my_unread_count : 0
-      } : null;
-      return item;
-    }).filter(Boolean);
-    const filtered = q ? items.filter(it => (it.name || '').toLowerCase().includes(q)) : items;
-    filtered.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-    return filtered;
-  });
+// Plain reactive projection for the sidebar, avoids Proxy aliasing
+messagingStore.sidebarItems = vanX.calc(() => {
+  const q = (messagingStore.searchQuery || '').toLowerCase();
+  const ids = messagingStore.conversationIds || [];
+  const byId = messagingStore.conversationsById || {};
+  const items = ids.map(id => {
+    const conv = byId[id];
+    const item = conv ? {
+      id: String(conv.id),
+      name: conv.displayName || '',
+      time: conv.lastTime || conv.last_message_created_at || conv.updated_at || conv.created_at || null,
+      ts: conv.lastTs || 0,
+      unread: typeof conv.my_unread_count === 'number' ? conv.my_unread_count : 0
+    } : null;
+    return item;
+  }).filter(Boolean);
+  const filtered = q ? items.filter(it => (it.name || '').toLowerCase().includes(q)) : items;
+  filtered.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return filtered;
+});
 
 // MLS computed properties
 messagingStore.selectedMlsGroup = vanX.calc(() => {
@@ -550,4 +550,4 @@ try {
     window.__messagingStore = messagingStore;
     window.messagingStore = messagingStore;
   }
-} catch {}
+} catch { }
