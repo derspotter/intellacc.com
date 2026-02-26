@@ -26,6 +26,22 @@ If enabled:
   - `TWILIO_SID`
   - `TWILIO_AUTH_TOKEN`
   - `TWILIO_VERIFY_SID`
+- SMS Gateway (self-hosted Android gateway; primary SMS path):
+  - `SMS_GATEWAY_URL` (for example `http://100.x.y.z:8080` or `.../message`)
+  - `SMS_GATEWAY_USERNAME`
+  - `SMS_GATEWAY_PASSWORD`
+  - Optional:
+    - `SMS_GATEWAY_TIMEOUT_MS`
+    - `PHONE_CODE_TTL_MINUTES`
+    - `PHONE_CODE_MAX_ATTEMPTS`
+    - `PHONE_CODE_HASH_SALT`
+- WhatsApp fallback via OpenClaw (optional, used only when SMS send fails):
+  - `OPENCLAW_URL` (wss endpoint)
+  - `OPENCLAW_TOKEN`
+  - Optional:
+    - `OPENCLAW_CLI_BIN` (default `openclaw`; set to `npx` with `OPENCLAW_CLI_ARGS='-y openclaw'` if needed)
+    - `OPENCLAW_CLI_ARGS`
+    - `OPENCLAW_TIMEOUT_MS`
 - Stripe:
   - `STRIPE_SECRET_KEY`
   - `STRIPE_PUBLISHABLE_KEY`

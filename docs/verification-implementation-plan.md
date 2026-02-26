@@ -24,7 +24,8 @@ The implementation should cover three tiers:
   - `EMAIL_TOKEN_SECRET`, `SMTP_HOST`, `SMTP_FROM`
   - Existing password verification guard behavior remains.
 - Optional provider requirements:
-  - phone verification provider vars (`TWILIO_*`)
+  - phone verification provider vars (`TWILIO_*`) or self-hosted gateway vars (`SMS_GATEWAY_*`)
+  - optional WhatsApp fallback vars (`OPENCLAW_*`)
   - payment verification provider vars (`STRIPE_*`)
 - Runtime feature toggles:
   - `PHONE_VERIFICATION_ENABLED` and `PAYMENT_VERIFICATION_ENABLED` control whether tier-2/3 checks are enforced.
@@ -58,9 +59,10 @@ The implementation should cover three tiers:
   - targeted Playwright checks for `#settings/verification`
 
 ## Provider account plan
-- Phone verification provider: Twilio Verify.
-  - In production, use Twilio only if you want SMS verification for tier-2 unlocks.
-  - Cost model: pay-as-you-go API checks; typically low volume is cheap, but local rates and compliance charges can vary.
+- Phone verification providers:
+  - Twilio Verify (managed).
+  - Self-hosted SMS gateway (`SMS_GATEWAY_URL`, `SMS_GATEWAY_USERNAME`, `SMS_GATEWAY_PASSWORD`) with optional OpenClaw WhatsApp fallback for delivery failures.
+  - In production, configure at least one delivery path (Twilio or SMS gateway).
 - Payment verification provider: Stripe SetupIntents.
   - In production, enable payment verification only when you need tier-3 controls and card-based verification.
   - Costs are mostly payment-network fees and possible processing charges for attached cards; avoid turning this on unless needed.
