@@ -168,6 +168,8 @@ exports.startPhoneVerification = async (req, res) => {
         res.json({
             success: true,
             provider: result.provider,
+            channel: result.channel,
+            fallback_from: result.fallbackFrom || undefined,
             dev_code: result.devCode || undefined
         });
     } catch (err) {

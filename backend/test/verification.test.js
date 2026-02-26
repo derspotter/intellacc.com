@@ -241,7 +241,7 @@ describe('Tiered verification routes and middleware', () => {
         .send({ phoneNumber: '+15555550000' });
 
       expect(phoneStartRes.statusCode).toBe(400);
-      expect(phoneStartRes.body.error).toMatch(/Twilio verification is not configured/i);
+      expect(phoneStartRes.body.error).toMatch(/Twilio or SMS gateway verification is not configured/i);
     } finally {
       process.env.NODE_ENV = originalNodeEnv;
     }
