@@ -305,6 +305,53 @@ export default function MessagesPage() {
     }
   };
 
+  const InspectionModal = ({ inspection, onClose, onAccept }) => {
+    const { invite, info, members, senderStr } = inspection;
+
+    // Close handler that removes the element from DOM
+    const closeAndRemove = () => {
+      onClose();
+      const el = document.getElementById('verification-modal');
+      if (el) el.remove();
+    };
+
+    // Accept handler that removes the element from DOM and triggers join
+    const acceptAndRemove = () => {
+      onAccept(invite);
+      const el = document.getElementById('verification-modal');
+      if (el) el.remove();
+    };
+
+    return div({ class: "modal-overlay", id: "verification-modal" },
+      div({ class: "modal-content", style: "max-width: 500px" }, [
+        div({ class: "modal-header" }, [
+          van.tags.h3("Inspect Group Invitation"),
+          button({ class: "btn-close", onclick: closeAndRemove }, "×")
+        ]),
+        div({ class: "modal-body" }, [
+          p(van.tags.strong("Sender: "), senderStr),
+          p(van.tags.strong("Group Identity Hex: "), info.group_id_hex.substring(0, 16) + '...'),
+          van.tags.h4(`Members (${members.length})`),
+          van.tags.ul({ class: "contact-list", style: "max-height: 200px; overflow-y: auto; padding-left: 0; list-style: none;" }, members.map(m =>
+            van.tags.li({ class: "contact-item" }, [
+              div({ class: "contact-info" }, [
+                span({ class: "contact-name" }, m.identityStr),
+                span({ class: "contact-status text-muted" }, m.is_basic_credential ? ' (Basic Credential)' : '')
+              ])
+            ])
+          ))
+        ]),
+        div({ class: "modal-footer" }, [
+          button({
+            class: "btn btn-primary",
+            onclick: acceptAndRemove
+          }, "Accept & Join"),
+          button({ class: "btn", onclick: closeAndRemove }, "Cancel")
+        ])
+      ])
+    );
+  };
+
   const inspectPendingWelcome = async (invite) => {
     try {
       messagingStore.setMessagesLoading(true);
@@ -325,12 +372,23 @@ export default function MessagesPage() {
         }
       } catch (e) { }
 
-      verifyingInvite.val = {
+      const inspection = {
         invite,
         info,
         members,
         senderStr
       };
+
+      // Clean up any existing modal before adding a new one
+      const existing = document.getElementById('verification-modal');
+      if (existing) existing.remove();
+
+      van.add(document.body, InspectionModal({
+        inspection,
+        onClose: () => { verifyingInvite.val = null; },
+        onAccept: (inv) => { acceptPendingWelcome(inv); verifyingInvite.val = null; }
+      }));
+
     } catch (err) {
       console.error('[Messages] Failed to inspect welcome:', err);
       messagingStore.setError(err.message || 'Failed to inspect invite');
@@ -965,50 +1023,7 @@ export default function MessagesPage() {
             onclick: () => messagingStore.clearError()
           }, "×")
         ])
-      ]) : null,
-
-      // Verification modal for pending invites
-      div({
-        class: "modal-overlay",
-        style: () => verifyingInvite.val ? "display: flex" : "display: none"
-      },
-        () => {
-          const inspection = verifyingInvite.val;
-          if (!inspection) return span(); // Empty placeholder when hidden
-
-          const { invite, info, members, senderStr } = inspection;
-
-          return div({ class: "modal-content", style: "max-width: 500px" }, [
-            div({ class: "modal-header" }, [
-              van.tags.h3("Inspect Group Invitation"),
-              button({ class: "btn-close", onclick: () => verifyingInvite.val = null }, "×")
-            ]),
-            div({ class: "modal-body" }, [
-              p(van.tags.strong("Sender: "), senderStr),
-              p(van.tags.strong("Group Identity Hex: "), info.group_id_hex.substring(0, 16) + '...'),
-              van.tags.h4(`Members (${members.length})`),
-              van.tags.ul({ class: "contact-list", style: "max-height: 200px; overflow-y: auto; padding-left: 0; list-style: none;" }, members.map(m =>
-                van.tags.li({ class: "contact-item" }, [
-                  div({ class: "contact-info" }, [
-                    span({ class: "contact-name" }, m.identityStr),
-                    span({ class: "contact-status text-muted" }, m.is_basic_credential ? ' (Basic Credential)' : '')
-                  ])
-                ])
-              ))
-            ]),
-            div({ class: "modal-footer" }, [
-              button({
-                class: "btn btn-primary",
-                onclick: () => {
-                  acceptPendingWelcome(invite);
-                  verifyingInvite.val = null;
-                }
-              }, "Accept & Join"),
-              button({ class: "btn", onclick: () => verifyingInvite.val = null }, "Cancel")
-            ])
-          ]);
-        }
-      )
+      ]) : null
     ]);
   };
 }
