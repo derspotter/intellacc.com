@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
-# Use the official Node.js 23 Alpine image as the base
-FROM node:23-alpine
+# Use the official Node.js 25 Alpine image as the base
+FROM node:25-alpine
 
 # Install PostgreSQL client (no build toolchain)
 RUN apk add --no-cache postgresql-client

@@ -1,5 +1,5 @@
-# Use the official Node.js 23 Alpine image as the base
-FROM node:23-alpine
+# Use the official Node.js 25 Alpine image as the base
+FROM node:25-alpine
 
 # Set environment variable to indicate we're in Docker
 ENV DOCKER_ENV=true

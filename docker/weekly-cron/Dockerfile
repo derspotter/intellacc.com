@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:25-alpine
 
 ARG SUPERCRONIC_VERSION=0.2.33
 

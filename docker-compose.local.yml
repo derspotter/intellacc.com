@@ -3,7 +3,7 @@
 
 services:
   db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: intellacc_db_dev
     environment:
       POSTGRES_USER: intellacc_user

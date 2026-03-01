@@ -11,7 +11,7 @@ services:
       - intellacc-network
 
   db:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:pg18
     container_name: intellacc_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -20,7 +20,7 @@ services:
     ports:
       - "${POSTGRES_PORT}:5432"
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - db-data-pg18:/var/lib/postgresql
     networks:
       - intellacc-network
 
@@ -117,6 +117,7 @@ networks:
     external: true
 
 volumes:
+  db-data-pg18:
   db-data:
   # caddy_data:
   # caddy_config:
