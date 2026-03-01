@@ -47,5 +47,18 @@ export default defineConfig({
     hmr: {
       clientPort: hmrPort
     }
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: serverPort,
+    strictPort: true,
+    allowedHosts: [
+      'intellacc.de',
+      'www.intellacc.de',
+      'intellacc.com',
+      'www.intellacc.com',
+      'localhost',
+      '127.0.0.1'
+    ]
   }
 });
