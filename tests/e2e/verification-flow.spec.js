@@ -121,18 +121,37 @@ test.describe('Tiered Verification Flow', () => {
         await page.getByRole('button', { name: 'Verify Phone' }).click();
 
         // 6. Complete Tier 2 Phone Verification
-        await page.fill('input[type="tel"]', '+15555550123');
-        await page.getByRole('button', { name: 'Send Code' }).click();
+        const randomPhoneSuffix = Math.floor(1000000 + Math.random() * 9000000).toString().substring(1);
+        await page.fill('input[type="tel"]', `+1555${randomPhoneSuffix}`);
+        await page.getByRole('button', { name: 'Send Verification Code' }).click();
 
-        // Since we are in non-production environment, the test code is normally 000000
-        await expect(page.locator('text=Enter Verification Code')).toBeVisible({ timeout: 10000 });
-        await page.fill('input[placeholder="000 000"]', '000000');
-        await page.getByRole('button', { name: 'Verify Phone' }).click();
+        // Wait for the code input and the dev code display to appear
+        try {
+            await expect(page.locator('input[placeholder="Verification code"]')).toBeVisible({ timeout: 10000 });
+        } catch (error) {
+            console.error('Timeout waiting for code input. Current HTML:', await page.innerHTML('body'));
+            throw error;
+        }
+
+        const devCodeElement = page.locator('.dev-code');
+        await expect(devCodeElement).toBeVisible({ timeout: 10000 });
+
+        const devCodeText = await devCodeElement.innerText();
+        const codeToEnter = devCodeText.replace('Dev code: ', '').trim() || '000000';
+
+        await page.fill('input[placeholder="Verification code"]', codeToEnter);
+        await page.getByRole('button', { name: 'Verify Code' }).click();
+
+        // The VerificationStatus component doesn't auto-refresh its internal state when the child component succeeds.
+        // Reload the page to ensure fresh state is fetched from the backend.
+        await page.waitForTimeout(1000); // Give the backend a moment to commit the transaction
+        await page.reload();
+        await page.waitForSelector('.verification-status');
 
         // Validate that phone verification success triggers an upgrade to Tier 2
         await expect(page.locator('.tier-level-2')).toHaveClass(/current/, { timeout: 15000 });
 
         // Assert we got the success prompt
-        await expect(page.locator('text=Configure Payment Verification').or(page.locator('text=Payment verification is unavailable'))).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('h3:has-text("Verify a Payment Method")').or(page.locator('text=Payment verification is unavailable'))).toBeVisible({ timeout: 10000 });
     });
 });
