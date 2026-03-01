@@ -3,7 +3,7 @@
 
 import socketService from './socket.js';
 import messagingStore from '../stores/messagingStore.js';
-import coreCryptoClient from './mls/coreCryptoClient.js';
+import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 
 /**
  * MLS Messaging service for end-to-end encrypted messaging

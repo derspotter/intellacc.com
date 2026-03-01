@@ -2,7 +2,7 @@
 // Safety Numbers UI for verifying E2EE identity (MITM protection)
 import van from 'vanjs-core';
 const { div, h3, h4, p, span, button, pre, code } = van.tags;
-import coreCryptoClient from '../services/mls/coreCryptoClient.js';
+import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 
 /**
  * Safety Numbers Modal Component

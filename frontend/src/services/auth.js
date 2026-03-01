@@ -7,10 +7,11 @@ import predictionsStore from '../store/predictions';
 import { updatePageFromHash } from '../router';
 import { getStore } from '../store';
 import socketService from './socket';
-import coreCryptoClient from './mls/coreCryptoClient';
+import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import vaultStore from '../stores/vaultStore';
 import vaultService from './vaultService';
 import { initIdleAutoLock, stopIdleAutoLock, loadIdleLockConfig } from './idleLock';
+import { syncSkinWithServer } from './skinProvider';
 import {
   getToken,
   saveToken, 
@@ -116,6 +117,7 @@ export function checkAuth() {
 
         // Check vault status on page load
         await vaultService.checkVaultExists(profile.id);
+        await syncSkinWithServer();
       }
     }).catch(console.error);
     return true;
@@ -134,6 +136,7 @@ export async function onLoginSuccess(password = null) {
         if (profile) {
           // Set up vault store with user ID
           vaultStore.setUserId(profile.id);
+          await syncSkinWithServer();
 
         // Privacy-Preserving Auth Flow:
         // We cannot check if a vault exists without the password (to derive the key/hash).

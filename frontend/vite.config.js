@@ -7,6 +7,7 @@ import path from 'path';
 const disableHmr =
   process.env.VITE_DISABLE_HMR === '1' ||
   process.env.VITE_DISABLE_HMR === 'true';
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://intellacc_backend:3000';
 
 export default defineConfig({
   define: {
@@ -33,17 +34,24 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@openmls': path.resolve(__dirname, '../openmls-wasm/pkg')
+      '@openmls': path.resolve(__dirname, './openmls-pkg'),
+      '@shared': path.resolve(__dirname, '../shared'),
+      '@app-services': path.resolve(__dirname, './src/services'),
+      '@app-vault-service': path.resolve(__dirname, './src/services/vaultService.js'),
+      '@app-messaging-store': path.resolve(__dirname, './src/stores/messagingStore.js')
     }
   },
   assetsInclude: ['**/*.wasm'],
   server: {
     host: '0.0.0.0',
     allowedHosts: true,
+    fs: {
+      allow: [path.resolve(__dirname, '..')]
+    },
     hmr: disableHmr ? false : undefined,
     proxy: {
       '/api': {
-        target: 'http://intellacc_backend:3000',  // Updated to use container_name instead of service name
+        target: apiProxyTarget,
         changeOrigin: true,
         secure: false,
         proxyTimeout: 30000, // Increased timeout to 30s for slower connections
@@ -97,7 +105,7 @@ export default defineConfig({
         }
       },
       '/socket.io': {
-        target: 'http://intellacc_backend:3000',
+        target: apiProxyTarget,
         changeOrigin: true,
         ws: true,
         secure: false

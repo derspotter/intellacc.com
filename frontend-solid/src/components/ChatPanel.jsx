@@ -1,0 +1,686 @@
+import { createSignal, Show, For, createEffect, onCleanup } from "solid-js";
+import { Panel } from "./ui/Panel";
+import vaultService from "../services/mls/vaultService";
+import vaultStore from "../store/vaultStore";
+import { userData, getToken } from "../services/tokenService";
+import { api } from "../services/api";
+import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
+import { onMlsMessage, onMlsWelcome } from "../services/socket";
+import { DeviceLinkModal } from "./vault/DeviceLinkModal";
+
+export const ChatPanel = () => {
+    const [password, setPassword] = createSignal("");
+    const [unlocking, setUnlocking] = createSignal(false);
+    const [error, setError] = createSignal("");
+    const [msgInput, setMsgInput] = createSignal("");
+
+    // Real data state
+    const [conversations, setConversations] = createSignal([]);
+    const [selectedConversation, setSelectedConversation] = createSignal(null);
+    const [messages, setMessages] = createSignal([]);
+    const [loadingConvs, setLoadingConvs] = createSignal(false);
+    const [unreadCounts, setUnreadCounts] = createSignal({});
+    const [sidebarOpen, setSidebarOpen] = createSignal(false);
+
+    // Resolve a senderId (numeric) to a display username
+    const getSenderName = (msg) => {
+        if (msg.sender) return msg.sender;
+        if (msg.sender_username) return msg.sender_username;
+        const sid = msg.senderId != null ? Number(msg.senderId) : null;
+        if (sid == null) return 'UNKNOWN';
+        const me = userData();
+        if (me && Number(me.userId) === sid) return me.username || 'ME';
+        const conv = selectedConversation();
+        if (conv?.displayName) return conv.displayName;
+        if (conv?.other_username) return conv.other_username;
+        return `USER ${sid}`;
+    };
+
+    // New DM flow state
+    const [showNewDM, setShowNewDM] = createSignal(false);
+    const [searchQuery, setSearchQuery] = createSignal("");
+    const [searchResults, setSearchResults] = createSignal([]);
+    const [searching, setSearching] = createSignal(false);
+
+    const getConversationId = (conv) => String(conv?.group_id || conv?.groupId || conv?.id || '');
+    const normalizeArrayResult = (value, keys) => {
+        if (Array.isArray(value)) return value;
+        if (value && typeof value === 'object') {
+            for (const k of keys) {
+                if (Array.isArray(value[k])) return value[k];
+            }
+        }
+        return [];
+    };
+
+    const totalUnread = () => {
+        const counts = unreadCounts() || {};
+        let n = 0;
+        for (const k in counts) n += Number(counts[k] || 0);
+        return n;
+    };
+
+    const bumpUnread = (convId) => {
+        if (!convId) return;
+        setUnreadCounts((prev) => {
+            const next = { ...(prev || {}) };
+            next[convId] = (next[convId] || 0) + 1;
+            return next;
+        });
+    };
+
+    const clearUnread = (convId) => {
+        if (!convId) return;
+        setUnreadCounts((prev) => {
+            if (!prev || prev[convId] == null) return prev;
+            const next = { ...prev };
+            delete next[convId];
+            return next;
+        });
+    };
+
+    const hexToBytes = (hex) => {
+        if (typeof hex !== 'string') return null;
+        let s = hex.trim();
+        if (s.startsWith('\\\\x')) s = s.slice(2);
+        if (s.startsWith('0x')) s = s.slice(2);
+        if (!s || s.length % 2 !== 0) return null;
+        if (!/^[0-9a-fA-F]+$/.test(s)) return null;
+        const out = new Uint8Array(s.length / 2);
+        for (let i = 0; i < out.length; i++) out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16);
+        return out;
+    };
+
+    const toBytes = (v) => {
+        if (v == null) return null;
+        if (v instanceof Uint8Array) return v;
+        if (Array.isArray(v)) return new Uint8Array(v);
+        if (v?.type === 'Buffer' && Array.isArray(v.data)) return new Uint8Array(v.data);
+        if (typeof v === 'string') {
+            const b = hexToBytes(v);
+            return b;
+        }
+        return null;
+    };
+
+    let searchReqId = 0;
+    createEffect(() => {
+        if (!showNewDM()) return;
+
+        const q = searchQuery().trim();
+        if (!q) {
+            setSearchResults([]);
+            setSearching(false);
+            return;
+        }
+
+        const reqId = ++searchReqId;
+        setSearching(true);
+
+        const t = setTimeout(async () => {
+            try {
+                const results = await api.users.search(q);
+                if (reqId !== searchReqId) return;
+                setSearchResults(Array.isArray(results) ? results : []);
+            } catch (e) {
+                if (reqId !== searchReqId) return;
+                console.warn("[ChatPanel] usersSearch failed:", e?.message || e);
+                setSearchResults([]);
+            } finally {
+                if (reqId === searchReqId) setSearching(false);
+            }
+        }, 250);
+
+        onCleanup(() => clearTimeout(t));
+    });
+
+    // Delegate all MLS message processing to coreCryptoClient.syncMessages()
+    // which handles welcomes, commits, proposals, and application messages properly.
+    const processPendingQueue = async () => {
+        try {
+            if (!coreCryptoClient?.client) return [];
+            await coreCryptoClient.syncMessages();
+            return [];
+        } catch (e) {
+            console.warn('[ChatPanel] syncMessages failed:', e?.message || e);
+            return [];
+        }
+    };
+
+    const refreshConversationMessages = async (convId) => {
+        if (!convId) return;
+        try {
+            const msgs = await vaultService.getMessages(convId);
+            setMessages(msgs);
+        } catch (err) {
+            console.error('[ChatPanel] Failed to load messages:', err);
+        }
+    };
+
+    // Vault unlock: load conversations + drain pending relay queue.
+    let wasLocked = true;
+    createEffect(() => {
+        const locked = vaultStore.state.locked;
+        if (wasLocked && !locked) {
+            (async () => {
+                await processPendingQueue().catch(() => {});
+                await loadConversations().catch(() => {});
+            })();
+        }
+        if (!wasLocked && locked) {
+            setSelectedConversation(null);
+            setMessages([]);
+            setUnreadCounts({});
+        }
+        wasLocked = locked;
+    });
+
+    // MLS socket hints: treat them as "new MLS data available".
+    // We must drain the pending queue (and ack) before GET /messages reflects new content.
+    let disposed = false;
+    let mlsSyncTimer = null;
+    const pendingHintGroupIds = new Set();
+    const scheduleMlsSync = (maybeGroupId, { forceReloadConversations = false } = {}) => {
+        if (maybeGroupId) pendingHintGroupIds.add(String(maybeGroupId));
+        if (mlsSyncTimer) return;
+
+        mlsSyncTimer = setTimeout(async () => {
+            const groupIds = Array.from(pendingHintGroupIds);
+            pendingHintGroupIds.clear();
+            mlsSyncTimer = null;
+            if (disposed) return;
+
+            // If vault is locked, we can't process MLS. Still keep unread counters.
+            if (vaultStore.state.locked) {
+                for (const gid of groupIds) bumpUnread(gid);
+                return;
+            }
+
+            await processPendingQueue().catch(() => {});
+
+            const convIdSet = new Set((conversations() || []).map((c) => getConversationId(c)).filter(Boolean).map(String));
+            const hasMissing = forceReloadConversations || groupIds.some((gid) => !convIdSet.has(String(gid)));
+            if (hasMissing) await loadConversations().catch(() => {});
+
+            const selectedId = getConversationId(selectedConversation());
+            for (const gid of groupIds) {
+                if (selectedId && String(selectedId) === String(gid)) {
+                    await refreshConversationMessages(String(gid));
+                    clearUnread(String(gid));
+                } else {
+                    bumpUnread(String(gid));
+                }
+            }
+        }, 150);
+    };
+
+    const unsubMsg = onMlsMessage((payload) => {
+        const groupId = payload?.groupId || payload?.group_id;
+        if (!groupId) return;
+        scheduleMlsSync(groupId);
+    });
+    const unsubWelcome = onMlsWelcome((payload) => {
+        const groupId = payload?.groupId || payload?.group_id;
+        scheduleMlsSync(groupId, { forceReloadConversations: true });
+    });
+
+    onCleanup(() => {
+        disposed = true;
+        if (mlsSyncTimer) clearTimeout(mlsSyncTimer);
+        try { unsubMsg?.(); } catch {}
+        try { unsubWelcome?.(); } catch {}
+    });
+
+    const loadConversations = async () => {
+        setLoadingConvs(true);
+        try {
+            // Fetch both groups and DMs
+            const [groups, dms] = await Promise.all([
+                Promise.resolve([]),
+                api.mls.getDirectMessages().catch(() => [])
+            ]);
+
+            const groupsArr = normalizeArrayResult(groups, ['groups', 'items', 'data', 'rows']);
+            const dmsArr = normalizeArrayResult(dms, ['directMessages', 'dms', 'items', 'data', 'rows']);
+
+            // Combine and format
+            const allConvs = [
+                ...groupsArr.map(g => ({ ...g, type: 'group', displayName: g.name || g.group_id })),
+                ...dmsArr.map(d => ({ ...d, type: 'dm', displayName: d.other_username || `User ${d.other_user_id}` }))
+            ];
+
+            setConversations(allConvs);
+            console.log('[ChatPanel] Loaded conversations:', allConvs.length);
+            return allConvs;
+        } catch (err) {
+            console.error('[ChatPanel] Failed to load conversations:', err);
+            return [];
+        } finally {
+            setLoadingConvs(false);
+        }
+    };
+
+    const selectConversation = async (conv) => {
+        setSelectedConversation(conv);
+        setSidebarOpen(false);
+        setMessages([]);
+
+        try {
+            const convId = getConversationId(conv);
+            clearUnread(convId);
+            // Ensure pending MLS messages are drained before we fetch history.
+            await processPendingQueue().catch(() => {});
+            await refreshConversationMessages(convId);
+        } catch (err) {
+            console.error('[ChatPanel] Failed to load messages:', err);
+        }
+    };
+
+    const handleSendMessage = async (e) => {
+        e.preventDefault();
+        if (!msgInput().trim() || !selectedConversation()) return;
+
+        const text = msgInput().trim();
+        const convId = getConversationId(selectedConversation());
+        if (!convId) return;
+
+        console.log('[ChatPanel] Sending:', text, 'to:', selectedConversation()?.displayName);
+
+        const optimisticId = `opt_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+        // Optimistic update (sender device is excluded from relay fanout)
+        setMessages(prev => [...prev, {
+            id: optimisticId,
+            optimistic: true,
+            content: text,
+            sender: userData()?.username || 'me',
+            timestamp: new Date().toISOString()
+        }]);
+
+        setMsgInput("");
+
+        try {
+            await coreCryptoClient.sendMessage(convId, text);
+        } catch (err) {
+            console.warn('[ChatPanel] Send failed:', err?.message || err);
+            setMessages(prev => (prev || []).filter(m => m?.id !== optimisticId));
+        }
+    };
+
+    const toggleNewDM = () => {
+        const next = !showNewDM();
+        setShowNewDM(next);
+        setSearchQuery("");
+        setSearchResults([]);
+        setSearching(false);
+        searchReqId++;
+    };
+
+    const createDMWithUser = async (targetUserId) => {
+        try {
+            const res = await coreCryptoClient.startDirectMessage(targetUserId);
+            const groupId = res?.groupId || res?.group_id || null;
+
+            setShowNewDM(false);
+            setSearchQuery("");
+            setSearchResults([]);
+            setSearching(false);
+            searchReqId++;
+
+            const all = await loadConversations();
+            let nextConv = null;
+            if (groupId) {
+                nextConv = (all || []).find(c => String(getConversationId(c)) === String(groupId));
+            }
+            // Some backends return only metadata and omit groupId; fall back to matching the DM peer.
+            if (!nextConv) {
+                nextConv = (all || []).find(c =>
+                    c?.type === 'dm' && String(c?.other_user_id ?? c?.otherUserId ?? '') === String(targetUserId)
+                );
+            }
+            if (nextConv) await selectConversation(nextConv);
+        } catch (e) {
+            console.warn('[ChatPanel] createDirectMessage failed:', e?.message || e);
+        }
+    };
+
+    const isLinkRequiredError = (err) =>
+        err && err.status === 403 && err.data?.code === "LINK_REQUIRED";
+
+    // Closure variable for pending password (not in global store for security)
+    let pendingVaultPassword = null;
+
+    const attemptVaultUnlock = async (pw) => {
+        const user = userData();
+        const userId = user?.username || (user?.userId ? String(user.userId) : null);
+        if (!userId) throw new Error("Wait for login...");
+
+        const success = await vaultService.findAndUnlock(pw, userId);
+        if (!success) {
+            await vaultService.setupKeystoreWithPassword(pw, userId);
+        }
+    };
+
+    const handleUnlock = async (e) => {
+        e.preventDefault();
+        setUnlocking(true);
+        setError("");
+
+        try {
+            await attemptVaultUnlock(password());
+        } catch (err) {
+            console.error(err);
+            if (isLinkRequiredError(err)) {
+                pendingVaultPassword = password();
+                vaultStore.setShowDeviceLinkModal(true);
+            } else {
+                setError(err.message);
+            }
+        } finally {
+            setUnlocking(false);
+        }
+    };
+
+    const handleDeviceLinkSuccess = async () => {
+        const pw = pendingVaultPassword;
+        pendingVaultPassword = null;
+        if (!pw) return;
+
+        setUnlocking(true);
+        setError("");
+        try {
+            await attemptVaultUnlock(pw);
+        } catch (err) {
+            console.error("[ChatPanel] Post-link unlock failed:", err);
+            setError(err.message);
+        } finally {
+            setUnlocking(false);
+        }
+    };
+
+    const handleDeviceLinkCancel = () => {
+        pendingVaultPassword = null;
+    };
+
+    return (
+        <Panel title="[3] COMMS // E2EE" class="h-full flex flex-col font-mono text-xs">
+            <Show when={vaultStore.state.locked}>
+                <div class="flex-1 flex flex-col items-center justify-center p-4 bg-bb-bg">
+                    <div class="w-full max-w-xs border border-bb-border p-4 bg-bb-panel shadow-glow-red">
+                        <form onSubmit={handleUnlock} class="flex flex-col gap-2">
+                            <div class="text-[10px] text-bb-muted mb-2 text-center leading-tight">
+                                NO LOCAL KEYS FOUND.<br />ENTER PASSWORD TO UNLOCK.
+                            </div>
+                            <input
+                                type="password"
+                                value={password()}
+                                onInput={(e) => setPassword(e.target.value)}
+                                placeholder="Vault Password..."
+                                class="bg-black border border-bb-border p-2 text-center text-bb-text focus:border-bb-accent outline-none text-xs"
+                                disabled={unlocking()}
+                            />
+                            <button
+                                type="submit"
+                                class="bg-bb-accent text-bb-bg font-bold py-1 hover:brightness-110 disabled:opacity-50 text-xs"
+                                disabled={unlocking()}
+                            >
+                                {unlocking() ? 'UNLOCKING...' : '> UNLOCK VAULT'}
+                            </button>
+                        </form>
+                        <Show when={error()}>
+                            <div class="text-market-down text-xs mt-2 text-center">{error()}</div>
+                        </Show>
+                    </div>
+                </div>
+            </Show>
+
+            <Show when={!vaultStore.state.locked}>
+                <div class="relative flex flex-1 min-h-0 bg-bb-bg text-bb-text font-mono">
+                    <Show when={sidebarOpen()}>
+                        <div
+                            class="md:hidden absolute inset-0 bg-black/70 z-30"
+                            onClick={() => setSidebarOpen(false)}
+                        ></div>
+                    </Show>
+
+                    {/* === LEFT SIDEBAR === */}
+                    <div
+                        class={`border-r border-bb-border bg-bb-panel/50 flex flex-col z-40
+                            w-[85vw] max-w-[320px] md:w-[200px] md:max-w-none md:min-w-[160px]
+                            ${sidebarOpen() ? 'absolute inset-y-0 left-0 flex md:static md:flex' : 'hidden md:flex'}`}
+                    >
+                        {/* Header */}
+                        <div class="bg-bb-panel px-3 py-2 flex items-center justify-between border-b border-bb-border">
+                            <span class="font-bold text-xs bg-bb-border px-2 py-0.5 text-bb-accent">IB MANAGER</span>
+                            <div class="flex items-center gap-3">
+                                <span class="hidden md:inline text-bb-muted text-xs cursor-pointer hover:text-bb-text">[ALERTS]</span>
+                                <button
+                                    type="button"
+                                    class="md:hidden text-bb-muted text-xs hover:text-bb-accent"
+                                    onClick={() => setSidebarOpen(false)}
+                                >
+                                    [X]
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Search/Add Bar */}
+                        <div class="bg-bb-accent text-bb-bg flex items-center px-2 py-1 gap-1">
+                            <span class="font-bold text-xs">&gt;</span>
+                            <input
+                                class="flex-1 bg-transparent border-none outline-none text-bb-bg placeholder-bb-bg/70 text-xs font-bold h-6"
+                                placeholder={showNewDM() ? "NEW DM: USERNAME/ID..." : "SEARCH..."}
+                                value={showNewDM() ? searchQuery() : ""}
+                                onInput={(e) => showNewDM() && setSearchQuery(e.target.value)}
+                            />
+                            <span
+                                class={`text-bb-bg font-bold cursor-pointer hover:text-white text-xs ${showNewDM() ? 'underline' : ''}`}
+                                onClick={toggleNewDM}
+                                title={showNewDM() ? 'Cancel New DM' : 'New DM'}
+                            >
+                                [+]
+                            </span>
+                        </div>
+
+                        {/* New DM Search Results */}
+                        <Show when={showNewDM()}>
+                            <div class="border-b border-bb-border bg-bb-panel/60">
+                                <div class="px-3 py-2 text-[10px] text-bb-muted uppercase flex items-center justify-between">
+                                    <span>NEW DM</span>
+                                    <Show when={searching()}>
+                                        <span class="text-bb-muted">SEARCHING...</span>
+                                    </Show>
+                                </div>
+
+                                <Show when={searchQuery().trim() && !searching() && searchResults().length === 0}>
+                                    <div class="px-3 pb-3 text-bb-muted text-[10px]">
+                                        NO MATCHES.
+                                    </div>
+                                </Show>
+
+                                <For each={searchResults()}>
+                                    {(u) => (
+                                        <div
+                                            onClick={() => createDMWithUser(u.id)}
+                                            class="px-3 py-2 cursor-pointer border-t border-bb-border/30 hover:bg-bb-border/40 transition-colors flex items-center justify-between"
+                                        >
+                                            <span class="truncate text-xs text-bb-text">
+                                                {(u.username || `USER ${u.id}`).toUpperCase()}
+                                            </span>
+                                            <span class="text-[10px] text-bb-muted">
+                                                #{u.id}
+                                            </span>
+                                        </div>
+                                    )}
+                                </For>
+                            </div>
+                        </Show>
+
+                        {/* Conversations List */}
+                        <div class="flex-1 overflow-y-auto custom-scrollbar">
+                            <div class="text-[10px] text-bb-muted uppercase px-3 py-2 flex items-center gap-1 cursor-pointer hover:text-bb-text select-none border-b border-bb-border/50">
+                                <span class="text-[9px]">[v]</span> CHATS
+                            </div>
+
+                            <Show when={loadingConvs()}>
+                                <div class="text-bb-muted text-center py-2 text-xs">LOADING...</div>
+                            </Show>
+
+                            <Show when={!loadingConvs() && conversations().length === 0}>
+                                <div class="text-bb-muted text-center py-4 text-xs px-2">
+                                    NO ACTIVE CHATS.<br />START NEW.
+                                </div>
+                            </Show>
+
+                            <For each={conversations()}>
+                                {(conv) => (
+                                    <div
+                                        onClick={() => selectConversation(conv)}
+                                        class={`px-3 py-2 cursor-pointer flex justify-between items-center border-b border-bb-border/30 transition-colors ${
+                                            (selectedConversation()?.id === conv.id || selectedConversation()?.group_id === conv.group_id)
+                                            ? 'bg-bb-border text-bb-accent font-bold'
+                                            : 'text-bb-text hover:bg-bb-border/50'
+                                            }`}
+                                    >
+                                        <span class="truncate text-xs">
+                                            {conv.type === 'group' ? '[G] ' : ''}{conv.displayName.toUpperCase()}
+                                        </span>
+                                        <Show when={(unreadCounts()[getConversationId(conv)] || 0) > 0}>
+                                            <span class="ml-2 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-bb-accent text-bb-bg text-[10px] font-bold rounded-sm">
+                                                {unreadCounts()[getConversationId(conv)]}
+                                            </span>
+                                        </Show>
+                                    </div>
+                                )}
+                            </For>
+                        </div>
+                    </div>
+
+                    {/* === RIGHT MAIN CHAT AREA === */}
+                    <div class="flex-1 flex flex-col bg-bb-bg min-w-0">
+                        {/* Chat Header */}
+                        <div class="border-b border-bb-border px-4 py-2 flex items-center gap-3 bg-bb-panel">
+                            <button
+                                type="button"
+                                class="md:hidden bg-bb-bg border border-bb-border text-bb-text px-2 py-1 text-[10px] hover:bg-bb-border hover:text-bb-accent transition-colors"
+                                onClick={() => setSidebarOpen(true)}
+                            >
+                                CHATS{totalUnread() > 0 ? ` (${totalUnread()})` : ''}
+                            </button>
+                            <Show when={selectedConversation()}>
+                                <div class="w-2 h-2 rounded-full bg-market-up shadow-glow-green"></div>
+                                <span class="font-bold text-bb-text text-sm uppercase">{selectedConversation()?.displayName}</span>
+                            </Show>
+                            <Show when={!selectedConversation()}>
+                                <span class="text-bb-muted text-xs uppercase">[SELECT CONVERSATION]</span>
+                            </Show>
+                            <div class="ml-auto hidden sm:flex gap-4 text-bb-muted text-xs font-mono">
+                                <span class="cursor-pointer hover:text-bb-accent">[CALL]</span>
+                                <span class="cursor-pointer hover:text-bb-accent">[INFO]</span>
+                                <span class="cursor-pointer hover:text-bb-accent">[MENU]</span>
+                            </div>
+                        </div>
+
+                        {/* Messages Area */}
+                        <div class="flex-1 overflow-y-auto p-3 sm:p-4 font-mono text-xs custom-scrollbar">
+                            <Show when={!selectedConversation()}>
+                                <div class="text-bb-muted text-center mt-12 text-xs">
+                                    // AWAITING SELECTION...
+                                </div>
+                            </Show>
+
+                            <Show when={selectedConversation() && messages().length === 0}>
+                                <div class="text-bb-muted italic text-xs">// NO MESSAGES FOUND. BEGIN TRANSMISSION.</div>
+                            </Show>
+
+                            <For each={messages()}>
+                                {(msg) => (
+                                    <div class="mb-3 hover:bg-bb-border/20 p-1 rounded-sm">
+                                        <div class="flex items-baseline gap-2 mb-1">
+                                            <span class="text-bb-accent font-bold text-xs">
+                                                {getSenderName(msg).toUpperCase()}
+                                            </span>
+                                            <span class="text-bb-muted text-[10px]">
+                                                {new Date(msg.timestamp || msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+                                            </span>
+                                        </div>
+                                        <div class="text-bb-text text-xs leading-relaxed pl-2 border-l border-bb-border">
+                                            <span class="break-words">{msg.content || msg.plaintext || '[ENCRYPTED DATA]'}</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </For>
+                        </div>
+
+                        {/* === INPUT AREA === */}
+                        <div class="border-t border-bb-border bg-bb-panel p-2 flex flex-col gap-2">
+                            <form onSubmit={handleSendMessage} class="flex flex-col gap-2">
+                                {/* Input Area */}
+                                <div class="relative group">
+                                    <div class="absolute top-0 left-0 bg-bb-accent text-bb-bg text-[10px] font-bold px-1">
+                                        MSG ENTRY
+                                    </div>
+                                    <textarea
+                                        value={msgInput()}
+                                        onInput={(e) => setMsgInput(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                handleSendMessage(e);
+                                            }
+                                        }}
+                                        class="w-full bg-black text-bb-text placeholder-bb-muted/50 p-2 pt-5 text-sm font-mono outline-none resize-none h-16 sm:h-20 border border-bb-border focus:border-bb-accent transition-colors"
+                                        placeholder="// Type message..."
+                                        disabled={!selectedConversation()}
+                                    />
+                                    <div class="absolute bottom-2 right-2 flex gap-3 text-bb-muted text-[10px]">
+                                        <span class="cursor-pointer hover:text-bb-accent">[ATTACH]</span>
+                                        <span class="cursor-pointer hover:text-bb-accent">[LINK]</span>
+                                        <span class="cursor-pointer hover:text-market-down">[FLAG]</span>
+                                    </div>
+                                </div>
+
+                                {/* Trade Ticket Fields Row (Simplified for style) */}
+                                <div class="flex gap-1 text-[10px] font-mono opacity-60">
+                                    <div class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-muted flex-1">
+                                        SEC: <span class="text-bb-accent">--</span>
+                                    </div>
+                                    <div class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-muted w-20">
+                                        SIDE: <span class="text-bb-accent">--</span>
+                                    </div>
+                                    <div class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-muted w-24 text-right">
+                                        QTY: <span class="text-bb-accent">0</span>
+                                    </div>
+                                </div>
+
+                                {/* Bottom Controls Row */}
+                                <div class="flex items-center gap-1 text-[10px] mt-1 font-mono">
+                                    <button
+                                        type="button"
+                                        onClick={loadConversations}
+                                        class="bg-bb-bg border border-bb-border text-bb-text w-6 h-6 flex items-center justify-center hover:bg-bb-border hover:text-bb-accent transition-colors"
+                                        title="Refresh"
+                                    >
+                                        R
+                                    </button>
+                                    
+                                    <div class="flex-1"></div>
+
+                                    <button
+                                        type="submit"
+                                        disabled={!selectedConversation() || !msgInput().trim()}
+                                        class="bg-bb-accent text-bb-bg border border-bb-accent px-4 h-6 hover:brightness-110 font-bold disabled:opacity-50 disabled:grayscale transition-all uppercase"
+                                    >
+                                        &gt; TRANSMIT
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </Show>
+
+            <DeviceLinkModal onSuccess={handleDeviceLinkSuccess} onCancel={handleDeviceLinkCancel} />
+        </Panel>
+    );
+};

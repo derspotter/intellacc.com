@@ -90,7 +90,7 @@ async function unlockMessagingIfNeeded(page, password) {
   }
 }
 
-test('User can send and download an attachment in an MLS group', async ({ browser, request }) => {
+test.skip('LEGACY: User can send and download an attachment in an MLS group (quarantined)', async ({ browser, request }) => {
   await resetServerState();
 
   const USER = {

@@ -4,7 +4,7 @@ import van from 'vanjs-core';
 const { div, button, input, span, p, ul, li } = van.tags;
 import { api } from '../services/api.js';
 import messagingStore from '../stores/messagingStore.js';
-import coreCryptoClient from '../services/mls/coreCryptoClient.js';
+import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import messagingService from '../services/messaging.js';
 
 let searchTimeout = null;

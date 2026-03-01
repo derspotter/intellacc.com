@@ -7,7 +7,7 @@
 
 import init, { MlsClient } from 'openmls-wasm';
 import vaultStore from '../stores/vaultStore.js';
-import coreCryptoClient from './mls/coreCryptoClient.js';
+import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import messagingStore from '../stores/messagingStore.js';
 import { initIdleAutoLock, stopIdleAutoLock, loadIdleLockConfig } from './idleLock.js';
 import { api } from './api.js';

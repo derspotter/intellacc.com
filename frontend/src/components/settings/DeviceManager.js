@@ -1,7 +1,7 @@
 import van from 'vanjs-core';
 import { api } from '../../services/api';
 import vaultService from '../../services/vaultService';
-import coreCryptoClient from '../../services/mls/coreCryptoClient';
+import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import messagingService from '../../services/messaging';
 import vaultStore from '../../stores/vaultStore.js';
 

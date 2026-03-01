@@ -5,7 +5,7 @@ const { div, h2, h3, button, input, span, p, ul, li, textarea, form, i } = van.t
 import messagingService from '../services/messaging.js';
 import { getUserId as authGetUserId } from '../services/auth.js';
 import messagingStore from '../stores/messagingStore.js';
-import coreCryptoClient from '../services/mls/coreCryptoClient.js';
+import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import vaultStore from '../stores/vaultStore.js';
 import { api } from '../services/api.js';
 import { SafetyNumbersButton, ContactVerifyButton, VerificationBadge, FingerprintWarningBanner, ContactVerificationModal } from '../components/SafetyNumbers.js';

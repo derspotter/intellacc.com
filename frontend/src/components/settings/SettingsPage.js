@@ -2,6 +2,7 @@ import van from 'vanjs-core';
 import VaultSettings from '../vault/VaultSettings.js';
 import PasskeyManager from './PasskeyManager.js';
 import DeviceManager from './DeviceManager.js';
+import SkinPreferenceSettings from './SkinPreferenceSettings.js';
 import NotificationSettings from './NotificationSettings.js';
 import VerificationSettings from '../verification/VerificationSettings.js';
 import AiFlaggedContent from '../admin/AiFlaggedContent.js';
@@ -36,6 +37,8 @@ if (savedDarkMode !== null) {
 export default function SettingsPage() {
   return div({ class: 'settings-page' },
     h1('Settings'),
+
+    SkinPreferenceSettings(),
 
     div({ class: 'setting-item' },
       label(
