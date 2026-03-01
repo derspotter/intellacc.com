@@ -3,6 +3,8 @@ import solid from 'vite-plugin-solid';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import path from 'path';
+import tailwindcss from 'tailwindcss';
+import autoprefixer from 'autoprefixer';
 
 const proxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://backend:3000';
 const serverPort = Number(process.env.VITE_SERVER_PORT || process.env.PORT || 5174);
@@ -14,6 +16,11 @@ export default defineConfig({
     wasm(),
     topLevelAwait()
   ],
+  css: {
+    postcss: {
+      plugins: [tailwindcss(), autoprefixer()]
+    }
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

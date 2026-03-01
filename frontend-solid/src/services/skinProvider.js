@@ -57,6 +57,11 @@ const applySkinClass = (skin) => {
 
 const applyActiveSkin = (querySkin, storedSkin) => {
   const nextSkin = querySkin || storedSkin || DEFAULT_SKIN;
+  // Persist explicit hash/query skin so auth redirects that rewrite the hash
+  // (e.g. #home?skin=terminal -> #login) keep the selected skin.
+  if (querySkin) {
+    writeStoredSkin(querySkin);
+  }
   setSkinState(nextSkin);
   applySkinClass(nextSkin);
   return nextSkin;
@@ -125,6 +130,16 @@ export const setSkinPreference = async (skin) => {
 };
 
 export const syncSkinWithServer = async () => {
+  // When skin is explicitly selected via URL, do not let server preference
+  // override it during this navigation session.
+  const locationSkin = parseSkinFromQuery() || parseSkinFromHash();
+  if (locationSkin && VALID_SKINS.includes(locationSkin)) {
+    writeStoredSkin(locationSkin);
+    setSkinState(locationSkin);
+    applySkinClass(locationSkin);
+    return locationSkin;
+  }
+
   const response = await api.users.getUiPreferences();
   if (response?.skin && VALID_SKINS.includes(response.skin)) {
     writeStoredSkin(response.skin);
