@@ -1,5 +1,5 @@
 # Unified Backlog
-Updated: 2026-02-26 (audited against current codebase)
+Updated: 2026-03-01 (audited against current codebase)
 
 Status legend:
 - `Done`: implemented in app code (may still require production rollout/config).
@@ -44,10 +44,10 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   Backend blocks provider-unavailable starts in production and exposes provider availability + requirements in status payload.
 - `Done` PWA foundation:
   manifest, Apple touch icons, and offline caching via Stale-While-Revalidate service worker are implemented.
-- `Open` MLS key rotation UX:
-  low-level `selfUpdate()` exists, but no periodic scheduler and no manual "Refresh Keys" settings UI found.
-- `Partial` MLS staged-welcome inspection UI:
-  pending invite accept/reject exists, but member fingerprint inspection before acceptance is still missing.
+- `Done` MLS key rotation UX:
+  manual "Refresh Keys" settings UI implemented, tested with Playwright. Periodic scheduler postponed as a stretch goal.
+- `Done` MLS staged-welcome inspection UI:
+  member fingerprint inspection before acceptance is fully implemented via a modal, tested with Playwright.
 - `Done` Market lifecycle tests:
   backend coverage now verifies closed-market and resolved-market trade rejection in `/api/events/:eventId/update` plus open-market pass-through behavior.
 - `Done` Controlled onboarding with admin approval:
@@ -61,8 +61,9 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   no TOTP setup/login/backup-code flow found.
 - `Done` Passkey PRF vault unlock:
   WebAuthn/passkey management now persists PRF seed input, uses server-verified PRF output in passkey login responses, and supports local PRF unlock flow.
-- `Open` MLS proposal wrappers:
-  `propose_add_member`, `propose_remove_member`, `propose_self_update`, `add_members_without_update`, `self_update_with_new_signer` wrappers not implemented in app-facing JS.
+- `Partial` MLS proposal wrappers:
+  app-facing MLS wrappers now cover `selfUpdate`, `removeMember`, `leaveGroup`, proposal processing, and commit of pending proposals.
+  Still missing explicit wrappers for `propose_add_member`, `propose_remove_member`, `propose_self_update`, `add_members_without_update`, and `self_update_with_new_signer`.
 - `Open` MLS CommitBuilder JS wrapper:
   no general JS wrapper for app-driven multi-proposal/policy commit building.
 - `Done` Persistent message dedup across restarts:
@@ -80,7 +81,7 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Done` Mobile navigation overhaul:
   mobile header/hamburger, bottom nav, and responsive touch-target CSS are present.
 - `Partial` Enhanced offline + push notifications + background sync:
-  push notifications are implemented; offline caching and background sync are still missing.
+  push notifications and offline caching are implemented; background sync is still missing.
 - `Open` Messaging UX upgrades:
   reactions, message edit/delete, read receipts, and disappearing messages not implemented.
 - `Partial` Advanced social features:
@@ -88,7 +89,8 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Partial` Prediction analytics + user insights dashboards:
   scoring/calibration APIs exist; dedicated analytics dashboard UX is still missing.
 - `Partial` Performance/scaling work:
-  some DB/index and feed-performance work is done, but infra hardening and CI/CD remain open.
+  DB/index and feed-performance work are in place, and runtime stack was upgraded to Node 25 + Postgres 18.
+  Remaining work is infra hardening, capacity testing, and CI/CD automation.
 
 ## Source References
 - `next-steps.md`

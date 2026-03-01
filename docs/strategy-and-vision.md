@@ -164,6 +164,46 @@ Outcome resolves → Leaderboard updates →
 New users come to prove they're smarter → repeat
 ```
 
+## Execution Baseline (What Exists vs What Is Missing)
+
+If we want to win with **Consistency + Persuasion + Prediction**, we should optimize for shipping the full loop before adding too many new surfaces.
+
+Status snapshot (as of 2026-03-01):
+
+| Pillar | What is already in code | What is still missing to complete the pillar |
+|--------|--------------------------|----------------------------------------------|
+| Consistency (argument quality) | claim-gate + hybrid retrieval + reasoner pipeline, `post_analysis` lifecycle, market-link confirm/verify APIs, AI moderation flagging pipeline | Consistent end-user UX for argument/critique visibility and correction on all relevant post surfaces; stronger model-quality eval/monitoring loop before broad rollout |
+| Persuasion (did others update?) | attribution primitives exist (`post_market_matches`, `post_market_clicks`), referral context forwarded through trade/update path, matching + verification endpoints exist | reward scoring/settlement layer not finished (`post_signal_episodes`, `post_signal_reward_payouts`, nightly scorer, payout credit runner, cap/kill-switch observability) |
+| Prediction (was it true?) | LMSR engine, market updates/resolution, user scoring endpoints, leaderboard/reputation APIs, calibration/log scoring endpoints | tighter productized analytics UX and production ops/alerting hardening around scoring jobs and market lifecycle anomalies |
+
+### Immediate Priority Rule
+
+For roadmap sequencing, use this rule:
+
+1. Finish Persuasion payout pipeline to production-safe state.
+2. Tighten Consistency UX + model QA loop so users trust the critique layer.
+3. Productize Prediction analytics presentation.
+4. Then scale acquisition features (digests, aggregation, embeds, extension).
+
+## 90-Day Execution Plan (Minimum Viable Truth Loop)
+
+### Track A: Complete Persuasion settlement (highest leverage)
+- Ship schema + jobs: `post_signal_episodes`, `post_signal_reward_payouts`, scorer, payout crediting.
+- Add idempotent lock-safe batch processing (`SKIP LOCKED` pattern).
+- Add admin run-status endpoint + alert thresholds (error rate, lag, cap-hit rate).
+- Exit criteria: daily automatic runs, no double-payouts, auditable payout logs.
+
+### Track B: Make Consistency visible and correctable
+- Show argument + market-link + critique results clearly in post UX where users already read/write.
+- Keep author confirmation/override low-friction and always available.
+- Track acceptance/override/reject rates as quality metrics.
+- Exit criteria: users can understand and correct model interpretation without leaving core flow.
+
+### Track C: Prediction credibility UX
+- Add focused profile/dashboard surfaces for calibration, resolved-win rate, and time-weighted score.
+- Keep formulas and units explicit in UI copy.
+- Exit criteria: credibility score is explainable and shareable, not a black box.
+
 ### Cold Start Mitigation
 - LMSR market maker provides automatic liquidity (already built)
 - Auto-resolve markets from APIs (stock prices, election results) for trustless resolution
