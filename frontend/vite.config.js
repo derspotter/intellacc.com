@@ -4,6 +4,10 @@ import topLevelAwait from 'vite-plugin-top-level-await';
 import viteCompression from 'vite-plugin-compression';
 import path from 'path';
 
+const disableHmr =
+  process.env.VITE_DISABLE_HMR === '1' ||
+  process.env.VITE_DISABLE_HMR === 'true';
+
 export default defineConfig({
   define: {
     'process.env': {},
@@ -36,6 +40,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     allowedHosts: true,
+    hmr: disableHmr ? false : undefined,
     proxy: {
       '/api': {
         target: 'http://intellacc_backend:3000',  // Updated to use container_name instead of service name

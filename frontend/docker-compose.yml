@@ -3,8 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    environment:
+      VITE_DISABLE_HMR: "1"
     container_name: intellacc_frontend
-    command: sh -lc "npm install && npm install @rollup/rollup-linux-x64-musl --save-optional && npm run dev -- --host 0.0.0.0"
+    command: sh -lc "npm install && npm install @rollup/rollup-linux-x64-musl --save-optional && npm run build && npm run preview -- --host 0.0.0.0 --port 5173"
     ports:
       - "5173:5173"
     volumes:
