@@ -111,12 +111,19 @@ router.get('/messages/welcome', async (req, res) => {
 router.get('/queue/pending', async (req, res) => {
     try {
         const devicePublicId = req.headers['x-device-id'];
-        if (!devicePublicId) return res.status(400).json({ error: 'x-device-id header required' });
+        let deviceIds = [];
 
-        const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, req.user.id]);
-        if (deviceRes.rows.length === 0) return res.status(404).json({ error: 'Device not found' });
+        if (devicePublicId) {
+            const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, req.user.id]);
+            if (deviceRes.rows.length === 0) return res.status(404).json({ error: 'Device not found' });
+            deviceIds = deviceRes.rows.map((row) => row.id);
+        } else {
+            const allDevicesRes = await db.query('SELECT id FROM user_devices WHERE user_id = $1 AND revoked_at IS NULL', [req.user.id]);
+            if (allDevicesRes.rows.length === 0) return res.status(404).json({ error: 'No active devices found' });
+            deviceIds = allDevicesRes.rows.map((row) => row.id);
+        }
 
-        const messages = await mlsService.getPendingMessages(deviceRes.rows[0].id);
+        const messages = await mlsService.getPendingMessages(deviceIds);
         res.json(messages);
     } catch (err) {
         console.error(err);
@@ -128,12 +135,19 @@ router.post('/queue/ack', async (req, res) => {
     try {
         const devicePublicId = req.headers['x-device-id'];
         const { messageIds } = req.body;
-        if (!devicePublicId) return res.status(400).json({ error: 'x-device-id header required' });
+        let deviceIds = [];
 
-        const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, req.user.id]);
-        if (deviceRes.rows.length === 0) return res.status(404).json({ error: 'Device not found' });
+        if (devicePublicId) {
+            const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, req.user.id]);
+            if (deviceRes.rows.length === 0) return res.status(404).json({ error: 'Device not found' });
+            deviceIds = deviceRes.rows.map((row) => row.id);
+        } else {
+            const allDevicesRes = await db.query('SELECT id FROM user_devices WHERE user_id = $1 AND revoked_at IS NULL', [req.user.id]);
+            if (allDevicesRes.rows.length === 0) return res.status(404).json({ error: 'No active devices found' });
+            deviceIds = allDevicesRes.rows.map((row) => row.id);
+        }
 
-        await mlsService.ackMessages(deviceRes.rows[0].id, messageIds);
+        await mlsService.ackMessages(deviceIds, messageIds);
         res.json({ success: true });
     } catch (err) {
         console.error(err);
@@ -391,6 +405,40 @@ router.post('/direct-messages/:targetUserId', async (req, res) => {
   } catch (err) {
     console.error('Error creating DM:', err);
     res.status(500).json({ error: 'Failed to create direct message' });
+  }
+});
+
+// Rehydrate welcomes for an existing DM when the client is missing local group state.
+router.post('/direct-messages/:targetUserId/rehydrate', async (req, res) => {
+  try {
+    const requesterId = req.user.id;
+    const targetId = parseInt(req.params.targetUserId);
+
+    if (isNaN(targetId)) {
+      return res.status(400).json({ error: 'Invalid target user ID' });
+    }
+
+    if (requesterId === targetId) {
+      return res.status(400).json({ error: 'Cannot rehydrate DM with yourself' });
+    }
+
+    const groupId = await mlsService.findDirectMessage(requesterId, targetId);
+    if (!groupId) {
+      return res.status(404).json({ error: 'Direct message not found' });
+    }
+
+    const result = await mlsService.rehydrateDirectMessageWelcomes(requesterId, targetId, groupId);
+    res.json(result);
+  } catch (err) {
+    console.error('Error rehydrating direct message welcomes:', err);
+    if (err.message === 'Requester is not part of this direct message'
+      || err.message === 'Target user is not part of this direct message') {
+      return res.status(403).json({ error: err.message });
+    }
+    if (err.message === 'Direct message not found') {
+      return res.status(404).json({ error: err.message });
+    }
+    res.status(500).json({ error: 'Failed to rehydrate direct message' });
   }
 });
 
