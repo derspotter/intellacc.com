@@ -242,7 +242,7 @@ export default function EventsList(props) {
     if (authed() && weeklyLoading()) {
       return (
         <div class="event-card-section">
-          <h2>Select an Event</h2>
+          <h2 class="event-card-placeholder-title">Select an Event</h2>
           <div class="selection-prompt">
             <p>Loading your weekly assignment...</p>
           </div>
@@ -277,7 +277,7 @@ export default function EventsList(props) {
 
     return (
       <div class="event-card-section">
-        <h2>Select an Event</h2>
+        <h2 class="event-card-placeholder-title">Select an Event</h2>
         <div class="selection-prompt">
           <p>Choose an event from the list above to view details, make predictions, and place bets.</p>
           {authed() ? <p>No weekly assignment available.</p> : null}
