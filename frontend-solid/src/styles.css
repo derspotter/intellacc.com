@@ -7481,6 +7481,10 @@ body.skin-terminal * {
   font-family: var(--font-family, inherit);
 }
 
+body.skin-terminal #background-svg {
+  display: none;
+}
+
 /* Inline message/modal/leaderboard styles for solid test app */
 /* Global Leaderboard Styles */
 .global-leaderboard-card {
