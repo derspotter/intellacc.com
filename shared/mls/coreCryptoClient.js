@@ -1,6 +1,6 @@
-import init, { MlsClient, init_logging } from 'openmls-wasm';
-import { registerSocketEventHandler } from '../socket.js';
-import { api } from '../api.js';
+import init, { MlsClient, init_logging } from '@openmls';
+import { registerSocketEventHandler } from '@app-services/socket.js';
+import { api } from '@app-services/api.js';
 
 const KEY_PACKAGE_RENEWAL_WINDOW_SECONDS = 60 * 60 * 24 * 7;
 const MAX_LEAF_NODE_LIFETIME_RANGE_SECONDS = (60 * 60 * 24 * 28 * 3) + (60 * 60);
@@ -34,7 +34,7 @@ class CoreCryptoClient {
 
     async getVaultService() {
         if (!this._vaultService) {
-            this._vaultService = (await import('../vaultService.js')).default;
+            this._vaultService = (await import('@app-vault-service')).default;
         }
         return this._vaultService;
     }
@@ -1026,7 +1026,7 @@ class CoreCryptoClient {
             console.warn('[MLS] SECURITY: Fingerprint changes detected for members:', fingerprintWarnings);
             // Notify UI about fingerprint changes
             try {
-                const { default: messagingStore } = await import('../../stores/messagingStore.js');
+                const { default: messagingStore } = await import('@app-messaging-store');
                 messagingStore.addFingerprintWarnings(fingerprintWarnings);
             } catch (e) {
                 console.warn('[MLS] Could not notify UI of fingerprint warnings:', e);
@@ -1195,7 +1195,7 @@ class CoreCryptoClient {
 
     // Rotate keys for all active groups
     async rotateKeysAllGroups() {
-        const { default: messagingStore } = await import('../../stores/messagingStore.js');
+        const { default: messagingStore } = await import('@app-messaging-store');
         const groupsToUpdate = [];
 
         if (messagingStore.mlsGroups) {

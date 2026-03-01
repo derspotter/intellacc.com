@@ -4,7 +4,7 @@
 import van from 'vanjs-core';
 import vaultStore from '../../stores/vaultStore.js';
 import vaultService from '../../services/vaultService.js';
-import coreCryptoClient from '../../services/mls/coreCryptoClient.js';
+import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import { api } from '../../services/api.js';
 
 const { div, h3, p, button, label, select, option, span, input, form } = van.tags;

@@ -5,6 +5,7 @@ import { initializeSocket } from './services/socket';
 import { initIdleAutoLock } from './services/idleLock';
 import { registerServiceWorker } from './services/pushService';
 import Router, { updatePageFromHash } from './router';
+import { initializeSkinProvider } from './services/skinProvider';
 
 // Initialize store before anything else
 initializeStore();
@@ -29,6 +30,7 @@ registerServiceWorker();
 document.addEventListener('DOMContentLoaded', () => {
   const appEl = document.getElementById('app');
   appEl.innerHTML = ""; // Clear container
+  initializeSkinProvider();
   
   // Mount router
   van.add(appEl, Router());

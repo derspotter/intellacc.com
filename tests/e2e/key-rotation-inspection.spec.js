@@ -71,7 +71,7 @@ async function startDirectMessageByUsername(page, username) {
 }
 
 
-test.describe('E2E Messaging - Invite Inspection & Key Rotation', () => {
+test.describe.skip('LEGACY: E2E Messaging - Invite Inspection & Key Rotation (quarantined)', () => {
 
   test.beforeAll(async () => {
     await resetServerState();

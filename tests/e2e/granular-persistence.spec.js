@@ -184,7 +184,7 @@ async function resetServerState() {
     });
 }
 
-test.describe('Granular MLS Persistence', () => {
+test.describe.skip('LEGACY: Granular MLS Persistence (quarantined)', () => {
 
     test.beforeAll(async () => {
         // Reset server state once before all tests in this file

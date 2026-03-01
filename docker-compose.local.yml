@@ -3,7 +3,7 @@
 
 services:
   db:
-    image: postgres:18-alpine
+    image: postgres:17-alpine
     container_name: intellacc_db_dev
     environment:
       POSTGRES_USER: intellacc_user
@@ -76,6 +76,7 @@ services:
       - "5175:5173"
     volumes:
       - ./frontend:/app
+      - ./shared:/shared
       - frontend_node_modules:/app/node_modules
     depends_on:
       - backend
