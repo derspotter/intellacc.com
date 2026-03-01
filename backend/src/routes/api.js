@@ -202,6 +202,8 @@ router.get("/posts/:postId/markets", authenticateJWT, persuasiveAlphaController.
 router.get("/posts/:postId/market-link", authenticateJWT, persuasiveAlphaController.getPostMarketLink);
 router.post("/posts/:postId/confirm-market", authenticateJWT, persuasiveAlphaController.confirmMarketLink);
 router.post("/posts/:postId/verify", authenticateJWT, persuasiveAlphaController.submitVerification);
+router.post("/admin/persuasion-score/run", authenticateJWT, requireAdmin, persuasiveAlphaController.runAutomaticRewards);
+router.get("/admin/persuasion-score/status", authenticateJWT, requireAdmin, persuasiveAlphaController.getRewardRunStatus);
 router.get("/posts/:id/analysis-status", authenticateJWT, postController.getPostAnalysisStatus);
 router.get("/posts", postController.getPosts);                                 // Get all posts (public)
 router.get("/feed", authenticateJWT, postController.getFeed);                  // Get personalized feed
@@ -401,26 +403,26 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
     }
 
     try {
-      const eventResult = await db.query(
-        'SELECT outcome, closing_date FROM events WHERE id = $1',
-        [eventIdNumber]
-      );
+        const eventResult = await db.query(
+            'SELECT outcome, closing_date FROM events WHERE id = $1',
+            [eventIdNumber]
+        );
 
-      if (eventResult.rows.length === 0) {
-        return res.status(404).json({ message: 'Event not found' });
-      }
+        if (eventResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Event not found' });
+        }
 
-      const { outcome, closing_date } = eventResult.rows[0];
-      if (outcome) {
-        return res.status(400).json({ error: 'Market resolved', event_id: eventIdNumber });
-      }
+        const { outcome, closing_date } = eventResult.rows[0];
+        if (outcome) {
+            return res.status(400).json({ error: 'Market resolved', event_id: eventIdNumber });
+        }
 
-      if (closing_date && new Date(closing_date).getTime() <= Date.now()) {
-        return res.status(400).json({ error: 'Market closed', event_id: eventIdNumber });
-      }
+        if (closing_date && new Date(closing_date).getTime() <= Date.now()) {
+            return res.status(400).json({ error: 'Market closed', event_id: eventIdNumber });
+        }
     } catch (error) {
-      console.error('Error loading event lifecycle state:', error);
-      return res.status(500).json({ error: 'Failed to validate event state' });
+        console.error('Error loading event lifecycle state:', error);
+        return res.status(500).json({ error: 'Failed to validate event state' });
     }
 
     try {

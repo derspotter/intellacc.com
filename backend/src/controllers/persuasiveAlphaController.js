@@ -1,4 +1,5 @@
 const db = require('../db');
+const postSignalScoringService = require('../services/postSignalScoringService');
 
 const DEFAULT_CLICK_TTL_MINUTES = 30;
 const VALID_CONFIRM_ACTIONS = new Set(['confirm', 'override']);
@@ -554,7 +555,7 @@ exports.submitVerification = async (req, res) => {
       }
 
       await db.query('COMMIT');
-      res.status(200).json({
+      return res.status(200).json({
         success: true,
         action: actionType,
         post_id: postId,
@@ -575,5 +576,48 @@ exports.submitVerification = async (req, res) => {
     }
     console.error('Error submitting verification:', error);
     res.status(500).json({ message: 'Failed to submit verification' });
+  }
+};
+
+exports.runAutomaticRewards = async (req, res) => {
+  try {
+    const runLog = await postSignalScoringService.runPayerBatch();
+    res.status(200).json({
+      success: true,
+      run_result: runLog
+    });
+  } catch (error) {
+    console.error('Error running persuasive alpha rewards batch:', error);
+    res.status(500).json({ success: false, message: 'Failed to run persuasive rewards batch' });
+  }
+};
+
+exports.getRewardRunStatus = async (req, res) => {
+  try {
+    const limit = parseIntParam(req.query.limit || 10, 'limit');
+
+    // Check if the table exists first to avoid crashing if run before migration
+    const tableCheck = await db.query(
+      `SELECT EXISTS (
+         SELECT FROM information_schema.tables 
+         WHERE table_schema = 'public' AND table_name = 'post_signal_run_logs'
+       )`
+    );
+    if (!tableCheck.rows[0].exists) {
+      return res.status(200).json({ runs: [], message: 'Schema not initialized' });
+    }
+
+    const result = await db.query(
+      `SELECT * FROM post_signal_run_logs ORDER BY id DESC LIMIT $1`,
+      [limit]
+    );
+
+    res.status(200).json({
+      success: true,
+      runs: result.rows
+    });
+  } catch (error) {
+    console.error('Error fetching persuasive alpha run status:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch run status' });
   }
 };
