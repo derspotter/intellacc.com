@@ -1,8 +1,8 @@
 # /home/justus/Nextcloud/intellacc.com/docker-compose.yml
 
 include:
-  - path: ./frontend/docker-compose.yml
-    project_directory: ./frontend
+  - path: ./frontend-solid/docker-compose.yml
+    project_directory: ./frontend-solid
   - path: ./backend/docker-compose.yml
     project_directory: ./backend
   - path: ./prediction-engine/docker-compose.yml

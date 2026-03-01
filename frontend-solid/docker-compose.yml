@@ -1,16 +1,16 @@
 services:
-  frontend-solid:
+  frontend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: intellacc_frontend_solid
-    command: sh -lc "npm install --legacy-peer-deps && npm run dev -- --host 0.0.0.0"
+    container_name: intellacc_frontend
+    command: sh -lc "npm ci --legacy-peer-deps && npm run build && npm run preview -- --host 0.0.0.0 --port 5173"
     environment:
       VITE_API_PROXY_TARGET: http://intellacc_backend:3000
-      VITE_SERVER_PORT: 5174
-      VITE_HMR_CLIENT_PORT: 5174
+      VITE_SERVER_PORT: 5173
+      VITE_HMR_CLIENT_PORT: 5173
     ports:
-      - "5174:5174"
+      - "5173:5173"
     volumes:
       - .:/app
       - ../shared:/shared

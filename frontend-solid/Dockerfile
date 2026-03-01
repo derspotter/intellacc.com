@@ -11,8 +11,8 @@ RUN npm install --legacy-peer-deps
 # Copy application code
 COPY . .
 
-# Expose the port
-EXPOSE 5174
+# Expose the primary frontend port
+EXPOSE 5173
 
 # Command to run the dev server
 CMD ["npm", "run", "dev", "--", "--host"]
