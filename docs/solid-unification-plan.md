@@ -388,3 +388,30 @@ Do not open PR until all of the following are true:
 5. Migration notes include runbook for production-safe rollback (rebuild + deploy to `frontend-solid` only).
 
 Open PR after this gate is met so that migration, behavior, and visual parity are both auditable and repeatable.
+
+## Production Cutover Gate (Blocking)
+
+Before switching compose/mainline frontend runtime from legacy VanJS to Solid, run this gate script:
+
+```bash
+./scripts/solid-cutover-gate.sh
+```
+
+Mandatory checks in this script:
+
+1. Shared MLS core de-duplication guard (`scripts/check-mls-dedup.sh`)
+2. Containerized `frontend-solid` production build with mounted shared MLS + wasm dependencies
+
+Recommended full gate (includes UI smoke):
+
+```bash
+RUN_PLAYWRIGHT=1 PLAYWRIGHT_BASE_URL=http://localhost:4174 ./scripts/solid-cutover-gate.sh
+```
+
+(`PLAYWRIGHT_BASE_URL` defaults to `http://localhost:4174` inside the script.)
+
+Current smoke spec for cutover:
+
+- `tests/e2e/solid-cutover-smoke.spec.js`
+
+Do not flip compose default frontend until this gate is green.
