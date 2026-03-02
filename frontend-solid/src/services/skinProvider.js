@@ -57,11 +57,6 @@ const applySkinClass = (skin) => {
 
 const applyActiveSkin = (querySkin, storedSkin) => {
   const nextSkin = querySkin || storedSkin || DEFAULT_SKIN;
-  // Persist explicit hash/query skin so auth redirects that rewrite the hash
-  // (e.g. #home?skin=terminal -> #login) keep the selected skin.
-  if (querySkin) {
-    writeStoredSkin(querySkin);
-  }
   setSkinState(nextSkin);
   applySkinClass(nextSkin);
   return nextSkin;
@@ -71,8 +66,8 @@ let initialized = false;
 
 export const resolveSkin = () => {
   const querySkin = parseSkinFromQuery() || parseSkinFromHash();
-  const stored = readStoredSkin();
-  return querySkin || stored || DEFAULT_SKIN;
+  // Default to Van on direct visits unless a URL skin is explicitly requested.
+  return querySkin || DEFAULT_SKIN;
 };
 
 export const initializeSkinProvider = () => {
@@ -134,7 +129,6 @@ export const syncSkinWithServer = async () => {
   // override it during this navigation session.
   const locationSkin = parseSkinFromQuery() || parseSkinFromHash();
   if (locationSkin && VALID_SKINS.includes(locationSkin)) {
-    writeStoredSkin(locationSkin);
     setSkinState(locationSkin);
     applySkinClass(locationSkin);
     return locationSkin;
