@@ -24,9 +24,31 @@ const closePool = async () => {
   pool = null;
 };
 
+const executeWithTransaction = async (callback) => {
+  const activePool = getActivePool();
+  const client = await activePool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      // Preserve original failure; rollback failure is logged for diagnosis.
+      console.error('Failed to rollback transaction:', rollbackError);
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 // Export query method that wraps pool.query for convenience
 module.exports = {
   query: (text, params) => getActivePool().query(text, params),
   getPool: getActivePool,
-  closePool
+  closePool,
+  executeWithTransaction
 };

@@ -13,8 +13,9 @@ use chrono;
 use futures_util::{sink::SinkExt, stream::StreamExt};
 use moka::future::Cache;
 use rust_decimal::prelude::ToPrimitive;
+use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -242,6 +243,10 @@ async fn main() -> anyhow::Result<()> {
             "/log-scoring/time-weights",
             get(calculate_time_weights_endpoint),
         )
+        .route(
+            "/persuasion/score-mature-episodes",
+            post(score_mature_persuasion_episodes_endpoint),
+        )
         .route("/log-scoring/leaderboard", get(get_log_scoring_leaderboard))
         .route(
             "/user/:user_id/reputation",
@@ -325,6 +330,7 @@ async fn main() -> anyhow::Result<()> {
     println!("  GET /enhanced-leaderboard - Get enhanced leaderboard with log scores");
     println!("  GET /log-scoring/calculate - Calculate log scores for resolved predictions");
     println!("  GET /log-scoring/time-weights - Calculate time-weighted scores");
+    println!("  POST /persuasion/score-mature-episodes - Score mature persuasive-alpha episode components");
     println!("  GET /log-scoring/leaderboard - Get unified log scoring leaderboard");
     println!("  GET /user/:user_id/reputation - Get user reputation stats");
     println!("  GET /user/:user_id/update-reputation - Update user reputation points");
@@ -673,6 +679,223 @@ async fn calculate_time_weights_endpoint(State(app_state): State<AppState>) -> A
             e
         ))),
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct ScoreMatureEpisodesRequest {
+    #[serde(default)]
+    episode_ids: Option<Vec<i32>>,
+}
+
+// Score mature persuasive-alpha episode components directly in prediction-engine.
+// Backend callers only persist + mint from these engine-produced scores.
+async fn score_mature_persuasion_episodes_endpoint(
+    State(app_state): State<AppState>,
+    ExtractJson(payload): ExtractJson<ScoreMatureEpisodesRequest>,
+) -> ApiResult<Value> {
+    match score_mature_persuasion_episodes(&app_state.db, payload.episode_ids.as_deref()).await {
+        Ok((processed_episodes, updated_components)) => Ok(Json(json!({
+            "success": true,
+            "processed_episodes": processed_episodes,
+            "updated_components": updated_components
+        }))),
+        Err(e) => Err(internal_error(&format!(
+            "Persuasion mature scoring error: {}",
+            e
+        ))),
+    }
+}
+
+async fn score_mature_persuasion_episodes(
+    pool: &PgPool,
+    episode_ids: Option<&[i32]>,
+) -> Result<(i32, i32), anyhow::Error> {
+    let rows = if let Some(ids) = episode_ids {
+        if ids.is_empty() {
+            Vec::new()
+        } else {
+            sqlx::query(
+                r#"
+                SELECT
+                  pse.id,
+                  pse.event_id,
+                  pse.market_update_id,
+                  pse.p_before,
+                  pse.p_after,
+                  pse.s_early,
+                  pse.s_mid,
+                  pse.s_final,
+                  mu.created_at AS update_ts,
+                  e.closing_date AT TIME ZONE 'UTC' AS closing_date,
+                  e.outcome,
+                  e.market_prob AS fallback_prob
+                FROM post_signal_episodes pse
+                JOIN market_updates mu ON mu.id = pse.market_update_id
+                JOIN events e ON e.id = pse.event_id
+                WHERE pse.is_meaningful = TRUE
+                  AND pse.id = ANY($1)
+                  AND (pse.s_early IS NULL OR pse.s_mid IS NULL OR (pse.s_final IS NULL AND e.outcome IS NOT NULL))
+                ORDER BY pse.id ASC
+                "#,
+            )
+            .bind(ids)
+            .fetch_all(pool)
+            .await?
+        }
+    } else {
+        sqlx::query(
+            r#"
+            SELECT
+              pse.id,
+              pse.event_id,
+              pse.market_update_id,
+              pse.p_before,
+              pse.p_after,
+              pse.s_early,
+              pse.s_mid,
+              pse.s_final,
+              mu.created_at AS update_ts,
+              e.closing_date AT TIME ZONE 'UTC' AS closing_date,
+              e.outcome,
+              e.market_prob AS fallback_prob
+            FROM post_signal_episodes pse
+            JOIN market_updates mu ON mu.id = pse.market_update_id
+            JOIN events e ON e.id = pse.event_id
+            WHERE pse.is_meaningful = TRUE
+              AND (pse.s_early IS NULL OR pse.s_mid IS NULL OR (pse.s_final IS NULL AND e.outcome IS NOT NULL))
+            ORDER BY pse.id ASC
+            LIMIT 2000
+            "#,
+        )
+        .fetch_all(pool)
+        .await?
+    };
+
+    let mut processed_episodes = 0_i32;
+    let mut updated_components = 0_i32;
+    let now = chrono::Utc::now();
+
+    for row in rows {
+        processed_episodes += 1;
+
+        let episode_id: i32 = row.get("id");
+        let event_id: i32 = row.get("event_id");
+        let p_before: f64 = row.get("p_before");
+        let p_after: f64 = row.get("p_after");
+        let s_early_existing: Option<f64> = row.get("s_early");
+        let s_mid_existing: Option<f64> = row.get("s_mid");
+        let s_final_existing: Option<f64> = row.get("s_final");
+        let update_ts: chrono::DateTime<chrono::Utc> = row.get("update_ts");
+        let closing_date: chrono::DateTime<chrono::Utc> = row.get("closing_date");
+        let outcome_raw: Option<String> = row.get("outcome");
+        let fallback_prob: f64 = row.get("fallback_prob");
+
+        let remaining = closing_date.signed_duration_since(update_ts);
+        let remaining_ms = remaining.num_milliseconds().max(0);
+
+        let early_target_ts =
+            update_ts + chrono::Duration::milliseconds((remaining_ms as f64 * 0.10).round() as i64);
+        let mid_target_ts =
+            update_ts + chrono::Duration::milliseconds((remaining_ms as f64 * 0.50).round() as i64);
+
+        let mut set_fragments: Vec<String> = Vec::new();
+        let mut bind_values: Vec<f64> = Vec::new();
+
+        if s_early_existing.is_none() && early_target_ts < closing_date && now >= early_target_ts {
+            let target =
+                get_market_prob_at_or_before(pool, event_id, early_target_ts, fallback_prob)
+                    .await?;
+            let score = episode_log_score_delta(target, p_before, p_after);
+            set_fragments.push(format!("s_early = ${}", bind_values.len() + 1));
+            bind_values.push(score);
+            set_fragments.push("finalized_early_at = NOW()".to_string());
+            updated_components += 1;
+        }
+
+        if s_mid_existing.is_none() && mid_target_ts < closing_date && now >= mid_target_ts {
+            let target =
+                get_market_prob_at_or_before(pool, event_id, mid_target_ts, fallback_prob).await?;
+            set_fragments.push(format!("s_mid = ${}", bind_values.len() + 1));
+            bind_values.push(episode_log_score_delta(target, p_before, p_after));
+            set_fragments.push("finalized_mid_at = NOW()".to_string());
+            updated_components += 1;
+        }
+
+        if s_final_existing.is_none() {
+            if let Some(target_final) = parse_final_target(outcome_raw.as_deref()) {
+                set_fragments.push(format!("s_final = ${}", bind_values.len() + 1));
+                bind_values.push(episode_log_score_delta(target_final, p_before, p_after));
+                set_fragments.push("finalized_final_at = NOW()".to_string());
+                updated_components += 1;
+            }
+        }
+
+        if !set_fragments.is_empty() {
+            let query = format!(
+                "UPDATE post_signal_episodes SET {} WHERE id = ${}",
+                set_fragments.join(", "),
+                bind_values.len() + 1
+            );
+
+            let mut q = sqlx::query(&query);
+            for value in bind_values {
+                q = q.bind(value);
+            }
+            q.bind(episode_id).execute(pool).await?;
+        }
+    }
+
+    Ok((processed_episodes, updated_components))
+}
+
+async fn get_market_prob_at_or_before(
+    pool: &PgPool,
+    event_id: i32,
+    ts: chrono::DateTime<chrono::Utc>,
+    fallback_prob: f64,
+) -> Result<f64, anyhow::Error> {
+    let row = sqlx::query(
+        r#"
+        SELECT new_prob
+        FROM market_updates
+        WHERE event_id = $1
+          AND created_at <= $2
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(event_id)
+    .bind(ts)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(found) = row {
+        let value: f64 = found.get("new_prob");
+        Ok(value)
+    } else {
+        Ok(fallback_prob)
+    }
+}
+
+fn parse_final_target(outcome: Option<&str>) -> Option<f64> {
+    let value = outcome?.to_ascii_lowercase();
+    match value.as_str() {
+        "yes" | "true" | "1" | "correct" => Some(1.0),
+        "no" | "false" | "0" | "incorrect" => Some(0.0),
+        _ => None,
+    }
+}
+
+fn episode_log_score_delta(target: f64, p_before: f64, p_after: f64) -> f64 {
+    let floor = 0.0001_f64;
+    let clamp01 = |p: f64| p.clamp(0.0, 1.0);
+    let t = clamp01(target);
+    let pb = clamp01(p_before);
+    let pa = clamp01(p_after);
+
+    let ll_before = -(t * (pb.max(floor)).ln() + (1.0 - t) * ((1.0 - pb).max(floor)).ln());
+    let ll_after = -(t * (pa.max(floor)).ln() + (1.0 - t) * ((1.0 - pa).max(floor)).ln());
+    (ll_before - ll_after).max(0.0)
 }
 
 // Get unified log scoring leaderboard
