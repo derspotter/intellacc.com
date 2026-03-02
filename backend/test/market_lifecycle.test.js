@@ -129,4 +129,61 @@ describe('Market lifecycle rejection coverage', () => {
     expect(res.body).toHaveProperty('market_update_id', 99);
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
+
+  test('rejects closed market sells before calling prediction engine', async () => {
+    const user = await makeUser('closed_market_sell_user');
+    const closedEvent = await createEvent({
+      closingDate: new Date(Date.now() - 5 * 60 * 1000)
+    });
+
+    cleanup.users.add(user.id);
+    cleanup.events.add(closedEvent.id);
+
+    const res = await request(app)
+      .post(`/api/events/${closedEvent.id}/sell`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ share_type: 'YES', amount: 1.0 });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Market closed');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('rejects resolved market sells before calling prediction engine', async () => {
+    const user = await makeUser('resolved_market_sell_user');
+    const resolvedEvent = await createEvent({
+      outcome: 'resolved'
+    });
+
+    cleanup.users.add(user.id);
+    cleanup.events.add(resolvedEvent.id);
+
+    const res = await request(app)
+      .post(`/api/events/${resolvedEvent.id}/sell`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ share_type: 'NO', amount: 1.0 });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Market resolved');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('does not block open-market sells when event is still active', async () => {
+    const user = await makeUser('open_market_sell_user');
+    const activeEvent = await createEvent({
+      closingDate: new Date(Date.now() + 5 * 60 * 1000)
+    });
+
+    cleanup.users.add(user.id);
+    cleanup.events.add(activeEvent.id);
+
+    const res = await request(app)
+      .post(`/api/events/${activeEvent.id}/sell`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ share_type: 'YES', amount: 1.0 });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveProperty('market_update_id', 99);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
 });

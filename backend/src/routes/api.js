@@ -28,6 +28,7 @@ const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const moderationController = require('../controllers/moderationController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
 const db = require('../db');
+const { ensureEventIsActive } = require('../utils/eventLifecycle');
 const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
 const predictionEngineHeaders = {
     'Content-Type': 'application/json',
@@ -175,6 +176,7 @@ router.post("/events", authenticateJWT, requirePaymentVerified, predictionsContr
 router.get("/events", predictionsController.getEvents); // Temporarily no auth for testing
 router.get("/categories", predictionsController.getCategories); // Get available categories
 router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
+router.patch("/events/:id", authenticateJWT, requireAdmin, predictionsController.resolveEvent);
 router.get("/predictions", authenticateJWT, predictionsController.getUserPredictions);
 
 // Community market question submission + validation
@@ -349,8 +351,24 @@ router.get("/events/:eventId/kelly", authenticateJWT, requirePhoneVerified, asyn
 });
 
 router.post("/events/:eventId/sell", authenticateJWT, requirePhoneVerified, async (req, res) => {
+    const { eventId } = req.params;
+    const eventIdNumber = Number(eventId);
+
+    if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
+        return res.status(400).json({ message: 'Invalid event id' });
+    }
+
     try {
-        const { eventId } = req.params;
+        const lifecycleValidation = await ensureEventIsActive(eventIdNumber);
+        if (lifecycleValidation.status !== 200) {
+            return res.status(lifecycleValidation.status).json(lifecycleValidation.payload);
+        }
+    } catch (error) {
+        console.error('Error loading event lifecycle state:', error);
+        return res.status(500).json({ error: 'Failed to validate event state' });
+    }
+
+    try {
         const { share_type, amount } = req.body;
         const userId = req.user.id;
 
