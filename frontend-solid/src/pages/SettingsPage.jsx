@@ -3,6 +3,7 @@ import SkinPreferenceSettings from '../components/settings/SkinPreferenceSetting
 import PasskeyManager from '../components/settings/PasskeyManager';
 import DeviceManager from '../components/settings/DeviceManager';
 import VerificationSettings from '../components/verification/VerificationSettings';
+import ApiKeysManager from '../components/settings/ApiKeysManager';
 import NotificationSettings from '../components/settings/NotificationSettings';
 import VaultSettings from '../components/settings/VaultSettings';
 import PasswordResetCancel from '../components/settings/PasswordResetCancel';
@@ -66,6 +67,7 @@ export default function SettingsPage() {
       <PasskeyManager />
       <DeviceManager />
       <VerificationSettings />
+      <ApiKeysManager />
       <NotificationSettings />
       <VaultSettings />
       <PasswordResetCancel />

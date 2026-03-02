@@ -188,16 +188,15 @@ export default function MarketQuestionHub() {
     }
   };
 
-  const submitReview = async (submissionId, vote) => {
+  const submitReview = async (submissionId, vote, noteText = null) => {
     if (reviewSubmitting.val) return;
     reviewSubmitting.val = submissionId;
     clearMessages();
 
     try {
-      const noteState = getReviewNoteState(submissionId);
       const response = await api.marketQuestions.submitReview(submissionId, {
         vote,
-        note: noteState.val || null
+        note: noteText || null
       });
 
       const message =
@@ -205,7 +204,6 @@ export default function MarketQuestionHub() {
           ? `Review finalized. Outcome: ${response.approved ? 'approved' : 'rejected'}.`
           : `Review submitted (${response?.submission?.total_reviews || 1}/${response?.submission?.required_validators || '...'}).`;
       success.val = message;
-      noteState.val = '';
 
       queueLoaded.val = false;
       listLoaded.val = false;
@@ -251,55 +249,59 @@ export default function MarketQuestionHub() {
       ? `Submit question (${cfg.baseCreatorBondRp} RP base bond)`
       : 'Submit question';
 
-    return Card({ className: 'market-question-card', title: 'Submit a New Question' }, [
-      renderConfigBanner(),
-      form({ onsubmit: createSubmission, class: 'market-question-form' }, [
-        label({ for: 'mq-title' }, 'Title'),
-        input({
-          id: 'mq-title',
-          type: 'text',
-          value: () => title.val,
-          oninput: (event) => (title.val = event.target.value),
-          placeholder: 'Example: Will X happen by date Y?'
-        }),
+    return Card({ 
+      className: 'market-question-card', 
+      title: 'Submit a New Question',
+      children: [
+        renderConfigBanner(),
+        form({ onsubmit: createSubmission, class: 'market-question-form' }, [
+          label({ for: 'mq-title' }, 'Title'),
+          input({
+            id: 'mq-title',
+            type: 'text',
+            value: () => title.val,
+            oninput: (event) => (title.val = event.target.value),
+            placeholder: 'Example: Will X happen by date Y?'
+          }),
 
-        label({ for: 'mq-details' }, 'Details'),
-        textarea({
-          id: 'mq-details',
-          rows: 5,
-          value: () => details.val,
-          oninput: (event) => (details.val = event.target.value),
-          placeholder: 'Include specific, falsifiable wording and closing criteria.'
-        }),
+          label({ for: 'mq-details' }, 'Details'),
+          textarea({
+            id: 'mq-details',
+            rows: 5,
+            value: () => details.val,
+            oninput: (event) => (details.val = event.target.value),
+            placeholder: 'Include specific, falsifiable wording and closing criteria.'
+          }),
 
-        label({ for: 'mq-category' }, 'Category (optional)'),
-        input({
-          id: 'mq-category',
-          type: 'text',
-          value: () => category.val,
-          oninput: (event) => (category.val = event.target.value),
-          placeholder: 'Politics, Crypto, Sports, etc.'
-        }),
+          label({ for: 'mq-category' }, 'Category (optional)'),
+          input({
+            id: 'mq-category',
+            type: 'text',
+            value: () => category.val,
+            oninput: (event) => (category.val = event.target.value),
+            placeholder: 'Politics, Crypto, Sports, etc.'
+          }),
 
-        label({ for: 'mq-closing-date' }, 'Closing Date'),
-        input({
-          id: 'mq-closing-date',
-          type: 'datetime-local',
-          min: toLocalDateTimeValue(new Date()),
-          value: () => closingDate.val,
-          oninput: (event) => (closingDate.val = event.target.value)
-        }),
+          label({ for: 'mq-closing-date' }, 'Closing Date'),
+          input({
+            id: 'mq-closing-date',
+            type: 'datetime-local',
+            min: toLocalDateTimeValue(new Date()),
+            value: () => closingDate.val,
+            oninput: (event) => (closingDate.val = event.target.value)
+          }),
 
-        div({ class: 'market-question-form-actions' }, [
-          Button({
-            type: 'submit',
-            className: 'button-primary',
-            disabled: () => creating.val,
-            children: () => creating.val ? 'Submitting...' : createLabel
-          })
+          div({ class: 'market-question-form-actions' }, [
+            Button({
+              type: 'submit',
+              className: 'button-primary',
+              disabled: () => creating.val,
+              children: () => creating.val ? 'Submitting...' : createLabel
+            })
+          ])
         ])
-      ])
-    ]);
+      ]
+    });
   };
 
   const renderReviewQueue = () => {
@@ -308,56 +310,73 @@ export default function MarketQuestionHub() {
       loadReviewQueue();
     }
 
-    return Card({ className: 'market-question-card', title: 'Review Queue' }, [
-      div({ class: 'market-question-card-subtitle' }, 'Review questions submitted by other users. You stake 2 RP to review each submission.'),
-      queueLoading.val
-        ? p('Loading queue...')
-        : reviewQueue.val.length === 0
-          ? p('No pending reviews available right now.')
-          : ul({ class: 'market-question-list' },
-            reviewQueue.val.map((submission) => {
-              const noteState = getReviewNoteState(submission.id);
-              const approveBusy = () => isReviewerBusy(submission.id) && reviewSubmitting.val === submission.id;
-              return li({ class: 'market-question-item' }, [
-                div({ class: 'market-question-item-header' }, [
-                  div({ class: 'market-question-title' }, String(submission.title || 'Untitled')),
-                  div({ class: 'market-question-meta' }, [
-                    span(`Creator: ${submission.creator_username || `User #${submission.creator_user_id}`}`),
-                    span(` | Category: ${submission.category || 'General'}`),
-                    span(` | Closes: ${formatDateTime(submission.closing_date)}`)
-                  ])
-                ]),
-                p({ class: 'market-question-details' }, String(submission.details || 'No details provided.')),
-                div({ class: 'market-question-votes' }, [
-                  span(`Current: ${submission.approvals || 0}/${submission.required_approvals} approvals | `),
-                  span(`${submission.rejections || 0}/${submission.required_validators - Number(submission.rejections || 0)} rejections`)
-                ]),
-                div({ class: 'market-question-note' }, [
-                  textarea({
-                    placeholder: 'Optional note (visible to creator)',
-                    rows: 2,
-                    value: () => noteState.val,
-                    oninput: (event) => (noteState.val = event.target.value)
-                  })
-                ]),
-                div({ class: 'market-question-item-actions' }, [
-                  button({
-                    class: 'button button-secondary',
-                    type: 'button',
-                    disabled: approveBusy,
-                    onclick: () => submitReview(submission.id, 'approve')
-                  }, () => approveBusy() ? 'Submitting...' : 'Approve'),
-                  button({
-                    class: 'button button-secondary',
-                    type: 'button',
-                    disabled: approveBusy,
-                    onclick: () => submitReview(submission.id, 'reject')
-                  }, () => approveBusy() ? 'Submitting...' : 'Reject')
-                  ])
-              ]);
-            })
-          )
-    ]);
+    return Card({ 
+      className: 'market-question-card', 
+      title: 'Review Queue',
+      children: [
+        div({ class: 'market-question-card-subtitle' }, 'Review questions submitted by other users. You stake 2 RP to review each submission.'),
+        () => {
+          if (queueLoading.val) return p('Loading queue...');
+          if (reviewQueue.val.length === 0) return p('No pending reviews available right now.');
+
+          const listDom = ul({ class: 'market-question-list' });
+
+          reviewQueue.val.forEach((submission) => {
+            const approveBusy = () => isReviewerBusy(submission.id) && reviewSubmitting.val === submission.id;
+            const textareaId = `review-note-${submission.id}`;
+
+            const item = li({ class: 'market-question-item' },
+              div({ class: 'market-question-item-header' },
+                div({ class: 'market-question-title' }, String(submission.title || 'Untitled')),
+                div({ class: 'market-question-meta' },
+                  span(`Creator: ${submission.creator_username || `User #${submission.creator_user_id}`}`),
+                  span(` | Category: ${submission.category || 'General'}`),
+                  span(` | Closes: ${formatDateTime(submission.closing_date)}`)
+                )
+              ),
+              p({ class: 'market-question-details' }, String(submission.details || 'No details provided.')),
+              div({ class: 'market-question-votes' },
+                span(`Current: ${submission.approvals || 0}/${submission.required_approvals} approvals | `),
+                span(`${submission.rejections || 0}/${submission.required_validators - Number(submission.rejections || 0)} rejections`)
+              ),
+              div({ class: 'market-question-note' },
+                textarea({
+                  id: textareaId,
+                  placeholder: 'Optional note (visible to creator)',
+                  rows: 2,
+                  class: 'form-input',
+                  style: 'width: 100%; box-sizing: border-box; resize: vertical; margin-bottom: 0.5rem; padding: 0.5rem;'
+                })
+              ),
+              div({ class: 'market-question-item-actions' },
+                button({
+                  class: 'button button-secondary',
+                  type: 'button',
+                  disabled: approveBusy,
+                  onclick: () => {
+                    const noteValue = document.getElementById(textareaId)?.value || '';
+                    submitReview(submission.id, 'approve', noteValue);
+                  }
+                }, () => approveBusy() ? 'Submitting...' : 'Approve'),
+                button({
+                  class: 'button button-secondary',
+                  type: 'button',
+                  disabled: approveBusy,
+                  onclick: () => {
+                    const noteValue = document.getElementById(textareaId)?.value || '';
+                    submitReview(submission.id, 'reject', noteValue);
+                  }
+                }, () => approveBusy() ? 'Submitting...' : 'Reject')
+              )
+            );
+            
+            van.add(listDom, item);
+          });
+
+          return listDom;
+        }
+      ]
+    });
   };
 
   const renderMySubmissions = () => {
@@ -365,60 +384,70 @@ export default function MarketQuestionHub() {
       loadSubmissions();
     }
 
-    return Card({ className: 'market-question-card', title: 'My Submissions' }, [
-      div({ class: 'market-question-filters' }, [
-        label({ for: 'mq-status-filter' }, 'Status: '),
-        select({
-          id: 'mq-status-filter',
-          value: () => statusFilter.val,
-          onchange: (event) => {
-            statusFilter.val = event.target.value;
-            listLoaded.val = false;
-            mineOnly.val = true;
-            loadSubmissions();
-          }
-        }, [
-          option({ value: 'all' }, 'All'),
-          option({ value: 'pending' }, 'Pending'),
-          option({ value: 'approved' }, 'Approved'),
-          option({ value: 'rejected' }, 'Rejected')
+    return Card({ 
+      className: 'market-question-card', 
+      title: 'My Submissions',
+      children: [
+        div({ class: 'market-question-filters' }, [
+          label({ for: 'mq-status-filter' }, 'Status: '),
+          select({
+            id: 'mq-status-filter',
+            value: () => statusFilter.val,
+            onchange: (event) => {
+              statusFilter.val = event.target.value;
+              listLoaded.val = false;
+              mineOnly.val = true;
+              loadSubmissions();
+            }
+          }, [
+            option({ value: 'all' }, 'All'),
+            option({ value: 'pending' }, 'Pending'),
+            option({ value: 'approved' }, 'Approved'),
+            option({ value: 'rejected' }, 'Rejected')
+          ]),
+          Button({
+            className: 'button-secondary',
+            onclick: loadSubmissions,
+            children: () => listLoading.val ? 'Loading...' : 'Refresh'
+          })
         ]),
-        Button({
-          className: 'button-secondary',
-          onclick: loadSubmissions,
-          children: () => listLoading.val ? 'Loading...' : 'Refresh'
-        })
-      ]),
 
-      listLoading.val
-        ? p('Loading submissions...')
-        : submissions.val.length === 0
-          ? p('No matching submissions found.')
-          : ul({ class: 'market-question-list' },
-              submissions.val.map((submission) => li({ class: 'market-question-item' }, [
-                div({ class: 'market-question-item-header' }, [
-                  div({ class: 'market-question-title' }, String(submission.title || 'Untitled')),
-                  div({ class: 'market-question-status' }, String(submission.status || 'unknown')),
-                ]),
-                div({ class: 'market-question-meta' }, [
-                  span(`Creator bond: ${Number(submission.creator_bond_rp || 0)} RP`),
-                  span(` | Reviews: ${submission.total_reviews || 0}/${submission.required_validators || 5}`),
-                  span(` | Approvals: ${submission.approvals || 0}`),
-                  span(` | Rejections: ${submission.rejections || 0}`),
-                  span(` | Closes: ${formatDateTime(submission.closing_date)}`)
-                ]),
-                p({ class: 'market-question-details' }, String(submission.details || '')),
-                submission.approved_event_id
-                  ? div({ class: 'market-question-submission-meta' }, [
-                      div({ class: 'market-question-status-note' }, [
-                        strong('Linked event: '),
-                        small(`#${submission.approved_event_id}`)
-                      ])
-                    ])
-                  : null
-              ]))
-            )
-    ]);
+        () => {
+          if (listLoading.val) return p('Loading submissions...');
+          if (submissions.val.length === 0) return p('No matching submissions found.');
+          
+          const list = ul({ class: 'market-question-list' });
+
+          submissions.val.forEach((submission) => {
+            const item = li({ class: 'market-question-item' },
+              div({ class: 'market-question-item-header' },
+                div({ class: 'market-question-title' }, String(submission.title || 'Untitled')),
+                div({ class: 'market-question-status' }, String(submission.status || 'unknown')),
+              ),
+              div({ class: 'market-question-meta' },
+                span(`Creator bond: ${Number(submission.creator_bond_rp || 0)} RP`),
+                span(` | Reviews: ${submission.total_reviews || 0}/${submission.required_validators || 5}`),
+                span(` | Approvals: ${submission.approvals || 0}`),
+                span(` | Rejections: ${submission.rejections || 0}`),
+                span(` | Closes: ${formatDateTime(submission.closing_date)}`)
+              ),
+              p({ class: 'market-question-details' }, String(submission.details || '')),
+              submission.approved_event_id
+                ? div({ class: 'market-question-submission-meta' },
+                    div({ class: 'market-question-status-note' },
+                      strong('Linked event: '),
+                      small(`#${submission.approved_event_id}`)
+                    )
+                  )
+                : null
+            );
+            van.add(list, item);
+          });
+
+          return list;
+        }
+      ]
+    });
   };
 
   const renderTab = (id, tabLabel) => {
@@ -480,15 +509,16 @@ export default function MarketQuestionHub() {
     () => isAdminState.val
       ? Card({
         className: 'market-question-admin',
-        title: 'Admin Helpers'
-      }, [
+        title: 'Admin Helpers',
+        children: [
           p('Automatically process traction + resolution rewards for eligible approved questions.'),
           Button({
             onclick: runAutoRewards,
             className: 'button-secondary',
             children: 'Run reward sweep now'
           })
-        ])
+        ]
+      })
       : null
   ]);
 }

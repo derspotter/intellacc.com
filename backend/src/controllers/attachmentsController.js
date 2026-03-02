@@ -219,6 +219,9 @@ async function downloadAttachment(req, res) {
       if (!attachment.mls_group_id) {
         return res.status(404).json({ error: 'Attachment not linked to a group' });
       }
+      if (!req.user) {
+        return res.status(401).json({ error: 'Authentication required for message attachments' });
+      }
       const membership = await db.query(
         'SELECT 1 FROM mls_group_members WHERE group_id = $1 AND user_id = $2',
         [attachment.mls_group_id, req.user.id]

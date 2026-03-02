@@ -108,45 +108,45 @@ export default function PaymentVerification({ onSuccess } = {}) {
   });
 
   return (
-    <section class="payment-verification">
-      <div class="verification-icon">💳</div>
-      <h3>Verify a payment method</h3>
+    <section class="payment-verification" style="text-align: left; padding: 1rem 0;">
+      <div class="verification-icon" style="font-size: 2rem; margin-bottom: 0.5rem;">💳</div>
+      <h3 style="margin-top: 0; margin-bottom: 0.5rem;">Verify a payment method</h3>
       <Show when={status() === 'loading'}>
-        <div class="loading-state">
-          <div class="spinner" />
-          <p>Preparing secure payment form...</p>
+        <div class="loading-state" style="text-align: left;">
+          <div class="spinner" style="margin-bottom: 0.5rem;" />
+          <p style="margin: 0;">Preparing secure payment form...</p>
         </div>
       </Show>
       <Show when={status() === 'processing'}>
-        <div class="loading-state">
-          <div class="spinner" />
-          <p>Confirming your payment method...</p>
+        <div class="loading-state" style="text-align: left;">
+          <div class="spinner" style="margin-bottom: 0.5rem;" />
+          <p style="margin: 0;">Confirming your payment method...</p>
         </div>
       </Show>
       <Show when={status() === 'success'}>
-        <div class="success-state">
-          <div class="success-icon">✓</div>
-          <p class="success-message">Payment method verified.</p>
-          <p class="instructions">This will update shortly once Stripe confirms.</p>
+        <div class="success-state" style="text-align: left; padding: 1rem 0;">
+          <div class="success-icon" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: var(--success-color); color: white; border-radius: 50%; margin-bottom: 0.5rem;">✓</div>
+          <p class="success-message" style="margin-bottom: 0.5rem;">Payment method verified.</p>
+          <p class="instructions" style="margin-bottom: 0;">This will update shortly once Stripe confirms.</p>
         </div>
       </Show>
       <Show when={['idle', 'ready', 'error'].includes(status())}>
-        <div class="payment-form">
-          <p class="description">Verify payment to unlock market creation and governance actions.</p>
+        <div class="payment-form" style="text-align: left;">
+          <p class="description" style="margin-bottom: 1rem;">Verify payment to unlock market creation and governance actions.</p>
           {status() === 'ready' ? (
             <>
               <div class="payment-form-body" ref={setPaymentContainer} />
-              <button type="button" class="btn btn-primary" onClick={confirmPayment}>
+              <button type="button" class="button button-primary" style="margin-top: 1rem;" onClick={confirmPayment}>
                 Confirm verification
               </button>
             </>
           ) : (
-            <button type="button" class="btn btn-primary" onClick={setupPayment} disabled={status() === 'loading'}>
+            <button type="button" class="button button-primary" onClick={setupPayment} disabled={status() === 'loading'}>
               Start payment verification
             </button>
           )}
           <Show when={error()}>
-            <p class="error-message">{error()}</p>
+            <p class="error-message" style="margin-top: 1rem;">{error()}</p>
           </Show>
         </div>
       </Show>

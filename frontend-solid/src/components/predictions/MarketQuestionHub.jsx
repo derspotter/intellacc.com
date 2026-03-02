@@ -339,6 +339,7 @@ export default function MarketQuestionHub() {
                       rows={2}
                       value={noteFor(submission.id)}
                       onInput={(event) => setNoteFor(submission.id, event.target.value)}
+                      style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg, transparent); color: var(--text-color); margin-bottom: 0.5rem; resize: vertical;"
                     />
                   </div>
                   <div class="market-question-item-actions">

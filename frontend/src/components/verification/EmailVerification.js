@@ -56,22 +56,22 @@ export default function EmailVerification({ onSuccess, userEmail } = {}) {
         }
     };
 
-    return div({ class: 'email-verification' },
-        div({ class: 'verification-icon' }, '📧'),
-        h3('Verify Your Email'),
+    return div({ class: 'email-verification', style: 'text-align: left; padding: 1rem 0;' },
+        div({ class: 'verification-icon', style: 'font-size: 2rem; margin-bottom: 0.5rem;' }, '📧'),
+        h3({ style: 'margin-top: 0; margin-bottom: 0.5rem;' }, 'Verify Your Email'),
 
         () => {
             const currentStatus = status.val;
 
             if (currentStatus === 'sent') {
-                return div({ class: 'success-state' },
-                    div({ class: 'success-icon' }, '✓'),
-                    p({ class: 'success-message' },
+                return div({ class: 'success-state', style: 'text-align: left; padding: 1rem 0;' },
+                    div({ class: 'success-icon', style: 'display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: var(--success-color); color: white; border-radius: 50%; margin-bottom: 0.5rem;' }, '✓'),
+                    p({ class: 'success-message', style: 'margin-bottom: 0.5rem;' },
                         'Verification email sent to ',
                         strong(userEmail || 'your email address'),
                         '.'
                     ),
-                    p({ class: 'instructions' },
+                    p({ class: 'instructions', style: 'margin-bottom: 0.5rem;' },
                         'Check your inbox and click the verification link. ',
                         'The link expires in 24 hours.'
                     ),
@@ -82,6 +82,7 @@ export default function EmailVerification({ onSuccess, userEmail } = {}) {
                             : button({
                                 type: 'button',
                                 class: 'btn-link',
+                                style: 'padding: 0; margin: 0; border: none; background: none; color: var(--primary-color); cursor: pointer; text-decoration: underline;',
                                 onclick: sendVerification
                             }, 'resend')
                     )
@@ -89,18 +90,18 @@ export default function EmailVerification({ onSuccess, userEmail } = {}) {
             }
 
             if (currentStatus === 'sending') {
-                return div({ class: 'loading-state' },
-                    div({ class: 'spinner' }),
-                    p('Sending verification email...')
+                return div({ class: 'loading-state', style: 'text-align: left;' },
+                    div({ class: 'spinner', style: 'margin-bottom: 0.5rem;' }),
+                    p({ style: 'margin: 0;' }, 'Sending verification email...')
                 );
             }
 
             if (currentStatus === 'error') {
-                return div({ class: 'error-state' },
-                    p({ class: 'error-message' }, error.val),
+                return div({ class: 'error-state', style: 'text-align: left;' },
+                    p({ class: 'error-message', style: 'margin-bottom: 1rem;' }, error.val),
                     button({
                         type: 'button',
-                        class: 'btn btn-primary',
+                        class: 'button button-primary',
                         onclick: sendVerification,
                         disabled: cooldown.val > 0
                     }, cooldown.val > 0 ? `Wait ${cooldown.val}s` : 'Try Again')
@@ -108,17 +109,17 @@ export default function EmailVerification({ onSuccess, userEmail } = {}) {
             }
 
             // Idle state
-            return div({ class: 'idle-state' },
-                p({ class: 'description' },
+            return div({ class: 'idle-state', style: 'text-align: left;' },
+                p({ class: 'description', style: 'margin-bottom: 0.5rem;' },
                     'Verify your email address to unlock posting, commenting, and messaging features.'
                 ),
-                userEmail ? p({ class: 'email-display' },
+                userEmail ? p({ class: 'email-display', style: 'margin-bottom: 1.5rem;' },
                     'We\'ll send a verification link to: ',
                     strong(userEmail)
                 ) : null,
                 button({
                     type: 'button',
-                    class: 'btn btn-primary',
+                    class: 'button button-primary',
                     onclick: sendVerification
                 }, 'Send Verification Email')
             );

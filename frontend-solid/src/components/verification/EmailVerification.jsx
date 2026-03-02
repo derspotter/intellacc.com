@@ -47,43 +47,45 @@ export default function EmailVerification({ onSuccess, userEmail }) {
   };
 
   return (
-    <section class="email-verification">
-      <div class="verification-icon">📧</div>
-      <h3>Verify your email</h3>
+    <section class="email-verification" style="text-align: left; padding: 1rem 0;">
+      <div class="verification-icon" style="font-size: 2rem; margin-bottom: 0.5rem;">📧</div>
+      <h3 style="margin-top: 0; margin-bottom: 0.5rem;">Verify your email</h3>
       <Show when={status() === 'sent'}>
-        <div class="success-state">
-          <div class="success-icon">✓</div>
-          <p class="success-message">
+        <div class="success-state" style="text-align: left; padding: 1rem 0;">
+          <div class="success-icon" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: var(--success-color); color: white; border-radius: 50%; margin-bottom: 0.5rem;">✓</div>
+          <p class="success-message" style="margin-bottom: 0.5rem;">
             Verification email sent to {userEmail || 'your email'}.
           </p>
-          <p class="instructions">Check your inbox and click the verification link.</p>
+          <p class="instructions" style="margin-bottom: 0.5rem;">Check your inbox and click the verification link.</p>
           <p class="spam-note">
-            Didn&apos;t receive it? Check spam or {cooldown() > 0 ? `wait ${cooldown()}s` : <button type="button" class="btn-link" onClick={send}>resend</button>}
+            Didn&apos;t receive it? Check spam or {cooldown() > 0 ? `wait ${cooldown()}s` : <button type="button" class="btn-link" style="padding: 0; margin: 0; border: none; background: none; color: var(--primary-color); cursor: pointer; text-decoration: underline;" onClick={send}>resend</button>}
           </p>
         </div>
       </Show>
       <Show when={status() === 'sending'}>
-        <div class="loading-state">
-          <div class="spinner" />
-          <p>Sending verification email...</p>
+        <div class="loading-state" style="text-align: left;">
+          <div class="spinner" style="margin-bottom: 0.5rem;" />
+          <p style="margin: 0;">Sending verification email...</p>
         </div>
       </Show>
       <Show when={status() === 'error'}>
-        <div class="error-state">
-          <p class="error-message">{error()}</p>
-          <button type="button" class="btn btn-primary" onClick={send} disabled={cooldown() > 0}>
+        <div class="error-state" style="text-align: left;">
+          <p class="error-message" style="margin-bottom: 1rem;">{error()}</p>
+          <button type="button" class="button button-primary" onClick={send} disabled={cooldown() > 0}>
             {cooldown() > 0 ? `Wait ${cooldown()}s` : 'Try again'}
           </button>
         </div>
       </Show>
       <Show when={status() === 'idle'}>
-        <p class="description">Verify your email address to unlock posting, commenting, and messaging.</p>
-        <Show when={userEmail}>
-          <p class="email-display">We&apos;ll send it to {userEmail}</p>
-        </Show>
-        <button type="button" class="btn btn-primary" onClick={send}>
-          Send verification email
-        </button>
+        <div class="idle-state" style="text-align: left;">
+          <p class="description" style="margin-bottom: 0.5rem;">Verify your email address to unlock posting, commenting, and messaging.</p>
+          <Show when={userEmail}>
+            <p class="email-display" style="margin-bottom: 1.5rem;">We&apos;ll send it to <strong>{userEmail}</strong></p>
+          </Show>
+          <button type="button" class="button button-primary" onClick={send}>
+            Send verification email
+          </button>
+        </div>
       </Show>
     </section>
   );

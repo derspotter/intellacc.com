@@ -422,6 +422,15 @@ export const api = {
     deleteAccount: (password) =>
       request('/me', { method: 'DELETE', body: { password } }),
 
+    getApiKeys: () =>
+      request('/users/me/api-keys'),
+
+    createApiKey: (name, isBot) =>
+      request('/users/me/api-keys', { method: 'POST', body: { name, isBot } }),
+
+    revokeApiKey: (keyId) =>
+      request(`/users/me/api-keys/${keyId}`, { method: 'DELETE' }),
+
     getMasterKey: (deviceIds) =>
       request('/users/master-key', { 
           headers: deviceIds ? { 'x-device-ids': deviceIds.join(',') } : {} 
@@ -558,13 +567,18 @@ export const api = {
     unlikePost: (postId) => 
       request(`/posts/${postId}/like`, { method: 'DELETE' }),
       
-    getLikeStatus: (postId) => 
+    getLikeStatus: (postId) =>
       request(`/posts/${postId}/like/status`, { method: 'GET' }),
-      
-    getLikesCount: (postId) => 
-      request(`/posts/${postId}/likes`, { method: 'GET' })
-  },
 
+    getLikesCount: (postId) =>
+      request(`/posts/${postId}/likes`, { method: 'GET' }),
+
+    getMarkets: (postId) =>
+      request(`/posts/${postId}/markets`),
+
+    marketClick: (postId, eventId) =>
+      request(`/posts/${postId}/market-click`, { method: 'POST', body: { event_id: eventId } })
+    },
   attachments: {
     uploadPost: (file) => {
       const form = new FormData();

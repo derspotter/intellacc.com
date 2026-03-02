@@ -8,6 +8,7 @@ import VerificationSettings from '../verification/VerificationSettings.js';
 import AiFlaggedContent from '../admin/AiFlaggedContent.js';
 import DangerZone from './DangerZone.js';
 import PasswordResetCancel from './PasswordResetCancel.js';
+import { ApiKeysManager } from './ApiKeysManager.js';
 import { isAdminState } from '../../services/auth';
 
 const { div, h1, label, input } = van.tags;
@@ -59,6 +60,9 @@ export default function SettingsPage() {
 
     // Verification
     VerificationSettings(),
+    
+    // API Keys (Agents)
+    ApiKeysManager(),
 
     // Admin AI moderation
     () => isAdminState.val ? AiFlaggedContent() : null,
