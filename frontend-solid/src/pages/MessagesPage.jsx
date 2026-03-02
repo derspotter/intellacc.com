@@ -5,6 +5,7 @@ import vaultStore from '../store/vaultStore';
 import vaultService from '../services/mls/vaultService';
 import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import { onMlsMessage, onMlsWelcome } from '../services/socket';
+import { DeviceLinkModal } from '../components/vault/DeviceLinkModal';
 
 const normalizeRows = (payload) => {
   if (Array.isArray(payload)) {
@@ -124,6 +125,9 @@ const getConversationName = (conversation, groupId) => {
   return `Conversation ${groupId}`;
 };
 
+const isLinkRequiredError = (err) =>
+  err?.status === 403 && err?.data?.code === 'LINK_REQUIRED';
+
 export default function MessagesPage() {
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal('');
@@ -139,6 +143,7 @@ export default function MessagesPage() {
   const [showNewConversation, setShowNewConversation] = createSignal(false);
   const [isInitialized, setIsInitialized] = createSignal(false);
   const [groupError, setGroupError] = createSignal('');
+  let pendingPostLinkAction = null;
 
   const currentUserId = createMemo(() => {
     return getAuthUserId() || coreCryptoClient?.identityName || vaultStore.userId || '';
@@ -249,6 +254,15 @@ export default function MessagesPage() {
       await loadConversations();
       setIsInitialized(true);
     } catch (err) {
+      if (isLinkRequiredError(err)) {
+        pendingPostLinkAction = async () => {
+          await initializeMessaging();
+        };
+        vaultStore.setShowDeviceLinkModal(true);
+        setError('Verify this device to unlock encrypted messaging.');
+        setIsInitialized(false);
+        return;
+      }
       setError(err?.message || 'Unable to initialize encrypted messaging.');
       setIsInitialized(false);
     }
@@ -373,6 +387,15 @@ export default function MessagesPage() {
       setTargetId('');
       setShowNewConversation(false);
     } catch (err) {
+      if (isLinkRequiredError(err)) {
+        pendingPostLinkAction = async () => {
+          await coreCryptoClient.startDirectMessage(nextTarget);
+          await loadConversations();
+        };
+        vaultStore.setShowDeviceLinkModal(true);
+        setError('Verify this device before starting a new encrypted conversation.');
+        return;
+      }
       setError(err?.message || 'Failed to create message thread.');
     } finally {
       setConversationBusy(false);
@@ -423,12 +446,35 @@ export default function MessagesPage() {
         }));
       }
     } catch (err) {
+      if (isLinkRequiredError(err)) {
+        vaultStore.setShowDeviceLinkModal(true);
+      }
       setError(err?.message || 'Failed to send message.');
       setMessageText(text);
       setGroupMessages((current) => current.filter((msg) => msg.id !== optimisticId));
     } finally {
       setSendingMessage(false);
     }
+  };
+
+  const handleDeviceLinkSuccess = async () => {
+    const action = pendingPostLinkAction;
+    pendingPostLinkAction = null;
+    setError('');
+    if (!action) {
+      await initializeMessaging();
+      return;
+    }
+    try {
+      await action();
+      await initializeMessaging();
+    } catch (err) {
+      setError(err?.message || 'Device linked, but the requested action failed. Please try again.');
+    }
+  };
+
+  const handleDeviceLinkCancel = () => {
+    pendingPostLinkAction = null;
   };
 
   createEffect(() => {
@@ -645,6 +691,7 @@ export default function MessagesPage() {
       <Show when={error()}>
         <p class="error">{error()}</p>
       </Show>
+      <DeviceLinkModal onSuccess={handleDeviceLinkSuccess} onCancel={handleDeviceLinkCancel} />
     </section>
   );
 }
