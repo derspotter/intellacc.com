@@ -1,7 +1,8 @@
 {
   "scripts": {
     "console": "node scripts/collect_console.js",
-    "console:prod": "HEADLESS=true node scripts/collect_console.js https://intellacc.com 5000"
+    "console:prod": "HEADLESS=true node scripts/collect_console.js https://intellacc.com 5000",
+    "solid:cutover-gate": "./scripts/solid-cutover-gate.sh"
   },
   "dependencies": {
     "@playwright/test": "^1.57.0",
