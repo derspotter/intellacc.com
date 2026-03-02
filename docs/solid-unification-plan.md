@@ -343,6 +343,10 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
   - Added shared verification styles and status states (verifying/success/error).
   - Added `confirmEmailVerification` named API export for `frontend-solid` route usage.
   - Current status: parity coverage now includes the VanJS email verification landing path as a first-class route.
+- `2026-03-02`: Closed MLS device-link parity gap for Van skin messaging route:
+  - Added `DeviceLinkModal` wiring to `frontend-solid/src/pages/MessagesPage.jsx`.
+  - Added `LINK_REQUIRED` handling for initialization, conversation creation, and send failures.
+  - Added post-link retry hook so the pending messaging action can continue after approval.
 
 ## Assumptions
 
