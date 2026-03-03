@@ -77,20 +77,14 @@ const createPost = async (content) => {
 
 const likePost = (postId) => {
     if (postId == null) return;
-    setState("posts", (prev) => prev.map(p =>
-        String(p.id) === String(postId)
-            ? { ...p, liked_by_user: true, like_count: (p.like_count || 0) + 1 }
-            : p
-    ));
+    setState("posts", p => String(p.id) === String(postId), "liked_by_user", true);
+    setState("posts", p => String(p.id) === String(postId), "like_count", c => (c || 0) + 1);
 };
 
 const unlikePost = (postId) => {
     if (postId == null) return;
-    setState("posts", (prev) => prev.map(p =>
-        String(p.id) === String(postId)
-            ? { ...p, liked_by_user: false, like_count: Math.max(0, (p.like_count || 1) - 1) }
-            : p
-    ));
+    setState("posts", p => String(p.id) === String(postId), "liked_by_user", false);
+    setState("posts", p => String(p.id) === String(postId), "like_count", c => Math.max(0, (c || 1) - 1));
 };
 
 const clear = () => {

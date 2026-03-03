@@ -6,6 +6,7 @@ import { isAdminState, getTokenData } from '../../services/auth';
 import postsStore from '../../store/posts';
 import auth from '../../services/auth';
 import LikeButton from './LikeButton';
+import PostMarkets from './PostMarkets';
 
 import AiContentBadge from '../common/AiContentBadge';
 
@@ -253,7 +254,18 @@ export default function PostItem({ post }) {
               span(post.username || 'Anonymous')
           ]),
           div({ class: "post-meta post-meta-main" }, [
-            span({ class: "post-header-likes" }, `${post.like_count || 0} like${(post.like_count === 1) ? '' : 's'}`),
+            span({ class: "post-header-likes" }, () => {
+              const currentLikeStatus = postsStore.state.likeStatus[post.id];
+              const initiallyLiked = !!post.liked_by_user;
+              let currentCount = Number(post.like_count) || 0;
+              
+              if (currentLikeStatus !== undefined && currentLikeStatus !== initiallyLiked) {
+                currentCount += currentLikeStatus ? 1 : -1;
+                currentCount = Math.max(0, currentCount);
+              }
+              
+              return `${currentCount} like${(currentCount === 1) ? '' : 's'}`;
+            }),
             span({
               class: "post-header-comments",
               style: "cursor: pointer;",
@@ -393,6 +405,9 @@ export default function PostItem({ post }) {
           }
         }
       ),
+
+      // 4.5 Market Chips
+      PostMarkets({ postId: post.id }),
 
       // 5. Actions (Toggle Edit Options)
       div({ class: "post-actions" }, [

@@ -310,15 +310,14 @@ const postsStore = {
       this.state.likeStatus[itemId] = !current;  // optimistic status toggle
       console.log(`[Store Action] likeStatus toggled for itemId ${itemId}: ${current} -> ${this.state.likeStatus[itemId]}`);
       console.log('[Store Action] Current likeStatus map:', this.state.likeStatus);
-      // Update like_count on post
+      // Update like_count on post mutably without triggering global array re-render
       const idx = this.state.posts.val.findIndex(p => p.id === itemId);
       let originalCount;
       if (idx !== -1) {
         originalCount = this.state.posts.val[idx].like_count || 0;
         const newCount = !current ? originalCount + 1 : Math.max(0, originalCount - 1);
-        const updatedPost = { ...this.state.posts.val[idx], like_count: newCount, liked_by_user: !current };
-        const newArr = [...this.state.posts.val]; newArr[idx] = updatedPost;
-        this.state.posts.val = newArr;
+        this.state.posts.val[idx].like_count = newCount;
+        this.state.posts.val[idx].liked_by_user = !current;
         console.log(`[Store Action] post ${itemId} like_count updated: ${originalCount} -> ${newCount}`);
       }
       try {
@@ -328,13 +327,11 @@ const postsStore = {
       } catch (err) {
         console.error('[Store Action] toggleLike API error:', err);
         console.log(`[Store Action] Reverting likeStatus for itemId ${itemId} back to ${current}`);
-        console.log('[Store Action] Current likeStatus map after revert:', this.state.likeStatus);
         // revert
         this.state.likeStatus[itemId] = current;
         if (idx !== -1) {
-          const reverted = { ...this.state.posts.val[idx], like_count: originalCount, liked_by_user: current };
-          const revertArr = [...this.state.posts.val]; revertArr[idx] = reverted;
-          this.state.posts.val = revertArr;
+          this.state.posts.val[idx].like_count = originalCount;
+          this.state.posts.val[idx].liked_by_user = current;
         }
         return false;
       }

@@ -24,9 +24,12 @@ export default function LikeButton({ postId }) {
    
   // Create the button with a reactive binding to just this post's like status
   return button({
+    type: 'button',
     class: () => `post-action like-button ${like() ? 'liked' : ''} ${isProcessing.val ? 'processing' : ''}`,
     disabled: isProcessing.val,
     onclick: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       e.target.classList.add('animate-like');
       setTimeout(() => e.target.classList.remove('animate-like'), 300);
       handleLikeToggle();
