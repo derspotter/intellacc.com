@@ -29,6 +29,8 @@ mod database;
 mod db_adapter;
 mod lmsr_api; // Clean LMSR API using lmsr_core directly
 mod lmsr_core;
+mod lmsr_multi_core;
+mod market_import;
 mod metaculus; // Configuration management
 
 #[cfg(test)]
@@ -274,10 +276,20 @@ async fn main() -> anyhow::Result<()> {
             get(manual_limited_import_endpoint),
         )
         .route("/metaculus/sync-categories", get(manual_category_sync))
+        .route("/imports/sync-all", post(sync_all_imports_endpoint))
+        .route(
+            "/imports/sync/:provider",
+            post(sync_provider_import_endpoint),
+        )
+        .route("/imports/status", get(import_status_endpoint))
         // LMSR Market API endpoints
         .route("/events/:id/market", get(get_market_state_endpoint))
         .route("/events/:id/trades", get(get_event_trades_endpoint))
         .route("/events/:id/update", post(update_market_endpoint))
+        .route(
+            "/events/:id/update-outcome",
+            post(update_market_outcome_endpoint),
+        )
         .route("/events/:id/kelly", get(kelly_suggestion_endpoint))
         .route("/events/:id/sell", post(sell_shares_endpoint))
         .route(
@@ -340,9 +352,15 @@ async fn main() -> anyhow::Result<()> {
     println!("  GET /metaculus/sync - Manual sync with Metaculus API (150 recent questions)");
     println!("  GET /metaculus/bulk-import - Complete import of ALL Metaculus questions");
     println!("  GET /metaculus/sync-categories - Manual category sync");
+    println!("  POST /imports/sync-all - Sync all configured external market providers");
+    println!(
+        "  POST /imports/sync/:provider - Sync one provider (metaculus|manifold|polymarket|kalshi)"
+    );
+    println!("  GET /imports/status - Recent provider sync runs");
     println!("  GET /events/:id/market - Get market state for event");
     println!("  GET /events/:id/trades - Get recent trades for event");
     println!("  POST /events/:id/update - Update market with stake");
+    println!("  POST /events/:id/update-outcome - Update N-outcome market with stake");
     println!("  GET /events/:id/kelly - Get Kelly criterion suggestion");
     println!("  POST /events/:id/sell - Sell shares back to market");
     println!("  POST /events/:id/market-resolve - Resolve market event");
@@ -630,6 +648,102 @@ async fn manual_category_sync(
             })))
         }
         Err(e) => Err(internal_error(&format!("Category sync error: {}", e))),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ImportStatusQuery {
+    limit: Option<i64>,
+}
+
+async fn sync_all_imports_endpoint(State(app_state): State<AppState>) -> ApiResult<Value> {
+    match market_import::sync_all_markets(&app_state.db).await {
+        Ok(runs) => {
+            invalidate_and_broadcast(
+                &app_state,
+                "external_import_sync_all",
+                json!({ "providers": runs.len() }),
+            );
+            let summary = runs.iter().fold(
+                json!({
+                    "fetched_count": 0,
+                    "excluded_count": 0,
+                    "merged_count": 0,
+                    "created_count": 0,
+                    "linked_count": 0,
+                    "error_count": 0
+                }),
+                |mut acc, run| {
+                    acc["fetched_count"] = json!(
+                        acc["fetched_count"].as_i64().unwrap_or(0) + run.fetched_count as i64
+                    );
+                    acc["excluded_count"] = json!(
+                        acc["excluded_count"].as_i64().unwrap_or(0) + run.excluded_count as i64
+                    );
+                    acc["merged_count"] =
+                        json!(acc["merged_count"].as_i64().unwrap_or(0) + run.merged_count as i64);
+                    acc["created_count"] = json!(
+                        acc["created_count"].as_i64().unwrap_or(0) + run.created_count as i64
+                    );
+                    acc["linked_count"] =
+                        json!(acc["linked_count"].as_i64().unwrap_or(0) + run.linked_count as i64);
+                    acc["error_count"] =
+                        json!(acc["error_count"].as_i64().unwrap_or(0) + run.error_count as i64);
+                    acc
+                },
+            );
+
+            Ok(Json(json!({
+                "success": true,
+                "runs": runs,
+                "summary": summary
+            })))
+        }
+        Err(e) => Err(internal_error(&format!(
+            "External import sync-all error: {}",
+            e
+        ))),
+    }
+}
+
+async fn sync_provider_import_endpoint(
+    State(app_state): State<AppState>,
+    Path(provider): Path<String>,
+) -> ApiResult<Value> {
+    match market_import::sync_provider_named(&app_state.db, &provider).await {
+        Ok(run) => {
+            invalidate_and_broadcast(
+                &app_state,
+                "external_import_sync_provider",
+                json!({ "provider": provider }),
+            );
+            Ok(Json(json!({
+                "success": true,
+                "run": run
+            })))
+        }
+        Err(e) => Err(internal_error(&format!(
+            "External import sync-provider error: {}",
+            e
+        ))),
+    }
+}
+
+async fn import_status_endpoint(
+    State(app_state): State<AppState>,
+    Query(params): Query<ImportStatusQuery>,
+) -> ApiResult<Value> {
+    let limit = params.limit.unwrap_or(25).clamp(1, 200);
+    match market_import::get_recent_import_runs(&app_state.db, limit).await {
+        Ok(runs) => Ok(Json(json!({
+            "success": true,
+            "limit": limit,
+            "runs": runs
+        }))),
+        Err(e) => Err(internal_error(&format!(
+            "External import status error: {}",
+            e
+        ))),
     }
 }
 
@@ -1170,7 +1284,106 @@ async fn update_market_endpoint(
             if msg_lower.contains("market closed") {
                 return Err(bad_request_error("Market closed"));
             }
+            if msg_lower.contains("outcome-based endpoint") {
+                return Err(bad_request_error(
+                    "Use /events/:id/update-outcome for this market type",
+                ));
+            }
             Err(internal_error(&format!("Market update error: {}", msg)))
+        }
+    }
+}
+
+// Update market for an explicit outcome (multiple choice / numeric buckets)
+async fn update_market_outcome_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+
+    let user_id = payload
+        .get("user_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| {
+            bad_request_error("Missing or invalid user_id: must be a positive integer")
+        })? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
+
+    let outcome_id = payload
+        .get("outcome_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid outcome_id"))?;
+    if outcome_id <= 0 {
+        return Err(bad_request_error("Invalid outcome_id: must be positive"));
+    }
+
+    let stake = payload
+        .get("stake")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| bad_request_error("Missing or invalid stake: must be a finite number"))?;
+    if !stake.is_finite() {
+        return Err(bad_request_error("Invalid stake: must be finite"));
+    }
+    if !(0.01..=1_000_000.0).contains(&stake) {
+        return Err(bad_request_error(
+            "Invalid stake: must be within [0.01, 1,000,000] RP",
+        ));
+    }
+
+    let update = lmsr_api::OutcomeMarketUpdate {
+        event_id,
+        outcome_id,
+        stake,
+        referral_post_id: payload
+            .get("referral_post_id")
+            .and_then(|value| value.as_i64())
+            .filter(|value| *value > 0)
+            .map(|value| value as i32),
+        referral_click_id: payload
+            .get("referral_click_id")
+            .and_then(|value| value.as_i64())
+            .filter(|value| *value > 0)
+            .map(|value| value as i32),
+    };
+
+    match lmsr_api::update_market_outcome(&app_state.db, &app_state.config, user_id, update).await {
+        Ok(result) => {
+            invalidate_and_broadcast(
+                &app_state,
+                "market_updated",
+                json!({
+                    "event_id": event_id,
+                    "user_id": user_id,
+                    "new_prob": result.market_prob,
+                    "outcome_id": result.outcome_id
+                }),
+            );
+            Ok(Json(json!(result)))
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            let msg_lower = msg.to_lowercase();
+            if msg_lower.contains("market resolved") {
+                return Err(bad_request_error("Market resolved"));
+            }
+            if msg_lower.contains("market closed") {
+                return Err(bad_request_error("Market closed"));
+            }
+            if msg_lower.contains("no configured outcomes")
+                || msg_lower.contains("selected outcome")
+                || msg_lower.contains("binary markets")
+            {
+                return Err(bad_request_error(&msg));
+            }
+            Err(internal_error(&format!(
+                "Market outcome update error: {}",
+                msg
+            )))
         }
     }
 }
@@ -1375,20 +1588,75 @@ async fn resolve_market_event_endpoint(
         return Err(bad_request_error("Invalid event_id: must be positive"));
     }
 
-    // Extract and validate outcome: true = YES, false = NO
+    if let Some(outcome_id) = payload.get("outcome_id").and_then(|v| v.as_i64()) {
+        if outcome_id <= 0 {
+            return Err(bad_request_error("Invalid outcome_id: must be positive"));
+        }
+        match lmsr_api::resolve_event_by_outcome_id(&app_state.db, event_id, outcome_id, None).await
+        {
+            Ok(()) => {
+                invalidate_and_broadcast(
+                    &app_state,
+                    "marketResolved",
+                    json!({
+                        "eventId": event_id,
+                        "outcome_id": outcome_id,
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    }),
+                );
+                return Ok(Json(json!({
+                    "success": true,
+                    "event_id": event_id,
+                    "outcome_id": outcome_id,
+                    "message": format!("Market event {} resolved with outcome {}", event_id, outcome_id)
+                })));
+            }
+            Err(e) => return Err(internal_error(&format!("Market resolution error: {}", e))),
+        }
+    }
+
+    if let Some(numerical_outcome) = payload.get("numerical_outcome").and_then(|v| v.as_f64()) {
+        if !numerical_outcome.is_finite() {
+            return Err(bad_request_error("numerical_outcome must be finite"));
+        }
+        match lmsr_api::resolve_numeric_event(&app_state.db, event_id, numerical_outcome).await {
+            Ok(outcome_id) => {
+                invalidate_and_broadcast(
+                    &app_state,
+                    "marketResolved",
+                    json!({
+                        "eventId": event_id,
+                        "outcome_id": outcome_id,
+                        "numerical_outcome": numerical_outcome,
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    }),
+                );
+                return Ok(Json(json!({
+                    "success": true,
+                    "event_id": event_id,
+                    "outcome_id": outcome_id,
+                    "numerical_outcome": numerical_outcome,
+                    "message": format!("Numeric market {} resolved into bucket {}", event_id, outcome_id)
+                })));
+            }
+            Err(e) => {
+                return Err(internal_error(&format!(
+                    "Numeric market resolution error: {}",
+                    e
+                )))
+            }
+        }
+    }
+
     let outcome = payload
         .get("outcome")
         .and_then(|v| v.as_bool())
-        .ok_or_else(|| bad_request_error("Missing or invalid outcome (must be boolean)"))?;
-
-    println!(
-        "🎯 Market resolution triggered: event_id={}, outcome={}",
-        event_id, outcome
-    );
+        .ok_or_else(|| {
+            bad_request_error("Provide one of: outcome (bool), outcome_id, or numerical_outcome")
+        })?;
 
     match lmsr_api::resolve_event(&app_state.db, event_id, outcome).await {
         Ok(()) => {
-            // Broadcast market resolution
             invalidate_and_broadcast(
                 &app_state,
                 "marketResolved",
@@ -1398,7 +1666,6 @@ async fn resolve_market_event_endpoint(
                     "timestamp": chrono::Utc::now().to_rfc3339()
                 }),
             );
-
             Ok(Json(json!({
                 "success": true,
                 "event_id": event_id,

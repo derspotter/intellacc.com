@@ -1,4 +1,5 @@
 // Metaculus API integration for fetching prediction questions
+use crate::market_import::{exclusion_reason, ImportedMarket, MarketImportProvider};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
@@ -33,23 +34,16 @@ struct MetaculusQuestion {
     description: Option<String>,
 }
 
-// Our internal event structure
-#[derive(Debug)]
-struct PredictionEvent {
-    title: String,
-    description: String,
-    metaculus_id: i32,
-    metaculus_url: String,
-    close_time: Option<DateTime<Utc>>,
-    category: String,
-    event_type: String,
-    status: String,
-}
-
 #[derive(Clone)]
 pub struct MetaculusClient {
     client: Client,
     base_url: String,
+}
+
+impl MarketImportProvider for MetaculusClient {
+    fn source_name(&self) -> &'static str {
+        "metaculus"
+    }
 }
 
 impl MetaculusClient {
@@ -164,12 +158,12 @@ impl MetaculusClient {
         Ok(self.extract_questions_from_response(response))
     }
 
-    // Convert Metaculus question to our internal event format
-    fn convert_to_event(
+    // Convert Metaculus question to the provider-neutral import format
+    fn convert_to_imported_market(
         &self,
         question: &MetaculusQuestion,
         post: &MetaculusPost,
-    ) -> PredictionEvent {
+    ) -> ImportedMarket {
         let close_time = question
             .scheduled_close_time
             .as_ref()
@@ -189,11 +183,12 @@ impl MetaculusClient {
             "general".to_string()
         };
 
-        PredictionEvent {
+        ImportedMarket {
+            source: "metaculus".to_string(),
+            external_id: question.id.to_string(),
+            external_url: format!("https://www.metaculus.com/questions/{}/", question.id),
             title: question.title.clone(),
             description,
-            metaculus_id: question.id,
-            metaculus_url: format!("https://www.metaculus.com/questions/{}/", question.id),
             close_time,
             category,
             event_type: question.question_type.clone(),
@@ -213,38 +208,55 @@ impl MetaculusClient {
         let topic_id = self.ensure_metaculus_topic(pool).await?;
 
         for (question, post) in questions_with_posts {
-            let event = self.convert_to_event(&question, &post);
+            let market = self.convert_to_imported_market(&question, &post);
+
+            if let Some(reason) = exclusion_reason(&market) {
+                println!(
+                    "⏭️ Skipping {} market ({}): {}",
+                    reason, market.external_id, market.title
+                );
+                continue;
+            }
 
             // Check if we already have this question by Metaculus ID (more reliable)
-            let metaculus_id_pattern = format!("Metaculus ID: {}", event.metaculus_id);
-            let existing = sqlx::query("SELECT id FROM events WHERE details LIKE $1")
+            let metaculus_id_pattern = format!("Metaculus ID: {}", market.external_id);
+            let source_pattern = format!("Source: {}", market.source);
+            let external_id_pattern = format!("External ID: {}", market.external_id);
+            let existing = sqlx::query(
+                "SELECT id FROM events WHERE details LIKE $1 OR (details LIKE $2 AND details LIKE $3)",
+            )
                 .bind(format!("%{}%", metaculus_id_pattern))
+                .bind(format!("%{}%", source_pattern))
+                .bind(format!("%{}%", external_id_pattern))
                 .fetch_optional(pool)
                 .await?;
 
             if existing.is_some() {
                 println!(
                     "📝 Skipping existing question (ID: {}): {}",
-                    event.metaculus_id, event.title
+                    market.external_id, market.title
                 );
                 continue;
             }
 
             // Truncate title if too long
-            let truncated_title = if event.title.len() > 255 {
-                format!("{}...", &event.title[..252])
+            let truncated_title = if market.title.len() > 255 {
+                format!("{}...", &market.title[..252])
             } else {
-                event.title.clone()
+                market.title.clone()
             };
 
             // Create details with Metaculus metadata
             let enhanced_details = format!(
-                "{}\n\nMetaculus ID: {}\nMetaculus URL: {}\nCategory: {}\nType: {}",
-                event.description,
-                event.metaculus_id,
-                event.metaculus_url,
-                event.category,
-                event.event_type
+                "{}\n\nSource: {}\nExternal ID: {}\nExternal URL: {}\nMetaculus ID: {}\nMetaculus URL: {}\nCategory: {}\nType: {}",
+                market.description,
+                market.source,
+                market.external_id,
+                market.external_url,
+                market.external_id,
+                market.external_url,
+                market.category,
+                market.event_type
             );
 
             // Insert new event with category
@@ -258,13 +270,13 @@ impl MetaculusClient {
             .bind(topic_id)
             .bind(&truncated_title)
             .bind(&enhanced_details)
-            .bind(event.close_time)
-            .bind(if event.status == "resolved" {
+            .bind(market.close_time)
+            .bind(if market.status == "resolved" {
                 Some("pending")
             } else {
                 None
             })
-            .bind(&event.category)
+            .bind(&market.category)
             .execute(pool)
             .await;
 
@@ -389,7 +401,7 @@ impl MetaculusClient {
 
     // Daily sync job - fetch and store new questions
     pub async fn daily_sync(&self, pool: &PgPool) -> Result<usize> {
-        println!("🔄 Starting daily Metaculus sync...");
+        println!("🔄 Starting daily {} sync...", self.source_name());
 
         // For daily sync, fetch more questions to catch new ones
         // Use ID ordering to get highest numbered questions first
@@ -421,6 +433,18 @@ impl MetaculusClient {
         println!("💾 Total stored across all categories: {}", total_stored);
         Ok(total_stored)
     }
+}
+
+/// Provider-neutral open market fetch used by multi-source import orchestration.
+pub async fn fetch_open_markets(limit: Option<usize>) -> Result<Vec<ImportedMarket>> {
+    let client = MetaculusClient::new();
+    let limit_u32 = limit.map(|v| v.min(u32::MAX as usize) as u32);
+    let rows = client.fetch_open_questions(limit_u32).await?;
+    let mut markets = Vec::with_capacity(rows.len());
+    for (question, post) in rows {
+        markets.push(client.convert_to_imported_market(&question, &post));
+    }
+    Ok(markets)
 }
 
 // Manual bulk import function for initial setup

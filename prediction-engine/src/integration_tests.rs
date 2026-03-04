@@ -603,18 +603,18 @@ mod tests {
             .fetch_optional(&pool)
             .await?;
 
-            if let Some(shares_row) = final_shares {
-                let final_yes_shares: f64 = shares_row.get("yes_shares");
-                let staked_yes_ledger: i64 = shares_row.get("staked_yes_ledger");
-                let staked_no_ledger: i64 = shares_row.get("staked_no_ledger");
-                let total_staked_ledger = staked_yes_ledger + staked_no_ledger;
+        if let Some(shares_row) = final_shares {
+            let final_yes_shares: f64 = shares_row.get("yes_shares");
+            let staked_yes_ledger: i64 = shares_row.get("staked_yes_ledger");
+            let staked_no_ledger: i64 = shares_row.get("staked_no_ledger");
+            let total_staked_ledger = staked_yes_ledger + staked_no_ledger;
 
-                // Net payout includes share value minus remaining staked ledger balance cleared at resolution.
-                let payout_ledger = to_ledger_i64(final_yes_shares)?
-                    .checked_sub(total_staked_ledger)
-                    .ok_or_else(|| anyhow!("Resolution payout underflow for user {}", user.id))?;
-                resolution_credits.insert(user.id, payout_ledger);
-            }
+            // Net payout includes share value minus remaining staked ledger balance cleared at resolution.
+            let payout_ledger = to_ledger_i64(final_yes_shares)?
+                .checked_sub(total_staked_ledger)
+                .ok_or_else(|| anyhow!("Resolution payout underflow for user {}", user.id))?;
+            resolution_credits.insert(user.id, payout_ledger);
+        }
 
         lmsr_api::resolve_event(&pool, event_id, true).await?;
 
@@ -993,12 +993,10 @@ mod tests {
         println!("🔒 Test 6: Closed-market trading test");
 
         // Move closing date to the past
-        sqlx::query(
-            "UPDATE events SET closing_date = NOW() - INTERVAL '1 minute' WHERE id = $1",
-        )
-        .bind(event_id)
-        .execute(&pool)
-        .await?;
+        sqlx::query("UPDATE events SET closing_date = NOW() - INTERVAL '1 minute' WHERE id = $1")
+            .bind(event_id)
+            .execute(&pool)
+            .await?;
 
         let closed_market_trade = lmsr_api::update_market(
             &pool,
@@ -1019,7 +1017,9 @@ mod tests {
             "Trading on closed event should be rejected"
         );
 
-        let closed_err = closed_market_trade.err().expect("Expected closed market update error");
+        let closed_err = closed_market_trade
+            .err()
+            .expect("Expected closed market update error");
         assert!(
             closed_err.to_string().contains("Market closed"),
             "Expected 'Market closed' error, got: {closed_err}"
@@ -1030,12 +1030,10 @@ mod tests {
         println!("🎯 Test 7: Post-resolution trading test");
 
         // Re-open market before resolving so resolved-state error is tested distinctly
-        sqlx::query(
-            "UPDATE events SET closing_date = NOW() + INTERVAL '7 days' WHERE id = $1",
-        )
-        .bind(event_id)
-        .execute(&pool)
-        .await?;
+        sqlx::query("UPDATE events SET closing_date = NOW() + INTERVAL '7 days' WHERE id = $1")
+            .bind(event_id)
+            .execute(&pool)
+            .await?;
 
         // Resolve the event
         lmsr_api::resolve_event(&pool, event_id, true).await?;
@@ -1059,7 +1057,9 @@ mod tests {
             post_resolution_trade.is_err(),
             "Trading on resolved event should be rejected"
         );
-        let resolved_trade_err = post_resolution_trade.err().expect("Expected resolved market update error");
+        let resolved_trade_err = post_resolution_trade
+            .err()
+            .expect("Expected resolved market update error");
         assert!(
             resolved_trade_err.to_string().contains("Market resolved"),
             "Expected 'Market resolved' error, got: {resolved_trade_err}"
