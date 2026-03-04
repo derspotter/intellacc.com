@@ -1,6 +1,7 @@
 // backend/src/middleware/auth.js
 const db = require('../db');
 const { verifyToken, getUserFromToken } = require('../utils/jwt');
+const crypto = require('crypto');
 
 let supportsDeletedAt = null;
 
@@ -36,7 +37,45 @@ const authenticateJWT = async (req, res, next) => {
 
   const token = authHeader.split(" ")[1];
   // Do not log tokens
+
+  // API Key Authentication Path
+  if (token && token.startsWith('sk_live_')) {
+    try {
+      const hashedKey = crypto.createHash('sha256').update(token).digest('hex');
+      const result = await db.query(
+        'SELECT u.id, u.role, u.password_changed_at, u.deleted_at, a.scopes, a.is_bot FROM users u JOIN api_keys a ON u.id = a.user_id WHERE a.key_hash = $1',
+        [hashedKey]
+      );
+      
+      if (result.rows.length === 0) {
+        return res.status(403).json({ message: "Authentication failed: Invalid API key" });
+      }
+      
+      const userRow = result.rows[0];
+      if (userRow.deleted_at) {
+        return res.status(403).json({ message: 'Account has been deleted' });
+      }
+      
+      // Update last_used_at for the API key in the background
+      db.query('UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE key_hash = $1', [hashedKey]).catch(err => console.error('Failed to update API key last_used_at:', err));
+
+      req.user = {
+        id: userRow.id,
+        userId: userRow.id,
+        role: userRow.role || 'user',
+        isAgent: true,
+        isBot: userRow.is_bot || false,
+        scopes: userRow.scopes || []
+      };
+      
+      return next();
+    } catch (err) {
+      console.error('API key auth error:', err);
+      return res.status(500).json({ message: 'Authentication failed: Server error' });
+    }
+  }
   
+  // JWT Authentication Path
   const decoded = verifyToken(token);
   
   if (decoded.error) {

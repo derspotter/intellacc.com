@@ -27,6 +27,7 @@ const persuasiveAlphaController = require('../controllers/persuasiveAlphaControl
 const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const moderationController = require('../controllers/moderationController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
+const { requireScope } = require('../middleware/scopes');
 const db = require('../db');
 const { ensureEventIsActive } = require('../utils/eventLifecycle');
 const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
@@ -134,6 +135,7 @@ const passwordResetRateLimit = rateLimit({
     legacyHeaders: false,
 });
 const deviceController = require('../controllers/deviceController');
+const apiKeysController = require('../controllers/apiKeysController');
 
 // Password reset routes
 router.post('/auth/forgot-password', passwordResetRateLimit, passwordResetController.forgotPassword);
@@ -144,6 +146,11 @@ router.post('/users/change-password', authenticateJWT, userController.changePass
 router.get("/me", authenticateJWT, userController.getUserProfile);
 router.delete("/me", authenticateJWT, userController.deleteAccount);
 router.patch("/users/profile", authenticateJWT, userController.editUserProfile);
+
+// API Key Routes (requires full verification: email & phone)
+router.get('/users/me/api-keys', authenticateJWT, requireEmailVerified, requirePhoneVerified, apiKeysController.listKeys);
+router.post('/users/me/api-keys', authenticateJWT, requireEmailVerified, requirePhoneVerified, apiKeysController.createKey);
+router.delete('/users/me/api-keys/:id', authenticateJWT, requireEmailVerified, requirePhoneVerified, apiKeysController.revokeKey);
 
 // Follow System Routes
 router.post("/users/:id/follow", authenticateJWT, userController.followUser);
@@ -177,6 +184,7 @@ router.get("/events", predictionsController.getEvents); // Temporarily no auth f
 router.get("/categories", predictionsController.getCategories); // Get available categories
 router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
 router.patch("/events/:id", authenticateJWT, requireAdmin, predictionsController.resolveEvent);
+router.put("/events/:id/outcomes", authenticateJWT, requireAdmin, predictionsController.setEventOutcomes);
 router.get("/predictions", authenticateJWT, predictionsController.getUserPredictions);
 
 // Community market question submission + validation
@@ -200,7 +208,7 @@ router.post("/assignments/:id/bet", authenticateJWT, requirePhoneVerified, predi
 router.get("/bets/stats", authenticateJWT, predictionsController.getMonthlyBettingStats);
 
 // Post Routes (require email verification - Tier 1)
-router.post("/posts", authenticateJWT, requireEmailVerified, postController.createPost);
+router.post("/posts", authenticateJWT, requireEmailVerified, requireScope('social:post'), postController.createPost);
 router.post("/posts/:postId/market-click", authenticateJWT, persuasiveAlphaController.createPostMarketClick);
 router.get("/posts/:postId/markets", authenticateJWT, persuasiveAlphaController.getPostMarkets);
 router.get("/posts/:postId/market-link", authenticateJWT, persuasiveAlphaController.getPostMarketLink);
@@ -283,7 +291,7 @@ router.post('/attachments/presign-upload', authenticateJWT, attachmentsControlle
 router.get('/attachments/presign-download', authenticateJWT, attachmentsController.presignDownload);
 router.post('/attachments/post', authenticateJWT, requireEmailVerified, attachmentsController.uploadPostImage);
 router.post('/attachments/message', authenticateJWT, requireEmailVerified, attachmentsController.uploadMessageAttachment);
-router.get('/attachments/:id', authenticateJWT, attachmentsController.downloadAttachment);
+router.get('/attachments/:id', attachmentsController.downloadAttachment);
 
 // LMSR Market API proxy routes (bypass CORS issues)
 router.get("/events/:eventId/market", async (req, res) => {
@@ -350,7 +358,7 @@ router.get("/events/:eventId/kelly", authenticateJWT, requirePhoneVerified, asyn
     }
 });
 
-router.post("/events/:eventId/sell", authenticateJWT, requirePhoneVerified, async (req, res) => {
+router.post("/events/:eventId/sell", authenticateJWT, requirePhoneVerified, requireScope('market:trade'), async (req, res) => {
     const { eventId } = req.params;
     const eventIdNumber = Number(eventId);
 
@@ -409,7 +417,7 @@ router.post("/events/:eventId/sell", authenticateJWT, requirePhoneVerified, asyn
     }
 });
 
-router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, async (req, res) => {
+router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, requireScope('market:trade'), async (req, res) => {
     const { eventId } = req.params;
     const { stake, target_prob } = req.body;
     const userId = req.user.id;
@@ -554,6 +562,72 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, as
         } catch (releaseError) {
             console.error('Failed to cleanup market update DB client:', releaseError.message);
         }
+    }
+});
+
+router.post("/events/:eventId/update-outcome", authenticateJWT, requirePhoneVerified, requireScope('market:trade'), async (req, res) => {
+    const { eventId } = req.params;
+    const { stake, outcome_id } = req.body;
+    const userId = req.user.id;
+    const eventIdNumber = Number(eventId);
+    const outcomeIdNumber = Number(outcome_id);
+
+    if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
+        return res.status(400).json({ message: 'Invalid event id' });
+    }
+    if (!Number.isInteger(outcomeIdNumber) || outcomeIdNumber <= 0) {
+        return res.status(400).json({ message: 'Invalid outcome id' });
+    }
+
+    try {
+        const eventResult = await db.query(
+            'SELECT outcome, closing_date FROM events WHERE id = $1',
+            [eventIdNumber]
+        );
+        if (eventResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Event not found' });
+        }
+
+        const { outcome, closing_date } = eventResult.rows[0];
+        if (outcome) {
+            return res.status(400).json({ error: 'Market resolved', event_id: eventIdNumber });
+        }
+        if (closing_date && new Date(closing_date).getTime() <= Date.now()) {
+            return res.status(400).json({ error: 'Market closed', event_id: eventIdNumber });
+        }
+
+        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/update-outcome`, {
+            method: 'POST',
+            headers: predictionEngineHeaders,
+            body: JSON.stringify({
+                user_id: userId,
+                stake,
+                outcome_id: outcomeIdNumber
+            })
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            const io = req.app.get('io');
+            if (io && data.market_prob !== undefined) {
+                io.to('predictions').emit('marketUpdate', {
+                    eventId: eventIdNumber,
+                    market_prob: parseFloat(data.market_prob),
+                    cumulative_stake: data.cumulative_stake,
+                    action: 'stake-outcome',
+                    user_id: userId,
+                    stake,
+                    outcome_id: outcomeIdNumber,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            return res.json(data);
+        }
+
+        return res.status(response.status).json(data);
+    } catch (error) {
+        console.error('Market outcome update proxy error:', error);
+        return res.status(500).json({ error: 'Failed to update market outcome' });
     }
 });
 
