@@ -53,6 +53,12 @@
 
 .device-link-modal .modal-header {
   margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.device-link-modal .modal-header h2 {
+  text-align: center;
+  width: 100%;
 }
 
 

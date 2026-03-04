@@ -7,6 +7,7 @@ import postsStore from '../../store/posts';
 import auth from '../../services/auth';
 import LikeButton from './LikeButton';
 import PostMarkets from './PostMarkets';
+import PostCritiques from './PostCritiques';
 
 import AiContentBadge from '../common/AiContentBadge';
 
@@ -408,6 +409,9 @@ export default function PostItem({ post }) {
 
       // 4.5 Market Chips
       PostMarkets({ postId: post.id }),
+      
+      // 4.6 Truth Analysis / Critique
+      PostCritiques({ postId: post.id, authorId: post.user_id }),
 
       // 5. Actions (Toggle Edit Options)
       div({ class: "post-actions" }, [

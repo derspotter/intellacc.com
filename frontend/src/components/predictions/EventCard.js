@@ -4,10 +4,16 @@ import api from '../../services/api.js';
 import { registerSocketEventHandler } from '../../services/socket.js';
 import { getUserId, tokenState } from '../../services/auth.js';
 import predictionsStore from '../../store/predictions.js';
+import NonBinaryEventCard from './NonBinaryEventCard.js';
 
 const { div, h3, p, span, small, input, label, form, button } = van.tags;
 
 export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
+  const eventType = String(event.event_type || 'binary').toLowerCase();
+  if (eventType !== 'binary') {
+    return NonBinaryEventCard({ event, onStakeUpdate, hideTitle });
+  }
+
   const userPosition = van.state(null);
   const withdrawalTrigger = van.state(0); // Counter to force re-renders
   const kellyData = van.state(null);

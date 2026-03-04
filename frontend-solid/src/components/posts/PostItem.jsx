@@ -16,6 +16,8 @@ import {
   uploadPostImage
 } from '../../services/api';
 import { getCurrentUserId, isAdmin, isAuthenticated } from '../../services/auth';
+import PostMarkets from './PostMarkets';
+import PostCritiques from './PostCritiques';
 
 const normalizePosts = (payload) => {
   if (!payload) return [];
@@ -686,6 +688,9 @@ export default function PostItem(props) {
           <p class="muted">Image failed to load.</p>
         </Show>
       </Show>
+
+      <PostMarkets postId={post().id} />
+      <PostCritiques postId={post().id} />
 
       <Show when={actionError()}>
         <p class="error-message">{actionError()}</p>

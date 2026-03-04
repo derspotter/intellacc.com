@@ -481,6 +481,15 @@ export const api = {
     getMarkets: (postId) =>
       request(`/posts/${postId}/markets`),
 
+    getMarketLink: (postId) =>
+      request(`/posts/${postId}/market-link`),
+
+    getAnalysisStatus: (postId) =>
+      request(`/posts/${postId}/analysis-status`),
+
+    confirmMarketLink: (postId, eventId, action, stance) =>
+      request(`/posts/${postId}/confirm-market`, { method: 'POST', body: { event_id: eventId, action, stance } }),
+
     marketClick: (postId, eventId) =>
       request(`/posts/${postId}/market-click`, { method: 'POST', body: { event_id: eventId } })
   },

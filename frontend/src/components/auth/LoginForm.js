@@ -3,7 +3,7 @@
 
 import van from 'vanjs-core';
 import PasskeyButton from './PasskeyButton';
-const { div, h1, form, label, input, button, p, a } = van.tags;
+const { div, h1, form, label, input, button, p, a, span } = van.tags;
 import auth from '../../services/auth';
 
 // Preload WASM module in background while user types credentials
@@ -216,9 +216,11 @@ const LoginForm = () => {
             )
           ),
         ),
-        div({ class: 'auth-links' },
-          a({ href: '#forgot-password' }, 'Forgot password?')
-        )
+        div({ class: 'auth-links' }, [
+          a({ href: '#forgot-password' }, 'Forgot password?'),
+          span({ style: 'margin: 0 10px; color: var(--text-muted);' }, '|'),
+          a({ href: '#signup' }, 'Create an account')
+        ]),
       ),
 
       div({
