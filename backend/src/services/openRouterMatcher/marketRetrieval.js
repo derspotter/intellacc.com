@@ -18,9 +18,13 @@ const normalizeDomain = (value) => config.normalizeDomain(value);
 
 const normalizeSearchText = (claimSummary, entities = []) => {
   const normalized = [claimSummary, ...(Array.isArray(entities) ? entities : [])]
-    .map((item) => cleanText(item))
-    .filter(Boolean);
+    .flatMap(item => cleanText(item).split(' '))
+    .filter(word => word.length > 2) // Ignore very short stop words
+    .filter((value, index, self) => self.indexOf(value) === index); // Unique
 
+  if (config.retrieval.websearchToTsquery) {
+    return normalized.join(' OR ');
+  }
   return normalized.join(' ');
 };
 
@@ -110,8 +114,9 @@ const queryHybrid = async ({
   searchExpression,
   capabilities
 }) => {
-  const params = [claimEmbedding, searchText, candidateLimit];
-  const domainFilter = withDomainFilter(capabilities.hasDomainColumn, domain, 4);
+  const minSimilarityThreshold = config.retrieval.minSimilarityThreshold || 0.50;
+  const params = [claimEmbedding, searchText, candidateLimit, minSimilarityThreshold];
+  const domainFilter = withDomainFilter(capabilities.hasDomainColumn, domain, 5);
 
   if (capabilities.hasDomainColumn && domain) {
     params.push(domain);
@@ -131,6 +136,7 @@ const queryHybrid = async ({
       WHERE e.outcome IS NULL
         AND e.closing_date > NOW()
         AND e.embedding IS NOT NULL
+        AND 1 - (e.embedding <=> $1::vector) >= $4
         ${domainFilter}
       ORDER BY e.embedding <=> $1::vector
       LIMIT 60
@@ -163,8 +169,8 @@ const queryHybrid = async ({
         + (1.0 / (60 + COALESCE(t.text_rank, 999)))
       ) AS match_score
     FROM vector_matches v
-    FULL OUTER JOIN text_matches t ON v.event_id = t.event_id
-    LEFT JOIN events e ON e.id = COALESCE(v.event_id, t.event_id)
+    LEFT JOIN text_matches t ON v.event_id = t.event_id
+    LEFT JOIN events e ON e.id = v.event_id
     ORDER BY match_score DESC, event_id DESC
     LIMIT $3
   `;

@@ -188,7 +188,8 @@ exports.getPostMarkets = async (req, res) => {
        FROM post_market_matches pm
        JOIN events e ON e.id = pm.event_id
        WHERE pm.post_id = $1
-       ORDER BY pm.match_score DESC, pm.event_id ASC`,
+       ORDER BY pm.match_score DESC, pm.event_id ASC
+       LIMIT 3`,
       [postId]
     );
 

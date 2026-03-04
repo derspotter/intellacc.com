@@ -23,6 +23,124 @@ const normalizeMarketOutcome = (raw) => {
   return null;
 };
 
+const ALLOWED_EVENT_TYPES = new Set(['binary', 'multiple_choice', 'numeric', 'discrete', 'date']);
+
+const normalizeEventType = (raw) => {
+  const value = String(raw || 'binary').trim().toLowerCase();
+  return ALLOWED_EVENT_TYPES.has(value) ? value : 'binary';
+};
+
+const normalizeOutcomeRows = (eventType, outcomes, numericBuckets) => {
+  if (eventType === 'multiple_choice') {
+    if (!Array.isArray(outcomes)) return [];
+    return outcomes
+      .map((item, idx) => {
+        if (typeof item === 'string') {
+          const label = item.trim();
+          if (!label) return null;
+          return {
+            key: `choice_${idx + 1}`,
+            label,
+            sortOrder: idx,
+            lowerBound: null,
+            upperBound: null
+          };
+        }
+        if (!item || typeof item !== 'object') return null;
+        const label = String(item.label || '').trim();
+        if (!label) return null;
+        const key = String(item.key || `choice_${idx + 1}`).trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+        return {
+          key: key || `choice_${idx + 1}`,
+          label,
+          sortOrder: Number.isInteger(item.sort_order) ? item.sort_order : idx,
+          lowerBound: null,
+          upperBound: null
+        };
+      })
+      .filter(Boolean);
+  }
+
+  if (eventType === 'numeric') {
+    if (!Array.isArray(numericBuckets)) return [];
+    return numericBuckets
+      .map((bucket, idx) => {
+        if (!bucket || typeof bucket !== 'object') return null;
+        const lower = Number(bucket.lower_bound);
+        const upper = Number(bucket.upper_bound);
+        if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower >= upper) {
+          return null;
+        }
+        const label = String(bucket.label || `${lower} to ${upper}`).trim();
+        return {
+          key: String(bucket.key || `bucket_${idx + 1}`).trim().toLowerCase().replace(/[^a-z0-9_]/g, '_') || `bucket_${idx + 1}`,
+          label,
+          sortOrder: Number.isInteger(bucket.sort_order) ? bucket.sort_order : idx,
+          lowerBound: lower,
+          upperBound: upper
+        };
+      })
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const validateNumericBuckets = (rows) => {
+  const sorted = [...rows].sort((a, b) => a.lowerBound - b.lowerBound || a.upperBound - b.upperBound);
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i].lowerBound < sorted[i - 1].upperBound) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const seedEventOutcomes = async (client, eventId, eventType, outcomeRows) => {
+  if (!Array.isArray(outcomeRows) || outcomeRows.length < 2) {
+    return;
+  }
+
+  const prob = 1 / outcomeRows.length;
+  for (const row of outcomeRows) {
+    const outcomeResult = await client.query(
+      `INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (event_id, outcome_key) DO UPDATE
+       SET label = EXCLUDED.label,
+           sort_order = EXCLUDED.sort_order,
+           lower_bound = EXCLUDED.lower_bound,
+           upper_bound = EXCLUDED.upper_bound,
+           updated_at = NOW()
+       RETURNING id`,
+      [eventId, row.key, row.label, row.sortOrder, row.lowerBound, row.upperBound]
+    );
+
+    const outcomeId = outcomeResult.rows[0].id;
+    await client.query(
+      `INSERT INTO event_outcome_states (event_id, outcome_id, q_value, prob)
+       VALUES ($1, $2, 0.0, $3)
+       ON CONFLICT (event_id, outcome_id) DO UPDATE
+       SET q_value = EXCLUDED.q_value,
+           prob = EXCLUDED.prob,
+           updated_at = NOW()`,
+      [eventId, outcomeId, prob]
+    );
+  }
+
+  if (eventType === 'multiple_choice' || eventType === 'numeric') {
+    const primaryProb = prob;
+    await client.query(
+      `UPDATE events
+       SET market_prob = $1,
+           q_yes = 0.0,
+           q_no = 0.0
+       WHERE id = $2`,
+      [primaryProb, eventId]
+    );
+  }
+};
+
 // Helper function to generate probability vectors for unified scoring
 function generateProbabilityVector(prediction_type, prediction_value, confidence, numerical_value, lower_bound, upper_bound) {
   switch (prediction_type) {
@@ -187,30 +305,53 @@ exports.createPrediction = async (req, res) => {
 
 // Create a new event
 exports.createEvent = async (req, res) => {
-  const { title, details, closing_date, domain } = req.body;
+  const { title, details, closing_date, domain, event_type, outcomes, numeric_buckets } = req.body;
   const normalizedDomain = matchConfig.normalizeDomain(domain);
+  const normalizedEventType = normalizeEventType(event_type);
+  const outcomeRows = normalizeOutcomeRows(normalizedEventType, outcomes, numeric_buckets);
+
+  if ((normalizedEventType === 'multiple_choice' || normalizedEventType === 'numeric') && outcomeRows.length < 2) {
+    return res.status(400).json({ message: `${normalizedEventType} events require at least two outcomes/buckets` });
+  }
+  if (normalizedEventType === 'numeric' && !validateNumericBuckets(outcomeRows)) {
+    return res.status(400).json({ message: 'numeric buckets overlap or are invalid' });
+  }
 
   try {
-    let result;
-
-    try {
-      result = await db.query(
-        "INSERT INTO events (title, details, closing_date, domain) VALUES ($1, $2, $3, $4) RETURNING *",
-        [title, details, closing_date, normalizedDomain]
-      );
-    } catch (insertErr) {
-      // Backward compatibility for older test DBs / environments without events.domain yet.
-      if (insertErr.code === '42703') {
-        result = await db.query(
-          "INSERT INTO events (title, details, closing_date) VALUES ($1, $2, $3) RETURNING *",
-          [title, details, closing_date]
+    const newEvent = await db.executeWithTransaction(async (client) => {
+      let result;
+      try {
+        result = await client.query(
+          "INSERT INTO events (title, details, closing_date, domain, event_type) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+          [title, details, closing_date, normalizedDomain, normalizedEventType]
         );
-      } else {
-        throw insertErr;
+      } catch (insertErr) {
+        if (insertErr.code === '42703') {
+          try {
+            result = await client.query(
+              "INSERT INTO events (title, details, closing_date, event_type) VALUES ($1, $2, $3, $4) RETURNING *",
+              [title, details, closing_date, normalizedEventType]
+            );
+          } catch (fallbackErr) {
+            if (fallbackErr.code === '42703') {
+              result = await client.query(
+                "INSERT INTO events (title, details, closing_date) VALUES ($1, $2, $3) RETURNING *",
+                [title, details, closing_date]
+              );
+            } else {
+              throw fallbackErr;
+            }
+          }
+        } else {
+          throw insertErr;
+        }
       }
-    }
 
-    const newEvent = result.rows[0];
+      const createdEvent = result.rows[0];
+      await seedEventOutcomes(client, createdEvent.id, normalizedEventType, outcomeRows);
+      return createdEvent;
+    });
+
     setEventEmbedding({
       eventId: newEvent.id,
       title: newEvent.title,
@@ -218,10 +359,85 @@ exports.createEvent = async (req, res) => {
     }).catch((error) => {
       console.error('[Event Embedding] Failed to create embedding:', error.message || error);
     });
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(newEvent);
   } catch (err) {
     console.error("Error creating event:", err);
     res.status(500).send("Database error: " + err.message);
+  }
+};
+
+exports.setEventOutcomes = async (req, res) => {
+  const eventId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(eventId) || eventId <= 0) {
+    return res.status(400).json({ message: 'Invalid event id' });
+  }
+
+  const { event_type, outcomes, numeric_buckets } = req.body;
+  const normalizedEventType = normalizeEventType(event_type);
+  if (normalizedEventType !== 'multiple_choice' && normalizedEventType !== 'numeric') {
+    return res.status(400).json({ message: 'event_type must be multiple_choice or numeric' });
+  }
+
+  const outcomeRows = normalizeOutcomeRows(normalizedEventType, outcomes, numeric_buckets);
+  if (outcomeRows.length < 2) {
+    return res.status(400).json({ message: 'At least two outcomes/buckets required' });
+  }
+  if (normalizedEventType === 'numeric' && !validateNumericBuckets(outcomeRows)) {
+    return res.status(400).json({ message: 'numeric buckets overlap or are invalid' });
+  }
+
+  try {
+    const result = await db.executeWithTransaction(async (client) => {
+      const eventRow = await client.query(
+        'SELECT id, outcome FROM events WHERE id = $1 FOR UPDATE',
+        [eventId]
+      );
+      if (eventRow.rows.length === 0) {
+        const error = new Error('Event not found');
+        error.status = 404;
+        throw error;
+      }
+      if (eventRow.rows[0].outcome) {
+        const error = new Error('Cannot reconfigure resolved event');
+        error.status = 400;
+        throw error;
+      }
+
+      const openPositions = await client.query(
+        `SELECT
+           (SELECT COUNT(*) FROM user_shares WHERE event_id = $1 AND (yes_shares > 0 OR no_shares > 0)) AS binary_positions,
+           (SELECT COUNT(*) FROM user_outcome_shares WHERE event_id = $1 AND shares > 0) AS outcome_positions`,
+        [eventId]
+      );
+      const binaryPositions = Number(openPositions.rows[0].binary_positions || 0);
+      const outcomePositions = Number(openPositions.rows[0].outcome_positions || 0);
+      if (binaryPositions > 0 || outcomePositions > 0) {
+        const error = new Error('Cannot reconfigure outcomes while positions are open');
+        error.status = 409;
+        throw error;
+      }
+
+      await client.query('DELETE FROM event_outcome_states WHERE event_id = $1', [eventId]);
+      await client.query('DELETE FROM event_outcomes WHERE event_id = $1', [eventId]);
+      await seedEventOutcomes(client, eventId, normalizedEventType, outcomeRows);
+
+      const updated = await client.query(
+        'UPDATE events SET event_type = $1, resolution_outcome_id = NULL, updated_at = NOW() WHERE id = $2 RETURNING id, event_type',
+        [normalizedEventType, eventId]
+      );
+      return updated.rows[0];
+    });
+
+    return res.status(200).json({
+      message: 'Event outcomes updated',
+      event: result
+    });
+  } catch (err) {
+    console.error('Error setting event outcomes:', err);
+    if (err.status) {
+      return res.status(err.status).json({ message: err.message });
+    }
+    return res.status(500).json({ message: 'Database error: ' + err.message });
   }
 };
 
@@ -233,7 +449,30 @@ exports.getEvents = async (req, res) => {
     
     // Get search parameter if provided
     const search = req.query.search;
-    let query = "SELECT * FROM events WHERE 1=1";  // Show all events (resolved and unresolved)
+    // Keep response lean for UI. Exclude heavyweight internal search fields
+    // (embedding/search_vector) which are not needed on predictions pages.
+    let query = `
+      SELECT
+        id,
+        topic_id,
+        title,
+        details,
+        closing_date,
+        outcome,
+        created_at,
+        updated_at,
+        category,
+        event_type,
+        numerical_outcome,
+        market_prob,
+        liquidity_b,
+        cumulative_stake,
+        q_yes,
+        q_no,
+        domain
+      FROM events
+      WHERE 1=1
+    `;
     let params = [];
     
     // Add search functionality
@@ -300,21 +539,25 @@ exports.resolvePrediction = async (req, res) => {
 };
 
 exports.resolveEvent = async (req, res) => {
-  const { outcome } = req.body;
+  const { outcome, outcome_id, numerical_outcome } = req.body;
   const { id } = req.params;
   const outcomeValue = normalizeMarketOutcome(outcome);
+  const outcomeId = Number.isInteger(outcome_id) ? outcome_id : Number.parseInt(outcome_id, 10);
+  const hasOutcomeId = Number.isInteger(outcomeId) && outcomeId > 0;
+  const hasNumericalOutcome = Number.isFinite(Number(numerical_outcome));
+  const numericalValue = hasNumericalOutcome ? Number(numerical_outcome) : null;
   const eventId = Number.parseInt(id, 10);
 
   if (!Number.isInteger(eventId) || eventId <= 0) {
     return res.status(400).json({ message: 'Invalid event id' });
   }
 
-  if (!outcomeValue) {
-    return res.status(400).json({ message: "Outcome must be 'yes' or 'no'" });
+  if (!hasOutcomeId && !hasNumericalOutcome && !outcomeValue) {
+    return res.status(400).json({ message: "Provide one of: outcome ('yes'/'no'), outcome_id, or numerical_outcome" });
   }
 
   try {
-    const existingEvent = await db.query('SELECT id, outcome FROM events WHERE id = $1', [eventId]);
+    const existingEvent = await db.query('SELECT id, outcome, event_type FROM events WHERE id = $1', [eventId]);
     if (existingEvent.rows.length === 0) {
       return res.status(404).json({ message: 'Event not found' });
     }
@@ -323,13 +566,16 @@ exports.resolveEvent = async (req, res) => {
     }
 
     const resolvedBoolean = outcomeValue === 'yes';
+    const engineBody = hasOutcomeId
+      ? { outcome_id: outcomeId }
+      : (hasNumericalOutcome ? { numerical_outcome: numericalValue } : { outcome: resolvedBoolean });
     const outcomeResponse = await fetch(`http://prediction-engine:3001/events/${eventId}/market-resolve`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(process.env.PREDICTION_ENGINE_AUTH_TOKEN ? { 'x-engine-token': process.env.PREDICTION_ENGINE_AUTH_TOKEN } : {})
       },
-      body: JSON.stringify({ outcome: resolvedBoolean })
+      body: JSON.stringify(engineBody)
     });
 
     const outcomeResult = await outcomeResponse.json().catch(() => ({}));
@@ -337,9 +583,25 @@ exports.resolveEvent = async (req, res) => {
       return res.status(outcomeResponse.status).json(outcomeResult);
     }
 
+    const backendOutcome = hasOutcomeId
+      ? `resolved_outcome_${outcomeId}`
+      : (hasNumericalOutcome ? 'resolved_numeric' : outcomeValue);
+    const backendNumericalOutcome = hasNumericalOutcome
+      ? numericalValue
+      : (hasOutcomeId ? null : (resolvedBoolean ? 1 : 0));
+    const resolvedOutcomeId = hasOutcomeId
+      ? outcomeId
+      : (Number.isInteger(outcomeResult.outcome_id) ? outcomeResult.outcome_id : null);
+
     const update = await db.query(
-      'UPDATE events SET outcome = $1, numerical_outcome = $2, updated_at = NOW() WHERE id = $3 RETURNING id, title, outcome, numerical_outcome, closing_date',
-      [outcomeValue, resolvedBoolean ? 1 : 0, eventId]
+      `UPDATE events
+       SET outcome = $1,
+           numerical_outcome = $2,
+           resolution_outcome_id = $3,
+           updated_at = NOW()
+       WHERE id = $4
+       RETURNING id, title, outcome, numerical_outcome, resolution_outcome_id, closing_date`,
+      [backendOutcome, backendNumericalOutcome, resolvedOutcomeId, eventId]
     );
 
     const resolvedEvent = update.rows[0];
@@ -351,14 +613,16 @@ exports.resolveEvent = async (req, res) => {
     if (req.app.get('io')) {
       req.app.get('io').to('predictions').emit('marketResolved', {
         eventId,
-        outcome: outcomeValue,
+        outcome: backendOutcome,
+        outcome_id: resolvedOutcomeId,
+        numerical_outcome: backendNumericalOutcome,
         timestamp: new Date().toISOString()
       });
     }
 
     return res.status(200).json({
       event: resolvedEvent,
-      message: outcomeResult.message || `Market ${eventId} resolved as ${outcomeValue.toUpperCase()}`
+      message: outcomeResult.message || `Market ${eventId} resolved`
     });
   } catch (err) {
     console.error('Error resolving event:', err);

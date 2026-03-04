@@ -7,7 +7,7 @@ Implement a production-safe, attribution-backed reward system for high-signal po
 - Signal metric: marginal information value from attributed trade episodes
 - Horizon mix: 10% / 50% / final = 0.2 / 0.3 / 0.5
 - Wrong-direction handling: zero floor (no negative score in v1)
-- Payout model: per-score minting (with hard caps)
+- Payout model: per-score minting (no daily caps; kill-switch only)
 - Settlement: nightly batch + final on event resolution
 - Reliability: uniform initial user weights in v1 (`r_u = 1.0`)
 
@@ -27,9 +27,9 @@ This plan is tailored to current code reality:
   - Rule must be centralized in a single helper/service.
   - Use `remaining = closing_time - t`, `target_early_time = t + 0.10 * remaining`, `target_mid_time = t + 0.50 * remaining`, and skip any target at/after close.
 - Open Problem 2: Reward economics + treasury model
-  - Decision: policy is explicit and conservative:
+  - Decision: policy keeps minting simple:
     - Mint only through scheduled reward runs, not on user action.
-    - Global/day caps remain configurable and default to safe production limits.
+    - No per-post/per-author/global daily caps in v1.
     - `POST_SIGNAL_REWARDS_ENABLED` is the mandatory kill switch for rollout.
     - Treasury mint authority remains server-side and logs every minted batch for audit.
 - Open Problem 3: Concurrency and locking in nightly scorer
@@ -67,7 +67,7 @@ This plan is tailored to current code reality:
       - `episodes_created`
       - `payout_rows_created`
       - `minted_ledger_total`
-      - `skipped_by_cap`
+      - `skipped_by_cap` (expected to remain `0` under no-cap policy)
       - `skipped_by_threshold`
       - `claim_conflicts`
       - `errors`
@@ -86,7 +86,7 @@ This plan is tailored to current code reality:
     - `GET /api/admin/persuasion-score/run-status` returns last N run summaries and current queue lag.
   - Define launch alerts:
     - run errors > 0
-    - cap-skip rate > 5% of payout candidates in a single run
+    - unexpected non-zero cap-skip values (should remain 0 with no-cap policy)
     - queue lag > 15 minutes
     - no successful run in 24h
   - Track these in the same logging path used by scheduled jobs (structured JSON logs + JSON summary table in DB if needed).
@@ -364,7 +364,7 @@ For each episode, compute:
 - `target_mid = market consensus at t + 50% of remaining event lifetime`
 - `target_final = resolved outcome prob (1 or 0) when resolved`
 
-Proper-score delta:
+LMSR-aligned proper-score delta:
 - `Delta_h = LogLoss(target_h, p_before) - LogLoss(target_h, p_after)`
 
 Horizon score with zero floor:
@@ -384,10 +384,8 @@ Post score:
 Payout (per-score minting):
 - `reward_ledger = floor(score * mint_rate_ledger_per_point)`
 
-Safety caps:
-- Max reward per post per event per day.
-- Max reward per author per day.
-- Max system mint per day (global circuit breaker).
+Safety control:
+- Master kill-switch only (`POST_SIGNAL_REWARDS_ENABLED`).
 
 Finalization:
 - early/mid components awarded when horizon targets mature.
@@ -539,7 +537,7 @@ If introduced, they are:
 ### 5.1 Nightly scorer job (new)
 Batch job performs:
 1. Build/refresh episodes from newly attributed `market_updates`.
-2. Finalize early and mid components for mature episodes.
+2. Ask prediction-engine to finalize mature episode components (early/mid/final) as scoring source-of-truth.
 3. Write payouts idempotently (`post_signal_reward_payouts`) and credit author `rp_balance_ledger`.
 
 ### 5.2 Finalization on resolution
@@ -558,9 +556,8 @@ Implementation path:
 - Self-referral exclusion.
 - Meaningful update threshold.
 - Episode dedupe window.
-- Per-post daily cap.
-- Per-author daily cap.
-- Global daily mint cap (hard stop).
+- No daily mint caps in v1.
+- Master kill-switch controls payout enablement.
 - Minimum account requirements for rewarded authors:
   - account age >= X days (configurable)
   - email verified minimum (reuse verification tier).
@@ -584,8 +581,8 @@ Moderation integration:
 - logloss delta correctness.
 - zero-floor enforcement.
 - horizon weighting.
-4. Payout caps:
-- per-post, per-author, global cap behavior.
+4. Payout behavior:
+- no-cap minting path under kill-switch control.
 5. Idempotency:
 - rerunning jobs does not duplicate payouts.
 
@@ -614,8 +611,8 @@ Moderation integration:
 - store scores, no payouts
 - monitor gaming patterns and score distribution for 2 weeks.
 
-2. **Phase B (capped minting on)**
-- enable payout with conservative mint rate and strict caps
+2. **Phase B (minting on)**
+- enable payout with conservative mint rate
 - keep admin kill switch.
 
 3. **Phase C (tuning)**
@@ -623,14 +620,14 @@ Moderation integration:
 - optionally introduce non-uniform `r_u` in v1.1.
 
 Observability:
-- metrics: attributed trade rate, episode counts, score distribution, payout totals, cap-hit frequency, flagged abuse counts.
+- metrics: attributed trade rate, episode counts, score distribution, payout totals, flagged abuse counts.
 
 ## 9. Explicit Interfaces / Type Additions
 
 ### Backend DTOs
 - `PostMarketClickRequest { event_id: number }`
 - `PostMarketMatch { event_id, title, market_prob, match_score }`
-- `SignalRewardRunResult { processed_updates, episodes_created, payouts_count, minted_ledger_total, capped_count }`
+- `SignalRewardRunResult { processed_updates, episodes_created, payouts_count, minted_ledger_total }`
 - `PostAnalysisStatus { post_id, has_claim, domain, processing_status, gate_latency_ms, reason_latency_ms, processing_errors }`
 - `PostMarketLinkProposal { post_id, event_id, stance, confidence, source, reasoning_summary }`
 
@@ -649,13 +646,8 @@ Observability:
 - `POST_SIGNAL_MIN_PROB_DELTA=0.01`
 - `POST_SIGNAL_MIN_STAKE_LEDGER=1000000`
 - `POST_SIGNAL_MINT_RATE_LEDGER_PER_POINT`
-- `POST_SIGNAL_CAP_PER_POST_PER_DAY_LEDGER`
-- `POST_SIGNAL_CAP_PER_AUTHOR_PER_DAY_LEDGER`
-- `POST_SIGNAL_CAP_GLOBAL_PER_DAY_LEDGER`
 - `POST_SIGNAL_BELIEF_MULTIPLIER=1.0`
 - `POST_SIGNAL_ATTENTION_MULTIPLIER=0.35`
-- `POST_SIGNAL_GLOBAL_DAILY_CAP_LEDGER`
-- `POST_SIGNAL_DAILY_PANIC_FRACTION` (optional auto-disable threshold, e.g. 0.05)
 - `POST_SIGNAL_AGENTIC_MATCH_ENABLED=false`
 - `POST_SIGNAL_MATCH_GATE_ENABLED=false` (claim/domain classifier)
 - `POST_SIGNAL_MATCH_REASONER_ENABLED=false`
@@ -671,7 +663,7 @@ Observability:
 - Wrong-direction scoring: zero floor.
 - Horizon weights: 0.2 / 0.3 / 0.5 (10%/50%/final).
 - Reliability weighting: uniform in v1 (`r_u=1.0`).
-- Funding: per-score minting with strict caps and kill-switch.
+- Funding: per-score minting with kill-switch.
 - Settlement cadence: nightly + final on resolution.
 - v1 uses both buy/update and sell `market_updates` as attribution source (with side-aware zero-floor scoring and no double-counting).
 

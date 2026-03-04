@@ -77,7 +77,8 @@ module.exports = {
   retrieval: {
     enabled: toBool(process.env.POST_SIGNAL_MATCH_PIPELINE_ENABLED, true),
     candidateLimit: Math.max(1, toInt(process.env.POST_SIGNAL_MATCH_CANDIDATE_LIMIT, 15)),
-    websearchToTsquery: toBool(process.env.POST_SIGNAL_MATCH_USE_WEBSEARCH_TSQUERY, true)
+    websearchToTsquery: toBool(process.env.POST_SIGNAL_MATCH_USE_WEBSEARCH_TSQUERY, true),
+    minSimilarityThreshold: Number(process.env.POST_SIGNAL_MATCH_MIN_SIMILARITY || '0.50')
   },
   embedding: {
     model: process.env.POST_SIGNAL_MATCH_EMBEDDING_MODEL || 'text-embedding-3-small',

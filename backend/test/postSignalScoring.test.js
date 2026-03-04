@@ -149,27 +149,28 @@ describe('postSignalScoringService', () => {
         expect(importantInserts[1].params[6]).toBe(false); // is_meaningful
     });
 
-    it('scoreMatureEpisodes computes zero-floor rewards (negative becomes 0)', async () => {
-        const queryLog = [];
-        const pool = poolMock(queryLog);
+    it('scoreMatureEpisodes delegates mature scoring to prediction-engine endpoint', async () => {
+        const originalFetch = global.fetch;
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            json: async () => ({ success: true, processed_episodes: 2, updated_components: 6 })
+        }));
 
-        await postSignalScoringService.scoreMatureEpisodes(pool);
-        // 2 mature episodes returned from our mock, 3 horizons each = 6 update statements
-
-        const updates = queryLog.filter(q => q.sql.includes('UPDATE post_signal_episodes SET s_early'));
-        expect(updates.length).toBe(2);
-
-        // Look at episode 2 (wrong direction, zero floor)
-        // Outcome = 1.0, p_before = 0.8, p_after = 0.6.
-        // Base Brier: (0.8-1)^2 - (0.6-1)^2 = 0.04 - 0.16 = -0.12.
-        // Zero floor Math.max(0, -0.12) = 0.
-        const ep2Update = updates.find(q => q.params.includes(2)); // Row ID 2
-        expect(ep2Update.params[0]).toBe(0); // early
-        expect(ep2Update.params[1]).toBe(0); // mid
-        expect(ep2Update.params[2]).toBe(0); // final
+        try {
+            const result = await postSignalScoringService.scoreMatureEpisodes();
+            expect(result.success).toBe(true);
+            expect(result.processed_episodes).toBe(2);
+            expect(result.updated_components).toBe(6);
+            expect(global.fetch).toHaveBeenCalledTimes(1);
+            const [url, init] = global.fetch.mock.calls[0];
+            expect(url).toContain('/persuasion/score-mature-episodes');
+            expect(init.method).toBe('POST');
+        } finally {
+            global.fetch = originalFetch;
+        }
     });
 
-    it('mintPayouts respects caps and writes idempotently', async () => {
+    it('mintPayouts writes idempotent payout rows and credits balances', async () => {
         const queryLog = [];
         const pool = await poolMock(queryLog).connect();
 

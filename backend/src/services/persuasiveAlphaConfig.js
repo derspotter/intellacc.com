@@ -61,13 +61,5 @@ module.exports = {
     // Default: 1 point = 1 RP (1,000,000 ledger)
     mintRateLedgerPerPoint: parseEnvInt('POST_SIGNAL_MINT_RATE_LEDGER_PER_POINT', 1 * RP_MULTIPLIER),
 
-    // Caps (all in Ledger units)
-    // Default max per post/day: 100 RP
-    capPerPostPerDayLedger: parseEnvInt('POST_SIGNAL_CAP_PER_POST_PER_DAY_LEDGER', 100 * RP_MULTIPLIER),
-
-    // Default max per author/day: 500 RP
-    capPerAuthorPerDayLedger: parseEnvInt('POST_SIGNAL_CAP_PER_AUTHOR_PER_DAY_LEDGER', 500 * RP_MULTIPLIER),
-
-    // Default global max system mint per day: 10,000 RP
-    capGlobalPerDayLedger: parseEnvInt('POST_SIGNAL_CAP_GLOBAL_PER_DAY_LEDGER', 10000 * RP_MULTIPLIER),
+    // No daily reward caps (policy decision). Kill switch remains the only hard stop.
 };

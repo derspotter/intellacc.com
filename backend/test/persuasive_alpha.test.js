@@ -1,4 +1,10 @@
 const request = require('supertest');
+
+jest.mock('../src/services/openRouterMatcher/postMatchPipeline', () => ({
+  processPost: jest.fn().mockResolvedValue({}),
+  processPostForTesting: jest.fn().mockResolvedValue({})
+}));
+
 const { app } = require('../src/index');
 const db = require('../src/db');
 
@@ -154,6 +160,10 @@ const createClick = async ({ postId, eventId, token }) => {
     .post(`/api/posts/${postId}/market-click`)
     .set('Authorization', `Bearer ${token}`)
     .send({ event_id: eventId });
+
+  if (res.statusCode >= 400) {
+    console.error('CREATE CLICK ERROR:', res.statusCode, res.body, { postId, eventId });
+  }
 
   return res;
 };

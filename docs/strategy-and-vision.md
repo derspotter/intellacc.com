@@ -182,8 +182,7 @@ For roadmap sequencing, use this rule:
 
 1. Finish Persuasion payout pipeline to production-safe state.
 2. Tighten Consistency UX + model QA loop so users trust the critique layer.
-3. Productize Prediction analytics presentation.
-4. Then scale acquisition features (digests, aggregation, embeds, extension).
+3. Then scale acquisition features (digests, aggregation, embeds, extension).
 
 ## 90-Day Execution Plan (Minimum Viable Truth Loop)
 
@@ -198,11 +197,6 @@ For roadmap sequencing, use this rule:
 - Keep author confirmation/override low-friction and always available.
 - Track acceptance/override/reject rates as quality metrics.
 - Exit criteria: users can understand and correct model interpretation without leaving core flow.
-
-### Track C: Prediction credibility UX
-- Add focused profile/dashboard surfaces for calibration, resolved-win rate, and time-weighted score.
-- Keep formulas and units explicit in UI copy.
-- Exit criteria: credibility score is explainable and shareable, not a black box.
 
 ### Cold Start Mitigation
 - LMSR market maker provides automatic liquidity (already built)

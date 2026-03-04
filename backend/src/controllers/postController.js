@@ -150,11 +150,18 @@ const removeAttachmentFile = (storagePath) => {
 // Create a new post or comment
 exports.createPost = async (req, res) => {
   try {
-    const { content, image_url, image_attachment_id, parent_id } = req.body;
+    let { content, image_url, image_attachment_id, parent_id } = req.body;
 
     // Input validation
     if (!content || content.trim() === '') {
       return res.status(400).json({ message: 'Content is required' });
+    }
+
+    const isBot = req.user && req.user.isBot ? true : false;
+    
+    // Append bot text so it federates across ActivityPub/ATProto properly
+    if (isBot) {
+      content += '\n\n✨ Made with AI';
     }
 
     // Get user ID from authenticated user
@@ -188,7 +195,7 @@ exports.createPost = async (req, res) => {
       postId = parentPost.id;
     }
 
-    console.log('Creating post/comment with:', { userId, content, image_url, image_attachment_id, parentId, depth, isComment });
+    console.log('Creating post/comment with:', { userId, content, image_url, image_attachment_id, parentId, depth, isComment, isBot });
 
     if (image_attachment_id) {
       const attachCheck = await db.query(
@@ -203,8 +210,8 @@ exports.createPost = async (req, res) => {
 
     // Insert the post or comment
     const result = await db.query(
-      'INSERT INTO posts (user_id, content, image_url, image_attachment_id, parent_id, depth, is_comment, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) RETURNING *',
-      [userId, content, image_url || null, image_attachment_id || null, parentId, depth, isComment]
+      'INSERT INTO posts (user_id, content, image_url, image_attachment_id, parent_id, depth, is_comment, is_bot, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW()) RETURNING *',
+      [userId, content, image_url || null, image_attachment_id || null, parentId, depth, isComment, isBot]
     );
 
     const newPost = result.rows[0];
