@@ -38,14 +38,36 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event - handle offline requests (Stale-While-Revalidate pattern)
+// Fetch event - handle offline requests
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (event.request.url.includes('/api/')) return;
 
+  // Use Network-First strategy for HTML navigation requests to ensure fresh app entry point
+  if (event.request.mode === 'navigate' || event.request.headers.get('accept').includes('text/html')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
+          }
+          return networkResponse;
+        })
+        .catch(() => {
+          // Fallback to cache if network fails
+          return caches.match(event.request).then((cachedResponse) => {
+            if (cachedResponse) return cachedResponse;
+            return caches.match('/index.html'); // Ultimate fallback
+          });
+        })
+    );
+    return;
+  }
+
+  // Stale-While-Revalidate for other static assets (JS, CSS, Images)
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      // Return cached version immediately if available
       if (cachedResponse) {
         // Fetch update in background
         fetch(event.request).then((networkResponse) => {
@@ -64,10 +86,7 @@ self.addEventListener('fetch', (event) => {
         }
         return networkResponse;
       }).catch(() => {
-        // Offline fallback for navigation
-        if (event.request.mode === 'navigate') {
-          return caches.match('/index.html');
-        }
+        // Silently fail for non-critical assets
       });
     })
   );
