@@ -51,7 +51,7 @@ test('User can create a post with an image attachment', async ({ page }) => {
       response.url().includes('/api/posts');
   });
 
-  await page.getByRole('button', { name: 'POST' }).click();
+  await page.getByRole('button', { name: 'POST', exact: true }).click();
 
   const createResponse = await createPost;
   expect(createResponse.ok()).toBeTruthy();

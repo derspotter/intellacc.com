@@ -61,7 +61,7 @@ test('Image upload renders without corrupt/truncated warnings', async ({ page, r
     return req.method() === 'POST' && req.url().includes('/api/posts');
   });
 
-  await page.getByRole('button', { name: 'POST' }).click();
+  await page.getByRole('button', { name: 'POST', exact: true }).click();
 
   const createResponse = await createPost;
   expect(createResponse.ok()).toBeTruthy();
