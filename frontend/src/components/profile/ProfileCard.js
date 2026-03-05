@@ -54,7 +54,13 @@ export default function ProfileCard({ onEdit, user, followButton, title = 'Profi
       () => !userData ? 
         p("Loading profile...") :
         div({ class: "profile-content" }, [
-          showUsername ? h3({ class: "username" }, userData.username) : null,
+          div({ class: "profile-header", style: "display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;" }, [
+            userData.avatar_url 
+              ? van.tags.img({ src: userData.avatar_url, alt: `${userData.username} avatar`, style: "width: 80px; height: 80px; border-radius: 50%; object-fit: cover;" })
+              : div({ style: "width: 80px; height: 80px; border-radius: 50%; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; font-size: 2rem;" }, "👤"),
+            showUsername ? h3({ class: "username", style: "margin: 0;" }, userData.username) : null,
+          ]),
+          
           userData.email ? div({ class: "email-section" }, [
             h4("Email"),
             p({ class: "email" }, userData.email)

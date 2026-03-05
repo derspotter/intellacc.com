@@ -97,6 +97,61 @@ async function createAttachmentRecord({ ownerId, scope, postId, mlsGroupId, file
   return result.rows[0].id;
 }
 
+const uploadAvatar = multer({
+  storage: buildStorage('avatars'),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    if (!ALLOWED_IMAGE_MIME.has(file.mimetype)) {
+      return cb(new Error('Unsupported file type'));
+    }
+    cb(null, true);
+  }
+});
+
+async function uploadUserAvatar(req, res) {
+  uploadAvatar.single('file')(req, res, async (err) => {
+    const cleanupFile = (file) => {
+      if (file?.path) {
+        fs.unlink(file.path, (unlinkErr) => {
+          if (unlinkErr) console.error('uploadUserAvatar cleanup error:', unlinkErr);
+        });
+      }
+    };
+
+    if (err) {
+      const message = err.message || 'Upload failed';
+      cleanupFile(req.file);
+      return res.status(400).json({ error: message });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'file required' });
+    }
+    try {
+      const attachmentId = await createAttachmentRecord({
+        ownerId: req.user.id,
+        scope: 'avatar',
+        file: req.file
+      });
+
+      const avatarUrl = `/api/attachments/${attachmentId}`;
+      
+      await db.query('UPDATE users SET avatar_url = $1 WHERE id = $2', [avatarUrl, req.user.id]);
+
+      return res.json({
+        attachmentId,
+        avatarUrl,
+        fileName: req.file.originalname,
+        contentType: req.file.mimetype,
+        size: req.file.size
+      });
+    } catch (error) {
+      console.error('uploadUserAvatar error:', error);
+      cleanupFile(req.file);
+      return res.status(500).json({ error: 'Failed to save attachment' });
+    }
+  });
+}
+
 async function uploadPostImage(req, res) {
   uploadPost.single('file')(req, res, async (err) => {
     const cleanupFile = (file) => {
@@ -229,7 +284,7 @@ async function downloadAttachment(req, res) {
       if (membership.rows.length === 0) {
         return res.status(403).json({ error: 'Not authorized for this attachment' });
       }
-    } else {
+    } else if (attachment.scope !== 'avatar') {
       return res.status(400).json({ error: 'Invalid attachment scope' });
     }
 
@@ -240,7 +295,11 @@ async function downloadAttachment(req, res) {
 
     res.setHeader('Content-Type', attachment.content_type);
     res.setHeader('Content-Length', attachment.size);
-    res.setHeader('Cache-Control', 'private, max-age=300');
+    if (attachment.scope === 'avatar') {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    } else {
+      res.setHeader('Cache-Control', 'private, max-age=300');
+    }
     const stream = fs.createReadStream(filePath);
     stream.on('error', (err) => {
       console.error('downloadAttachment stream error:', err);
@@ -303,6 +362,7 @@ async function presignDownload(req, res) {
 }
 
 module.exports = {
+  uploadUserAvatar,
   uploadPostImage,
   uploadMessageAttachment,
   downloadAttachment,

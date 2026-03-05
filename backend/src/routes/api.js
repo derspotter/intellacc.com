@@ -1,6 +1,7 @@
 // backend/src/routes/api.js
 
 const express = require('express');
+const crypto = require('crypto');
 const router = express.Router();
 const userController = require('../controllers/userController');
 const postController = require('../controllers/postController');
@@ -34,6 +35,29 @@ const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
 const predictionEngineHeaders = {
     'Content-Type': 'application/json',
     ...(PREDICTION_ENGINE_AUTH_TOKEN ? { 'x-engine-token': PREDICTION_ENGINE_AUTH_TOKEN } : {})
+};
+
+const requireCronSharedSecret = (req, res, next) => {
+    const configured = process.env.CRON_SHARED_SECRET;
+    if (!configured) {
+        return res.status(503).json({ message: 'Cron shared secret is not configured' });
+    }
+
+    const provided = req.get('x-cron-secret');
+    if (!provided) {
+        return res.status(401).json({ message: 'Missing cron secret' });
+    }
+
+    const configuredBuf = Buffer.from(String(configured), 'utf8');
+    const providedBuf = Buffer.from(String(provided), 'utf8');
+    if (
+        configuredBuf.length !== providedBuf.length ||
+        !crypto.timingSafeEqual(configuredBuf, providedBuf)
+    ) {
+        return res.status(401).json({ message: 'Invalid cron secret' });
+    }
+
+    next();
 };
 
 // Base test route
@@ -215,6 +239,7 @@ router.get("/posts/:postId/market-link", authenticateJWT, persuasiveAlphaControl
 router.post("/posts/:postId/confirm-market", authenticateJWT, persuasiveAlphaController.confirmMarketLink);
 router.post("/posts/:postId/verify", authenticateJWT, persuasiveAlphaController.submitVerification);
 router.post("/admin/persuasion-score/run", authenticateJWT, requireAdmin, persuasiveAlphaController.runAutomaticRewards);
+router.post("/admin/persuasion-score/run-cron", requireCronSharedSecret, persuasiveAlphaController.runAutomaticRewards);
 router.get("/admin/persuasion-score/status", authenticateJWT, requireAdmin, persuasiveAlphaController.getRewardRunStatus);
 router.get("/posts/:id/analysis-status", authenticateJWT, postController.getPostAnalysisStatus);
 router.get("/posts", postController.getPosts);                                 // Get all posts (public)
@@ -289,6 +314,7 @@ router.use('/mls', authenticateJWT, requireEmailVerified, mlsRoutes);
 // Attachments (pre-signed URL scaffold)
 router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);
 router.get('/attachments/presign-download', authenticateJWT, attachmentsController.presignDownload);
+router.post('/attachments/avatar', authenticateJWT, attachmentsController.uploadUserAvatar);
 router.post('/attachments/post', authenticateJWT, requireEmailVerified, attachmentsController.uploadPostImage);
 router.post('/attachments/message', authenticateJWT, requireEmailVerified, attachmentsController.uploadMessageAttachment);
 router.get('/attachments/:id', attachmentsController.downloadAttachment);

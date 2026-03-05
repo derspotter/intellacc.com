@@ -224,15 +224,15 @@ const postsStore = {
       return this.state.posts.val;
     },
 
-    async createPost(content, image_attachment_id = null, image_url = null) {
+    async createPost(content, image_attachment_id = null, image_url = null, repost_id = null) {
       try {
         this.state.loading.val = true;
         this.state.error.val = null;
-        if (!content || typeof content !== 'string' || content.trim() === '') {
-          throw new Error('Post content cannot be empty');
+        if ((!content || typeof content !== 'string' || content.trim() === '') && !repost_id) {
+          throw new Error('Post content is required unless reposting');
         }
         try {
-          const post = await api.posts.create(content, image_attachment_id, image_url);
+          const post = await api.posts.create(content, image_attachment_id, image_url, repost_id);
           const updatedPosts = [post, ...this.state.posts.val];
           this.state.posts.val = updatedPosts;
           return post;

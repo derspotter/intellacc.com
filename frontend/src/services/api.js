@@ -497,9 +497,8 @@ export const api = {
     getById: (id) => 
       request(`/posts/${id}`),
       
-    create: (content, image_attachment_id, image_url = null) => 
-      request('/posts', { method: 'POST', body: { content, image_attachment_id, image_url } }),
-      
+    create: (content, image_attachment_id, image_url = null, repost_id = null) =>
+      request('/posts', { method: 'POST', body: { content, image_attachment_id, image_url, repost_id } }),      
     update: (id, content, image_attachment_id, image_url) => {
       let body = { content };
       if (image_attachment_id && typeof image_attachment_id === 'object' && image_url === undefined) {
@@ -593,6 +592,11 @@ export const api = {
       const form = new FormData();
       form.append('file', file);
       return requestForm('/attachments/post', form, { method: 'POST' });
+    },
+    uploadAvatar: (file) => {
+      const form = new FormData();
+      form.append('file', file);
+      return requestForm('/attachments/avatar', form, { method: 'POST' });
     },
     uploadMessage: (file, mlsGroupId) => {
       const form = new FormData();

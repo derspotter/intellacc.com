@@ -6,6 +6,7 @@ const pangramService = require('../services/pangramService');
 const activitypubOutbound = require('../services/activitypub/outboundService');
 const atprotoOutbound = require('../services/atproto/outboundService');
 const postMatchPipeline = require('../services/openRouterMatcher/postMatchPipeline');
+const { extractFirstUrl, fetchMetadata } = require('../services/metadata/metadataService');
 const { getRequestBaseUrl } = require('../services/activitypub/url');
 const { verifyToken, getUserFromToken } = require('../utils/jwt');
 
@@ -150,17 +151,17 @@ const removeAttachmentFile = (storagePath) => {
 // Create a new post or comment
 exports.createPost = async (req, res) => {
   try {
-    let { content, image_url, image_attachment_id, parent_id } = req.body;
+    let { content, image_url, image_attachment_id, parent_id, repost_id } = req.body;
 
     // Input validation
-    if (!content || content.trim() === '') {
-      return res.status(400).json({ message: 'Content is required' });
+    if ((!content || content.trim() === '') && !repost_id) {
+      return res.status(400).json({ message: 'Content is required unless reposting' });
     }
 
     const isBot = req.user && req.user.isBot ? true : false;
     
     // Append bot text so it federates across ActivityPub/ATProto properly
-    if (isBot) {
+    if (isBot && content) {
       content += '\n\n✨ Made with AI';
     }
 
@@ -195,7 +196,17 @@ exports.createPost = async (req, res) => {
       postId = parentPost.id;
     }
 
-    console.log('Creating post/comment with:', { userId, content, image_url, image_attachment_id, parentId, depth, isComment, isBot });
+    if (repost_id) {
+      const repostResult = await db.query(
+        `SELECT id FROM posts WHERE id = $1 ${buildPostVisibilityClause('$2')}`,
+        [repost_id, viewerId]
+      );
+      if (repostResult.rows.length === 0) {
+        return res.status(404).json({ message: 'Post to repost not found' });
+      }
+    }
+
+    console.log('Creating post/comment with:', { userId, content, image_url, image_attachment_id, parentId, depth, isComment, isBot, repost_id });
 
     if (image_attachment_id) {
       const attachCheck = await db.query(
@@ -208,13 +219,56 @@ exports.createPost = async (req, res) => {
       }
     }
 
+    // Extract link and fetch metadata
+    let linkUrl = extractFirstUrl(content);
+    let linkMetadataId = null;
+    
+    if (linkUrl) {
+      try {
+        const metadata = await fetchMetadata(linkUrl);
+        if (metadata && (metadata.title || metadata.description || metadata.image_url)) {
+          // Store the metadata
+          const metaRes = await db.query(
+            `INSERT INTO link_metadata (url, title, description, image_url, site_name, content) 
+             VALUES ($1, $2, $3, $4, $5, $6) 
+             ON CONFLICT (url) DO UPDATE 
+             SET title = EXCLUDED.title, 
+                 description = EXCLUDED.description, 
+                 image_url = EXCLUDED.image_url, 
+                 site_name = EXCLUDED.site_name,
+                 content = EXCLUDED.content,
+                 updated_at = NOW()
+             RETURNING id`,
+            [metadata.url, metadata.title, metadata.description, metadata.image_url, metadata.site_name, metadata.content]
+          );
+          linkMetadataId = metaRes.rows[0].id;
+          linkUrl = metadata.url; // Use resolved URL
+        }
+      } catch (err) {
+        console.warn(`Error processing link metadata for ${linkUrl}:`, err.message);
+      }
+    }
+
     // Insert the post or comment
     const result = await db.query(
-      'INSERT INTO posts (user_id, content, image_url, image_attachment_id, parent_id, depth, is_comment, is_bot, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW()) RETURNING *',
-      [userId, content, image_url || null, image_attachment_id || null, parentId, depth, isComment, isBot]
+      'INSERT INTO posts (user_id, content, image_url, image_attachment_id, parent_id, depth, is_comment, is_bot, link_url, link_metadata_id, repost_id, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW()) RETURNING *',
+      [userId, content || '', image_url || null, image_attachment_id || null, parentId, depth, isComment, isBot, linkUrl || null, linkMetadataId || null, repost_id || null]
     );
 
     const newPost = result.rows[0];
+
+    // Fetch full post metadata (including link preview info) for the response
+    const fullPostResult = await db.query(
+      `SELECT p.*, u.username,
+              lm.url as link_meta_url, lm.title as link_meta_title, lm.description as link_meta_description, lm.image_url as link_meta_image_url, lm.site_name as link_meta_site_name, lm.content as link_meta_content
+       FROM posts p
+       JOIN users u ON p.user_id = u.id
+       LEFT JOIN link_metadata lm ON p.link_metadata_id = lm.id
+       WHERE p.id = $1`,
+      [newPost.id]
+    );
+    
+    let returnedPost = fullPostResult.rows[0];
 
     if (image_attachment_id) {
       await db.query(
@@ -292,21 +346,21 @@ exports.createPost = async (req, res) => {
       const baseUrl = getRequestBaseUrl(req);
       activitypubOutbound.enqueueCreateForLocalPost({
         baseUrl,
-        post: newPost,
-        username: newPost.username
+        post: returnedPost,
+        username: returnedPost.username
       }).catch((err) => {
         console.error('[ActivityPub] Failed to enqueue outbound Create:', err?.message || err);
       });
 
       atprotoOutbound.enqueueCreateForLocalPost({
-        post: newPost
+        post: returnedPost
       }).catch((err) => {
         console.error('[ATProto] Failed to enqueue outbound post:', err?.message || err);
       });
     }
 
-    console.log('Post/comment created successfully:', newPost);
-    res.status(201).json(newPost);
+    console.log('Post/comment created successfully:', returnedPost);
+    res.status(201).json(returnedPost);
   } catch (error) {
     console.error('Error in createPost controller:', error);
     console.error('Stack trace:', error.stack);
@@ -382,7 +436,8 @@ exports.getPosts = async (req, res) => {
     }
 
     const result = await db.query(
-      `SELECT p.*, u.username,
+      `SELECT p.*, u.username, u.avatar_url,
+              lm.url as link_meta_url, lm.title as link_meta_title, lm.description as link_meta_description, lm.image_url as link_meta_image_url, lm.site_name as link_meta_site_name, lm.content as link_meta_content,
               CASE WHEN EXISTS (SELECT 1 FROM likes
                                 WHERE post_id = p.id AND user_id = $1)
                    THEN true
@@ -394,9 +449,19 @@ exports.getPosts = async (req, res) => {
               (1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) as visibility_multiplier,
               ai.ai_probability,
               ai.detected_model as ai_detected_model,
-              ai.is_flagged as ai_is_flagged
+              ai.is_flagged as ai_is_flagged,
+              (
+                SELECT row_to_json(repost_data.*)
+                FROM (
+                  SELECT rp.id, rp.content, rp.created_at, ru.username, ru.avatar_url
+                  FROM posts rp
+                  JOIN users ru ON rp.user_id = ru.id
+                  WHERE rp.id = p.repost_id
+                ) repost_data
+              ) as reposted_post
        FROM posts p
        JOIN users u ON p.user_id = u.id
+       LEFT JOIN link_metadata lm ON p.link_metadata_id = lm.id
        LEFT JOIN user_reputation ur ON u.id = ur.user_id
        LEFT JOIN LATERAL (
          SELECT ai_probability, detected_model, is_flagged
@@ -461,10 +526,12 @@ exports.getPostById = async (req, res) => {
     const userId = getViewerId(req);
     const result = await db.query(
       `SELECT p.*,
+              lm.url as link_meta_url, lm.title as link_meta_title, lm.description as link_meta_description, lm.image_url as link_meta_image_url, lm.site_name as link_meta_site_name, lm.content as link_meta_content,
               ai.ai_probability,
               ai.detected_model as ai_detected_model,
               ai.is_flagged as ai_is_flagged
        FROM posts p
+       LEFT JOIN link_metadata lm ON p.link_metadata_id = lm.id
        LEFT JOIN LATERAL (
          SELECT ai_probability, detected_model, is_flagged
          FROM content_ai_analysis
@@ -758,7 +825,8 @@ exports.getFeed = async (req, res) => {
     }
 
     const result = await db.query(
-      `SELECT p.*, u.username,
+      `SELECT p.*, u.username, u.avatar_url,
+              lm.url as link_meta_url, lm.title as link_meta_title, lm.description as link_meta_description, lm.image_url as link_meta_image_url, lm.site_name as link_meta_site_name, lm.content as link_meta_content,
               CASE WHEN EXISTS (SELECT 1 FROM likes
                                 WHERE post_id = p.id AND user_id = $1)
                    THEN true
@@ -770,9 +838,19 @@ exports.getFeed = async (req, res) => {
               (1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) as visibility_multiplier,
               ai.ai_probability,
               ai.detected_model as ai_detected_model,
-              ai.is_flagged as ai_is_flagged
+              ai.is_flagged as ai_is_flagged,
+              (
+                SELECT row_to_json(repost_data.*)
+                FROM (
+                  SELECT rp.id, rp.content, rp.created_at, ru.username, ru.avatar_url
+                  FROM posts rp
+                  JOIN users ru ON rp.user_id = ru.id
+                  WHERE rp.id = p.repost_id
+                ) repost_data
+              ) as reposted_post
        FROM posts p
        JOIN users u ON p.user_id = u.id
+       LEFT JOIN link_metadata lm ON p.link_metadata_id = lm.id
        LEFT JOIN user_reputation ur ON u.id = ur.user_id
        LEFT JOIN LATERAL (
          SELECT ai_probability, detected_model, is_flagged

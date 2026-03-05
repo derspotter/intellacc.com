@@ -171,7 +171,7 @@ exports.createUser = async (req, res) => {
 exports.getUser = async (req, res) => {
   const userId = req.params.id;
   try {
-    const result = await db.query('SELECT id, username, email, bio, created_at, updated_at FROM users WHERE id = $1 AND deleted_at IS NULL', [userId]);
+    const result = await db.query('SELECT id, username, email, bio, avatar_url, created_at, updated_at FROM users WHERE id = $1 AND deleted_at IS NULL', [userId]);
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -186,7 +186,7 @@ exports.getUser = async (req, res) => {
 exports.getUserByUsername = async (req, res) => {
   const username = req.params.username;
   try {
-    const result = await db.query('SELECT id, username, email, bio, created_at, updated_at FROM users WHERE LOWER(username) = LOWER($1) AND deleted_at IS NULL', [username]);
+    const result = await db.query('SELECT id, username, email, bio, avatar_url, created_at, updated_at FROM users WHERE LOWER(username) = LOWER($1) AND deleted_at IS NULL', [username]);
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -455,7 +455,7 @@ exports.getUserProfile = async (req, res) => {
     const userId = req.user.id; // Using standardized user object from auth middleware
 
     const result = await db.query(
-      "SELECT id, username, email, role, bio, (rp_balance_ledger::DOUBLE PRECISION / 1000000.0) AS rp_balance FROM users WHERE id = $1 AND deleted_at IS NULL",
+      "SELECT id, username, email, role, bio, avatar_url, (rp_balance_ledger::DOUBLE PRECISION / 1000000.0) AS rp_balance FROM users WHERE id = $1 AND deleted_at IS NULL",
       [userId]
     );
 
@@ -510,7 +510,7 @@ exports.editUserProfile = async (req, res) => {
     setClauses.push('updated_at = NOW()');
 
     const result = await db.query(
-      `UPDATE users SET ${setClauses.join(', ')} WHERE id = $${values.length + 1} RETURNING id, username, email, role, bio, updated_at`,
+      `UPDATE users SET ${setClauses.join(', ')} WHERE id = $${values.length + 1} RETURNING id, username, email, role, bio, avatar_url, updated_at`,
       [...values, userId]
     );
     

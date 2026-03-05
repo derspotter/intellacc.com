@@ -8,6 +8,7 @@ import auth from '../../services/auth';
 import LikeButton from './LikeButton';
 import PostMarkets from './PostMarkets';
 import PostCritiques from './PostCritiques';
+import { renderTextWithLinks } from '../../utils/text';
 
 import AiContentBadge from '../common/AiContentBadge';
 
@@ -42,6 +43,7 @@ export default function PostItem({ post }) {
   const imageFile = van.state(null);
   const imagePreview = van.state(null);
   const removeImage = van.state(false);
+  const isArticleExpanded = van.state(false);
 
   // --- Helpers ---
   const isCurrentUserPost = () => {
@@ -51,6 +53,19 @@ export default function PostItem({ post }) {
 
   const isEditing = () => {
     return postsStore.state.editingPostId.val === post.id;
+  };
+
+  const handleRepost = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (confirm("Repost this to your followers?")) {
+      try {
+        await postsStore.actions.createPost.call(postsStore, '', null, null, post.id);
+        alert("Successfully reposted!");
+      } catch (err) {
+        alert("Failed to repost: " + err.message);
+      }
+    }
   };
 
   // --- Edit Handlers ---
@@ -351,26 +366,58 @@ export default function PostItem({ post }) {
             // Heuristic: show a toggle when content is likely to exceed the clamped preview.
             const isLong = content.length > 240 || content.split('\n').length > 6;
 
-            return div({ class: "post-content-wrapper" }, [
-              div({
-                class: () => `post-content ${isExpanded() ? 'expanded' : 'clamped'}${(!isExpanded() && isLong) ? ' has-hover-overlay' : ''}`,
-              }, [
-                div({ class: 'post-content-text' }, content),
-                // Always render the overlay for long posts. CSS handles delayed hover and device gating.
-                (!isExpanded() && isLong) ? div({ class: 'post-content-hover-overlay' }, content) : null
-              ]),
-              () => isLong ? button({
-                type: 'button',
-                class: 'post-content-toggle',
-                onclick: (e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  postsStore.actions.toggleExpandedContent.call(postsStore, post.id);
-                }
-              }, () => isExpanded() ? 'Show less' : 'Show more') : null,
-              div({ class: "edit-file-row browse-placeholder" })
-            ]);
-          }
+            const renderMainContent = () => {
+              if (!content && !post.reposted_post) return null;
+              if (content) {
+                return div({ class: "post-content-wrapper" }, [
+                  div({
+                    class: () => `post-content ${isExpanded() ? 'expanded' : 'clamped'}${(!isExpanded() && isLong) ? ' has-hover-overlay' : ''}`,
+                  }, [
+                    div({ class: 'post-content-text' }, renderTextWithLinks(content, van)),
+                    // Always render the overlay for long posts. CSS handles delayed hover and device gating.
+                    (!isExpanded() && isLong) ? div({ class: 'post-content-hover-overlay' }, renderTextWithLinks(content, van)) : null
+                  ]),              () => isLong ? button({
+                    type: 'button',
+                    class: 'post-content-toggle',
+                    onclick: (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      postsStore.actions.toggleExpandedContent.call(postsStore, post.id);
+                    }
+                  }, () => isExpanded() ? 'Show less' : 'Show more') : null,
+
+                  div({ class: "edit-file-row browse-placeholder" })
+                ]);
+              }
+              return null;
+            };
+
+            const renderRepostedContent = () => {
+              if (!post.reposted_post) return null;
+              const rp = post.reposted_post;
+              return div({ class: "reposted-post", style: "border: 1px solid var(--border-color); padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem; background: var(--bg-card);" }, [
+                div({ class: "post-header", style: "margin-bottom: 0.5rem;" }, [
+                  div({ class: "post-author" }, [
+                    van.tags.span({ style: "margin-right: 0.5rem;" }, "♻️ Reposted from "),
+                    van.tags.a({
+                      href: `#user/${rp.user_id}`,
+                      class: "username-link",
+                      onclick: (e) => {
+                        e.preventDefault();
+                        window.location.hash = `user/${rp.user_id}`;
+                      }
+                    }, rp.username || 'Anonymous')
+                  ]),
+                  van.tags.span({ class: "post-date" }, new Date(rp.created_at).toLocaleDateString())
+                ]),
+                div({ class: "post-content-text" }, renderTextWithLinks(rp.content || '', van))
+              ]);
+            };
+
+            return div([
+              renderMainContent(),
+              renderRepostedContent()
+            ]);          }
         }
       ),
 
@@ -407,9 +454,6 @@ export default function PostItem({ post }) {
         }
       ),
 
-      // 4.5 Market Chips
-      PostMarkets({ postId: post.id }),
-      
       // 4.6 Truth Analysis / Critique
       PostCritiques({ postId: post.id, authorId: post.user_id }),
 
@@ -448,6 +492,7 @@ export default function PostItem({ post }) {
           LikeButton({ postId: post.id })
         ]),
         div({ class: "post-actions-right" }, [
+          button({ class: "post-action repost-button", onclick: handleRepost }, "Repost"),
           button({ class: "post-action comment-button", onclick: () => handleShowCommentForm(post.id) }, "Comment")
         ])
       ]),

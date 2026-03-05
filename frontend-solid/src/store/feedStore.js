@@ -48,28 +48,29 @@ const addComment = (comment) => {
     });
 };
 
-const createPost = async (content) => {
+const createPost = async (content, image_attachment_id = null, image_url = null, repost_id = null) => {
     const tempId = `temp-${Date.now()}`;
     const tempPost = {
         id: tempId,
-        content,
+        content: content || '',
         username: "You", // Placeholder until real post returns
         created_at: new Date().toISOString(),
         like_count: 0,
         liked_by_user: false,
-        is_temp: true
+        is_temp: true,
+        repost_id
     };
 
     // Optimistic add
     setState("posts", (prev) => [tempPost, ...prev]);
 
     try {
-        const newPost = await api.posts.create(content);
+        const newPost = await api.posts.create(content, image_attachment_id, image_url, repost_id);
         // Replace temp post with real one
         setState("posts", (prev) => prev.map(p => p.id === tempId ? newPost : p));
+        return newPost;
     } catch (err) {
-        console.error("Failed to create post", err);
-        // Remove temp post on error
+        // Revert optimistic add
         setState("posts", (prev) => prev.filter(p => p.id !== tempId));
         throw err;
     }

@@ -18,6 +18,7 @@ import {
 import { getCurrentUserId, isAdmin, isAuthenticated } from '../../services/auth';
 import PostMarkets from './PostMarkets';
 import PostCritiques from './PostCritiques';
+import { RenderTextWithLinks } from '../../utils/text';
 
 const normalizePosts = (payload) => {
   if (!payload) return [];
@@ -63,6 +64,7 @@ export default function PostItem(props) {
   const [editRemovingAttachment, setEditRemovingAttachment] = createSignal(false);
   const [editSubmitting, setEditSubmitting] = createSignal(false);
   const [editError, setEditError] = createSignal('');
+  const [isArticleExpanded, setIsArticleExpanded] = createSignal(false);
 
   const autoExpand = () => !!props.autoExpand;
 
@@ -351,6 +353,19 @@ export default function PostItem(props) {
     setIsEditing(true);
   };
 
+  const handleRepost = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (confirm("Repost this to your followers?")) {
+      try {
+        await feedStore.createPost('', null, null, post().id);
+        alert("Successfully reposted!");
+      } catch (err) {
+        alert("Failed to repost: " + err.message);
+      }
+    }
+  };
+
   const handleCancelEdit = () => {
     clearEditAttachmentPreview();
     setEditRemovingAttachment(false);
@@ -571,29 +586,51 @@ export default function PostItem(props) {
 
       <Show when={isEditing()} fallback={
         <div class="post-content-area">
-          <div class="post-content-wrapper">
-            <div class={`post-content ${contentExpanded() ? 'expanded' : 'clamped'}${(!contentExpanded() && isLongContent()) ? ' has-hover-overlay' : ''}`}>
-              <div class="post-content-text">{post().content || 'No content'}</div>
-              <Show when={!contentExpanded() && isLongContent()}>
-                <div class="post-content-hover-overlay">
-                  {post().content || 'No content'}
+          <Show when={post().content || !post().reposted_post}>
+            <div class="post-content-wrapper">
+              <div class={`post-content ${contentExpanded() ? 'expanded' : 'clamped'}${(!contentExpanded() && isLongContent()) ? ' has-hover-overlay' : ''}`}>
+                <div class="post-content-text">
+                  <RenderTextWithLinks text={post().content || ''} />
                 </div>
+                <Show when={!contentExpanded() && isLongContent()}>
+                  <div class="post-content-hover-overlay">
+                    <RenderTextWithLinks text={post().content || ''} />
+                  </div>
+                </Show>
+              </div>
+              <Show when={isLongContent()}>
+                <button
+                  type="button"
+                  class="post-content-toggle"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setContentExpanded((next) => !next);
+                  }}
+                >
+                  {contentExpanded() ? 'Show less' : 'Show more'}
+                </button>
               </Show>
+              <div class="edit-file-row browse-placeholder" />
             </div>
-            <Show when={isLongContent()}>
-              <button
-                type="button"
-                class="post-content-toggle"
-                onClick={(event) => {
-                  event.preventDefault();
-                  setContentExpanded((next) => !next);
-                }}
-              >
-                {contentExpanded() ? 'Show less' : 'Show more'}
-              </button>
-            </Show>
-            <div class="edit-file-row browse-placeholder" />
-          </div>
+          </Show>
+          <Show when={post().reposted_post}>
+            <div class="reposted-post" style="border: 1px solid var(--border-color); padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem; background: var(--bg-card);">
+              <div class="post-header" style="margin-bottom: 0.5rem;">
+                <div class="post-author">
+                  <span style="margin-right: 0.5rem;">♻️ Reposted from </span>
+                  <A href={`#user/${post().reposted_post.user_id}`} class="username-link">
+                    {post().reposted_post.username || 'Anonymous'}
+                  </A>
+                </div>
+                <span class="post-date">
+                  {new Date(post().reposted_post.created_at).toLocaleDateString()}
+                </span>
+              </div>
+              <div class="post-content-text">
+                <RenderTextWithLinks text={post().reposted_post.content || ''} />
+              </div>
+            </div>
+          </Show>
         </div>
       }>
         <div class="post-content-area">
@@ -724,6 +761,13 @@ export default function PostItem(props) {
           </button>
         </div>
         <div class="post-actions-right">
+          <button
+            type="button"
+            class="post-action repost-button"
+            onClick={handleRepost}
+          >
+            Repost
+          </button>
           <button
             type="button"
             class="post-action comment-button"
