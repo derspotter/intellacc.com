@@ -57,15 +57,8 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 ## Priority 2 - Medium
 - `Partial` Profile editing:
   username + bio editing exists; avatar/display-name/visibility settings are still missing.
-- `Open` Two-factor auth (TOTP):
-  no TOTP setup/login/backup-code flow found.
 - `Done` Passkey PRF vault unlock:
   WebAuthn/passkey management now persists PRF seed input, uses server-verified PRF output in passkey login responses, and supports local PRF unlock flow.
-- `Partial` MLS proposal wrappers:
-  app-facing MLS wrappers now cover `selfUpdate`, `removeMember`, `leaveGroup`, proposal processing, and commit of pending proposals.
-  Still missing explicit wrappers for `propose_add_member`, `propose_remove_member`, `propose_self_update`, `add_members_without_update`, and `self_update_with_new_signer`.
-- `Open` MLS CommitBuilder JS wrapper:
-  no general JS wrapper for app-driven multi-proposal/policy commit building.
 - `Done` Persistent message dedup across restarts:
   vault-backed processed-ID persistence created using IndexedDB.
 - `Done` AI moderation pipeline:
