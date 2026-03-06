@@ -1112,6 +1112,11 @@ class VaultService {
         const userId = vaultStore.userId;
         const found = await this.findAndUnlock(password, userId);
         if (!found) throw new Error('Incorrect password or vault not found');
+        try {
+            await coreCryptoClient.ensureKeyPackagesFresh();
+        } catch (e) {
+            console.warn('[MLS] Key package refresh after unlock failed:', e?.message || e);
+        }
     }
     async unlock(password) { return this.unlockWithPassword(password); }
 
@@ -1283,6 +1288,11 @@ class VaultService {
                         vaultStore.setUserId(userId);
                         vaultStore.updateActivity();
                         await coreCryptoClient.restoreStateFromVault(mlsState);
+                        try {
+                            await coreCryptoClient.ensureKeyPackagesFresh();
+                        } catch (e) {
+                            console.warn('[MLS] Key package refresh after PRF unlock failed:', e?.message || e);
+                        }
                         loadIdleLockConfig();
                         initIdleAutoLock();
                         console.log('[Keystore] Unlocked with PRF');

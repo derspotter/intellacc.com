@@ -8,8 +8,8 @@ const { div } = van.tags;
  * @param {string} props.className - Additional CSS classes
  * @param {any} props.children - Card content
  */
-export default function Card({ title, className = '', children }) {
-  return div({ class: `card ${className}` }, [
+export default function Card({ title, className = '', children, attrs = {} }) {
+  return div({ ...attrs, class: `card ${className}` }, [
     title ? div({ class: "card-title" }, title) : null,
     div({ class: "card-content" }, children)
   ]);

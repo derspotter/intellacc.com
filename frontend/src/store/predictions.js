@@ -400,6 +400,18 @@ const predictionsStore = {
       }
     },
 
+    invalidateVerificationNotice() {
+      this.state.verificationNoticeLoaded.val = false;
+      this.state.verificationNoticeLoading.val = false;
+    },
+
+    async refreshVerificationNotice({ force = false } = {}) {
+      if (force) {
+        this.actions.invalidateVerificationNotice.call(this);
+      }
+      return this.actions.fetchVerificationNotice.call(this);
+    },
+
     reset() {
       this.state.predictions.val = [];
       this.state.assignedPredictions.val = [];

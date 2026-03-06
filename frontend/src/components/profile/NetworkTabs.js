@@ -78,7 +78,6 @@ export default function NetworkTabs({ userId } = {}) {
   
   return Card({
     title: isCurrentUser ? "Your Network" : "Network",
-    className: "network-tabs",
     children: [
       // Error message
       () => error.val ? div({ class: "error-message" }, error.val) : null,

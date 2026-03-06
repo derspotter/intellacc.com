@@ -614,6 +614,9 @@ export const api = {
       const url = search ? `/events?search=${encodeURIComponent(search)}` : '/events';
       return request(url);
     },
+
+    getById: (eventId) =>
+      request(`/events/${eventId}`),
       
     create: (eventData) => 
       request('/events', { method: 'POST', body: eventData }),

@@ -226,8 +226,8 @@ const postsStore = {
 
     async createPost(content, image_attachment_id = null, image_url = null, repost_id = null) {
       try {
-        this.state.loading.val = true;
         this.state.error.val = null;
+
         if ((!content || typeof content !== 'string' || content.trim() === '') && !repost_id) {
           throw new Error('Post content is required unless reposting');
         }
@@ -235,6 +235,7 @@ const postsStore = {
           const post = await api.posts.create(content, image_attachment_id, image_url, repost_id);
           const updatedPosts = [post, ...this.state.posts.val];
           this.state.posts.val = updatedPosts;
+
           return post;
         } catch (apiError) {
           console.error('API Error details:', apiError);
@@ -245,8 +246,6 @@ const postsStore = {
         console.error('Error creating post:', error);
         this.state.error.val = error.message;
         throw error;
-      } finally {
-        this.state.loading.val = false;
       }
     },
 
@@ -410,6 +409,11 @@ const postsStore = {
         this.state.comments.val = {
           ...this.state.comments.val,
           [parentId]: [newComment, ...existingComments] // Add to the beginning
+        };
+        // Keep the thread open so the freshly created comment is immediately visible.
+        this.state.commentListVisible.val = {
+          ...this.state.commentListVisible.val,
+          [parentId]: true
         };
 
         // Initialize like status for the new comment

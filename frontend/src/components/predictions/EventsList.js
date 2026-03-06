@@ -12,7 +12,7 @@ export default function EventsList() {
   const events = van.state([]);
   const loading = van.state(true);
   const error = van.state(null);
-  const filter = van.state('all'); // 'all', 'open', 'closing-soon'
+  const filter = van.state('open'); // 'all', 'open', 'closing-soon', 'my-positions'
   const searchQuery = van.state('');
   const selectedEvent = van.state(null);
   
@@ -24,6 +24,7 @@ export default function EventsList() {
   const weeklyAssignment = van.state(null);
   const weeklyLoading = van.state(true);
   const weeklyError = van.state(null);
+  const routedMarketId = van.state('');
 
   const hasLoadedEvents = van.state(false);
   const loadedWeeklyUserId = van.state('');
@@ -34,6 +35,20 @@ export default function EventsList() {
   
   // Search debounce timeout
   let searchTimeout;
+  let lastTargetedSelectionFetchKey = '';
+  let targetedEventLookupInFlight = null;
+
+  const getMarketIdFromHash = () => {
+    const hash = String(window.location.hash || '').replace(/^#/, '');
+    if (!hash.startsWith('market/')) return '';
+    const [, marketId] = hash.split('/');
+    return String(marketId || '').trim();
+  };
+
+  routedMarketId.val = getMarketIdFromHash();
+  window.addEventListener('hashchange', () => {
+    routedMarketId.val = getMarketIdFromHash();
+  });
 
   // Register Socket.IO handler for real-time market updates in event list
   const unregisterEventListSocketHandler = registerSocketEventHandler('marketUpdate', (data) => {
@@ -211,6 +226,51 @@ export default function EventsList() {
     selectedEvent.val = event;
   };
 
+  const applyTargetedSelection = () => {
+    const marketId = String(routedMarketId.val || '').trim();
+    if (!marketId) return false;
+
+    const targetEvent = events.val.find((event) => String(event.id) === marketId);
+    if (!targetEvent) return false;
+
+    selectedEvent.val = targetEvent;
+    lastTargetedSelectionFetchKey = '';
+    return true;
+  };
+
+  const loadTargetedEvent = async (marketId) => {
+    const normalizedId = String(marketId || '').trim();
+    if (!normalizedId) return false;
+
+    if (targetedEventLookupInFlight === normalizedId) {
+      return false;
+    }
+
+    targetedEventLookupInFlight = normalizedId;
+
+    try {
+      const targetEvent = await api.events.getById(normalizedId);
+      if (!targetEvent || String(targetEvent.id) !== normalizedId) {
+        return false;
+      }
+
+      const nextEvents = events.val.some((event) => String(event.id) === normalizedId)
+        ? events.val
+        : [...events.val, targetEvent];
+      events.val = nextEvents;
+      selectedEvent.val = targetEvent;
+      lastTargetedSelectionFetchKey = '';
+      return true;
+    } catch (err) {
+      console.error('Error loading targeted event:', err);
+      return false;
+    } finally {
+      if (targetedEventLookupInFlight === normalizedId) {
+        targetedEventLookupInFlight = null;
+      }
+    }
+  };
+
   const handleStakeUpdate = (result) => {
     // Refresh events list and user positions after a stake is placed
     loadEvents(searchQuery.val.trim());
@@ -258,6 +318,37 @@ export default function EventsList() {
       loadedPositionsUserId.val = userId;
       loadUserPositions();
     }
+  });
+
+  van.derive(() => {
+    const marketId = String(routedMarketId.val || '').trim();
+    events.val.length;
+    loading.val;
+
+    if (!marketId) {
+      lastTargetedSelectionFetchKey = '';
+      return;
+    }
+
+    if (applyTargetedSelection()) {
+      return;
+    }
+
+    if (loading.val) {
+      return;
+    }
+
+    const fetchKey = `${marketId}:${searchQuery.val.trim()}`;
+    if (lastTargetedSelectionFetchKey === fetchKey) {
+      return;
+    }
+
+    lastTargetedSelectionFetchKey = fetchKey;
+    loadTargetedEvent(marketId).then((loaded) => {
+      if (!loaded) {
+        loadEvents(searchQuery.val.trim());
+      }
+    });
   });
 
   return () => div({ class: 'events-container' }, [
@@ -340,7 +431,7 @@ export default function EventsList() {
                 searchQuery.val.trim() ? Button({
                   onClick: () => {
                     searchQuery.val = '';
-                    filter.val = 'all';
+                    filter.val = 'open';
                   },
                   children: 'Clear Filters'
                 }) : null

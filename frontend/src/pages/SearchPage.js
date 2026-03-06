@@ -238,7 +238,6 @@ const postScopeOptions = () => {
       }
     } catch (error) {
       followError.val = error?.message || 'Unable to update follow status.';
-      followingState.val = !followingState.val;
     } finally {
       busyState.val = false;
     }

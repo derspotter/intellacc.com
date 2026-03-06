@@ -38,8 +38,14 @@ const formatDateTime = (value) => {
   }
 };
 
+const marketQuestionUiState = {
+  activeTab: 'create',
+  tabVersion: van.state(0)
+};
+
 export default function MarketQuestionHub() {
-  const activeTab = van.state('create');
+  const activeTab = () => marketQuestionUiState.activeTab;
+  const tabVersion = marketQuestionUiState.tabVersion;
   const config = van.state(null);
   const error = van.state('');
   const success = van.state('');
@@ -177,7 +183,8 @@ export default function MarketQuestionHub() {
       category.val = '';
       closingDate.val = toLocalDateTimeValue(new Date(Date.now() + 24 * 60 * 60 * 1000));
       mineOnly.val = true;
-      activeTab.val = 'mine';
+      marketQuestionUiState.activeTab = 'mine';
+      tabVersion.val += 1;
       listLoaded.val = false;
       await loadSubmissions();
     } catch (err) {
@@ -451,11 +458,23 @@ export default function MarketQuestionHub() {
   };
 
   const renderTab = (id, tabLabel) => {
-    const isActive = () => activeTab.val === id;
     return Button({
-      className: () => `market-question-tab ${isActive() ? 'is-active' : ''}`,
+      className: () => {
+        tabVersion.val;
+        return `market-question-tab ${activeTab() === id ? 'is-active' : ''}`;
+      },
       onclick: () => {
-        activeTab.val = id;
+        const tabContainer = document.querySelector('.market-question-hub .market-question-tabs');
+        if (tabContainer) {
+          Array.from(tabContainer.querySelectorAll('.market-question-tab')).forEach((el) => {
+            el.classList.remove('is-active');
+          });
+          const target = Array.from(tabContainer.querySelectorAll('.market-question-tab'))
+            .find((el) => String(el.textContent || '').trim() === tabLabel);
+          if (target) target.classList.add('is-active');
+        }
+        marketQuestionUiState.activeTab = id;
+        tabVersion.val += 1;
         if (id === 'mine') {
           mineOnly.val = true;
           statusFilter.val = 'all';
@@ -471,9 +490,8 @@ export default function MarketQuestionHub() {
     });
   };
 
-  return div({ class: 'market-question-hub' }, [
-    h2('Community Market Questions'),
-    h3(isAdminState.val ? 'Creator + Validator Flow' : 'Creator + Validator Flow'),
+  return div({ class: 'events-list-card market-question-hub card' }, [
+    h2({ class: 'events-list-title' }, 'Community Market Questions'),
 
     div({ class: 'market-question-tabs' }, [
       renderTab('create', 'Submit'),
@@ -487,7 +505,8 @@ export default function MarketQuestionHub() {
     () => success.val ? div({ class: 'success' }, success.val) : null,
 
     () => {
-      if (activeTab.val === 'create') {
+      tabVersion.val;
+      if (activeTab() === 'create') {
         return renderSubmissionForm();
       }
 
@@ -495,11 +514,11 @@ export default function MarketQuestionHub() {
         return div({ class: 'market-question-login-hint' }, 'Log in to access this section.');
       }
 
-      if (activeTab.val === 'review') {
+      if (activeTab() === 'review') {
         return renderReviewQueue();
       }
 
-      if (activeTab.val === 'mine') {
+      if (activeTab() === 'mine') {
         return renderMySubmissions();
       }
 

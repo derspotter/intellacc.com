@@ -4,11 +4,15 @@ import Card from '../common/Card';
 import api from '../../services/api';
 import { getTokenData, isLoggedInState, tokenState } from '../../services/auth';
 
+const leaderboardUiState = {
+  selectedTab: 'global',
+  tabVersion: van.state(0)
+};
+
 export default function LeaderboardCard() {
   // State for view type and data
-  const showGlobal = van.state(true);
-  const showFollowers = van.state(false);
-  const showFollowing = van.state(false);
+  const selectedTab = () => leaderboardUiState.selectedTab;
+  const tabVersion = leaderboardUiState.tabVersion;
   const leaderboardData = van.state([]);
   const loading = van.state(false);
   const error = van.state(null);
@@ -29,9 +33,8 @@ export default function LeaderboardCard() {
     
     try {
       let response;
-      
-      // Determine which type to fetch based on current selections
-      if (showGlobal.val) {
+
+      if (selectedTab() === 'global') {
         response = await api.leaderboard.getGlobal(10);
         // Fetch user rank for global leaderboard
         try {
@@ -40,17 +43,13 @@ export default function LeaderboardCard() {
         } catch (rankError) {
           console.warn('Could not fetch user rank:', rankError);
         }
-      } else if (showFollowers.val && showFollowing.val) {
-        // Both followers and following = network
-        response = await api.leaderboard.getNetwork(10);
-      } else if (showFollowers.val) {
+      } else if (selectedTab() === 'followers') {
         response = await api.leaderboard.getFollowers(10);
-      } else if (showFollowing.val) {
+      } else if (selectedTab() === 'following') {
         response = await api.leaderboard.getFollowing(10);
       } else {
-        // Default to global if nothing selected
         response = await api.leaderboard.getGlobal(10);
-        showGlobal.val = true;
+        leaderboardUiState.selectedTab = 'global';
       }
       
       leaderboardData.val = response.leaderboard || [];
@@ -63,26 +62,11 @@ export default function LeaderboardCard() {
     }
   };
 
-  // Handle tab toggling
-  const toggleTab = (tabKey) => {
-    if (tabKey === 'global') {
-      // Global is exclusive - turn off others
-      showGlobal.val = true;
-      showFollowers.val = false;
-      showFollowing.val = false;
-      userRank.val = null; // Clear previous rank
-    } else if (tabKey === 'followers') {
-      // Toggle followers, turn off global
-      showGlobal.val = false;
-      showFollowers.val = !showFollowers.val;
-      userRank.val = null;
-    } else if (tabKey === 'following') {
-      // Toggle following, turn off global
-      showGlobal.val = false;
-      showFollowing.val = !showFollowing.val;
-      userRank.val = null;
-    }
-    
+  // Handle tab selection
+  const selectTab = (tabKey) => {
+    leaderboardUiState.selectedTab = tabKey;
+    tabVersion.val += 1;
+    if (tabKey !== 'global') userRank.val = null;
     fetchLeaderboard();
   };
 
@@ -107,27 +91,26 @@ export default function LeaderboardCard() {
 
   // Render tab buttons
   const renderTabs = () => {
-    return div({ class: 'leaderboard-tabs' }, 
-      tabs.map(tab => {
-        const isActive = () => {
-          if (tab.key === 'global') return showGlobal.val;
-          if (tab.key === 'followers') return showFollowers.val;
-          if (tab.key === 'following') return showFollowing.val;
-          return false;
-        };
-        
-        return button({
-          class: () => `tab-button ${isActive() ? 'active' : ''}`,
-          onclick: () => toggleTab(tab.key)
-        }, tab.label);
-      })
-    );
+    return () => {
+      // Dependency anchor: force re-render when selected tab changes.
+      tabVersion.val;
+      return div({ class: 'leaderboard-tabs' },
+        tabs.map(tab => {
+          const active = selectedTab() === tab.key;
+          return button({
+            class: `tab-button ${active ? 'active' : ''}`,
+            onclick: () => selectTab(tab.key)
+          }, tab.label);
+        })
+      );
+    };
   };
 
   // Render user rank info (for global leaderboard)
   const renderUserRank = () => {
     return () => {
-      if (!showGlobal.val || !userRank.val) return null;
+      tabVersion.val;
+      if (selectedTab() !== 'global' || !userRank.val) return div({ style: 'display: none;' });
       
       const rank = userRank.val;
       return div({ class: 'user-rank-info' }, [
@@ -201,7 +184,7 @@ export default function LeaderboardCard() {
           )
         : div(
             { class: 'leaderboard-empty' },
-            showGlobal.val
+            selectedTab() === 'global'
               ? 'No users with predictions yet.'
               : 'No users in your network have made predictions yet.'
           );

@@ -18,7 +18,6 @@ import SearchPage from '../pages/SearchPage.js';
 import ProfileCard from '../components/profile/ProfileCard';
 import ProfileEditor from '../components/profile/ProfileEditor';
 import ProfilePredictions from '../components/profile/ProfilePredictions';
-import NetworkTabs from '../components/profile/NetworkTabs';
 import ProfilePage from '../components/profile/ProfilePage';
 import SettingsPage from '../components/settings/SettingsPage';
 import VerifyEmailPage from '../components/verification/VerifyEmailPage';
@@ -26,15 +25,28 @@ import VerifyEmailPage from '../components/verification/VerifyEmailPage';
 // Use shorthand for tag functions
 const { div, h1, h2, p, button } = van.tags;
 const publicProfileUserId = van.state(null);
+export const targetedMarketId = van.state(null); // Used to pass market ID to predictions page
 
 // Update page from hash (now async to handle store loading and initial fetch)
 export const updatePageFromHash = async () => {
   // Extract page name, handling query params (e.g., #verify-email?token=abc → verify-email)
   const hashValue = window.location.hash.slice(1) || 'home';
   let page = hashValue.split('?')[0] || 'home';
+  
   if (page.startsWith('settings')) {
     page = 'settings';
   }
+  
+  // Market routing
+  if (page.startsWith('market/')) {
+    const [, marketId] = page.split('/');
+    targetedMarketId.val = marketId || null;
+    page = 'predictions'; // Reroute to predictions page
+  } else {
+    targetedMarketId.val = null;
+  }
+  
+  // User profile routing
   if (page.startsWith('user/')) {
     const [, userId] = page.split('/');
     publicProfileUserId.val = userId || null;
@@ -150,10 +162,7 @@ export default function Router() {
               showViewAll: true,
               title: 'Your Predictions',
               className: 'profile-predictions'
-            })
-          ]),
-          div({ class: "profile-column sidebar" }, [
-            NetworkTabs()
+              })
           ])
         ])
       ])

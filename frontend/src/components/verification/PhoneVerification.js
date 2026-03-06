@@ -4,6 +4,7 @@
  */
 import van from 'vanjs-core';
 import api from '../../services/api.js';
+import predictionsStore from '../../store/predictions.js';
 
 const { div, h3, p, input, button, span } = van.tags;
 
@@ -13,6 +14,22 @@ export default function PhoneVerification({ onSuccess } = {}) {
   const code = van.state('');
   const error = van.state('');
   const devCode = van.state('');
+
+  const toPhoneErrorMessage = (err, fallbackMessage) => {
+    const raw = String(err?.data?.error || err?.message || fallbackMessage || '').trim();
+    if (!raw) return fallbackMessage;
+    if (/invalid phone number/i.test(raw)) {
+      return 'Invalid phone number format. Use international format (for example +491783049301).';
+    }
+    return raw;
+  };
+
+  const editPhoneNumber = () => {
+    stage.val = 'idle';
+    code.val = '';
+    devCode.val = '';
+    error.val = '';
+  };
 
   const sendCode = async () => {
     if (!phoneNumber.val.trim()) {
@@ -35,7 +52,7 @@ export default function PhoneVerification({ onSuccess } = {}) {
     } catch (err) {
       console.error('[PhoneVerification] Start error:', err);
       stage.val = 'idle';
-      error.val = err.data?.error || err.message || 'Failed to send verification code';
+      error.val = toPhoneErrorMessage(err, 'Failed to send verification code');
     }
   };
 
@@ -51,12 +68,15 @@ export default function PhoneVerification({ onSuccess } = {}) {
 
     try {
       await api.verification.confirmPhoneVerification(phoneNumber.val.trim(), code.val.trim());
+      await predictionsStore.actions.refreshVerificationNotice.call(predictionsStore, { force: true });
       stage.val = 'success';
-      if (onSuccess) onSuccess();
+      if (onSuccess) {
+        await onSuccess();
+      }
     } catch (err) {
       console.error('[PhoneVerification] Confirm error:', err);
       stage.val = 'code_sent';
-      error.val = err.data?.error || err.message || 'Verification failed';
+      error.val = toPhoneErrorMessage(err, 'Verification failed');
     }
   };
 
@@ -100,7 +120,7 @@ export default function PhoneVerification({ onSuccess } = {}) {
             class: 'form-input',
             style: 'width: 100%; box-sizing: border-box;',
             autocomplete: 'tel',
-            disabled: stage.val === 'code_sent' || stage.val === 'verifying' || stage.val === 'success'
+            disabled: stage.val === 'verifying' || stage.val === 'success'
           })
         ),
         stage.val === 'code_sent' ? div({ class: 'code-section', style: 'margin-bottom: 1rem;' },
@@ -114,11 +134,23 @@ export default function PhoneVerification({ onSuccess } = {}) {
             inputmode: 'numeric',
             autocomplete: 'one-time-code'
           }),
-          button({
-            type: 'button',
-            class: 'button button-primary',
-            onclick: confirmCode
-          }, 'Verify Code')
+          div({ class: 'phone-code-actions', style: 'display: flex; gap: 0.5rem; flex-wrap: wrap;' }, [
+            button({
+              type: 'button',
+              class: 'button button-primary',
+              onclick: confirmCode
+            }, 'Verify Code'),
+            button({
+              type: 'button',
+              class: 'button button-secondary',
+              onclick: sendCode
+            }, 'Resend code'),
+            button({
+              type: 'button',
+              class: 'button button-secondary',
+              onclick: editPhoneNumber
+            }, 'Change number')
+          ])
         ) : button({
           type: 'button',
           class: 'button button-primary',
@@ -126,13 +158,7 @@ export default function PhoneVerification({ onSuccess } = {}) {
           disabled: stage.val === 'sending' || stage.val === 'verifying'
         }, 'Send Verification Code'),
         () => devCode.val ? p({ class: 'dev-code', style: 'margin-top: 0.5rem; font-size: 0.9em; color: var(--secondary-text);' }, `Dev code: ${devCode.val}`) : null,
-        () => error.val ? p({ class: 'error-message', style: 'margin-top: 0.5rem;' }, error.val) : null,
-        () => stage.val === 'code_sent' ? button({
-          type: 'button',
-          class: 'btn-link resend-link',
-          style: 'padding: 0; margin-top: 0.5rem; border: none; background: none; color: var(--primary-color); cursor: pointer; text-decoration: underline;',
-          onclick: sendCode
-        }, 'Resend code') : null
+        () => error.val ? p({ class: 'error-message', style: 'margin-top: 0.5rem;' }, error.val) : null
       );
     }
   );

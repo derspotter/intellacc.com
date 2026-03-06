@@ -11,7 +11,7 @@ import PasswordResetCancel from './PasswordResetCancel.js';
 import { ApiKeysManager } from './ApiKeysManager.js';
 import { isAdminState } from '../../services/auth';
 
-const { div, h1, label, input } = van.tags;
+const { div, h1, h3, label, input } = van.tags;
 
 // Dark mode state
 const isDarkMode = van.state(false);
@@ -41,16 +41,19 @@ export default function SettingsPage() {
 
     SkinPreferenceSettings(),
 
-    div({ class: 'setting-item' },
-      label(
-        input({
-          type: 'checkbox',
-          checked: isDarkMode,
-          onchange: toggleDarkMode
-        }),
-        ' Dark Mode'
+    div({ class: 'settings-section appearance-settings' }, [
+      h3({ class: 'settings-section-title' }, 'Appearance'),
+      div({ class: 'setting-item' },
+        label(
+          input({
+            type: 'checkbox',
+            checked: isDarkMode,
+            onchange: toggleDarkMode
+          }),
+          ' Dark Mode'
+        )
       )
-    ),
+    ]),
 
     // Passkey Management
     PasskeyManager(),

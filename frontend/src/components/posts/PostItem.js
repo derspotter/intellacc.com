@@ -18,6 +18,7 @@ import AiContentBadge from '../common/AiContentBadge';
  * Single post component with optimized rendering
  */
 export default function PostItem({ post }) {
+  const isLoggedIn = () => !!auth.getToken();
   const attachmentUrl = van.state(postsStore.state.attachmentUrls[post.image_attachment_id] || null);
 
   // --- Loading Attachment URL ---
@@ -35,6 +36,8 @@ export default function PostItem({ post }) {
   const commentInput = van.state('');
   const likeState = van.state(!!post.liked_by_user);
   const likeCount = van.state(Number(post.like_count) || 0);
+  const isReposting = van.state(false);
+  const isRepostPost = !!post.repost_id;
 
   // --- Edit Mode State (Inlined from EditPostForm) ---
   const editedContent = van.state(post.content || '');
@@ -58,13 +61,44 @@ export default function PostItem({ post }) {
   const handleRepost = async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (confirm("Repost this to your followers?")) {
-      try {
-        await postsStore.actions.createPost.call(postsStore, '', null, null, post.id);
-        alert("Successfully reposted!");
-      } catch (err) {
-        alert("Failed to repost: " + err.message);
+    e.currentTarget?.blur?.();
+    if (isReposting.val) return;
+
+    const anchorSelector = `.post-card[data-post-id="${post.id}"]`;
+    const anchorBefore = typeof document !== 'undefined'
+      ? document.querySelector(anchorSelector)
+      : null;
+    const anchorTopBefore = anchorBefore?.getBoundingClientRect?.().top ?? null;
+
+    isReposting.val = true;
+    try {
+      await postsStore.actions.createPost.call(postsStore, '', null, null, post.id);
+
+      if (anchorTopBefore !== null && typeof window !== 'undefined') {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const anchorAfter = document.querySelector(anchorSelector);
+            const anchorTopAfter = anchorAfter?.getBoundingClientRect?.().top ?? null;
+            if (anchorTopAfter === null) return;
+            const delta = anchorTopAfter - anchorTopBefore;
+            if (Math.abs(delta) > 1) {
+              window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
+            }
+          });
+        });
       }
+
+      if (typeof window !== 'undefined' && typeof window.showNotification === 'function') {
+        window.showNotification('Reposted.', 'success');
+      }
+    } catch (err) {
+      const message = err?.message || 'Failed to repost';
+      if (typeof window !== 'undefined' && typeof window.showNotification === 'function') {
+        window.showNotification(message, 'error');
+      }
+      console.error('Failed to repost:', err);
+    } finally {
+      isReposting.val = false;
     }
   };
 
@@ -101,6 +135,7 @@ export default function PostItem({ post }) {
   });
 
   const handleStartEdit = () => {
+    if (isRepostPost) return;
     // Reset edit state when starting
     editedContent.val = post.content || '';
     editError.val = '';
@@ -231,6 +266,7 @@ export default function PostItem({ post }) {
   };
 
   const commentFormContent = (postId) => {
+    if (!isLoggedIn()) return null;
     if (!getCommentFormVisible(postId)) return null;
     return form({
       class: "comment-form",
@@ -253,6 +289,7 @@ export default function PostItem({ post }) {
   // --- Render ---
   return Card({
     className: "post-card",
+    attrs: { 'data-post-id': post.id },
     children: [
       // 1. Header (Static)
       div({ class: "post-header" }, [
@@ -287,25 +324,19 @@ export default function PostItem({ post }) {
               style: "cursor: pointer;",
               onclick: () => handleShowComments(post.id)
             }, `${post.comment_count || 0} comment${(post.comment_count === 1) ? '' : 's'}`),
-            span({ class: "post-date" }, new Date(post.created_at).toLocaleDateString())
-          ])
-        ]),
-        div({ class: "post-header-sub" }, [
-          div({ class: "post-meta post-meta-sub" }, [
-            div({ class: "post-header-expand-wrap" },
-              () => {
-                if (!(post.comment_count > 0)) return null;
-                const isExpanded = postsStore.state.allCommentsExpanded.val[post.id] || false;
-                return span({
-                  class: "post-header-expand",
-                  style: "cursor: pointer;",
-                  onclick: (e) => {
-                    e.stopPropagation();
-                    handleToggleExpandCollapseAll(post.id);
-                  }
-                }, isExpanded ? "Collapse All" : "Expand All");
-              }
-            ),
+            span({ class: "post-date" }, new Date(post.created_at).toLocaleDateString()),
+            () => {
+              if (!(post.comment_count > 0)) return null;
+              const isExpanded = postsStore.state.allCommentsExpanded.val[post.id] || false;
+              return span({
+                class: "post-header-expand",
+                style: "cursor: pointer;",
+                onclick: (e) => {
+                  e.stopPropagation();
+                  handleToggleExpandCollapseAll(post.id);
+                }
+              }, isExpanded ? "Collapse All" : "Expand All");
+            },
             AiContentBadge({
               aiProbability: post.ai_probability,
               aiFlagged: post.ai_is_flagged,
@@ -395,22 +426,39 @@ export default function PostItem({ post }) {
             const renderRepostedContent = () => {
               if (!post.reposted_post) return null;
               const rp = post.reposted_post;
-              return div({ class: "reposted-post", style: "border: 1px solid var(--border-color); padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem; background: var(--bg-card);" }, [
+              const repostUserId = Number.isInteger(Number(rp.user_id)) ? Number(rp.user_id) : null;
+              const resolveRepostContent = (node) => {
+                let current = node;
+                let depth = 0;
+                while (current && depth < 10) {
+                  const text = String(current.content || '').trim();
+                  if (text) return text;
+                  current = current.reposted_post;
+                  depth += 1;
+                }
+                return '';
+              };
+              const repostContent = resolveRepostContent(rp);
+              return div({ class: "reposted-post", style: "border: 1px solid var(--border-color); padding: 1rem; border-radius: 0; margin-bottom: 0.5rem; background: var(--bg-card);" }, [
                 div({ class: "post-header", style: "margin-bottom: 0.5rem;" }, [
                   div({ class: "post-author" }, [
                     van.tags.span({ style: "margin-right: 0.5rem;" }, "♻️ Reposted from "),
-                    van.tags.a({
-                      href: `#user/${rp.user_id}`,
-                      class: "username-link",
-                      onclick: (e) => {
-                        e.preventDefault();
-                        window.location.hash = `user/${rp.user_id}`;
-                      }
-                    }, rp.username || 'Anonymous')
+                    repostUserId
+                      ? van.tags.a({
+                          href: `#user/${repostUserId}`,
+                          class: "username-link",
+                          onclick: (e) => {
+                            e.preventDefault();
+                            window.location.hash = `user/${repostUserId}`;
+                          }
+                        }, rp.username || 'Anonymous')
+                      : van.tags.span({ class: "username-link" }, rp.username || 'Anonymous')
                   ]),
                   van.tags.span({ class: "post-date" }, new Date(rp.created_at).toLocaleDateString())
                 ]),
-                div({ class: "post-content-text" }, renderTextWithLinks(rp.content || '', van))
+                repostContent
+                  ? div({ class: "post-content-text" }, renderTextWithLinks(repostContent, van))
+                  : null
               ]);
             };
 
@@ -458,13 +506,11 @@ export default function PostItem({ post }) {
       PostCritiques({ postId: post.id, authorId: post.user_id }),
 
       // 5. Actions (Toggle Edit Options)
-      div({ class: "post-actions" }, [
+      () => isLoggedIn() ? div({ class: "post-actions" }, [
         div({
           class: "post-actions-left",
           style: () => {
-            // Hide the left column entirely when there is nothing to show.
-            // This prevents "missing Edit" from creating an empty 1/3 column on mobile.
-            const show = isEditing() || isCurrentUserPost() || isAdminState.val;
+            const show = isEditing() || (isCurrentUserPost() && !isRepostPost) || isAdminState.val;
             return show ? '' : 'display: none;';
           }
         },
@@ -480,7 +526,7 @@ export default function PostItem({ post }) {
               disabled: isSubmitting
             }, "Cancel")
           ]) : span({ style: "display: contents;" }, [
-            isCurrentUserPost()
+            (isCurrentUserPost() && !isRepostPost)
               ? button({ class: "post-action edit", onclick: handleStartEdit }, "Edit")
               : null,
             isAdminState.val
@@ -488,14 +534,26 @@ export default function PostItem({ post }) {
               : null
           ])
         ),
-        div({ class: "post-actions-center" }, [
-          LikeButton({ postId: post.id })
-        ]),
-        div({ class: "post-actions-right" }, [
-          button({ class: "post-action repost-button", onclick: handleRepost }, "Repost"),
-          button({ class: "post-action comment-button", onclick: () => handleShowCommentForm(post.id) }, "Comment")
+        div({ class: "post-actions-main" }, [
+          LikeButton({ postId: post.id }),
+          button({
+            type: "button",
+            class: "post-action repost-button",
+            onclick: handleRepost,
+            disabled: () => isReposting.val
+          }, () => isReposting.val ? "Reposting..." : "Repost"),
+          button({
+            type: "button",
+            class: "post-action comment-button",
+            onclick: (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              e.currentTarget?.blur?.();
+              handleShowCommentForm(post.id);
+            }
+          }, "Comment")
         ])
-      ]),
+      ]) : null,
 
       // 7. Comments List and Form
       van.derive(() => div({ class: "comments-section" }, [

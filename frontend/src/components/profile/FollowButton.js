@@ -22,7 +22,8 @@ export default function FollowButton({ user }) {
     try {
       const followers = await api.users.getFollowers(user.id);
       const currentUser = auth.getTokenData();
-      following.val = followers.some(follower => follower.id === currentUser.userId);
+      const currentUserId = currentUser?.userId;
+      following.val = followers.some((follower) => String(follower.id) === String(currentUserId));
     } catch (err) {
       console.error('Error checking follow status:', err);
     }

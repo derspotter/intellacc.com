@@ -13,6 +13,14 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
   if (eventType !== 'binary') {
     return NonBinaryEventCard({ event, onStakeUpdate, hideTitle });
   }
+  const isResolvedMarket = () => Boolean(event.outcome);
+  const isClosedByDate = () => {
+    if (!event.closing_date) return false;
+    const closeAt = new Date(event.closing_date).getTime();
+    if (!Number.isFinite(closeAt)) return false;
+    return closeAt <= Date.now();
+  };
+  const isTradingClosed = () => isResolvedMarket() || isClosedByDate();
 
   const userPosition = van.state(null);
   const withdrawalTrigger = van.state(0); // Counter to force re-renders
@@ -38,6 +46,10 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
       setVerificationNotice(msg);
     }
     error.val = msg;
+  };
+  const isTradeBlockedByPhoneVerification = () => {
+    if (!localStorage.getItem('token')) return false;
+    return shouldUseVerificationNotice(predictionsStore.state.verificationNotice.val, 2);
   };
   
   // Betting form state
@@ -245,6 +257,11 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
   };
 
   const getKellySuggestion = async (belief, updateCallback) => {
+    if (isTradingClosed()) {
+      kellyData.val = null;
+      return;
+    }
+
     try {
       // Get userId efficiently with caching
       const userId = getUserId();
@@ -315,6 +332,16 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
   const handleStake = async (e) => {
     e.preventDefault();
     if (!stakeAmount.val || submitting.val) return;
+
+    if (isTradeBlockedByPhoneVerification()) {
+      setError('Verify your phone number to unlock this feature', { requiredTier: 2 });
+      return;
+    }
+
+    if (isTradingClosed()) {
+      setError(isResolvedMarket() ? 'Market resolved' : 'Market closed');
+      return;
+    }
     
     try {
       submitting.val = true;
@@ -356,8 +383,15 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
         // Notify parent of update
         onStakeUpdate?.(result);
       } else {
-        const errorData = await response.json();
-        setError(errorData.message || 'Failed to place stake', { requiredTier: errorData.required_tier });
+        let errorData = null;
+        try {
+          errorData = await response.json();
+        } catch {
+          const fallbackText = await response.text().catch(() => '');
+          errorData = { error: fallbackText || null };
+        }
+        const errorMessage = errorData?.error || errorData?.message || `Failed to place stake (${response.status})`;
+        setError(errorMessage, { requiredTier: errorData?.required_tier });
       }
       
     } catch (err) {
@@ -712,6 +746,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
       
       // Betting Interface
       () => localStorage.getItem('token') ? div({ class: 'betting-interface' }, [
+        () => isTradingClosed() ? div({ class: 'error-message' }, isResolvedMarket() ? 'This market is resolved. Trading is closed.' : 'This market is closed for trading.') : null,
         form({ 
           class: 'betting-form',
           onsubmit: handleStake
@@ -723,12 +758,14 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
                 button({
                   type: 'button', 
                   class: () => `direction-btn no-btn ${betDirection.val === 'no' ? 'active' : ''}`,
-                  onclick: () => betDirection.val = 'no'
+                  onclick: () => betDirection.val = 'no',
+                  disabled: () => isTradingClosed() || isTradeBlockedByPhoneVerification() || submitting.val
                 }, 'NO'),
                 button({
                   type: 'button',
                   class: () => `direction-btn yes-btn ${betDirection.val === 'yes' ? 'active' : ''}`,
-                  onclick: () => betDirection.val = 'yes'
+                  onclick: () => betDirection.val = 'yes',
+                  disabled: () => isTradingClosed() || isTradeBlockedByPhoneVerification() || submitting.val
                 }, 'YES')
               ])
             ]),
@@ -743,7 +780,8 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
                 class: 'stake-input',
                 oninput: (e) => {
                   stakeAmount.val = e.target.value; // Direct state update
-                }
+                },
+                disabled: () => isTradingClosed() || isTradeBlockedByPhoneVerification() || submitting.val
               }))
             ])
           ]),
@@ -787,15 +825,24 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
             ]),
 
             div({ class: 'form-actions' }, [
+              () => isTradeBlockedByPhoneVerification()
+                ? div({ class: 'error-message', style: 'margin-bottom: 0.6rem;' }, 'Verify your phone number to place trades.')
+                : null,
               Button({
                 type: 'submit',
                 className: 'primary',
                 disabled: () => {
-                  const disabled = !stakeAmount.val || submitting.val;
-                  console.log('Button disabled:', disabled, 'stakeAmount.val:', stakeAmount.val, 'submitting.val:', submitting.val);
-                  return disabled;
+                  return isTradingClosed()
+                    || isTradeBlockedByPhoneVerification()
+                    || !stakeAmount.val
+                    || submitting.val;
                 },
-                children: () => submitting.val ? 'Placing Stake...' : 'Place Stake'
+                children: () => {
+                  if (isTradingClosed()) {
+                    return isResolvedMarket() ? 'Market Resolved' : 'Market Closed';
+                  }
+                  return submitting.val ? 'Placing Stake...' : 'Place Stake';
+                }
               })
             ])
           ]),

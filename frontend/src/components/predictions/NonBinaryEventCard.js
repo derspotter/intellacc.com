@@ -1,6 +1,7 @@
 import van from 'vanjs-core';
 import Button from '../common/Button.js';
 import { getUserId, tokenState } from '../../services/auth.js';
+import predictionsStore from '../../store/predictions.js';
 
 const { div, h3, p, span, input, form, button, small } = van.tags;
 
@@ -25,6 +26,20 @@ const formatBucket = (outcome) => {
 };
 
 export default function NonBinaryEventCard({ event, onStakeUpdate, hideTitle = false }) {
+  const isResolvedMarket = () => Boolean(event.outcome);
+  const isClosedByDate = () => {
+    if (!event.closing_date) return false;
+    const closeAt = new Date(event.closing_date).getTime();
+    if (!Number.isFinite(closeAt)) return false;
+    return closeAt <= Date.now();
+  };
+  const isTradingClosed = () => isResolvedMarket() || isClosedByDate();
+  const isTradeBlockedByPhoneVerification = () => {
+    if (!localStorage.getItem('token')) return false;
+    const notice = predictionsStore.state.verificationNotice?.val;
+    return typeof notice === 'string' && notice.toLowerCase().includes('verify your phone');
+  };
+
   const market = van.state(null);
   const position = van.state([]);
   const loading = van.state(true);
@@ -81,6 +96,14 @@ export default function NonBinaryEventCard({ event, onStakeUpdate, hideTitle = f
   const submitStake = async (e) => {
     e.preventDefault();
     if (submitting.val) return;
+    if (isTradeBlockedByPhoneVerification()) {
+      error.val = 'Verify your phone number to place trades.';
+      return;
+    }
+    if (isTradingClosed()) {
+      error.val = isResolvedMarket() ? 'Market resolved' : 'Market closed';
+      return;
+    }
     if (!selectedOutcomeId.val) {
       error.val = 'Select an outcome first';
       return;
@@ -173,12 +196,14 @@ export default function NonBinaryEventCard({ event, onStakeUpdate, hideTitle = f
             ])
           ])
         ]),
+        () => isTradingClosed() ? div({ class: 'error-message' }, isResolvedMarket() ? 'This market is resolved. Trading is closed.' : 'This market is closed for trading.') : null,
         div({ class: 'form-field' }, [
           span({ class: 'stat-label' }, 'Select Outcome:'),
           div({ class: 'direction-buttons', style: 'display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;' },
             outcomes.map((outcome) => button({
               type: 'button',
               class: `direction-btn ${selectedOutcomeId.val === outcome.outcome_id ? 'active' : ''}`,
+              disabled: () => isTradingClosed() || isTradeBlockedByPhoneVerification() || submitting.val,
               onclick: () => {
                 selectedOutcomeId.val = outcome.outcome_id;
               }
@@ -196,15 +221,28 @@ export default function NonBinaryEventCard({ event, onStakeUpdate, hideTitle = f
                     min: '0.01',
                     value: () => stakeAmount.val,
                     class: 'stake-input',
+                    disabled: () => isTradingClosed() || isTradeBlockedByPhoneVerification() || submitting.val,
                     oninput: (e) => { stakeAmount.val = e.target.value; }
                   })
                 ])
               ]),
+              () => isTradeBlockedByPhoneVerification()
+                ? div({ class: 'error-message' }, 'Verify your phone number to place trades.')
+                : null,
               Button({
                 type: 'submit',
                 className: 'primary',
-                disabled: () => submitting.val || !stakeAmount.val || !selectedOutcomeId.val,
-                children: () => submitting.val ? 'Placing Stake...' : 'Place Stake'
+                disabled: () => isTradingClosed()
+                  || isTradeBlockedByPhoneVerification()
+                  || submitting.val
+                  || !stakeAmount.val
+                  || !selectedOutcomeId.val,
+                children: () => {
+                  if (isTradingClosed()) {
+                    return isResolvedMarket() ? 'Market Resolved' : 'Market Closed';
+                  }
+                  return submitting.val ? 'Placing Stake...' : 'Place Stake';
+                }
               })
             ])
           : div({ class: 'login-prompt' }, [

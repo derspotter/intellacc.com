@@ -21,7 +21,7 @@
   --pending-color: #888;
   --correct-color: #0a0;
   --incorrect-color: #c00;
-  --border-radius: 4px;
+  --border-radius: 2px;
   --box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   --transition: 0.2s ease;
   --reward-color: #ff6b35;
@@ -243,6 +243,68 @@ input[type="submit"]:disabled {
   background-color: var(--button-bg);
 }
 
+/* Verification settings */
+.verification-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.verification-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.verification-tier-pill {
+  border: 1px solid var(--border-color);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  background: var(--card-bg);
+}
+
+.verification-step-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.verification-step-tab {
+  min-height: 32px;
+}
+
+.verification-step-tab.active {
+  border-color: var(--signature-blue);
+  box-shadow: 0 0 0 1px var(--signature-blue) inset;
+}
+
+.verification-step-tab.complete {
+  border-color: var(--success-color);
+}
+
+.verification-step-panel {
+  border: 1px solid var(--border-color);
+  padding: 0.75rem;
+  background: var(--card-bg);
+}
+
+.verification-step-complete {
+  margin: 0.25rem 0;
+}
+
+.step-complete-mark {
+  color: var(--success-color);
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .verification-summary-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 /* Layout */
 .wrapper {
   display: flex;
@@ -294,6 +356,13 @@ input[type="submit"]:disabled {
   width: 50%;
 }
 
+/* Settings page: allow a wider reading width on ultra-wide monitors. */
+@media (min-width: 1921px) {
+  .main-content.page-settings {
+    width: 75%;
+  }
+}
+
 body.dark-mode .main-content {
   background: var(--black-bg);
   color: var(--text-color);
@@ -321,7 +390,7 @@ body.dark-mode .login-link a {
 .settings-page {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.25rem;
 }
 
 .settings-page .setting-item {
@@ -342,12 +411,45 @@ body.dark-mode .login-link a {
   padding: 1rem 1.25rem;
 }
 
+.settings-page > .settings-section,
+.settings-page > .notification-settings,
+.settings-page > .danger-zone {
+  margin: 0;
+}
+
 .settings-section-title {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   margin: 0 0 0.75rem 0;
   font-size: 1.05rem;
+}
+
+/* Ultra-wide settings layout: two equal columns without row-coupled vertical gaps */
+@media (min-width: 1921px) {
+  .settings-page {
+    display: block;
+    column-count: 2;
+    column-gap: 1.25rem;
+  }
+
+  .settings-page > h1 {
+    column-span: all;
+    margin-bottom: 1rem;
+  }
+
+  .settings-page > .settings-section,
+  .settings-page > .notification-settings,
+  .settings-page > .danger-zone {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+    page-break-inside: avoid;
+    box-sizing: border-box;
+    margin: 0 0 1.25rem;
+  }
 }
 
 .section-icon {
@@ -880,6 +982,7 @@ body.dark-mode .device-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  column-gap: 0.75rem;
   margin-bottom: 0.75rem;
 }
 
@@ -895,6 +998,7 @@ body.dark-mode .device-item {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  margin-top: 0.25rem;
 }
 
 .post-author {
@@ -907,7 +1011,7 @@ body.dark-mode .device-item {
 
 .post-date {
   color: var(--secondary-text);
-  font-size: 0.875rem;
+  font-size: 0.8rem;
 }
 
 .post-meta {
@@ -918,8 +1022,9 @@ body.dark-mode .device-item {
 
 .post-meta-main {
   margin-left: auto;
-  white-space: nowrap;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .post-meta-sub {
@@ -1196,13 +1301,18 @@ body.dark-mode .post-content-toggle {
 }
 
 .post-actions-left,
+.post-actions-main,
 .post-actions-center,
 .post-actions-right {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 0.5rem;
+  gap: 1rem;
   min-width: 0;
+}
+
+.post-actions-main {
+  margin-left: 0;
 }
 
 .post-action {
@@ -1228,6 +1338,7 @@ body.dark-mode .post-content-toggle {
 }
 
 .post-action.like-button,
+.post-action.repost-button,
 .post-action.comment-button {
   width: 5rem;
   white-space: nowrap;
@@ -1310,22 +1421,14 @@ body.dark-mode .post-content-toggle {
 }
 
 .post-action.liked {
-  color: #e74c3c;
-  background-color: #fff5f5;
-  border-color: #e74c3c;
-}
-
-body.dark-mode .post-action.liked {
-  background-color: rgba(231, 76, 60, 0.12);
-  border-color: rgba(231, 76, 60, 0.9);
+  color: var(--button-fg);
+  background-color: var(--button-bg);
+  border-color: var(--signature-blue);
+  box-shadow: 0 0 0 1px var(--signature-blue) inset;
 }
 
 .post-action.liked:hover {
-  background-color: #fee2e2;
-}
-
-body.dark-mode .post-action.liked:hover {
-  background-color: rgba(231, 76, 60, 0.18);
+  background-color: var(--button-hover-bg);
 }
 
 .post-action.delete:hover {
@@ -2518,11 +2621,12 @@ body.dark-mode .delete-btn:hover {
 
 /* Notification Settings */
 .notification-settings {
-  margin-top: 1.5rem;
-  padding: 1rem;
+  margin-top: 0;
+  padding: 1rem 1.25rem;
   background: var(--card-bg);
+  border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
-  box-shadow: var(--box-shadow);
+  box-shadow: none;
 }
 
 .notification-settings h2 {
@@ -2584,6 +2688,14 @@ body.dark-mode .delete-btn:hover {
   color: var(--success-color);
   font-size: 0.9rem;
   margin-top: 1rem;
+}
+
+.danger-zone {
+  margin-top: 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid #f3b0b0;
+  background: #fff5f5;
+  border-radius: var(--border-radius);
 }
 
 /* Dark mode for push notifications */
@@ -2816,15 +2928,15 @@ body.dark-mode .username-link:hover {
 }
 
 .leaderboard-tabs .tab-button.active {
-  background: var(--text-color);
-  color: var(--blue-bg);
-  border-color: var(--text-color);
+  background: var(--signature-blue);
+  color: white;
+  border-color: var(--signature-blue);
 }
 
 body.dark-mode .leaderboard-tabs .tab-button.active {
-  background: var(--blue-bg);
-  color: var(--text-color);
-  border-color: var(--border-color);
+  background: var(--signature-blue);
+  color: white;
+  border-color: var(--signature-blue);
 }
 
 .user-rank-info {
@@ -2846,6 +2958,7 @@ body.dark-mode .leaderboard-tabs .tab-button.active {
 .leaderboard-content {
   /* Keep this from "breaking" the predictions page layout */
   max-height: 320px;
+  min-height: 320px;
   overflow: auto;
   border: 1px solid var(--border-color);
   border-radius: 2px;
@@ -5579,7 +5692,7 @@ select {
 
   .post-header-main {
     width: 100%;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: baseline;
   }
 
@@ -5595,7 +5708,7 @@ select {
   .post-header-sub {
     width: 100%;
     justify-content: flex-start;
-    margin-top: 0.35rem;
+    margin-top: 0.6rem;
   }
 
   .post-header-likes,
@@ -5604,9 +5717,8 @@ select {
   }
 
   .post-header-expand {
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     color: var(--secondary-text);
-    text-decoration: underline;
   }
 
   .post-stats {
@@ -5631,14 +5743,14 @@ select {
 
   /* On mobile, make the three main actions fill the full width evenly. */
   .post-actions {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: 1fr;
+    display: flex;
+    flex-direction: column;
     align-items: stretch;
     gap: 0.5rem;
   }
 
   .post-actions-left,
+  .post-actions-main,
   .post-actions-center,
   .post-actions-right {
     align-items: stretch;
@@ -5646,7 +5758,15 @@ select {
     width: 100%;
   }
 
+  .post-actions-main {
+    margin-left: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
   .post-actions-left .post-action,
+  .post-actions-main .post-action,
   .post-actions-center .post-action,
   .post-actions-right .post-action {
     flex: 1 1 0;
@@ -5655,6 +5775,7 @@ select {
   }
 
   .post-action.like-button,
+  .post-action.repost-button,
   .post-action.comment-button {
     width: auto;
   }

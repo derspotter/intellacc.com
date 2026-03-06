@@ -155,12 +155,12 @@ const LoginForm = () => {
         style: () => `display: ${stage.val === 'logging_in' ? 'none' : 'block'}`
       },
         div({ class: 'form-group' },
-          label({ for: 'email' }, 'Email'),
+          label({ for: 'email' }, 'Email or Username'),
           emailInputRef = input({
             id: 'email',
-            type: 'email',
+            type: 'text',
             required: true,
-            placeholder: 'Enter your email',
+            placeholder: 'Enter your email or username',
             autofocus: true
           })
         ),

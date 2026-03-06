@@ -1097,7 +1097,8 @@
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
-  background: var(--input-bg, #16213e);
+  background: var(--hover-bg, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--border-color);
   border-radius: 8px;
 }
 
