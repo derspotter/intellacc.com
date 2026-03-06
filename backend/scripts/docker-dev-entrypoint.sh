@@ -72,7 +72,12 @@ done
 # Ensure npm dependencies are present (helps when the image cache is stale)
 if [ ! -d node_modules ] || ! npm ls --depth=0 >/dev/null 2>&1; then
   echo "Installing npm dependencies"
-  npm install --no-fund --no-audit
+  npm ci --no-fund --no-audit
+fi
+
+if [ "$intellacc_stack" = "production" ]; then
+  echo "Starting backend in production mode"
+  exec npm run start
 fi
 
 echo "Starting backend in watch mode"

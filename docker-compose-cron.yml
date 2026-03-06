@@ -1,11 +1,11 @@
-version: '3.8'
-
 services:
   weekly-cron:
     build:
       context: .
       dockerfile: docker/weekly-cron/Dockerfile
     container_name: intellacc_weekly_cron
+    env_file:
+      - ./backend/.env
     environment:
       - API_BASE=http://backend:3000/api
       - WEEKLY_WEBHOOK_URL=${WEEKLY_WEBHOOK_URL:-}

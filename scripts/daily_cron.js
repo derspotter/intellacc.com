@@ -11,6 +11,7 @@ const API_BASE = process.env.API_BASE || 'http://backend:3000/api';
 const ADMIN_TOKEN = process.env.WEEKLY_ADMIN_TOKEN;
 const ADMIN_EMAIL = process.env.WEEKLY_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.WEEKLY_ADMIN_PASSWORD;
+const CRON_SHARED_SECRET = process.env.CRON_SHARED_SECRET;
 
 function requestJson(url, options = {}) {
   return new Promise((resolve, reject) => {
@@ -50,12 +51,16 @@ function requestJson(url, options = {}) {
 }
 
 async function getAuthHeaders() {
+  if (CRON_SHARED_SECRET) {
+    return { 'x-cron-secret': CRON_SHARED_SECRET };
+  }
+
   if (ADMIN_TOKEN) {
     return { 'Authorization': `Bearer ${ADMIN_TOKEN}` };
   }
 
   if (ADMIN_EMAIL && ADMIN_PASSWORD) {
-    const loginRes = await requestJson(`${API_BASE}/users/login`, {
+    const loginRes = await requestJson(`${API_BASE}/login`, {
       method: 'POST',
       body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD }
     });
@@ -72,19 +77,21 @@ async function runDailyTasks() {
   
   try {
     const headers = await getAuthHeaders();
+    const runPath = CRON_SHARED_SECRET
+      ? '/admin/persuasion-score/run-cron'
+      : '/admin/persuasion-score/run';
 
     // Step 1: Run Persuasive Alpha Reward Scoring
-    console.log('
-💰 Step 1: Running Persuasive Alpha Reward Settlement...');
-    const rewardsResponse = await requestJson(`${API_BASE}/admin/persuasion-score/run`, {
+    console.log('\n💰 Step 1: Running Persuasive Alpha Reward Settlement...');
+    const rewardsResponse = await requestJson(`${API_BASE}${runPath}`, {
       method: 'POST',
-      headers
+      headers,
+      body: { trigger_type: 'cron' }
     });
     console.log(`✅ Persuasive Alpha results: ${JSON.stringify(rewardsResponse.data, null, 2)}`);
 
   } catch (error) {
-    console.error('
-❌ Error in daily cron run:', JSON.stringify(error, null, 2));
+    console.error('\n❌ Error in daily cron run:', JSON.stringify(error, null, 2));
     process.exit(1);
   }
 }
