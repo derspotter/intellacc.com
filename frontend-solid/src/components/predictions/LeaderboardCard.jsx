@@ -59,11 +59,15 @@ export default function LeaderboardCard() {
       setEntries(Array.isArray(nextEntries?.leaderboard) ? nextEntries.leaderboard : (nextEntries || []));
 
       if (tab === 'global' || tab === 'network') {
-        try {
-          const rank = await getLeaderboardUserRank();
-          setRankData(rank || null);
-        } catch {
+        if (!isAuthenticated()) {
           setRankData(null);
+        } else {
+          try {
+            const rank = await getLeaderboardUserRank();
+            setRankData(rank || null);
+          } catch {
+            setRankData(null);
+          }
         }
       }
     } catch (err) {

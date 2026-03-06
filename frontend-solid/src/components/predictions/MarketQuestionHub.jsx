@@ -82,7 +82,7 @@ export default function MarketQuestionHub() {
   };
 
   const loadConfig = async () => {
-    if (configLoading()) {
+    if (configLoading() || !isAuthenticated()) {
       return;
     }
     setConfigLoading(true);
