@@ -25,7 +25,14 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Initialize Socket.IO with restricted CORS
-const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['http://localhost:5173'];
+const parseAllowedOrigins = () => {
+  const raw = process.env.CORS_ALLOWED_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:5173';
+  return raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+};
+const allowedOrigins = parseAllowedOrigins();
 const io = socketIo(server, {
   cors: {
     origin: allowedOrigins,

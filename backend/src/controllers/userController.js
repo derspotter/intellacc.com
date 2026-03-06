@@ -235,7 +235,7 @@ exports.searchUsers = async (req, res) => {
 
     const whereMessagingReady = messagingReadyOnly
       ? `
-        AND EXISTS (
+        EXISTS (
           SELECT 1
           FROM user_devices ud
           JOIN mls_key_packages kp
@@ -278,18 +278,78 @@ exports.searchUsers = async (req, res) => {
 exports.loginUser = async (req, res) => {
   const { email, password } = req.body;
   try {
-    const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    const identifier = String(email || '').trim();
+    const passwordInput = typeof password === 'string' ? password : '';
+
+    if (!identifier || !passwordInput) {
+      return res.status(400).json({ message: 'Email/username and password are required' });
+    }
+
+    // Resolve credentials deterministically:
+    // 1) email match (case-insensitive), 2) username match (case-insensitive).
+    // This avoids ambiguous OR-matches returning the wrong user row.
+    let result = await db.query(
+      'SELECT * FROM users WHERE deleted_at IS NULL AND LOWER(email) = LOWER($1) LIMIT 1',
+      [identifier]
+    );
+
+    if (result.rows.length === 0) {
+      result = await db.query(
+        'SELECT * FROM users WHERE deleted_at IS NULL AND LOWER(username) = LOWER($1) LIMIT 1',
+        [identifier]
+      );
+    }
+
     if (result.rows.length === 0) {
       return res.status(400).json({ message: 'User not found' });
     }
 
     const user = result.rows[0];
-    if (user.deleted_at) {
-      return res.status(403).json({ message: 'Account has been deleted' });
+    const passwordCandidates = [passwordInput];
+    const trimmedPassword = passwordInput.trim();
+    if (trimmedPassword && trimmedPassword !== passwordInput) {
+      passwordCandidates.push(trimmedPassword);
     }
-    const match = await bcrypt.compare(password, user.password_hash);
+
+    let match = false;
+    for (const candidate of passwordCandidates) {
+      try {
+        // Handle corrupted / legacy non-bcrypt hashes gracefully.
+        if (!user.password_hash || typeof user.password_hash !== 'string') {
+          break;
+        }
+        // bcrypt hashes are 60 chars and start with $2a$, $2b$, or $2y$.
+        if (!/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(user.password_hash)) {
+          break;
+        }
+        if (await bcrypt.compare(candidate, user.password_hash)) {
+          match = true;
+          break;
+        }
+      } catch (compareErr) {
+        console.error(`[Auth] Password comparison failed for user ${user.id}:`, compareErr);
+        break;
+      }
+    }
 
     if (!match) {
+      const pendingReset = await db.query(
+        `SELECT execute_after
+         FROM password_reset_requests
+         WHERE user_id = $1
+           AND status = 'pending'
+         ORDER BY execute_after DESC
+         LIMIT 1`,
+        [user.id]
+      );
+
+      if (pendingReset.rows.length > 0) {
+        const executeAfter = pendingReset.rows[0].execute_after;
+        return res.status(403).json({
+          message: `Password reset pending until ${new Date(executeAfter).toISOString()}`
+        });
+      }
+
       return res.status(400).json({ message: 'Incorrect password' });
     }
 
@@ -637,11 +697,18 @@ exports.deleteAccount = async (req, res) => {
 
 // Follow a user
 exports.followUser = async (req, res) => {
-  const followerId = req.user.id; // Using standardized user object
-  const followingId = req.params.id;
+  const followerId = getViewerId(req);
+  const followingId = parseUserId(req.params.id);
+
+  if (!Number.isInteger(followerId)) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  if (!Number.isInteger(followingId)) {
+    return res.status(400).json({ message: "Invalid user ID format" });
+  }
   
   // Check if user is trying to follow themselves
-  if (followerId === parseInt(followingId)) {
+  if (followerId === followingId) {
     return res.status(400).json({ message: "You cannot follow yourself" });
   }
   
@@ -685,8 +752,15 @@ exports.followUser = async (req, res) => {
 
 // Unfollow a user
 exports.unfollowUser = async (req, res) => {
-  const followerId = req.user.id; // Using standardized user object
-  const followingId = req.params.id;
+  const followerId = getViewerId(req);
+  const followingId = parseUserId(req.params.id);
+
+  if (!Number.isInteger(followerId)) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  if (!Number.isInteger(followingId)) {
+    return res.status(400).json({ message: "Invalid user ID format" });
+  }
   
   try {
     const result = await db.query(

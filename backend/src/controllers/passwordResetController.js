@@ -143,8 +143,9 @@ exports.resetPassword = async (req, res) => {
 
   try {
     const immediateAllowed = await isImmediateResetAllowed(req, userId);
+    const resetDelayMs = passwordResetService.getResetDelayMs();
 
-    if (immediateAllowed) {
+    if (immediateAllowed || resetDelayMs === 0) {
       await passwordResetService.executePasswordReset({
         userId,
         passwordHash,
@@ -159,7 +160,7 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
-    const executeAfter = new Date(Date.now() + passwordResetService.getResetDelayMs());
+    const executeAfter = new Date(Date.now() + resetDelayMs);
     const pending = await passwordResetService.createResetRequest({
       userId,
       tokenId: tokenResult.tokenId,

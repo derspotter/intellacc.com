@@ -3,6 +3,7 @@ const config = require('./config');
 const { runSafeGate } = require('./claimGate');
 const { retrieveCandidateMarkets } = require('./marketRetrieval');
 const { runSafeReasoner } = require('./argumentExtractor');
+const { extractFirstUrl, fetchArticleContent } = require('../metadata/metadataService');
 
 const MAX_ERROR_MESSAGE_LENGTH = 400;
 const MATCH_METHOD_DEFAULT = 'hybrid_v1';
@@ -638,6 +639,24 @@ const runPipeline = async (postId, content) => {
     let gateLatencyMs = null;
     let reasonLatencyMs = null;
 
+    let augmentedContent = normalizedContent;
+    let extractedLink = extractFirstUrl(normalizedContent);
+
+    if (extractedLink && config.gate.enabled) {
+      try {
+        const articleText = await fetchArticleContent(extractedLink);
+        if (articleText && articleText.length > 50) {
+          // Truncate article to ~10,000 chars to avoid blowing out context limits/budgets
+          const truncatedArticle = articleText.length > 10000 
+            ? articleText.substring(0, 10000) + '... (truncated)'
+            : articleText;
+          augmentedContent = `User's Post:\n${normalizedContent}\n\nLinked Article Content:\n${truncatedArticle}`;
+        }
+      } catch (err) {
+        console.warn('[PostMatchPipeline] Failed to augment content with article:', err.message);
+      }
+    }
+
     await upsertAnalysis(client, normalizedPostId, {
       has_claim: false,
       domain: null,
@@ -655,7 +674,7 @@ const runPipeline = async (postId, content) => {
     if (config.gate.enabled) {
       try {
         const gateStart = Date.now();
-        gateResult = await runSafeGate({ postContent: normalizedContent });
+        gateResult = await runSafeGate({ postContent: augmentedContent });
         gateLatencyMs = Date.now() - gateStart;
       } catch (error) {
         processingErrors = normalizeResultError(error, 'gate failed');
@@ -664,7 +683,7 @@ const runPipeline = async (postId, content) => {
 
     if (gateResult.has_claim) {
       candidates = await retrieveCandidateMarkets(
-        gateResult.claim_summary || normalizedContent,
+        gateResult.claim_summary || augmentedContent,
         gateResult.entities,
         gateResult.domain
       );
@@ -689,11 +708,11 @@ const runPipeline = async (postId, content) => {
         try {
           reasonerAttempted = true;
           const reasonStart = Date.now();
-          wordCount = normalizedContent.split(/\s+/).filter(Boolean).length;
+          wordCount = augmentedContent.split(/\s+/).filter(Boolean).length;
           const isHeavy = wordCount > 400;
 
           const argumentResult = await runSafeReasoner({
-            postContent: normalizedContent,
+            postContent: augmentedContent,
             candidates,
             overrideModel: isHeavy ? config.reasoner.heavyModel : null,
             overrideFallbackModels: isHeavy ? config.reasoner.heavyFallbackModels : null

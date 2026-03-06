@@ -494,6 +494,51 @@ exports.getEvents = async (req, res) => {
   }
 };
 
+exports.getEventById = async (req, res) => {
+  const eventId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(eventId) || eventId <= 0) {
+    return res.status(400).json({ message: 'Invalid event id' });
+  }
+
+  try {
+    const result = await db.query(
+      `
+        SELECT
+          id,
+          topic_id,
+          title,
+          details,
+          closing_date,
+          outcome,
+          created_at,
+          updated_at,
+          category,
+          event_type,
+          numerical_outcome,
+          market_prob,
+          liquidity_b,
+          cumulative_stake,
+          q_yes,
+          q_no,
+          domain
+        FROM events
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [eventId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Event not found' });
+    }
+
+    res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching event by id:', err);
+    res.status(500).send('Database error: ' + err.message);
+  }
+};
+
 // Resolve a prediction (admin only)
 exports.resolvePrediction = async (req, res) => {
   const { outcome } = req.body; // Should be "correct" or "incorrect"

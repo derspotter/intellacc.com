@@ -110,8 +110,8 @@ const validateProductionConfig = () => {
   }
 
   const resetDelay = Number(process.env.PASSWORD_RESET_DELAY_HOURS || '168');
-  if (!Number.isFinite(resetDelay) || resetDelay <= 0) {
-    issues.push('PASSWORD_RESET_DELAY_HOURS must be a positive number');
+  if (!Number.isFinite(resetDelay) || resetDelay < 0) {
+    issues.push('PASSWORD_RESET_DELAY_HOURS must be a non-negative number');
   }
 
   if (issues.length > 0) {

@@ -42,6 +42,8 @@ const toInt = (value, fallback) => {
 const getCodeTtlMinutes = () => toInt(process.env.PHONE_CODE_TTL_MINUTES, 10);
 const getCodeMaxAttempts = () => toInt(process.env.PHONE_CODE_MAX_ATTEMPTS, 5);
 const getSmsGatewayTimeoutMs = () => toInt(process.env.SMS_GATEWAY_TIMEOUT_MS, 8000);
+const getSmsGatewayStatusCheckAttempts = () => toInt(process.env.SMS_GATEWAY_STATUS_CHECK_ATTEMPTS, 2);
+const getSmsGatewayStatusCheckIntervalMs = () => toInt(process.env.SMS_GATEWAY_STATUS_CHECK_INTERVAL_MS, 350);
 const getOpenClawTimeoutMs = () => toInt(process.env.OPENCLAW_TIMEOUT_MS, 15000);
 
 const useTwilio = () => !!(getTwilioSid() && getTwilioAuthToken() && getTwilioVerifySid());
@@ -155,13 +157,87 @@ const resolveSmsGatewayMessageUrl = () => {
     : `${withoutTrailingSlash}/message`;
 };
 
+const resolveSmsGatewayMessageStatusUrl = (messageId) => {
+  const messageUrl = resolveSmsGatewayMessageUrl();
+  if (!messageUrl || !messageId) return '';
+  return `${messageUrl}/${encodeURIComponent(String(messageId))}`;
+};
+
+const isTerminalSmsGatewayState = (state) => {
+  const normalized = String(state || '').trim().toLowerCase();
+  return normalized === 'delivered' || normalized === 'failed' || normalized === 'sent';
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const sanitizeGatewayErrorMessage = (input) => {
+  const raw = String(input || '').trim();
+  if (!raw) {
+    return 'The SMS gateway rejected this request. Please try a different phone number.';
+  }
+
+  if (/invalid phone number/i.test(raw)) {
+    return 'Invalid phone number format. Use international format (for example +491783049301).';
+  }
+
+  const withoutNumbers = raw.replace(/\+?\d[\d\s()-]{5,}\d/g, '[redacted-number]');
+  return withoutNumbers;
+};
+
+const extractGatewayRecipientError = (payload) => {
+  if (!payload || typeof payload !== 'object') return '';
+  const recipients = Array.isArray(payload.recipients) ? payload.recipients : [];
+  const failedRecipient = recipients.find((recipient) => String(recipient?.state || '').toLowerCase() === 'failed');
+  if (failedRecipient?.error) {
+    return String(failedRecipient.error);
+  }
+  if (String(payload.state || '').toLowerCase() === 'failed' && payload.error) {
+    return String(payload.error);
+  }
+  return '';
+};
+
+const verifySmsGatewayAcceptedMessage = async (messageId) => {
+  const statusUrl = resolveSmsGatewayMessageStatusUrl(messageId);
+  if (!statusUrl) return;
+
+  const attempts = getSmsGatewayStatusCheckAttempts();
+  const delayMs = getSmsGatewayStatusCheckIntervalMs();
+
+  let payload = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) {
+      await sleep(delayMs);
+    }
+
+    const response = await axios.get(statusUrl, {
+      auth: {
+        username: getSmsGatewayUsername(),
+        password: getSmsGatewayPassword()
+      },
+      timeout: getSmsGatewayTimeoutMs()
+    });
+    payload = response?.data || null;
+
+    const state = String(payload?.state || '').trim().toLowerCase();
+    if (isTerminalSmsGatewayState(state)) {
+      break;
+    }
+  }
+
+  const recipientError = extractGatewayRecipientError(payload);
+  if (recipientError) {
+    throw new Error(sanitizeGatewayErrorMessage(recipientError));
+  }
+};
+
 const sendViaSmsGateway = async (phoneNumber, message) => {
   const endpoint = resolveSmsGatewayMessageUrl();
   if (!endpoint || !useSmsGateway()) {
     throw new Error('SMS gateway is not configured');
   }
 
-  await axios.post(endpoint, {
+  const response = await axios.post(endpoint, {
     textMessage: { text: message },
     phoneNumbers: [phoneNumber]
   }, {
@@ -172,6 +248,16 @@ const sendViaSmsGateway = async (phoneNumber, message) => {
     headers: { 'Content-Type': 'application/json' },
     timeout: getSmsGatewayTimeoutMs()
   });
+
+  const payload = response?.data || null;
+  const recipientError = extractGatewayRecipientError(payload);
+  if (recipientError) {
+    throw new Error(sanitizeGatewayErrorMessage(recipientError));
+  }
+
+  if (payload?.id) {
+    await verifySmsGatewayAcceptedMessage(payload.id);
+  }
 
   return { provider: 'smsgate', channel: 'sms' };
 };

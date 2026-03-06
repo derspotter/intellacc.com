@@ -113,6 +113,12 @@ router.post('/verification/email/resend', authenticateJWT, emailResendRateLimit,
 
 // Phone Verification Routes (Tier 2)
 const normalizePhoneForLimit = (phoneNumber) => (phoneNumber || '').replace(/\D/g, '');
+const hashPhoneForLimit = (phoneNumber) => {
+    const normalized = normalizePhoneForLimit(phoneNumber);
+    if (!normalized) return '';
+    const salt = process.env.PHONE_HASH_SALT || 'dev-phone-hash-salt';
+    return crypto.createHash('sha256').update(`${normalized}:${salt}`).digest('hex');
+};
 const phoneIpRateLimit = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
     max: 10,
@@ -131,7 +137,7 @@ const phoneUserRateLimit = rateLimit({
 const phoneNumberRateLimit = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
     max: 3,
-    keyGenerator: (req) => normalizePhoneForLimit(req.body?.phoneNumber) || req.ip,
+    keyGenerator: (req) => hashPhoneForLimit(req.body?.phoneNumber) || req.ip,
     message: { error: 'Too many verification attempts for this phone number. Try again later.' },
     standardHeaders: true,
     legacyHeaders: false
@@ -205,6 +211,7 @@ router.get("/users/:id/positions", (req, res, next) => {
 router.post("/predict", authenticateJWT, requirePhoneVerified, predictionsController.createPrediction);
 router.post("/events", authenticateJWT, requirePaymentVerified, predictionsController.createEvent);
 router.get("/events", predictionsController.getEvents); // Temporarily no auth for testing
+router.get("/events/:id", predictionsController.getEventById);
 router.get("/categories", predictionsController.getCategories); // Get available categories
 router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
 router.patch("/events/:id", authenticateJWT, requireAdmin, predictionsController.resolveEvent);
@@ -468,11 +475,11 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, re
 
         const { outcome, closing_date } = eventResult.rows[0];
         if (outcome) {
-            return res.status(400).json({ error: 'Market resolved', event_id: eventIdNumber });
+            return res.status(400).json({ error: 'Market resolved', message: 'Market resolved', event_id: eventIdNumber });
         }
 
         if (closing_date && new Date(closing_date).getTime() <= Date.now()) {
-            return res.status(400).json({ error: 'Market closed', event_id: eventIdNumber });
+            return res.status(400).json({ error: 'Market closed', message: 'Market closed', event_id: eventIdNumber });
         }
     } catch (error) {
         console.error('Error loading event lifecycle state:', error);
