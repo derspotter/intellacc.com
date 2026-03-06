@@ -56,16 +56,109 @@ const getViewerIdFromAuthHeader = async (req) => {
 };
 
 const isAdminViewer = (req) => req.user?.role === 'admin';
+const MAX_REPOST_CHAIN_DEPTH = 8;
 
-const buildPostVisibilityClause = (viewerIdParamName = '$3') => {
+const buildPostVisibilityClauseForAlias = (postAlias = 'p', viewerIdParamName = '$3') => {
   return `
-       p.is_hidden = FALSE
+       ${postAlias}.is_hidden = FALSE
        AND (${viewerIdParamName}::int IS NULL OR NOT EXISTS (
          SELECT 1
          FROM user_blocks ub
-         WHERE (ub.blocker_id = p.user_id AND ub.blocked_user_id = ${viewerIdParamName}::int)
-            OR (ub.blocker_id = ${viewerIdParamName}::int AND ub.blocked_user_id = p.user_id)
+         WHERE (ub.blocker_id = ${postAlias}.user_id AND ub.blocked_user_id = ${viewerIdParamName}::int)
+            OR (ub.blocker_id = ${viewerIdParamName}::int AND ub.blocked_user_id = ${postAlias}.user_id)
        ))`;
+};
+
+const buildPostVisibilityClause = (viewerIdParamName = '$3') =>
+  buildPostVisibilityClauseForAlias('p', viewerIdParamName);
+
+const buildNestedRepostObject = (chainRows) => {
+  if (!Array.isArray(chainRows) || chainRows.length === 0) return null;
+
+  let nested = null;
+  for (let i = chainRows.length - 1; i >= 0; i -= 1) {
+    const row = chainRows[i];
+    nested = {
+      id: row.id,
+      content: row.content || '',
+      created_at: row.created_at,
+      user_id: row.user_id,
+      username: row.username || 'Anonymous',
+      avatar_url: row.avatar_url || null,
+      repost_id: row.repost_id || null,
+      reposted_post: nested
+    };
+  }
+
+  return nested;
+};
+
+const loadRepostChain = async (repostPostId, viewerId) => {
+  const result = await db.query(
+    `
+      WITH RECURSIVE repost_chain AS (
+        SELECT p.id, p.repost_id, p.content, p.created_at, p.user_id, 0 AS depth
+        FROM posts p
+        WHERE p.id = $1
+          AND ${buildPostVisibilityClauseForAlias('p', '$2')}
+
+        UNION ALL
+
+        SELECT p2.id, p2.repost_id, p2.content, p2.created_at, p2.user_id, rc.depth + 1
+        FROM posts p2
+        JOIN repost_chain rc ON p2.id = rc.repost_id
+        WHERE rc.repost_id IS NOT NULL
+          AND rc.depth < $3
+          AND ${buildPostVisibilityClauseForAlias('p2', '$2')}
+      )
+      SELECT
+        rc.id,
+        rc.repost_id,
+        rc.content,
+        rc.created_at,
+        rc.user_id,
+        u.username,
+        u.avatar_url,
+        rc.depth
+      FROM repost_chain rc
+      JOIN users u ON u.id = rc.user_id
+      ORDER BY rc.depth ASC
+    `,
+    [repostPostId, viewerId, MAX_REPOST_CHAIN_DEPTH]
+  );
+
+  return buildNestedRepostObject(result.rows);
+};
+
+const hydrateRepostedPosts = async (posts, viewerId) => {
+  if (!Array.isArray(posts) || posts.length === 0) return;
+
+  const repostIds = [...new Set(
+    posts
+      .map((post) => Number(post?.reposted_post?.id))
+      .filter((id) => Number.isInteger(id))
+  )];
+
+  if (repostIds.length === 0) return;
+
+  const cache = new Map();
+  await Promise.all(repostIds.map(async (repostId) => {
+    try {
+      const nested = await loadRepostChain(repostId, viewerId);
+      if (nested) {
+        cache.set(repostId, nested);
+      }
+    } catch (err) {
+      console.error(`[Posts] Failed to load repost chain for ${repostId}:`, err);
+    }
+  }));
+
+  for (const post of posts) {
+    const repostId = Number(post?.reposted_post?.id);
+    if (Number.isInteger(repostId) && cache.has(repostId)) {
+      post.reposted_post = cache.get(repostId);
+    }
+  }
 };
 
 const parsePostCursor = (cursorRaw, scope) => {
@@ -181,7 +274,7 @@ exports.createPost = async (req, res) => {
       const parentResult = await db.query(
         `SELECT * FROM posts p
          WHERE p.id = $1
-         ${buildPostVisibilityClause('$2')}`,
+         AND ${buildPostVisibilityClause('$2')}`,
         [parent_id, viewerId]
       );
 
@@ -198,7 +291,9 @@ exports.createPost = async (req, res) => {
 
     if (repost_id) {
       const repostResult = await db.query(
-        `SELECT id FROM posts WHERE id = $1 ${buildPostVisibilityClause('$2')}`,
+        `SELECT p.id FROM posts p
+         WHERE p.id = $1
+           AND ${buildPostVisibilityClause('$2')}`,
         [repost_id, viewerId]
       );
       if (repostResult.rows.length === 0) {
@@ -453,10 +548,11 @@ exports.getPosts = async (req, res) => {
               (
                 SELECT row_to_json(repost_data.*)
                 FROM (
-                  SELECT rp.id, rp.content, rp.created_at, ru.username, ru.avatar_url
+                  SELECT rp.id, rp.content, rp.created_at, ru.id AS user_id, ru.username, ru.avatar_url
                   FROM posts rp
                   JOIN users ru ON rp.user_id = ru.id
                   WHERE rp.id = p.repost_id
+                    AND ${buildPostVisibilityClauseForAlias('rp', '$1')}
                 ) repost_data
               ) as reposted_post
        FROM posts p
@@ -502,6 +598,8 @@ exports.getPosts = async (req, res) => {
         )).toString('base64url')
       : null;
 
+    await hydrateRepostedPosts(items, effectiveViewerId);
+
     if (effectiveViewerId) {
       recordPostViews(effectiveViewerId, rows).catch((err) => {
         console.error('[Posts] Failed to record seen posts:', err);
@@ -541,7 +639,7 @@ exports.getPostById = async (req, res) => {
          LIMIT 1
         ) ai ON true
        WHERE p.id = $1
-         ${buildPostVisibilityClause('$2')}`,
+         AND ${buildPostVisibilityClause('$2')}`,
       [postId, viewerId]
     );
     if (result.rows.length === 0) {
@@ -630,7 +728,7 @@ exports.updatePost = async (req, res) => {
 
     // First, check if the post exists and get its owner
     const postCheck = await client.query(
-      'SELECT user_id, is_comment, image_attachment_id, image_url FROM posts WHERE id = $1 FOR UPDATE',
+      'SELECT user_id, is_comment, repost_id, image_attachment_id, image_url FROM posts WHERE id = $1 FOR UPDATE',
       [postId]
     );
 
@@ -643,10 +741,17 @@ exports.updatePost = async (req, res) => {
     // Check if the current user owns the post
     const postOwnerId = postCheck.rows[0].user_id;
     const isComment = postCheck.rows[0].is_comment;
+    const repostId = postCheck.rows[0].repost_id;
     if (postOwnerId !== userId) {
       await client.query('ROLLBACK');
       client.release();
       return res.status(403).json({ message: 'You can only edit your own posts' });
+    }
+
+    if (repostId) {
+      await client.query('ROLLBACK');
+      client.release();
+      return res.status(409).json({ message: 'Reposts cannot be edited' });
     }
 
     const hasImageAttachmentId = Object.prototype.hasOwnProperty.call(req.body, 'image_attachment_id');
@@ -842,10 +947,11 @@ exports.getFeed = async (req, res) => {
               (
                 SELECT row_to_json(repost_data.*)
                 FROM (
-                  SELECT rp.id, rp.content, rp.created_at, ru.username, ru.avatar_url
+                  SELECT rp.id, rp.content, rp.created_at, ru.id AS user_id, ru.username, ru.avatar_url
                   FROM posts rp
                   JOIN users ru ON rp.user_id = ru.id
                   WHERE rp.id = p.repost_id
+                    AND ${buildPostVisibilityClauseForAlias('rp', '$1')}
                 ) repost_data
               ) as reposted_post
        FROM posts p
@@ -882,6 +988,8 @@ exports.getFeed = async (req, res) => {
       ? Buffer.from(JSON.stringify({ createdAt: new Date(last.created_at).toISOString(), id: last.id })).toString('base64url')
       : null;
 
+    await hydrateRepostedPosts(items, viewerId);
+
     if (userId) {
       recordPostViews(userId, rows).catch((err) => {
         console.error('[Posts] Failed to record seen posts:', err);
@@ -911,7 +1019,7 @@ exports.getComments = async (req, res) => {
     const postCheck = await db.query(
       `SELECT * FROM posts p
        WHERE p.id = $1
-       ${buildPostVisibilityClause('$2')}`,
+       AND ${buildPostVisibilityClause('$2')}`,
       [postId, viewerId]
     );
 
@@ -941,7 +1049,7 @@ exports.getComments = async (req, res) => {
            LIMIT 1
          ) ai ON true
          WHERE p.parent_id = $1
-         ${buildPostVisibilityClause('$2')}
+         AND ${buildPostVisibilityClause('$2')}
          ORDER BY p.created_at ASC`,
         [postId, viewerId]
       );
@@ -970,7 +1078,7 @@ exports.getCommentTree = async (req, res) => {
     const postCheck = await db.query(
       `SELECT * FROM posts p
        WHERE p.id = $1
-       ${buildPostVisibilityClause('$2')}`,
+       AND ${buildPostVisibilityClause('$2')}`,
       [postId, viewerId]
     );
 
@@ -989,7 +1097,7 @@ exports.getCommentTree = async (req, res) => {
          FROM posts p
          JOIN users u ON p.user_id = u.id
          WHERE p.parent_id = $1
-         ${buildPostVisibilityClause('$3')}
+         AND ${buildPostVisibilityClause('$3')}
          
          UNION ALL
          
@@ -1002,7 +1110,7 @@ exports.getCommentTree = async (req, res) => {
          JOIN users u ON p.user_id = u.id
          JOIN comment_tree ct ON p.parent_id = ct.id
          WHERE ct.level < $2
-         ${buildPostVisibilityClause('$3')}
+         AND ${buildPostVisibilityClause('$3')}
        )
        SELECT ct.*,
               ai.ai_probability,
