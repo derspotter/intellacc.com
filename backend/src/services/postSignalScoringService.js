@@ -12,10 +12,13 @@ const config = require('./persuasiveAlphaConfig');
 const LOG_CTX = '[PersuasionScorer]';
 const PREDICTION_ENGINE_BASE_URL = process.env.PREDICTION_ENGINE_BASE_URL || 'http://prediction-engine:3001';
 
-const runPayerBatch = async () => {
+const runPayerBatch = async (options = {}) => {
+    const triggerType = typeof options.triggerType === 'string' && options.triggerType.trim()
+        ? options.triggerType.trim()
+        : 'manual';
     const ts_started = new Date();
     const runLog = {
-        trigger_type: 'manual', // or cron
+        trigger_type: triggerType, // manual | admin | cron
         is_enabled: config.enabled,
         processed_updates: 0,
         attributed_updates: 0,

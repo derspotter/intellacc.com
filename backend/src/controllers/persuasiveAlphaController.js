@@ -58,11 +58,13 @@ const normalizeEventPayload = (row, prefix = '') => {
     confirmed: !!row.confirmed,
     flagged_count: Number(row.flagged_count || 0),
     confirmed_count: Number(row.confirmed_count || 0),
+    market_prob: row.market_prob != null ? Number(row.market_prob) : null,
     event: {
       id: Number(row.event_id),
       title: eventTitle,
       outcome: row.outcome,
-      closing_date: row.closing_date
+      closing_date: row.closing_date,
+      market_prob: row.market_prob != null ? Number(row.market_prob) : null
     }
   };
 };
@@ -238,7 +240,8 @@ exports.getPostMarketLink = async (req, res) => {
          pml.confirmed_count,
          e.title,
          e.outcome,
-         e.closing_date
+         e.closing_date,
+         e.market_prob
        FROM post_market_links pml
        JOIN events e ON e.id = pml.event_id
        WHERE pml.post_id = $1
@@ -582,10 +585,15 @@ exports.submitVerification = async (req, res) => {
 
 exports.runAutomaticRewards = async (req, res) => {
   try {
-    const runLog = await postSignalScoringService.runPayerBatch();
+    const requestedTrigger = String(req.body?.trigger_type || '').trim().toLowerCase();
+    const triggerType = requestedTrigger === 'cron' ? 'cron' : 'admin';
+    const runLog = await postSignalScoringService.runPayerBatch({ triggerType });
+    const safeRunLog = JSON.parse(JSON.stringify(runLog, (_, value) =>
+      typeof value === 'bigint' ? value.toString() : value
+    ));
     res.status(200).json({
       success: true,
-      run_result: runLog
+      run_result: safeRunLog
     });
   } catch (error) {
     console.error('Error running persuasive alpha rewards batch:', error);

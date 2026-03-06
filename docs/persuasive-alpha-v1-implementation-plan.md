@@ -13,13 +13,25 @@ Implement a production-safe, attribution-backed reward system for high-signal po
 
 This plan is tailored to current code reality:
 - Attribution chain primitives are now in place (`post_market_clicks`, `post_market_matches`, and referral forwarding into market updates).
-- The payout and scoring pipeline is still missing:
-  - `post_signal_episodes`
-  - `post_signal_reward_payouts`
-  - nightly scorer/credit runner
+- The payout and scoring pipeline is implemented:
+  - `post_signal_episodes` settlement table + indexes
+  - `post_signal_reward_payouts` idempotent payout table + component uniqueness
+  - `post_signal_run_logs` run observability table
+  - backend scorer/mint service (`postSignalScoringService`)
+  - prediction-engine mature scoring endpoint (`POST /persuasion/score-mature-episodes`)
+  - admin run/status routes (`/api/admin/persuasion-score/run`, `/api/admin/persuasion-score/status`)
+  - daily cron runner (`scripts/daily_cron.js`)
 - `market_updates` records both buy and sell actions; persuasive-alpha scoring should count both in v1.
 - Existing reward runner pattern exists (`market-questions/rewards/run`) and should be reused.
  - Optional matching stack: an additive agentic retrieve-and-reason path is added below for match quality and post semantics; it is feature-flagged and does not alter reward flow.
+
+### Current rollout status (2026-03-05)
+- Core v1 implementation is complete in code and migration layer.
+- Remaining work is operational configuration:
+  - enable `POST_SIGNAL_REWARDS_ENABLED=true` in production env to mint payouts
+  - configure scheduled-run auth (`CRON_SHARED_SECRET` recommended, or `WEEKLY_ADMIN_TOKEN` / `WEEKLY_ADMIN_EMAIL` + `WEEKLY_ADMIN_PASSWORD`)
+  - monitor `post_signal_run_logs` and alert on non-zero `error_count`
+  - verify daily cron calls `POST /api/admin/persuasion-score/run-cron` with `x-cron-secret` and passes `trigger_type=cron`
 
 ### 1.0 Clarifications for v1 rollout (addressing open implementation risks)
 - Open Problem 1: Market history source for early/mid targets

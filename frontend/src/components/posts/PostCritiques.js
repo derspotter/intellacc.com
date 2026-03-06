@@ -15,6 +15,13 @@ export default function PostCritiques({ postId, authorId }) {
   };
 
   const loadData = async () => {
+    if (!auth.getToken()) {
+      status.val = null;
+      link.val = null;
+      isLoading.val = false;
+      return;
+    }
+
     try {
       const [statusRes, linkRes] = await Promise.all([
         api.posts.getAnalysisStatus(postId).catch(() => null),
@@ -53,97 +60,68 @@ export default function PostCritiques({ postId, authorId }) {
     }
   };
 
+  const handleMarketClick = async (e, eventId) => {
+    e.preventDefault();
+    try {
+      await api.posts.marketClick(postId, eventId);
+    } catch (err) {
+      console.error('Failed to register market click:', err);
+    }
+    window.location.hash = `#market/${eventId}`;
+  };
+
   // Initial load
-  loadData();
+  if (auth.getToken()) {
+    loadData();
+  } else {
+    isLoading.val = false;
+  }
 
-  return div({ class: "post-critiques-container", style: "margin-top: 12px; font-size: 0.9em; border-top: 1px solid #eee; padding-top: 8px;" },
+  return div({ class: "post-critiques-container", style: "margin-top: 8px;" },
     () => {
-      if (isLoading.val) return div({ style: "color: #888; font-style: italic;" }, "AI is analyzing this claim...");
-      
       const s = status.val;
-      if (!s) return span(); // No analysis available
-
-      if (s.processing_status === 'gated_out') {
-        return span(); // Not a claim, hide silently
-      }
-
-      if (s.processing_status === 'pending' || s.processing_status === 'retrieving' || s.processing_status === 'reasoning') {
-        return div({ style: "color: #888; font-style: italic;" }, "AI is currently analyzing this claim...");
-      }
-
-      const elements = [];
-
-      // Link section
-      if (link.val) {
-        elements.push(
-          div({ style: "margin-bottom: 8px;" },
-            span({ style: "font-weight: bold; color: #555;" }, "AI Matched Market: "),
-            a({ 
-              href: `#market/${link.val.event_id}`, 
-              style: "color: #007bff; text-decoration: none;"
-            }, link.val.title),
-            span({ style: "color: #888; margin-left: 8px; font-size: 0.85em;" }, 
-              `(${Math.round(link.val.match_confidence * 100)}% confidence)`
-            )
-          )
-        );
-      } else if (s.has_claim) {
-        elements.push(
-          div({ style: "color: #666; margin-bottom: 8px;" }, "AI identified a claim but could not find a suitable prediction market.")
-        );
-      }
-
-      // Stance
-      if (link.val && link.val.stance) {
-        const stanceColors = {
-          agrees: '#28a745',
-          disagrees: '#dc3545',
-          related: '#6c757d'
-        };
-        elements.push(
-          div({ style: "margin-bottom: 8px;" },
-            span({ style: "font-weight: bold; color: #555;" }, "AI Stance: "),
-            span({ style: `color: ${stanceColors[link.val.stance] || '#6c757d'}; font-weight: bold; text-transform: uppercase; font-size: 0.8em;` }, 
-              link.val.stance
-            )
-          )
-        );
-      }
-
-      // Confirmation Actions (Author Only)
-      if (isAuthor() && link.val && !link.val.confirmed) {
-        elements.push(
-          div({ style: "margin-top: 10px; display: flex; gap: 8px;" },
-            button({ 
-              class: "confirm-btn",
-              style: "background: #28a745; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.9em;",
-              onclick: () => handleConfirm('confirm'),
-              disabled: isConfirming.val
-            }, isConfirming.val ? "Saving..." : "Confirm AI Match"),
-            button({ 
-              class: "reject-btn",
-              style: "background: transparent; color: #dc3545; border: 1px solid #dc3545; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.9em;",
-              onclick: () => handleConfirm('override'),
-              disabled: isConfirming.val
-            }, "Reject")
-          )
-        );
-      } else if (link.val && link.val.confirmed) {
-        elements.push(
-          div({ style: "margin-top: 10px; color: #28a745; font-size: 0.85em; font-weight: bold;" }, 
-            "✓ Confirmed by author"
-          )
-        );
-      }
-
-      if (elements.length === 0) return span();
+      if (isLoading.val || !s) return span(); // No analysis available
       
-      return div(
-        div({ style: "display: flex; align-items: center; gap: 4px; margin-bottom: 8px;" },
-          span({ style: "font-size: 1.2em;" }, "🤖"),
-          span({ style: "font-weight: bold; color: #444;" }, "Truth Analysis")
+      if (s.processing_status === 'gated_out') return span(); // Not a claim
+
+      // Loading state
+      if (s.processing_status === 'pending' || s.processing_status === 'retrieving' || s.processing_status === 'reasoning') {
+        return div({ style: "color: #888; font-size: 0.85em; font-style: italic;" }, "AI is matching markets...");
+      }
+
+      // No link found
+      if (!link.val) return span();
+
+      // Render simple chip
+      return div({ style: "display: flex; flex-wrap: wrap; gap: 8px; align-items: center;" },
+        a({
+          href: `#market/${link.val.event_id}`,
+          class: "market-chip",
+          style: "background: rgba(0, 123, 255, 0.1); color: #007bff; padding: 4px 10px; border-radius: 16px; font-size: 0.85em; text-decoration: none; cursor: pointer;",
+          onclick: (e) => handleMarketClick(e, link.val.event_id)
+        }, 
+          span({ class: "market-chip-title" }, link.val.title),
+          " ",
+          span({ class: "market-chip-prob", style: "font-weight: bold;" }, 
+            link.val.market_prob != null ? `${Math.round(link.val.market_prob * 100)}%` : ''
+          )
         ),
-        div({ style: "background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #e9ecef;" }, elements)
+        
+        // Confirmation Actions (Author Only)
+        isAuthor() && !link.val.confirmed ? div({ style: "display: flex; gap: 4px;" },
+          button({ 
+            title: "Confirm this match",
+            style: "background: #28a745; color: white; border: none; padding: 2px 8px; border-radius: 12px; cursor: pointer; font-size: 0.75em; display: flex; align-items: center; justify-content: center;",
+            onclick: () => handleConfirm('confirm'),
+            disabled: isConfirming.val
+          }, "✓"),
+          button({ 
+            title: "Reject this match",
+            style: "background: transparent; color: #dc3545; border: 1px solid #dc3545; padding: 2px 8px; border-radius: 12px; cursor: pointer; font-size: 0.75em; display: flex; align-items: center; justify-content: center;",
+            onclick: () => handleConfirm('override'),
+            disabled: isConfirming.val
+          }, "✕")
+        ) : null
       );
     }
   );
