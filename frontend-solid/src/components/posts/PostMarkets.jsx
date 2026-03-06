@@ -1,5 +1,4 @@
 import { createSignal, createResource, Show, For } from 'solid-js';
-import { A } from '@solidjs/router';
 import api from '../../services/api';
 
 const fetchMarkets = async (postId) => {
@@ -30,14 +29,14 @@ export default function PostMarkets(props) {
         <div class="post-markets-list" style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '8px' }}>
           <For each={markets()}>
             {(market) => (
-              <A
-                href={`/market/${market.event_id}`}
+              <a
+                href={`#predictions`}
                 class="market-chip"
                 style={{
                   background: 'var(--bg-secondary, rgba(0, 123, 255, 0.1))',
                   color: 'var(--text-primary, #007bff)',
                   padding: '4px 10px',
-                  'border-radius': '16px',
+                  'border-radius': 'var(--border-radius)',
                   'font-size': '0.85em',
                   'text-decoration': 'none',
                   cursor: 'pointer',
@@ -52,7 +51,7 @@ export default function PostMarkets(props) {
                     {Math.round(market.market_prob * 100)}%
                   </span>
                 </Show>
-              </A>
+              </a>
             )}
           </For>
         </div>

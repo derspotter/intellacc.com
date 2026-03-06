@@ -141,7 +141,7 @@ export default function SignUpPage() {
             <Show when={requiresApproval()}>
               <div class="register-link">
                 <div
-                  style="margin: 0.75rem 0; padding: 0.75rem; border-radius: 8px; background: rgba(34, 197, 94, 0.12); border: 1px solid #22c55e; color: #0f5132;"
+                  style="margin: 0.75rem 0; padding: 0.75rem; border-radius: var(--border-radius); background: rgba(34, 197, 94, 0.12); border: 1px solid #22c55e; color: #0f5132;"
                 >
                   {resultMessage()}
                 </div>

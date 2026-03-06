@@ -614,13 +614,13 @@ export default function PostItem(props) {
             </div>
           </Show>
           <Show when={post().reposted_post}>
-            <div class="reposted-post" style="border: 1px solid var(--border-color); padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem; background: var(--bg-card);">
+            <div class="reposted-post" style="border: 1px solid var(--border-color); padding: 1rem; border-radius: var(--border-radius); margin-bottom: 0.5rem; background: var(--bg-card);">
               <div class="post-header" style="margin-bottom: 0.5rem;">
                 <div class="post-author">
                   <span style="margin-right: 0.5rem;">♻️ Reposted from </span>
-                  <A href={`#user/${post().reposted_post.user_id}`} class="username-link">
-                    {post().reposted_post.username || 'Anonymous'}
-                  </A>
+                  <a href={`#user/${post().reposted_post.user_id}`} class="username-link">
+                    {post().reposted_post.username}
+                  </a>
                 </div>
                 <span class="post-date">
                   {new Date(post().reposted_post.created_at).toLocaleDateString()}
