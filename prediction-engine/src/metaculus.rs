@@ -193,6 +193,7 @@ impl MetaculusClient {
             category,
             event_type: question.question_type.clone(),
             status: question.status.clone(),
+            outcomes: Vec::new(),
         }
     }
 

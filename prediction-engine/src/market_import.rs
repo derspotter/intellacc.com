@@ -19,6 +19,16 @@ pub struct ImportedMarket {
     pub category: String,
     pub event_type: String,
     pub status: String,
+    pub outcomes: Vec<ImportedOutcome>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportedOutcome {
+    pub key: String,
+    pub label: String,
+    pub sort_order: i32,
+    pub lower_bound: Option<f64>,
+    pub upper_bound: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -314,6 +324,7 @@ async fn upsert_market(
         find_event_by_source_id(pool, &market.source, &market.external_id).await?
     {
         upsert_source_mapping(pool, existing_event_id, market).await?;
+        seed_outcomes_if_missing(pool, existing_event_id, market).await?;
         return Ok(PersistOutcome::LinkedExisting);
     }
 
@@ -369,6 +380,7 @@ async fn upsert_market(
     .await?;
 
     upsert_source_mapping(pool, inserted_event_id, market).await?;
+    seed_outcomes_if_missing(pool, inserted_event_id, market).await?;
 
     if has_pgvector {
         if maybe_embedding.is_none() {
@@ -387,6 +399,108 @@ async fn upsert_market(
     }
 
     Ok(PersistOutcome::Created)
+}
+
+async fn seed_outcomes_if_missing(
+    pool: &PgPool,
+    event_id: i32,
+    market: &ImportedMarket,
+) -> Result<()> {
+    let event_type = normalize_event_type(&market.event_type);
+    if event_type != "multiple_choice" && event_type != "numeric" {
+        return Ok(());
+    }
+    if market.outcomes.len() < 2 {
+        return Ok(());
+    }
+
+    let existing_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint FROM event_outcomes WHERE event_id = $1 AND is_active = TRUE",
+    )
+    .bind(event_id)
+    .fetch_one(pool)
+    .await?;
+    if existing_count >= 2 {
+        return Ok(());
+    }
+
+    let event_row = sqlx::query("SELECT outcome FROM events WHERE id = $1")
+        .bind(event_id)
+        .fetch_optional(pool)
+        .await?;
+    if let Some(row) = event_row {
+        let resolved_outcome: Option<String> = row.get("outcome");
+        if resolved_outcome.is_some() {
+            return Ok(());
+        }
+    }
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        r#"
+        UPDATE events
+        SET event_type = $1,
+            resolution_outcome_id = NULL,
+            market_prob = $2,
+            q_yes = 0.0,
+            q_no = 0.0,
+            updated_at = NOW()
+        WHERE id = $3
+        "#,
+    )
+    .bind(&event_type)
+    .bind(1.0 / market.outcomes.len() as f64)
+    .bind(event_id)
+    .execute(tx.as_mut())
+    .await?;
+
+    sqlx::query("DELETE FROM event_outcome_states WHERE event_id = $1")
+        .bind(event_id)
+        .execute(tx.as_mut())
+        .await?;
+    sqlx::query("DELETE FROM event_outcomes WHERE event_id = $1")
+        .bind(event_id)
+        .execute(tx.as_mut())
+        .await?;
+
+    let default_prob = 1.0 / market.outcomes.len() as f64;
+    for outcome in &market.outcomes {
+        let outcome_id: i64 = sqlx::query_scalar(
+            r#"
+            INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id
+            "#,
+        )
+        .bind(event_id)
+        .bind(&outcome.key)
+        .bind(&outcome.label)
+        .bind(outcome.sort_order)
+        .bind(outcome.lower_bound)
+        .bind(outcome.upper_bound)
+        .fetch_one(tx.as_mut())
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO event_outcome_states (event_id, outcome_id, q_value, prob, updated_at)
+            VALUES ($1, $2, 0.0, $3, NOW())
+            ON CONFLICT (event_id, outcome_id)
+            DO UPDATE SET
+                q_value = EXCLUDED.q_value,
+                prob = EXCLUDED.prob,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(event_id)
+        .bind(outcome_id)
+        .bind(default_prob)
+        .execute(tx.as_mut())
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
 }
 
 async fn collect_candidates(
@@ -562,6 +676,13 @@ async fn upsert_source_mapping(
         "category": market.category,
         "event_type": market.event_type,
         "status": market.status,
+        "outcomes": market.outcomes.iter().map(|o| json!({
+            "key": o.key,
+            "label": o.label,
+            "sort_order": o.sort_order,
+            "lower_bound": o.lower_bound,
+            "upper_bound": o.upper_bound
+        })).collect::<Vec<_>>(),
     }).to_string())
     .execute(pool)
     .await?;
@@ -853,9 +974,10 @@ async fn fetch_manifold_markets(max_markets: usize) -> Result<Vec<ImportedMarket
     let mut output = Vec::new();
 
     while output.len() < max_markets {
+        let request_limit = page_limit.min(max_markets - output.len()).max(1);
         let mut url = format!(
             "https://api.manifold.markets/v0/markets?limit={}",
-            page_limit.min(max_markets - output.len())
+            request_limit
         );
         if let Some(ref b) = before {
             url.push_str("&before=");
@@ -899,6 +1021,12 @@ async fn fetch_manifold_markets(max_markets: usize) -> Result<Vec<ImportedMarket
             );
             let event_type =
                 value_to_string(row.get("outcomeType")).unwrap_or_else(|| "binary".to_string());
+            let mut outcomes = parse_manifold_outcomes(row);
+            if outcomes.len() < 2 && !normalize_event_type(&event_type).eq("binary") {
+                if let Ok(Some(detail)) = fetch_manifold_market_details(&client, &id).await {
+                    outcomes = parse_manifold_outcomes(&detail);
+                }
+            }
             let external_url = value_to_string(row.get("url")).unwrap_or_else(|| {
                 let slug = value_to_string(row.get("slug")).unwrap_or_else(|| id.clone());
                 let user = value_to_string(row.get("creatorUsername")).unwrap_or_default();
@@ -919,15 +1047,28 @@ async fn fetch_manifold_markets(max_markets: usize) -> Result<Vec<ImportedMarket
                 category,
                 event_type,
                 status: "open".to_string(),
+                outcomes,
             });
         }
 
         before = batch.last().and_then(|v| value_to_string(v.get("id")));
-        if before.is_none() || batch.len() < page_limit {
+        // Stop only when the provider returns fewer rows than we asked for.
+        // This avoids premature termination on small requested pages.
+        if before.is_none() || batch.len() < request_limit {
             break;
         }
     }
     Ok(output)
+}
+
+async fn fetch_manifold_market_details(client: &Client, market_id: &str) -> Result<Option<Value>> {
+    let url = format!("https://api.manifold.markets/v0/market/{}", market_id);
+    let response = client.get(&url).send().await?;
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let payload: Value = response.json().await?;
+    Ok(Some(payload))
 }
 
 async fn fetch_polymarket_markets(max_markets: usize) -> Result<Vec<ImportedMarket>> {
@@ -988,6 +1129,7 @@ async fn fetch_polymarket_markets(max_markets: usize) -> Result<Vec<ImportedMark
                 category,
                 event_type: "binary".to_string(),
                 status: "open".to_string(),
+                outcomes: Vec::new(),
             });
         }
 
@@ -1071,6 +1213,7 @@ async fn fetch_kalshi_markets(max_markets: usize) -> Result<Vec<ImportedMarket>>
                 category,
                 event_type: "binary".to_string(),
                 status: "open".to_string(),
+                outcomes: Vec::new(),
             });
         }
 
@@ -1121,6 +1264,78 @@ fn parse_datetime_value(value: Option<&Value>) -> Option<DateTime<Utc>> {
         }
     }
     None
+}
+
+fn parse_manifold_outcomes(row: &Value) -> Vec<ImportedOutcome> {
+    let answers = row
+        .get("answers")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if answers.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut parsed: Vec<ImportedOutcome> = Vec::new();
+    for (idx, answer) in answers.iter().enumerate() {
+        let label = value_to_string(answer.get("text"))
+            .or_else(|| value_to_string(answer.get("name")))
+            .unwrap_or_else(|| format!("Choice {}", idx + 1));
+        let raw_key = value_to_string(answer.get("id"))
+            .or_else(|| value_to_string(answer.get("slug")))
+            .unwrap_or_else(|| format!("choice_{}", idx + 1));
+        let sort_order = answer
+            .get("index")
+            .and_then(|v| v.as_i64())
+            .and_then(|v| i32::try_from(v).ok())
+            .unwrap_or(idx as i32);
+
+        parsed.push(ImportedOutcome {
+            key: sanitize_outcome_key(&raw_key, idx),
+            label: truncate(&label, 255),
+            sort_order,
+            lower_bound: None,
+            upper_bound: None,
+        });
+    }
+
+    parsed.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then_with(|| a.key.cmp(&b.key)));
+    ensure_unique_outcome_keys(&mut parsed);
+    parsed
+}
+
+fn sanitize_outcome_key(raw: &str, idx: usize) -> String {
+    let mut key = raw
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect::<String>();
+    while key.contains("__") {
+        key = key.replace("__", "_");
+    }
+    let key = key.trim_matches('_').to_string();
+    if key.is_empty() {
+        format!("choice_{}", idx + 1)
+    } else {
+        key
+    }
+}
+
+fn ensure_unique_outcome_keys(outcomes: &mut [ImportedOutcome]) {
+    let mut seen: HashSet<String> = HashSet::new();
+    for (idx, outcome) in outcomes.iter_mut().enumerate() {
+        let base = sanitize_outcome_key(&outcome.key, idx);
+        let mut key = base.clone();
+        let mut suffix = 2usize;
+        while seen.contains(&key) {
+            key = format!("{}_{}", base, suffix);
+            suffix += 1;
+        }
+        seen.insert(key.clone());
+        outcome.key = key;
+        outcome.sort_order = idx as i32;
+    }
 }
 
 pub fn exclusion_reason(market: &ImportedMarket) -> Option<&'static str> {
