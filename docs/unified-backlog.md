@@ -80,7 +80,7 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Partial` Advanced social features:
   follow system exists; sharing/boosting and social groups remain open.
 - `Partial` Prediction analytics + user insights dashboards:
-  scoring/calibration APIs exist; dedicated analytics dashboard UX is still missing.
+  LMSR ledger, market history, and leaderboard APIs exist; dedicated analytics dashboard UX is still missing.
 - `Partial` Performance/scaling work:
   DB/index and feed-performance work are in place, and runtime stack was upgraded to Node 25 + Postgres 18.
   Remaining work is infra hardening, capacity testing, and CI/CD automation.

@@ -5,33 +5,34 @@ Based on a survey of the Intellacc application architecture, the following obser
 ## 🏗️ Architectural Overview
 The system follows a microservices-style split to handle different concerns optimally:
 *   **Social & API Gateway (Node.js / Express):** Manages user authentication, social features, E2EE messaging (via MLS), and acts as a gateway for market operations. It heavily utilizes Socket.io for real-time market probability updates and notifications.
-*   **Prediction Engine (Rust / Axum):** Offloads heavy mathematical operations. It is responsible for the Logarithmic Market Scoring Rule (LMSR) calculations, trading logic, and complex reputation scoring.
-*   **Database (PostgreSQL):** Uses a micro-unit ledger system to ensure strict consistency for Reputation Points (RP), preventing floating-point drift and ensuring transactional integrity.
-*   **Frontend Transition (VanJS ➡️ SolidJS):** The application was originally built with VanJS (a minimalist reactive framework) and is currently undergoing a migration to SolidJS.
+*   **Prediction Engine (Rust / Axum):** Offloads heavy mathematical operations. It is responsible for the Logarithmic Market Scoring Rule (LMSR) calculations, trading logic, and ledger-consistent market state transitions.
+*   **Database (PostgreSQL):** Uses a micro-unit reputation ledger system to ensure strict consistency for available and staked RP, preventing floating-point drift and ensuring transactional integrity.
+*   **Frontend Architecture (SolidJS):** The application is now fully unified on SolidJS (`frontend-solid`), replacing the legacy VanJS implementation. This provides high performance, signal-based reactivity, and improved maintainability.
 *   **Secure Messaging (OpenMLS WASM):** Employs Messaging Layer Security (MLS) compiled to WebAssembly for end-to-end encrypted private communications.
 
 ## 💡 Suggestions for Improvement & Tech Debt Reduction
 
-### 1. Accelerate the SolidJS Unification
-*   **Observation:** Maintaining two frontend implementations (VanJS and SolidJS) simultaneously introduces significant technical debt, fragments development efforts, and complicates the build process.
-*   **Suggestion:** Prioritize completing the migration to SolidJS (`frontend-solid`). Once core features are verified, sunset the VanJS `frontend` to simplify the codebase, improve component reusability, and leverage Solid's more robust signal-based reactivity.
+### 1. Unified SolidJS Architecture (COMPLETED)
+*   **Observation:** The application has successfully transitioned from VanJS to SolidJS (`frontend-solid`). This shift provides a more robust, signal-based reactive model and improves developer productivity.
+*   **Recommendation:** With the primary switch complete, ensure all new features are implemented exclusively in the SolidJS codebase. The legacy `frontend` directory should be fully decommissioned to simplify the build process and eliminate technical debt.
 
-### 2. Direct Rust Engine Access for Real-time Data
+### 2. Direct Rust Engine Access for Real-time Data (COMPLETED)
 *   **Observation:** The Node.js backend currently acts as a proxy for many market calls and data streams originating from the Rust engine. This adds unnecessary latency and complicates error handling.
-*   **Suggestion:** For read-heavy, performance-critical data (like real-time market price streams or public ledger states), allow the frontend to subscribe or fetch directly from the Rust engine. This could be secured using shared JWT verification between Node.js and Rust.
+*   **Implementation:** The Rust prediction engine has been updated to directly validate JWTs (using the shared `JWT_SECRET`) alongside service-to-service tokens. Direct read endpoints (e.g., `GET /events`) have been added, and the CLI (`intellacc`) has been reconfigured to route market operations directly to the high-performance Rust service.
+*   **Recommendation:** Expand this direct-access pattern to the SolidJS frontend, allowing it to fetch real-time market price streams or public ledger states straight from port 3001.
 
-### 3. Formalize Inter-Service API Contracts
+### 3. Formalize Inter-Service API Contracts (COMPLETED)
 *   **Observation:** Communication between the Node.js API and the Rust prediction engine appears to rely on implicit JSON structures.
-*   **Suggestion:** Implement a shared schema definition (e.g., Protobuf, OpenAPI/Swagger, or even shared TypeScript types mapped to Rust structs via a tool like `ts-rs`) to ensure strict type safety and prevent breaking changes during deployments.
+*   **Implementation:** The `ts-rs` crate has been added to the Rust prediction engine. Core LMSR structs (`MarketEvent`, `MarketUpdate`, outcome market payloads, etc.) now derive `TS`, automatically generating single-source-of-truth TypeScript definitions in the `shared/types/` directory upon testing. This ensures strict type safety between the Rust backend and the TS/JS consumers (Node.js & SolidJS) and prevents silent contract breaking changes during deployments.
 
-### 4. Enhanced Ledger Auditing & Reconciliation
+### 4. Enhanced Ledger Auditing & Reconciliation (COMPLETED)
 *   **Observation:** There is a robust SQL-based ledger audit system (`run_ledger_audit`), which is excellent for catching discrepancies within the database.
-*   **Suggestion:** Expand this system into a periodic automated reconciliation worker that cross-references the Node.js user balances with the Rust engine's internal market states to guarantee no Reputation Points (RP) are ever "trapped" or duplicated between the services.
+*   **Implementation:** An automated reconciliation worker was created (`LedgerAuditService`) that executes the SQL audit and recursively queries the Rust engine's `/lmsr/verify-consistency` and `/lmsr/verify-balance-invariant` endpoints. This ensures absolute mathematical consistency between the Node.js user ledgers and the Rust engine's LMSR core. A database trigger was also implemented to guarantee `cumulative_stake` (LMSR Cost) is correctly calculated upon market creation to prevent drift.
 
 ### 5. Distributed Tracing and Logging
 *   **Observation:** Debugging user actions that span across the frontend, Node.js proxy, and Rust engine can be difficult without a unified view.
 *   **Suggestion:** Implement distributed tracing (such as OpenTelemetry). Injecting a `trace-id` at the Node.js API boundary and passing it to the Rust service will make diagnosing latency spikes and cross-service errors much easier.
 
-### 6. Streamline WASM Dependencies
+### 6. Streamline WASM Dependencies (COMPLETED)
 *   **Observation:** The E2EE relies on WASM artifacts from `openmls-wasm`. Managing WASM binaries across environments can be tricky and lead to duplication.
-*   **Suggestion:** Ensure your build pipeline correctly versions and de-duplicates these WASM artifacts before serving them to the client to keep the initial load time as small as possible.
+*   **Implementation:** The OpenMLS WebAssembly artifacts have been successfully extracted into a central `shared/openmls-pkg` directory, eliminating the dependency between the new SolidJS frontend and the deprecated legacy frontend. Additionally, the SolidJS `vite.config.js` was upgraded to utilize `vite-plugin-compression` (enabling Brotli and Gzip for `.wasm` files) and manual chunking (`openmls-wasm` chunk). This strictly de-duplicates the payload and drastically reduces the initial network transfer size for the E2EE client.

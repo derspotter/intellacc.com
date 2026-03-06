@@ -8,7 +8,7 @@ A social platform for sharing and discussing links (news, X posts, Substack, You
 
 1. **Consistency** (individual truth) — AI evaluates argument quality via the claimGate + argumentExtractor pipeline: logical structure, empirical soundness, fallacy detection. Acts as a "kind tutor" giving constructive feedback.
 2. **Persuasion** (social truth) — Persuasive Alpha: measures whether people actually update their predictions after reading your post. Captures genuine influence, not engagement farming.
-3. **Prediction** (real truth) — Track record: when reality resolves, were you right? LMSR-backed markets with log scoring, time-weighted reputation, and calibration metrics.
+3. **Prediction** (real truth) — Track record: when reality resolves, were you right? LMSR-backed markets with reputation kept directly in the market ledger.
 
 **Combined, these create a multi-dimensional credibility score that no other platform offers.** X has likes (popularity). Polymarket has money (conviction). Reddit has karma (agreement). Intellacc surfaces people who are logical, persuasive, AND correct.
 
@@ -25,9 +25,9 @@ Intellacc is NOT "the new X." It's a **discussion layer on top of the internet's
 | Platform | What they do | What they lack |
 |----------|-------------|----------------|
 | X/Twitter | Real-time discourse, network effect | No truth incentive, bot-riddled, engagement-farming |
-| Polymarket | Real-money prediction markets | No social layer, no reputation scoring, no discussion |
+| Polymarket | Real-money prediction markets | No social layer, no reputation ledger, no discussion |
 | Kalshi | Regulated prediction markets | Same as Polymarket — settlement, not discourse |
-| Kash ($2M pre-seed, Feb 2026) | Prediction markets embedded in X | Dependent on X, no standalone platform, no reputation scoring, no argument analysis |
+| Kash ($2M pre-seed, Feb 2026) | Prediction markets embedded in X | Dependent on X, no standalone platform, no reputation ledger, no argument analysis |
 | Reddit/HN | Link sharing + discussion | No truth mechanism, karma = agreement not accuracy |
 | Substack Notes | Long-form discussion | No prediction layer, no credibility scoring |
 | Community Notes (X) | Crowd-sourced fact-checking | Anonymous, binary, gameable, no prediction backing |
@@ -174,7 +174,7 @@ Status snapshot (as of 2026-03-01):
 |--------|--------------------------|----------------------------------------------|
 | Consistency (argument quality) | claim-gate + hybrid retrieval + reasoner pipeline, `post_analysis` lifecycle, market-link confirm/verify APIs, AI moderation flagging pipeline | Consistent end-user UX for argument/critique visibility and correction on all relevant post surfaces; stronger model-quality eval/monitoring loop before broad rollout |
 | Persuasion (did others update?) | attribution primitives exist (`post_market_matches`, `post_market_clicks`), referral context forwarded through trade/update path, matching + verification endpoints exist | reward scoring/settlement layer not finished (`post_signal_episodes`, `post_signal_reward_payouts`, nightly scorer, payout credit runner, cap/kill-switch observability) |
-| Prediction (was it true?) | LMSR engine, market updates/resolution, user scoring endpoints, leaderboard/reputation APIs, calibration/log scoring endpoints | tighter productized analytics UX and production ops/alerting hardening around scoring jobs and market lifecycle anomalies |
+| Prediction (was it true?) | LMSR engine, market updates/resolution, ledger-backed leaderboard/reputation APIs | tighter productized analytics UX and production ops/alerting hardening around market lifecycle anomalies |
 
 ### Immediate Priority Rule
 

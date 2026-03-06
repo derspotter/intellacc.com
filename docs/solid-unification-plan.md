@@ -275,7 +275,7 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
     - `/predict` with yes/no + confidence input.
     - `/predictions` history from the authenticated user feed.
   - Added admin market creation form posting to `/events`.
-  - Added `/scoring/leaderboard` readout with `/leaderboard/global` fallback.
+  - Added leaderboard readout with `/leaderboard/global`.
   - Expanded `frontend-solid/src/services/api.js` with prediction and leaderboard endpoint helpers.
   - Added styles for `predictions-*` layout/cards/forms and mobile stacking in `styles.css`.
   - Playwright verification:
