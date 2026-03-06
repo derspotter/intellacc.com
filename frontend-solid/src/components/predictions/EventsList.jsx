@@ -40,7 +40,7 @@ export default function EventsList(props) {
   const [error, setError] = createSignal(null);
 
   const [searchQuery, setSearchQuery] = createSignal('');
-  const [filter, setFilter] = createSignal('all');
+  const [filter, setFilter] = createSignal('open');
   const [selectedEvent, setSelectedEvent] = createSignal(null);
 
   const [userPositions, setUserPositions] = createSignal([]);
@@ -55,6 +55,7 @@ export default function EventsList(props) {
   const [loadedPositionsUserId, setLoadedPositionsUserId] = createSignal('');
 
   let searchTimeout;
+  let lastTargetedSelectionFetchKey = '';
 
   const authed = () => isAuthenticated();
 
@@ -77,6 +78,45 @@ export default function EventsList(props) {
       setLoading(false);
     }
   };
+
+  const applyTargetedSelection = () => {
+    const marketId = String(props.targetedMarketId || '').trim();
+    if (!marketId) return false;
+
+    const targetEvent = events().find((eventItem) => String(eventItem.id) === marketId);
+    if (!targetEvent) return false;
+
+    setSelectedEvent(targetEvent);
+    lastTargetedSelectionFetchKey = '';
+    return true;
+  };
+
+  createEffect(() => {
+    const marketId = String(props.targetedMarketId || '').trim();
+    events(); // subscribe to events changes
+    loading(); // subscribe to loading state
+
+    if (!marketId) {
+      lastTargetedSelectionFetchKey = '';
+      return;
+    }
+
+    if (applyTargetedSelection()) {
+      return;
+    }
+
+    if (loading()) {
+      return;
+    }
+
+    const fetchKey = `${marketId}:${searchQuery().trim()}`;
+    if (lastTargetedSelectionFetchKey === fetchKey) {
+      return;
+    }
+
+    lastTargetedSelectionFetchKey = fetchKey;
+    void loadEvents(searchQuery().trim());
+  });
 
   const loadUserPositions = async () => {
     if (!authed()) {
@@ -185,7 +225,7 @@ export default function EventsList(props) {
 
   const clearSearch = () => {
     setSearchQuery('');
-    setFilter('all');
+    setFilter('open');
     void loadEvents('');
   };
 

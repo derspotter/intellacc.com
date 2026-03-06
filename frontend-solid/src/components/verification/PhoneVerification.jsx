@@ -8,6 +8,22 @@ export default function PhoneVerification({ onSuccess } = {}) {
   const [error, setError] = createSignal('');
   const [devCode, setDevCode] = createSignal('');
 
+  const toPhoneErrorMessage = (err, fallbackMessage) => {
+    const raw = String(err?.data?.error || err?.message || fallbackMessage || '').trim();
+    if (!raw) return fallbackMessage;
+    if (/invalid phone number/i.test(raw)) {
+      return 'Invalid phone number format. Use international format (for example +491783049301).';
+    }
+    return raw;
+  };
+
+  const editPhoneNumber = () => {
+    setStage('idle');
+    setCode('');
+    setDevCode('');
+    setError('');
+  };
+
   const sendCode = async () => {
     if (!phoneNumber().trim()) {
       setError('Enter a phone number first');
@@ -27,7 +43,7 @@ export default function PhoneVerification({ onSuccess } = {}) {
       }
     } catch (err) {
       setStage('idle');
-      setError(err?.data?.error || err?.message || 'Failed to send verification code');
+      setError(toPhoneErrorMessage(err, 'Failed to send verification code'));
     }
   };
 
@@ -41,11 +57,14 @@ export default function PhoneVerification({ onSuccess } = {}) {
     setError('');
     try {
       await api.verification.confirmPhoneVerification(phoneNumber().trim(), code().trim());
+      try {
+        localStorage.removeItem('verificationNotice');
+      } catch (e) {}
       setStage('success');
       onSuccess?.();
     } catch (err) {
       setStage('code_sent');
-      setError(err?.data?.error || err?.message || 'Verification failed');
+      setError(toPhoneErrorMessage(err, 'Verification failed'));
     }
   };
 
@@ -81,7 +100,7 @@ export default function PhoneVerification({ onSuccess } = {}) {
             placeholder="+1 555 123 4567"
             value={phoneNumber()}
             onInput={(event) => setPhoneNumber(event.target.value)}
-            disabled={stage() === 'code_sent' || stage() === 'verifying' || stage() === 'success'}
+            disabled={stage() === 'verifying' || stage() === 'success'}
           />
         </div>
       </Show>
@@ -96,9 +115,17 @@ export default function PhoneVerification({ onSuccess } = {}) {
             value={code()}
             onInput={(event) => setCode(event.target.value)}
           />
-          <button type="button" class="button button-primary" onClick={verifyCode}>
-            Verify Code
-          </button>
+          <div class="phone-code-actions" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button type="button" class="button button-primary" onClick={verifyCode}>
+              Verify Code
+            </button>
+            <button type="button" class="button button-secondary" onClick={sendCode}>
+              Resend code
+            </button>
+            <button type="button" class="button button-secondary" onClick={editPhoneNumber}>
+              Change number
+            </button>
+          </div>
         </div>
       </Show>
 
@@ -111,19 +138,6 @@ export default function PhoneVerification({ onSuccess } = {}) {
         >
           Send Verification Code
         </button>
-      </Show>
-
-      <Show when={stage() === 'code_sent'}>
-        <div style="display:flex; gap:0.6rem; align-items:center; margin-top:0.5rem">
-          <button
-            type="button"
-            class="btn-link"
-            style="padding: 0; margin: 0; border: none; background: none; color: var(--primary-color); cursor: pointer; text-decoration: underline;"
-            onClick={sendCode}
-          >
-            Resend code
-          </button>
-        </div>
       </Show>
 
       <Show when={devCode()}>
