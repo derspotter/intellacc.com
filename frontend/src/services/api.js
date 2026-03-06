@@ -667,44 +667,6 @@ export const api = {
       request('/bets/stats')
   },
   
-  // Scoring endpoints (via backend proxy to prediction engine)
-  scoring: {
-    // Get unified log scoring leaderboard
-    getLeaderboard: (limit = 10) => 
-      request(`/scoring/leaderboard?limit=${limit}`),
-      
-    // Get enhanced leaderboard with Brier scores
-    getEnhancedLeaderboard: () => 
-      request('/scoring/enhanced-leaderboard'),
-      
-    // Get user's reputation stats
-    getUserReputation: (userId) => 
-      request(`/scoring/user/${userId}/reputation`),
-      
-    // Update user's reputation points
-    updateUserReputation: (userId) => 
-      request(`/scoring/user/${userId}/update-reputation`, { method: 'POST' }),
-      
-    // Get user's enhanced accuracy with Brier scores
-    getUserAccuracy: (userId) => 
-      request(`/scoring/user/${userId}/accuracy`),
-      
-    // Get user's calibration data
-    getUserCalibration: (userId) => 
-      request(`/scoring/user/${userId}/calibration`),
-      
-    // Get user's Brier score
-    getUserBrierScore: (userId) => 
-      request(`/scoring/user/${userId}/brier`),
-      
-    // Admin functions to manually trigger score calculations
-    calculateLogScores: () => 
-      request('/scoring/calculate', { method: 'POST' }),
-      
-    calculateTimeWeights: () => 
-      request('/scoring/time-weights', { method: 'POST' })
-  },
-
   // Weekly assignment endpoints
   weekly: {
     getUserStatus: (userId) =>
@@ -807,6 +769,21 @@ export const api = {
 
     runAutomaticRewards: () =>
       request('/market-questions/rewards/run', { method: 'POST' })
+  },
+
+  externalImports: {
+    getStatus: ({ limit = 10 } = {}) =>
+      request(`/admin/external-imports/status?limit=${Math.max(1, Math.min(200, limit))}`),
+
+    syncAll: ({ full = false } = {}) =>
+      request(`/admin/external-imports/sync-all?full=${full ? 'true' : 'false'}`, {
+        method: 'POST'
+      }),
+
+    syncProvider: (provider, { full = false } = {}) =>
+      request(`/admin/external-imports/sync/${encodeURIComponent(provider)}?full=${full ? 'true' : 'false'}`, {
+        method: 'POST'
+      })
   },
 
   // Push notification endpoints

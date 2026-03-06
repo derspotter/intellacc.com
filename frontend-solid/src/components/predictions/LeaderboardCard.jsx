@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, Show } from 'solid-js';
-import { getCurrentUserId } from '../../services/auth';
+import { getCurrentUserId, isAuthenticated } from '../../services/auth';
 import {
   getLeaderboardFollowers,
   getLeaderboardFollowing,
@@ -17,18 +17,10 @@ const LEADERBOARD_TABS = [
 
 const formatReputation = (value) => {
   if (value === null || value === undefined) {
-    return '1.0';
+    return '0.00';
   }
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric.toFixed(1) : '1.0';
-};
-
-const formatLogLoss = (value) => {
-  if (value === null || value === undefined) {
-    return '-';
-  }
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric.toFixed(3) : '-';
+  return Number.isFinite(numeric) ? numeric.toFixed(2) : '0.00';
 };
 
 export default function LeaderboardCard() {
@@ -130,13 +122,10 @@ export default function LeaderboardCard() {
                     {`Pred: ${entry.total_predictions ?? '-'}`
                   }
                   </span>
-                  <span class="leaderboard-meta-item">
-                    {`LogLoss: ${formatLogLoss(entry.avg_log_loss)}`}
-                  </span>
                 </div>
               </div>
               <div class="leaderboard-points">
-                <span class="leaderboard-points-value">{formatReputation(entry.rep_points)}</span>
+                <span class="leaderboard-points-value">{formatReputation(entry.total_reputation)}</span>
                 <span class="leaderboard-points-label">RP</span>
               </div>
             </li>
@@ -155,7 +144,7 @@ export default function LeaderboardCard() {
       <div class="leaderboard-header-row">
         <div class="card-header">
           <h3>Reputation Leaderboard</h3>
-          <p class="header-subtitle">Unified log scoring (All-Log + PLL)</p>
+          <p class="header-subtitle">Ranked by total reputation locked and available</p>
         </div>
         <button
           type="button"
@@ -183,7 +172,7 @@ export default function LeaderboardCard() {
         <div class="user-rank-info">
           <span class="rank-label">Your Rank: </span>
           <span class="rank-value">#{rankData()?.rank || 'N/A'}</span>
-          <span class="rank-points">{formatReputation(rankData()?.rep_points)} pts</span>
+          <span class="rank-points">{formatReputation(rankData()?.total_reputation)} RP</span>
         </div>
       </Show>
 

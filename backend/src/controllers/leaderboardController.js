@@ -1,31 +1,61 @@
 const db = require('../db');
 
-// Get fast leaderboard from stored rankings (zero-sum relative ranking)
+const availableReputationSql = '(COALESCE(u.rp_balance_ledger, 0)::DOUBLE PRECISION / 1000000.0)';
+const stakedReputationSql = '(COALESCE(u.rp_staked_ledger, 0)::DOUBLE PRECISION / 1000000.0)';
+const totalReputationSql = '((COALESCE(u.rp_balance_ledger, 0) + COALESCE(u.rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0)';
+const totalReputationLedgerSql = '(COALESCE(u.rp_balance_ledger, 0) + COALESCE(u.rp_staked_ledger, 0))';
+const totalPredictionsSql = 'COUNT(p.id)';
+
+function parseLimit(value, fallback = 10) {
+  return Math.min(Math.max(parseInt(value, 10) || fallback, 1), 100);
+}
+
+async function queryLeaderboard({ userIds = null, currentUserId = null, limit = 10 }) {
+  const params = [];
+  const whereClauses = ['u.deleted_at IS NULL'];
+
+  if (currentUserId != null) {
+    params.push(currentUserId);
+  }
+  if (userIds) {
+    params.push(userIds);
+    whereClauses.push(`u.id = ANY($${params.length})`);
+  }
+  params.push(limit);
+
+  const isCurrentUserSelect = currentUserId != null
+    ? `, CASE WHEN u.id = $1 THEN true ELSE false END as is_current_user`
+    : '';
+
+  return db.query(`
+    SELECT
+      u.id as user_id,
+      u.username,
+      ${availableReputationSql} as available_reputation,
+      ${stakedReputationSql} as staked_reputation,
+      ${totalReputationSql} as total_reputation,
+      ${totalPredictionsSql} as total_predictions
+      ${isCurrentUserSelect}
+    FROM users u
+    LEFT JOIN predictions p ON u.id = p.user_id
+    WHERE ${whereClauses.join(' AND ')}
+    GROUP BY u.id, u.username, u.rp_balance_ledger, u.rp_staked_ledger
+    ORDER BY ${totalReputationLedgerSql} DESC, ${totalPredictionsSql} DESC, u.id ASC
+    LIMIT $${params.length}
+  `, params);
+}
+
+// Get fast leaderboard
 exports.getFastLeaderboard = async (req, res) => {
-  const limit = parseInt(req.query.limit) || 10;
+  const limit = parseLimit(req.query.limit);
   
   try {
-    const result = await db.query(`
-      SELECT 
-        u.id as user_id,
-        u.username,
-        ur.rep_points,
-        ur.global_rank,
-        ur.time_weighted_score,
-        COUNT(p.id) as total_predictions
-      FROM users u
-      JOIN user_reputation ur ON u.id = ur.user_id
-      LEFT JOIN predictions p ON u.id = p.user_id AND p.raw_log_loss IS NOT NULL
-      WHERE ur.global_rank IS NOT NULL
-      GROUP BY u.id, u.username, ur.rep_points, ur.global_rank, ur.time_weighted_score
-      ORDER BY ur.global_rank ASC
-      LIMIT $1
-    `, [limit]);
+    const result = await queryLeaderboard({ limit });
 
     res.json({
       leaderboard: result.rows,
-      source: "stored_rankings",
-      description: "Fast leaderboard from pre-calculated zero-sum rankings"
+      source: 'ledger_rankings',
+      description: 'Fast leaderboard from LMSR reputation ledgers'
     });
   } catch (error) {
     console.error('Error getting fast leaderboard:', error);
@@ -35,26 +65,10 @@ exports.getFastLeaderboard = async (req, res) => {
 
 // Get global leaderboard (all users)
 exports.getGlobalLeaderboard = async (req, res) => {
-  const limit = parseInt(req.query.limit) || 10;
+  const limit = parseLimit(req.query.limit);
   
   try {
-    const result = await db.query(`
-      SELECT 
-        u.id as user_id,
-        u.username,
-        (COALESCE(u.rp_balance_ledger, 1000000000)::DOUBLE PRECISION / 1000000.0) as rep_points,
-        COALESCE(ur.time_weighted_score, 0.0) as time_weighted_score,
-        COALESCE(ur.peer_bonus, 0.0) as peer_bonus,
-        COUNT(p.id) as total_predictions,
-        AVG(p.raw_log_loss) as avg_log_loss,
-        ur.updated_at
-      FROM users u
-      LEFT JOIN user_reputation ur ON u.id = ur.user_id
-      LEFT JOIN predictions p ON u.id = p.user_id AND p.raw_log_loss IS NOT NULL
-      GROUP BY u.id, u.username, u.rp_balance_ledger, ur.time_weighted_score, ur.peer_bonus, ur.updated_at
-      ORDER BY COALESCE(u.rp_balance_ledger, 1000000000) DESC, COUNT(p.id) DESC
-      LIMIT $1
-    `, [limit]);
+    const result = await queryLeaderboard({ limit });
 
     res.json({
       type: 'global',
@@ -69,7 +83,7 @@ exports.getGlobalLeaderboard = async (req, res) => {
 // Get followers leaderboard (user + their followers)
 exports.getFollowersLeaderboard = async (req, res) => {
   const userId = req.user.id;
-  const limit = parseInt(req.query.limit) || 10;
+  const limit = parseLimit(req.query.limit);
   
   try {
     // First, get follower IDs
@@ -82,25 +96,7 @@ exports.getFollowersLeaderboard = async (req, res) => {
     const userIds = [userId, ...followersResult.rows.map(row => row.follower_id)];
     
     // Get leaderboard filtered by these user IDs
-    const result = await db.query(`
-      SELECT 
-        u.id as user_id,
-        u.username,
-        COALESCE(ur.rep_points, 1.0) as rep_points,
-        COALESCE(ur.time_weighted_score, 0.0) as time_weighted_score,
-        COALESCE(ur.peer_bonus, 0.0) as peer_bonus,
-        COUNT(p.id) as total_predictions,
-        AVG(p.raw_log_loss) as avg_log_loss,
-        ur.updated_at,
-        CASE WHEN u.id = $1 THEN true ELSE false END as is_current_user
-      FROM users u
-      LEFT JOIN user_reputation ur ON u.id = ur.user_id
-      LEFT JOIN predictions p ON u.id = p.user_id AND p.raw_log_loss IS NOT NULL
-      WHERE u.id = ANY($2)
-      GROUP BY u.id, u.username, ur.rep_points, ur.time_weighted_score, ur.peer_bonus, ur.updated_at
-      ORDER BY COALESCE(ur.rep_points, 1.0) DESC, COUNT(p.id) DESC
-      LIMIT $3
-    `, [userId, userIds, limit]);
+    const result = await queryLeaderboard({ userIds, currentUserId: userId, limit });
 
     res.json({
       type: 'followers',
@@ -115,7 +111,7 @@ exports.getFollowersLeaderboard = async (req, res) => {
 // Get following leaderboard (user + people they follow)
 exports.getFollowingLeaderboard = async (req, res) => {
   const userId = req.user.id;
-  const limit = parseInt(req.query.limit) || 10;
+  const limit = parseLimit(req.query.limit);
   
   try {
     // First, get following IDs
@@ -128,25 +124,7 @@ exports.getFollowingLeaderboard = async (req, res) => {
     const userIds = [userId, ...followingResult.rows.map(row => row.following_id)];
     
     // Get leaderboard filtered by these user IDs
-    const result = await db.query(`
-      SELECT 
-        u.id as user_id,
-        u.username,
-        COALESCE(ur.rep_points, 1.0) as rep_points,
-        COALESCE(ur.time_weighted_score, 0.0) as time_weighted_score,
-        COALESCE(ur.peer_bonus, 0.0) as peer_bonus,
-        COUNT(p.id) as total_predictions,
-        AVG(p.raw_log_loss) as avg_log_loss,
-        ur.updated_at,
-        CASE WHEN u.id = $1 THEN true ELSE false END as is_current_user
-      FROM users u
-      LEFT JOIN user_reputation ur ON u.id = ur.user_id
-      LEFT JOIN predictions p ON u.id = p.user_id AND p.raw_log_loss IS NOT NULL
-      WHERE u.id = ANY($2)
-      GROUP BY u.id, u.username, ur.rep_points, ur.time_weighted_score, ur.peer_bonus, ur.updated_at
-      ORDER BY COALESCE(ur.rep_points, 1.0) DESC, COUNT(p.id) DESC
-      LIMIT $3
-    `, [userId, userIds, limit]);
+    const result = await queryLeaderboard({ userIds, currentUserId: userId, limit });
 
     res.json({
       type: 'following',
@@ -161,7 +139,7 @@ exports.getFollowingLeaderboard = async (req, res) => {
 // Get network leaderboard (user + followers + following)
 exports.getNetworkLeaderboard = async (req, res) => {
   const userId = req.user.id;
-  const limit = parseInt(req.query.limit) || 10;
+  const limit = parseLimit(req.query.limit);
   
   try {
     // Get both followers and following IDs
@@ -178,25 +156,7 @@ exports.getNetworkLeaderboard = async (req, res) => {
     ]);
     
     // Get leaderboard filtered by network user IDs
-    const result = await db.query(`
-      SELECT 
-        u.id as user_id,
-        u.username,
-        COALESCE(ur.rep_points, 1.0) as rep_points,
-        COALESCE(ur.time_weighted_score, 0.0) as time_weighted_score,
-        COALESCE(ur.peer_bonus, 0.0) as peer_bonus,
-        COUNT(p.id) as total_predictions,
-        AVG(p.raw_log_loss) as avg_log_loss,
-        ur.updated_at,
-        CASE WHEN u.id = $1 THEN true ELSE false END as is_current_user
-      FROM users u
-      LEFT JOIN user_reputation ur ON u.id = ur.user_id
-      LEFT JOIN predictions p ON u.id = p.user_id AND p.raw_log_loss IS NOT NULL
-      WHERE u.id = ANY($2)
-      GROUP BY u.id, u.username, ur.rep_points, ur.time_weighted_score, ur.peer_bonus, ur.updated_at
-      ORDER BY COALESCE(ur.rep_points, 1.0) DESC, COUNT(p.id) DESC
-      LIMIT $3
-    `, [userId, Array.from(allUserIds), limit]);
+    const result = await queryLeaderboard({ userIds: Array.from(allUserIds), currentUserId: userId, limit });
 
     res.json({
       type: 'network',
@@ -217,15 +177,17 @@ exports.getUserRank = async (req, res) => {
       WITH ranked_users AS (
         SELECT 
           u.id,
-          (COALESCE(u.rp_balance_ledger, 1000000000)::DOUBLE PRECISION / 1000000.0) as rep_points,
+          ${availableReputationSql} as available_reputation,
+          ${stakedReputationSql} as staked_reputation,
+          ${totalReputationSql} as total_reputation,
           COUNT(p.id) as total_predictions,
-          ROW_NUMBER() OVER (ORDER BY COALESCE(u.rp_balance_ledger, 1000000000) DESC, COUNT(p.id) DESC) as rank
+          ROW_NUMBER() OVER (ORDER BY ${totalReputationLedgerSql} DESC, COUNT(p.id) DESC, u.id ASC) as rank
         FROM users u
-        LEFT JOIN user_reputation ur ON u.id = ur.user_id
-        LEFT JOIN predictions p ON u.id = p.user_id AND p.raw_log_loss IS NOT NULL
-        GROUP BY u.id, u.rp_balance_ledger
+        LEFT JOIN predictions p ON u.id = p.user_id
+        WHERE u.deleted_at IS NULL
+        GROUP BY u.id, u.rp_balance_ledger, u.rp_staked_ledger
       )
-      SELECT rank, rep_points, total_predictions
+      SELECT rank, available_reputation, staked_reputation, total_reputation, total_predictions
       FROM ranked_users
       WHERE id = $1
     `, [userId]);
@@ -234,7 +196,9 @@ exports.getUserRank = async (req, res) => {
       return res.json({
         user_id: userId,
         rank: null,
-        rep_points: 1000.0,
+        available_reputation: 1000.0,
+        staked_reputation: 0.0,
+        total_reputation: 1000.0,
         total_predictions: 0,
         message: 'User has no predictions yet'
       });

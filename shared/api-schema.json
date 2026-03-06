@@ -1,0 +1,54 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Intellacc Prediction Engine API",
+    "version": "1.0.0",
+    "description": "Shared schema for Intellacc prediction markets and LMSR reputation ledger"
+  },
+  "components": {
+    "schemas": {
+      "MarketEvent": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "title": { "type": "string" },
+          "details": { "type": "string" },
+          "closing_date": { "type": "string", "format": "date-time" },
+          "outcome": { "type": "string", "nullable": true },
+          "event_type": { "type": "string", "enum": ["binary", "multiple_choice", "numeric", "discrete", "date"] },
+          "market_prob": { "type": "number" },
+          "liquidity_b": { "type": "number" },
+          "cumulative_stake": { "type": "number" }
+        },
+        "required": ["id", "title", "event_type"]
+      },
+      "Trade": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "event_id": { "type": "integer" },
+          "user_id": { "type": "integer" },
+          "prev_prob": { "type": "number" },
+          "new_prob": { "type": "number" },
+          "stake": { "type": "number" },
+          "shares_acquired": { "type": "number" },
+          "share_type": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        },
+        "required": ["id", "event_id", "user_id", "new_prob", "stake"]
+      },
+      "UserReputation": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "integer" },
+          "available_reputation": { "type": "number" },
+          "staked_reputation": { "type": "number" },
+          "total_reputation": { "type": "number" },
+          "rank": { "type": "integer", "nullable": true },
+          "total_predictions": { "type": "integer", "nullable": true }
+        },
+        "required": ["user_id", "available_reputation", "staked_reputation", "total_reputation"]
+      }
+    }
+  }
+}

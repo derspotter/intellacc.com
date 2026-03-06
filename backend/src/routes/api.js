@@ -7,7 +7,6 @@ const userController = require('../controllers/userController');
 const postController = require('../controllers/postController');
 const likeController = require('../controllers/likeController');
 const predictionsController = require('../controllers/predictionsController');
-const scoringController = require('../controllers/scoringController');
 const leaderboardController = require('../controllers/leaderboardController');
 const notificationController = require('../controllers/notificationController');
 const pushController = require('../controllers/pushController');
@@ -25,6 +24,7 @@ const federationController = require('../controllers/federationController');
 const atprotoController = require('../controllers/atprotoController');
 const socialAuthController = require('../controllers/socialAuthController');
 const persuasiveAlphaController = require('../controllers/persuasiveAlphaController');
+const ledgerAuditController = require('../controllers/ledgerAuditController');
 const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const moderationController = require('../controllers/moderationController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
@@ -32,6 +32,7 @@ const { requireScope } = require('../middleware/scopes');
 const db = require('../db');
 const { ensureEventIsActive } = require('../utils/eventLifecycle');
 const PREDICTION_ENGINE_AUTH_TOKEN = process.env.PREDICTION_ENGINE_AUTH_TOKEN;
+const PREDICTION_ENGINE_BASE_URL = process.env.PREDICTION_ENGINE_BASE_URL || 'http://prediction-engine:3001';
 const predictionEngineHeaders = {
     'Content-Type': 'application/json',
     ...(PREDICTION_ENGINE_AUTH_TOKEN ? { 'x-engine-token': PREDICTION_ENGINE_AUTH_TOKEN } : {})
@@ -229,6 +230,51 @@ router.post('/market-questions/:id/reviews', authenticateJWT, marketQuestionCont
 router.post('/market-questions/:id/rewards/traction', authenticateJWT, requireAdmin, marketQuestionController.rewardTraction);
 router.post('/market-questions/:id/rewards/resolution', authenticateJWT, requireAdmin, marketQuestionController.rewardResolution);
 
+router.get('/admin/external-imports/status', authenticateJWT, requireAdmin, async (req, res) => {
+    try {
+        const limit = Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 25));
+        const response = await fetch(`${PREDICTION_ENGINE_BASE_URL}/imports/status?limit=${limit}`, {
+            headers: predictionEngineHeaders
+        });
+        const data = await response.json();
+        return res.status(response.status).json(data);
+    } catch (error) {
+        console.error('External import status proxy failed:', error);
+        return res.status(502).json({ message: 'Failed to load external import status' });
+    }
+});
+
+router.post('/admin/external-imports/sync-all', authenticateJWT, requireAdmin, async (req, res) => {
+    try {
+        const full = req.query.full === '1' || req.query.full === 'true' || req.body?.full === true;
+        const response = await fetch(`${PREDICTION_ENGINE_BASE_URL}/imports/sync-all?full=${full ? 'true' : 'false'}`, {
+            method: 'POST',
+            headers: predictionEngineHeaders
+        });
+        const data = await response.json();
+        return res.status(response.status).json(data);
+    } catch (error) {
+        console.error('External import sync-all proxy failed:', error);
+        return res.status(502).json({ message: 'Failed to start external import sync' });
+    }
+});
+
+router.post('/admin/external-imports/sync/:provider', authenticateJWT, requireAdmin, async (req, res) => {
+    try {
+        const provider = encodeURIComponent(String(req.params.provider || '').trim().toLowerCase());
+        const full = req.query.full === '1' || req.query.full === 'true' || req.body?.full === true;
+        const response = await fetch(`${PREDICTION_ENGINE_BASE_URL}/imports/sync/${provider}?full=${full ? 'true' : 'false'}`, {
+            method: 'POST',
+            headers: predictionEngineHeaders
+        });
+        const data = await response.json();
+        return res.status(response.status).json(data);
+    } catch (error) {
+        console.error('External import provider proxy failed:', error);
+        return res.status(502).json({ message: 'Failed to start provider import sync' });
+    }
+});
+
 // ADMIN: Delete all predictions (for testing only)
 router.delete("/predictions/all", authenticateJWT, predictionsController.deleteAllPredictions);
 
@@ -247,6 +293,7 @@ router.post("/posts/:postId/confirm-market", authenticateJWT, persuasiveAlphaCon
 router.post("/posts/:postId/verify", authenticateJWT, persuasiveAlphaController.submitVerification);
 router.post("/admin/persuasion-score/run", authenticateJWT, requireAdmin, persuasiveAlphaController.runAutomaticRewards);
 router.post("/admin/persuasion-score/run-cron", requireCronSharedSecret, persuasiveAlphaController.runAutomaticRewards);
+router.post("/admin/ledger-audit/run-cron", requireCronSharedSecret, ledgerAuditController.runAuditCron);
 router.get("/admin/persuasion-score/status", authenticateJWT, requireAdmin, persuasiveAlphaController.getRewardRunStatus);
 router.get("/posts/:id/analysis-status", authenticateJWT, postController.getPostAnalysisStatus);
 router.get("/posts", postController.getPosts);                                 // Get all posts (public)
@@ -282,13 +329,6 @@ router.delete("/push/subscribe", authenticateJWT, pushController.unsubscribe);
 router.get("/push/preferences", authenticateJWT, pushController.getPreferences);
 router.put("/push/preferences", authenticateJWT, pushController.updatePreferences);
 
-// Scoring Routes (proxy to prediction engine)
-router.get("/scoring/leaderboard", scoringController.getLogScoringLeaderboard);
-router.get("/scoring/enhanced-leaderboard", scoringController.getEnhancedLeaderboard);
-router.get("/scoring/user/:userId/reputation", authenticateJWT, scoringController.getUserReputation);
-router.post("/scoring/user/:userId/update-reputation", authenticateJWT, scoringController.updateUserReputation);
-router.get("/scoring/user/:userId/accuracy", authenticateJWT, scoringController.getUserEnhancedAccuracy);
-
 // Leaderboard Routes (direct database queries for performance)
 router.get("/leaderboard/fast", leaderboardController.getFastLeaderboard); // Fast leaderboard from stored rankings
 router.get("/leaderboard/global", leaderboardController.getGlobalLeaderboard);
@@ -296,10 +336,6 @@ router.get("/leaderboard/followers", authenticateJWT, leaderboardController.getF
 router.get("/leaderboard/following", authenticateJWT, leaderboardController.getFollowingLeaderboard);
 router.get("/leaderboard/network", authenticateJWT, leaderboardController.getNetworkLeaderboard);
 router.get("/leaderboard/rank", authenticateJWT, leaderboardController.getUserRank);
-router.get("/scoring/user/:userId/calibration", authenticateJWT, scoringController.getUserCalibration);
-router.get("/scoring/user/:userId/brier", authenticateJWT, scoringController.getUserBrierScore);
-router.post("/scoring/calculate", authenticateJWT, scoringController.calculateLogScores);
-router.post("/scoring/time-weights", authenticateJWT, scoringController.calculateTimeWeights);
 
 // Admin AI moderation routes
 router.get('/admin/ai-flags', authenticateJWT, aiModerationController.getFlaggedContent);

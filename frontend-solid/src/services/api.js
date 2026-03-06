@@ -308,8 +308,8 @@ function mlsRequest(endpoint, options = {}) {
 export const api = {
   // Auth endpoints
   auth: {
-    login: (email, password) =>
-      request('/login', { method: 'POST', body: { email, password } }),
+    login: (identifier, password) =>
+      request('/login', { method: 'POST', body: { email: identifier, password } }),
 
     register: (username, email, password) =>
       request('/users/register', { method: 'POST', body: { username, email, password } }),
@@ -623,44 +623,6 @@ export const api = {
 
     getBettingStats: () =>
       request('/bets/stats')
-  },
-
-  // Scoring endpoints (via backend proxy to prediction engine)
-  scoring: {
-    // Get unified log scoring leaderboard
-    getLeaderboard: (limit = 10) =>
-      request(`/scoring/leaderboard?limit=${limit}`),
-
-    // Get enhanced leaderboard with Brier scores
-    getEnhancedLeaderboard: () =>
-      request('/scoring/enhanced-leaderboard'),
-
-    // Get user's reputation stats
-    getUserReputation: (userId) =>
-      request(`/scoring/user/${userId}/reputation`),
-
-    // Update user's reputation points
-    updateUserReputation: (userId) =>
-      request(`/scoring/user/${userId}/update-reputation`, { method: 'POST' }),
-
-    // Get user's enhanced accuracy with Brier scores
-    getUserAccuracy: (userId) =>
-      request(`/scoring/user/${userId}/accuracy`),
-
-    // Get user's calibration data
-    getUserCalibration: (userId) =>
-      request(`/scoring/user/${userId}/calibration`),
-
-    // Get user's Brier score
-    getUserBrierScore: (userId) =>
-      request(`/scoring/user/${userId}/brier`),
-
-    // Admin functions to manually trigger score calculations
-    calculateLogScores: () =>
-      request('/scoring/calculate', { method: 'POST' }),
-
-    calculateTimeWeights: () =>
-      request('/scoring/time-weights', { method: 'POST' })
   },
 
   // Weekly assignment endpoints
@@ -1036,8 +998,6 @@ export const getPredictions = () => api.predictions.getAll();
 export const createPrediction = (eventId, predictionValue, confidence, predictionType = 'binary') =>
   api.predictions.create(eventId, predictionValue, confidence, predictionType);
 
-export const getScoringLeaderboard = (limit = 10) => api.scoring.getLeaderboard(limit);
-
 export const getLeaderboardGlobal = (limit = 10) => api.leaderboard.getGlobal(limit);
 export const getLeaderboardFollowers = (limit = 10) => api.leaderboard.getFollowers(limit);
 export const getLeaderboardFollowing = (limit = 10) => api.leaderboard.getFollowing(limit);
@@ -1061,8 +1021,6 @@ export const submitMarketQuestionReview = (submissionId, vote, note = null) =>
 
 export const runMarketQuestionRewards = () => api.marketQuestions.runAutomaticRewards();
 
-export const getScoringUserRank = () => api.leaderboard.getUserRank();
-
 export const getFollowingStatus = (userId) => api.users.getFollowingStatus(userId);
 
 export const updateProfile = ({ username, bio }) => api.users.updateProfile({ username, bio });
@@ -1080,8 +1038,6 @@ export const getFollowing = (userId) => api.users.getFollowing(userId);
 export const getUser = (userId) => api.users.getUser(userId);
 
 export const getUserByUsername = (username) => api.users.getUserByUsername(username);
-
-export const getUserReputation = (userId) => api.scoring.getUserReputation(userId);
 
 export const createDirectMessage = (targetUserId) => api.mls.createDirectMessage(targetUserId);
 

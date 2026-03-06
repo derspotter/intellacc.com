@@ -10,7 +10,6 @@ import {
   getFollowingStatus,
   getPredictions,
   getUser,
-  getUserReputation,
   unfollowUser,
   updateProfile
 } from '../services/api';
@@ -28,7 +27,12 @@ const coerceUser = (user) => {
     id: user.id || user.userId,
     username: user.username || 'User',
     email: user.email || '',
-    bio: user.bio || ''
+    bio: user.bio || '',
+    rp_balance: Number(user.rp_balance || 0),
+    rp_staked: Number(user.rp_staked || 0),
+    total_reputation: Number(
+      user.total_reputation || (Number(user.rp_balance || 0) + Number(user.rp_staked || 0))
+    )
   };
 };
 
@@ -44,12 +48,8 @@ const normalizeId = (value) => {
 
 const normalizeReputation = (value = {}) => ({
   rank: value.rank || null,
-  rep_points: Number(value.rep_points || value.points || 0),
   total_predictions: Number(value.total_predictions || 0)
 });
-
-const hasValidReputation = (reputation) =>
-  !!(reputation && (reputation.rank || reputation.total_predictions || reputation.rep_points));
 
 const extractRows = (payload) => {
   if (Array.isArray(payload)) {
@@ -136,18 +136,6 @@ export default function ProfilePage(props) {
     return isAuthenticated();
   };
 
-  const fetchReputation = async (userId) => {
-    setReputationLoading(true);
-    try {
-      const payload = await getUserReputation(userId).catch(() => null);
-      setReputation(normalizeReputation(payload || {}));
-    } catch {
-      setReputation(normalizeReputation({}));
-    } finally {
-      setReputationLoading(false);
-    }
-  };
-
   const fetchProfile = async () => {
     const userId = targetUserId();
 
@@ -168,6 +156,9 @@ export default function ProfilePage(props) {
 
       const normalizedProfile = coerceUser(baseProfile);
       setProfile(normalizedProfile);
+      setReputationLoading(true);
+      setReputation(normalizeReputation(normalizedProfile));
+      setReputationLoading(false);
       setUsernameInput(normalizedProfile.username);
       setBioInput(normalizedProfile.bio);
       setFollowers([]);
@@ -175,8 +166,6 @@ export default function ProfilePage(props) {
       setNetworkLoaded(false);
 
       const isSelf = String(normalizedProfile.id) === String(getCurrentUserId() || '');
-      await fetchReputation(normalizedProfile.id);
-
       const predictionRows = isSelf ? await getPredictions().catch(() => []) : [];
       setPredictions(extractPredictionItems(predictionRows));
 
@@ -191,6 +180,7 @@ export default function ProfilePage(props) {
       setProfile(null);
       setPredictions([]);
       setReputation(normalizeReputation({}));
+      setReputationLoading(false);
     } finally {
       setLoading(false);
     }
@@ -365,31 +355,38 @@ export default function ProfilePage(props) {
                         <p class="reputation-loading">Loading reputation...</p>
                       </Show>
                       <Show when={!reputationLoading()}>
-                        <Show
-                          when={hasValidReputation(reputation())}
-                          fallback={<p class="reputation-none">Make predictions to build reputation</p>}
-                        >
-                          <div class="reputation-stats">
-                            <div class="reputation-item">
-                              <span class="reputation-label">Points: </span>
-                              <span class="reputation-value points-value">
-                                {reputation().rep_points.toFixed(1)}
-                              </span>
-                            </div>
-                            <div class="reputation-item">
-                              <span class="reputation-label">Global Rank: </span>
-                              <span class="reputation-value rank-value">
-                                {reputation().rank ? `#${reputation().rank}` : 'Unranked'}
-                              </span>
-                            </div>
-                            <div class="reputation-item">
-                              <span class="reputation-label">Predictions: </span>
-                              <span class="reputation-value predictions-value">
-                                {reputation().total_predictions}
-                              </span>
-                            </div>
+                        <div class="reputation-stats">
+                          <div class="reputation-item">
+                            <span class="reputation-label">Available: </span>
+                            <span class="reputation-value points-value">
+                              {user.rp_balance.toFixed(2)} RP
+                            </span>
                           </div>
-                        </Show>
+                          <div class="reputation-item">
+                            <span class="reputation-label">Staked: </span>
+                            <span class="reputation-value points-value">
+                              {user.rp_staked.toFixed(2)} RP
+                            </span>
+                          </div>
+                          <div class="reputation-item">
+                            <span class="reputation-label">Total Reputation: </span>
+                            <span class="reputation-value points-value">
+                              {user.total_reputation.toFixed(2)} RP
+                            </span>
+                          </div>
+                          <div class="reputation-item">
+                            <span class="reputation-label">Global Rank: </span>
+                            <span class="reputation-value rank-value">
+                              {reputation().rank ? `#${reputation().rank}` : 'Unranked'}
+                            </span>
+                          </div>
+                          <div class="reputation-item">
+                            <span class="reputation-label">Predictions: </span>
+                            <span class="reputation-value predictions-value">
+                              {reputation().total_predictions}
+                            </span>
+                          </div>
+                        </div>
                       </Show>
                     </div>
 

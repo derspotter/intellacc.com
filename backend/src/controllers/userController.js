@@ -38,6 +38,31 @@ const parseUserId = (value) => {
 
 const ALLOWED_UI_SKINS = new Set(['van', 'terminal']);
 
+async function getLedgerReputationSummary(userId) {
+  const result = await db.query(`
+    WITH ranked_users AS (
+      SELECT
+        u.id,
+        COUNT(p.id) AS total_predictions,
+        ROW_NUMBER() OVER (
+          ORDER BY
+            (COALESCE(u.rp_balance_ledger, 0) + COALESCE(u.rp_staked_ledger, 0)) DESC,
+            COUNT(p.id) DESC,
+            u.id ASC
+        ) AS rank
+      FROM users u
+      LEFT JOIN predictions p ON p.user_id = u.id
+      WHERE u.deleted_at IS NULL
+      GROUP BY u.id, u.rp_balance_ledger, u.rp_staked_ledger
+    )
+    SELECT rank, total_predictions
+    FROM ranked_users
+    WHERE id = $1
+  `, [userId]);
+
+  return result.rows[0] || { rank: null, total_predictions: 0 };
+}
+
 // Create a new user
 exports.createUser = async (req, res) => {
   if (!isRegistrationEnabled()) {
@@ -171,11 +196,32 @@ exports.createUser = async (req, res) => {
 exports.getUser = async (req, res) => {
   const userId = req.params.id;
   try {
-    const result = await db.query('SELECT id, username, email, bio, avatar_url, created_at, updated_at FROM users WHERE id = $1 AND deleted_at IS NULL', [userId]);
+    const [result, reputation] = await Promise.all([
+      db.query(`
+      SELECT
+        id,
+        username,
+        email,
+        bio,
+        avatar_url,
+        created_at,
+        updated_at,
+        (COALESCE(rp_balance_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_balance,
+        (COALESCE(rp_staked_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_staked,
+        ((COALESCE(rp_balance_ledger, 0) + COALESCE(rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) AS total_reputation
+      FROM users
+      WHERE id = $1 AND deleted_at IS NULL
+    `, [userId]),
+      getLedgerReputationSummary(userId)
+    ]);
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
-    res.json(result.rows[0]);
+    res.json({
+      ...result.rows[0],
+      rank: reputation.rank,
+      total_predictions: Number(reputation.total_predictions || 0)
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Error fetching user' });
@@ -186,11 +232,30 @@ exports.getUser = async (req, res) => {
 exports.getUserByUsername = async (req, res) => {
   const username = req.params.username;
   try {
-    const result = await db.query('SELECT id, username, email, bio, avatar_url, created_at, updated_at FROM users WHERE LOWER(username) = LOWER($1) AND deleted_at IS NULL', [username]);
+    const result = await db.query(`
+      SELECT
+        id,
+        username,
+        email,
+        bio,
+        avatar_url,
+        created_at,
+        updated_at,
+        (COALESCE(rp_balance_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_balance,
+        (COALESCE(rp_staked_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_staked,
+        ((COALESCE(rp_balance_ledger, 0) + COALESCE(rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) AS total_reputation
+      FROM users
+      WHERE LOWER(username) = LOWER($1) AND deleted_at IS NULL
+    `, [username]);
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
-    res.json(result.rows[0]);
+    const reputation = await getLedgerReputationSummary(result.rows[0].id);
+    res.json({
+      ...result.rows[0],
+      rank: reputation.rank,
+      total_predictions: Number(reputation.total_predictions || 0)
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Error fetching user' });
@@ -514,16 +579,34 @@ exports.getUserProfile = async (req, res) => {
   try {
     const userId = req.user.id; // Using standardized user object from auth middleware
 
-    const result = await db.query(
-      "SELECT id, username, email, role, bio, avatar_url, (rp_balance_ledger::DOUBLE PRECISION / 1000000.0) AS rp_balance FROM users WHERE id = $1 AND deleted_at IS NULL",
+    const [result, reputation] = await Promise.all([
+      db.query(
+      `SELECT
+         id,
+         username,
+         email,
+         role,
+         bio,
+         avatar_url,
+         (COALESCE(rp_balance_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_balance,
+         (COALESCE(rp_staked_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_staked,
+         ((COALESCE(rp_balance_ledger, 0) + COALESCE(rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) AS total_reputation
+       FROM users
+       WHERE id = $1 AND deleted_at IS NULL`,
       [userId]
-    );
+    ),
+      getLedgerReputationSummary(userId)
+    ]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    res.json(result.rows[0]); // Return user profile (excluding password)
+    res.json({
+      ...result.rows[0],
+      rank: reputation.rank,
+      total_predictions: Number(reputation.total_predictions || 0)
+    }); // Return user profile (excluding password)
   } catch (err) {
     console.error("Error fetching user profile:", err);
     res.status(500).json({ message: "Internal Server Error" });
@@ -651,7 +734,6 @@ exports.deleteAccount = async (req, res) => {
     await client.query('DELETE FROM notifications WHERE user_id = $1 OR actor_id = $1', [userId]);
     await client.query('DELETE FROM push_subscriptions WHERE user_id = $1', [userId]);
     await client.query('DELETE FROM notification_preferences WHERE user_id = $1', [userId]);
-    await client.query('DELETE FROM user_reputation WHERE user_id = $1', [userId]);
     await client.query('DELETE FROM user_visibility_score WHERE user_id = $1', [userId]);
     await client.query('DELETE FROM user_verifications WHERE user_id = $1', [userId]);
     await client.query('DELETE FROM webauthn_credentials WHERE user_id = $1', [userId]);

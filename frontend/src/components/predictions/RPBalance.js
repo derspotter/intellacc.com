@@ -22,8 +22,7 @@ export default function RPBalance({ horizontal = false }) {
         return;
       }
 
-      // Get current user's actual RP balance (not reputation points)
-      // Direct API calls for debugging
+      // Fetch the live LMSR ledger split plus rank summary.
       const userResponse = await fetch('/api/me', {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -40,7 +39,10 @@ export default function RPBalance({ horizontal = false }) {
       
       balance.val = {
         rp_balance: userResponse.rp_balance, // Actual betting balance
-        rep_points: leaderboardResponse.rep_points, // Reputation points
+        rp_staked: userResponse.rp_staked || 0,
+        total_reputation: userResponse.total_reputation ?? (
+          Number(userResponse.rp_balance || 0) + Number(userResponse.rp_staked || 0)
+        ),
         rank: leaderboardResponse.rank,
         total_predictions: leaderboardResponse.total_predictions
       };
@@ -84,7 +86,7 @@ export default function RPBalance({ horizontal = false }) {
 
   const getEarningTips = () => [
     '📅 Place at least 1% weekly assignment stake (avoid 1% missed-week penalty)',
-    '🎯 Make accurate predictions (log loss scoring)',
+    '🎯 Build reputation by holding strong market positions',
     '💎 Stake optimal amounts (Kelly criterion)',
     '⚡ Trade actively in markets for better rates',
     '🏆 Climb leaderboards for reputation bonuses'
@@ -127,15 +129,15 @@ export default function RPBalance({ horizontal = false }) {
           return div({ class: 'user-stats-horizontal' }, [
             div({ class: 'stat-item' }, [
               span({ class: 'stat-main' }, formatRP(bal.rp_balance) + ' RP'),
-              span({ class: 'stat-sub' }, 'Balance')
+              span({ class: 'stat-sub' }, 'Available')
             ]),
             div({ class: 'stat-item' }, [
-              span({ class: 'stat-main' }, formatRP(bal.rp_balance)),
-              span({ class: 'stat-sub' }, 'Available for Betting')
+              span({ class: 'stat-main' }, formatRP(bal.rp_staked)),
+              span({ class: 'stat-sub' }, 'Staked')
             ]),
             div({ class: 'stat-item' }, [
-              span({ class: 'stat-main' }, bal.rep_points ? `${bal.rep_points}` : '1.0'),
-              span({ class: 'stat-sub' }, 'Reputation Points')
+              span({ class: 'stat-main' }, formatRP(bal.total_reputation)),
+              span({ class: 'stat-sub' }, 'Total Reputation')
             ]),
             div({ class: 'stat-item' }, [
               span({ class: 'stat-main' }, bal.rank ? `#${bal.rank}` : 'Unranked'),
@@ -151,20 +153,24 @@ export default function RPBalance({ horizontal = false }) {
         // Vertical layout for sidebar/card
         return div({ class: 'rp-balance-content' }, [
           div({ class: 'balance-header' }, [
-            h3('💰 Your RP Balance'),
+            h3('💰 Your Reputation'),
             span({ 
               class: `balance-amount ${getBalanceColorClass(bal)}`
-            }, formatRP(bal.rp_balance) + ' RP')
+            }, formatRP(bal.total_reputation) + ' RP')
           ]),
           
           div({ class: 'balance-stats' }, [
             div({ class: 'stat-row' }, [
-              span({ class: 'stat-label' }, 'Available for Betting:'),
+              span({ class: 'stat-label' }, 'Available:'),
               span({ class: 'stat-value' }, formatRP(bal.rp_balance))
             ]),
             div({ class: 'stat-row' }, [
-              span({ class: 'stat-label' }, 'Reputation Points:'),
-              span({ class: 'stat-value' }, bal.rep_points ? `${bal.rep_points}` : '1.0')
+              span({ class: 'stat-label' }, 'Staked:'),
+              span({ class: 'stat-value' }, formatRP(bal.rp_staked))
+            ]),
+            div({ class: 'stat-row' }, [
+              span({ class: 'stat-label' }, 'Total Reputation:'),
+              span({ class: 'stat-value' }, formatRP(bal.total_reputation))
             ]),
             div({ class: 'stat-row' }, [
               span({ class: 'stat-label' }, 'Global Rank:'),

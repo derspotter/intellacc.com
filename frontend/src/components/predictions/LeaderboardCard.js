@@ -72,7 +72,7 @@ export default function LeaderboardCard() {
 
   // Format reputation points for display
   const formatRepPoints = (points) => {
-    return parseFloat(points || 1.0).toFixed(1);
+    return parseFloat(points || 0).toFixed(2);
   };
 
   // Get current user ID for highlighting
@@ -116,15 +116,9 @@ export default function LeaderboardCard() {
       return div({ class: 'user-rank-info' }, [
         span({ class: 'rank-label' }, 'Your Rank: '),
         span({ class: 'rank-value' }, `#${rank.rank || 'Unranked'}`),
-        span({ class: 'rank-points' }, `(${formatRepPoints(rank.rep_points)} pts)`)
+        span({ class: 'rank-points' }, `(${formatRepPoints(rank.total_reputation)} RP)`)
       ]);
     };
-  };
-
-  const formatLogLoss = (value) => {
-    if (value === null || value === undefined) return '-';
-    const n = Number(value);
-    return Number.isFinite(n) ? n.toFixed(3) : '-';
   };
 
   // Render compact leaderboard row (mobile-safe, no wide table)
@@ -147,12 +141,11 @@ export default function LeaderboardCard() {
         }, entry.username),
         isCurrentUser ? span({ class: 'you-indicator' }, 'you') : null,
         div({ class: 'leaderboard-meta' }, [
-          span({ class: 'leaderboard-meta-item' }, `Pred: ${entry.total_predictions ?? '-'}`),
-          span({ class: 'leaderboard-meta-item' }, `LogLoss: ${formatLogLoss(entry.avg_log_loss)}`)
+          span({ class: 'leaderboard-meta-item' }, `Pred: ${entry.total_predictions ?? '-'}`)
         ])
       ]),
       div({ class: 'leaderboard-points' }, [
-        span({ class: 'leaderboard-points-value' }, formatRepPoints(entry.rep_points)),
+        span({ class: 'leaderboard-points-value' }, formatRepPoints(entry.total_reputation)),
         span({ class: 'leaderboard-points-label' }, 'RP')
       ])
     ]);
@@ -203,7 +196,7 @@ export default function LeaderboardCard() {
       div({ class: 'leaderboard-header-row' }, [
         div({ class: 'card-header' }, [
           h3('Reputation Leaderboard'),
-          p({ class: 'header-subtitle' }, 'Unified log scoring (All-Log + PLL)')
+          p({ class: 'header-subtitle' }, 'Ranked by total reputation locked and available')
         ]),
         button({
           onclick: (e) => {

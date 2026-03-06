@@ -121,14 +121,6 @@ export default function AdminTools() {
             <button 
               type="button" 
               class="button secondary" 
-              onClick={() => runTask('Calculate Log Scores', api.scoring.calculateLogScores)}
-              disabled={submitting()}
-            >
-              Recalculate Log Scores
-            </button>
-            <button 
-              type="button" 
-              class="button secondary" 
               onClick={() => runTask('Run Weekly All', api.weekly.runAll)}
               disabled={submitting()}
             >

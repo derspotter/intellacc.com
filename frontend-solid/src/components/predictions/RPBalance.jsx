@@ -2,7 +2,7 @@ import { createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { isAuthenticated } from '../../services/auth';
 import {
   getCurrentUser,
-  getScoringUserRank
+  getLeaderboardUserRank
 } from '../../services/api';
 import Button from '../common/Button';
 
@@ -13,7 +13,11 @@ const safeNumber = (value, fallback = 0) => {
 
 const normalize = (value) => ({
   rp_balance: safeNumber(value?.rp_balance),
-  rep_points: safeNumber(value?.rep_points),
+  rp_staked: safeNumber(value?.rp_staked),
+  total_reputation: safeNumber(
+    value?.total_reputation,
+    safeNumber(value?.rp_balance) + safeNumber(value?.rp_staked)
+  ),
   rank: value?.rank || null,
   total_predictions: Number(value?.total_predictions || 0)
 });
@@ -44,7 +48,7 @@ export default function RPBalance({ horizontal = false }) {
     try {
       const [userResponse, rankResponse] = await Promise.allSettled([
         getCurrentUser(),
-        getScoringUserRank()
+        getLeaderboardUserRank()
       ]);
 
       const userPayload = userResponse.status === 'fulfilled' ? userResponse.value : null;
@@ -52,7 +56,8 @@ export default function RPBalance({ horizontal = false }) {
 
       setBalance(normalize({
         rp_balance: userPayload?.rp_balance,
-        rep_points: rankPayload?.rep_points,
+        rp_staked: userPayload?.rp_staked,
+        total_reputation: userPayload?.total_reputation ?? rankPayload?.total_reputation,
         rank: rankPayload?.rank,
         total_predictions: rankPayload?.total_predictions
       }));
@@ -115,17 +120,15 @@ export default function RPBalance({ horizontal = false }) {
           <>
             <div class="stat-item">
               <span class="stat-main">{formatRP(balance().rp_balance)}</span>
-              <span class="stat-sub">Balance</span>
+              <span class="stat-sub">Available</span>
             </div>
             <div class="stat-item">
-              <span class="stat-main">{formatRP(balance().rp_balance)}</span>
-              <span class="stat-sub">Available for Betting</span>
+              <span class="stat-main">{formatRP(balance().rp_staked)}</span>
+              <span class="stat-sub">Staked</span>
             </div>
             <div class="stat-item">
-              <span class="stat-main">
-                {Number.isFinite(Number(balance().rep_points)) ? Number(balance().rep_points).toFixed(1) : '1.0'}
-              </span>
-              <span class="stat-sub">Reputation Points</span>
+              <span class="stat-main">{formatRP(balance().total_reputation)}</span>
+              <span class="stat-sub">Total Reputation</span>
             </div>
             <div class="stat-item">
               <span class="stat-main">#{balance().rank || 'Unranked'}</span>
@@ -143,19 +146,20 @@ export default function RPBalance({ horizontal = false }) {
 
   return (
     <section class="rp-balance-card">
-      <h3 class="rp-balance-title">💰 Your RP Balance</h3>
+      <h3 class="rp-balance-title">💰 Your Reputation</h3>
       {loading() && <p class="rp-balance-loading">Loading your balance…</p>}
       {error() && <p class="rp-balance-error">{error()}</p>}
       {!loading() && !error() && balance() && (
         <div class="rp-balance-content">
           <div class="balance-display">
             <span class="balance-amount">
-              {formatRP(balance().rp_balance)}
+              {formatRP(balance().total_reputation)}
             </span>
-            <span class="balance-label">Available for betting</span>
+            <span class="balance-label">Total reputation</span>
           </div>
           <div class="rp-balance-stats">
-            <p>Reputation: {Number(balance().rep_points || 1).toFixed(1)}</p>
+            <p>Available: {formatRP(balance().rp_balance)}</p>
+            <p>Staked: {formatRP(balance().rp_staked)}</p>
             <p>Global Rank: {balance().rank || 'Unranked'}</p>
             <p>Total Predictions: {balance().total_predictions || 0}</p>
           </div>

@@ -29,7 +29,7 @@ export default function ProfileCard({ onEdit, user, followButton, title = 'Profi
       loadingReputation.val = true;
       const reputationPromise = isCurrentUser 
         ? api.leaderboard.getUserRank()
-        : api.scoring.getUserReputation(userData.id);
+        : api.users.getUser(userData.id);
         
       reputationPromise
         .then(data => {
@@ -71,20 +71,28 @@ export default function ProfileCard({ onEdit, user, followButton, title = 'Profi
             h4("Reputation"),
             () => loadingReputation.val ? 
               p({ class: "reputation-loading" }, "Loading reputation...") :
-              reputationData.val ? div({ class: "reputation-stats" }, [
+              div({ class: "reputation-stats" }, [
                 div({ class: "reputation-item" }, [
-                  span({ class: "reputation-label" }, "Points: "),
-                  span({ class: "reputation-value points-value" }, parseFloat(reputationData.val.rep_points || 1000.0).toFixed(1))
+                  span({ class: "reputation-label" }, "Available: "),
+                  span({ class: "reputation-value points-value" }, parseFloat(userData.rp_balance || 0).toFixed(2) + ' RP')
+                ]),
+                div({ class: "reputation-item" }, [
+                  span({ class: "reputation-label" }, "Staked: "),
+                  span({ class: "reputation-value points-value" }, parseFloat(userData.rp_staked || 0).toFixed(2) + ' RP')
+                ]),
+                div({ class: "reputation-item" }, [
+                  span({ class: "reputation-label" }, "Total Reputation: "),
+                  span({ class: "reputation-value points-value" }, parseFloat(userData.total_reputation || ((userData.rp_balance || 0) + (userData.rp_staked || 0))).toFixed(2) + ' RP')
                 ]),
                 div({ class: "reputation-item" }, [
                   span({ class: "reputation-label" }, "Global Rank: "),
-                  span({ class: "reputation-value rank-value" }, reputationData.val.rank ? `#${reputationData.val.rank}` : 'Unranked')
+                  span({ class: "reputation-value rank-value" }, reputationData.val?.rank ? `#${reputationData.val.rank}` : 'Unranked')
                 ]),
                 div({ class: "reputation-item" }, [
                   span({ class: "reputation-label" }, "Predictions: "),
-                  span({ class: "reputation-value predictions-value" }, reputationData.val.total_predictions || 0)
+                  span({ class: "reputation-value predictions-value" }, reputationData.val?.total_predictions || 0)
                 ])
-              ]) : p({ class: "reputation-none" }, "Make predictions to build reputation")
+              ])
           ]),
           
           div({ class: "bio-section" }, [

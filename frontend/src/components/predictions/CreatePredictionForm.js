@@ -7,7 +7,7 @@ import Card from '../common/Card';
 import predictionsStore from '../../store/predictions';
 import { isLoggedInState } from '../../services/auth';
 
-// Helper function to generate probability vectors for unified scoring
+// Helper function to generate probability payloads for non-binary prediction inputs
 function generateProbabilityVector(prediction_type, prediction_value, confidence, numerical_value, lower_bound, upper_bound) {
   switch (prediction_type) {
     case 'binary':
@@ -212,7 +212,7 @@ export default function CreatePredictionForm() {
             value: () => state.searchTerm,
             oninput: e => handleSearch(e.target.value),
             disabled: state.submitting || !isLoggedInState.val,
-            style: "width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid var(--border-color); border-radius: 4px;"
+            style: "width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius);"
           }) : null,
           
           // Event selection dropdown - reactive based on search results
@@ -308,7 +308,7 @@ export default function CreatePredictionForm() {
                   disabled: state.submitting,
                   required: true,
                   step: "any",
-                  style: "width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;"
+                  style: "width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius);"
                 });
                 
               case 'date':
@@ -319,7 +319,7 @@ export default function CreatePredictionForm() {
                   oninput: e => state.prediction = e.target.value,
                   disabled: state.submitting,
                   required: true,
-                  style: "width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;"
+                  style: "width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius);"
                 });
                 
               case 'multiple_choice':
@@ -331,7 +331,7 @@ export default function CreatePredictionForm() {
                   oninput: e => state.prediction = e.target.value,
                   disabled: state.submitting,
                   required: true,
-                  style: "width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;"
+                  style: "width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius);"
                 });
                 
               default: // binary
@@ -363,7 +363,7 @@ export default function CreatePredictionForm() {
                 oninput: e => state.lowerBound = e.target.value,
                 disabled: state.submitting,
                 step: "any",
-                style: "flex: 1; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;"
+                style: "flex: 1; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius);"
               }),
               span({ style: "padding: 0 8px;" }, "to"),
               input({
@@ -373,7 +373,7 @@ export default function CreatePredictionForm() {
                 oninput: e => state.upperBound = e.target.value,
                 disabled: state.submitting,
                 step: "any",
-                style: "flex: 1; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;"
+                style: "flex: 1; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--border-radius);"
               })
             ]),
             div({ 

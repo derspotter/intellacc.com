@@ -93,18 +93,20 @@ const buildNestedRepostObject = (chainRows) => {
   return nested;
 };
 
-const loadRepostChain = async (repostPostId, viewerId) => {
+const loadBatchedRepostChains = async (repostIds, viewerId) => {
+  if (!repostIds || repostIds.length === 0) return new Map();
+
   const result = await db.query(
     `
       WITH RECURSIVE repost_chain AS (
-        SELECT p.id, p.repost_id, p.content, p.created_at, p.user_id, 0 AS depth
+        SELECT p.id as root_id, p.id, p.repost_id, p.content, p.created_at, p.user_id, 0 AS depth
         FROM posts p
-        WHERE p.id = $1
+        WHERE p.id = ANY($1::int[])
           AND ${buildPostVisibilityClauseForAlias('p', '$2')}
 
         UNION ALL
 
-        SELECT p2.id, p2.repost_id, p2.content, p2.created_at, p2.user_id, rc.depth + 1
+        SELECT rc.root_id, p2.id, p2.repost_id, p2.content, p2.created_at, p2.user_id, rc.depth + 1
         FROM posts p2
         JOIN repost_chain rc ON p2.id = rc.repost_id
         WHERE rc.repost_id IS NOT NULL
@@ -112,6 +114,7 @@ const loadRepostChain = async (repostPostId, viewerId) => {
           AND ${buildPostVisibilityClauseForAlias('p2', '$2')}
       )
       SELECT
+        rc.root_id,
         rc.id,
         rc.repost_id,
         rc.content,
@@ -122,12 +125,24 @@ const loadRepostChain = async (repostPostId, viewerId) => {
         rc.depth
       FROM repost_chain rc
       JOIN users u ON u.id = rc.user_id
-      ORDER BY rc.depth ASC
+      ORDER BY rc.root_id, rc.depth ASC
     `,
-    [repostPostId, viewerId, MAX_REPOST_CHAIN_DEPTH]
+    [repostIds, viewerId, MAX_REPOST_CHAIN_DEPTH]
   );
 
-  return buildNestedRepostObject(result.rows);
+  const chainsByRoot = new Map();
+  for (const row of result.rows) {
+    if (!chainsByRoot.has(row.root_id)) {
+      chainsByRoot.set(row.root_id, []);
+    }
+    chainsByRoot.get(row.root_id).push(row);
+  }
+
+  const nestedByRoot = new Map();
+  for (const [rootId, chainRows] of chainsByRoot.entries()) {
+    nestedByRoot.set(rootId, buildNestedRepostObject(chainRows));
+  }
+  return nestedByRoot;
 };
 
 const hydrateRepostedPosts = async (posts, viewerId) => {
@@ -141,23 +156,16 @@ const hydrateRepostedPosts = async (posts, viewerId) => {
 
   if (repostIds.length === 0) return;
 
-  const cache = new Map();
-  await Promise.all(repostIds.map(async (repostId) => {
-    try {
-      const nested = await loadRepostChain(repostId, viewerId);
-      if (nested) {
-        cache.set(repostId, nested);
+  try {
+    const cache = await loadBatchedRepostChains(repostIds, viewerId);
+    for (const post of posts) {
+      const repostId = Number(post?.reposted_post?.id);
+      if (Number.isInteger(repostId) && cache.has(repostId)) {
+        post.reposted_post = cache.get(repostId);
       }
-    } catch (err) {
-      console.error(`[Posts] Failed to load repost chain for ${repostId}:`, err);
     }
-  }));
-
-  for (const post of posts) {
-    const repostId = Number(post?.reposted_post?.id);
-    if (Number.isInteger(repostId) && cache.has(repostId)) {
-      post.reposted_post = cache.get(repostId);
-    }
+  } catch (err) {
+    console.error('[Posts] Failed to bulk hydrate repost chains:', err);
   }
 };
 
@@ -538,10 +546,10 @@ exports.getPosts = async (req, res) => {
                    THEN true
                    ELSE false
               END AS liked_by_user,
-              COALESCE(ur.rep_points, 1.0) as user_rep_points,
+              ((COALESCE(u.rp_balance_ledger, 0) + COALESCE(u.rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) as user_total_reputation,
               -- Calculate visibility multiplier: higher reputation = more visibility
               -- Use GREATEST to ensure we never take LN of a negative number
-              (1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) as visibility_multiplier,
+              (1 + 0.15 * LN(GREATEST(0.1, 1 + ((COALESCE(u.rp_balance_ledger, 0) + COALESCE(u.rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0)))) as visibility_multiplier,
               ai.ai_probability,
               ai.detected_model as ai_detected_model,
               ai.is_flagged as ai_is_flagged,
@@ -558,7 +566,6 @@ exports.getPosts = async (req, res) => {
        FROM posts p
        JOIN users u ON p.user_id = u.id
        LEFT JOIN link_metadata lm ON p.link_metadata_id = lm.id
-       LEFT JOIN user_reputation ur ON u.id = ur.user_id
        LEFT JOIN LATERAL (
          SELECT ai_probability, detected_model, is_flagged
          FROM content_ai_analysis
@@ -580,7 +587,7 @@ exports.getPosts = async (req, res) => {
       id: post.id,
       user_id: post.user_id,
       username: post.username,
-      user_rep_points: post.user_rep_points,
+      user_total_reputation: post.user_total_reputation,
       visibility_multiplier: post.visibility_multiplier,
       liked_by_user: post.liked_by_user
     })));
@@ -680,6 +687,14 @@ exports.getPostAnalysisStatus = async (req, res) => {
          reason_model,
          gate_latency_ms,
          reason_latency_ms,
+         api_call_count,
+         api_success_count,
+         prompt_tokens,
+         completion_tokens,
+         total_tokens,
+         reasoning_tokens,
+         cached_tokens,
+         cost_credits,
          processing_errors,
          candidates_count,
          updated_at
@@ -937,10 +952,10 @@ exports.getFeed = async (req, res) => {
                    THEN true
                    ELSE false
               END AS liked_by_user,
-              COALESCE(ur.rep_points, 1.0) as user_rep_points,
+              ((COALESCE(u.rp_balance_ledger, 0) + COALESCE(u.rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) as user_total_reputation,
               -- Calculate visibility multiplier: higher reputation = more visibility
               -- Use GREATEST to ensure we never take LN of a negative number
-              (1 + 0.15 * LN(GREATEST(0.1, 1 + COALESCE(ur.rep_points, 1.0)))) as visibility_multiplier,
+              (1 + 0.15 * LN(GREATEST(0.1, 1 + ((COALESCE(u.rp_balance_ledger, 0) + COALESCE(u.rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0)))) as visibility_multiplier,
               ai.ai_probability,
               ai.detected_model as ai_detected_model,
               ai.is_flagged as ai_is_flagged,
@@ -957,7 +972,6 @@ exports.getFeed = async (req, res) => {
        FROM posts p
        JOIN users u ON p.user_id = u.id
        LEFT JOIN link_metadata lm ON p.link_metadata_id = lm.id
-       LEFT JOIN user_reputation ur ON u.id = ur.user_id
        LEFT JOIN LATERAL (
          SELECT ai_probability, detected_model, is_flagged
          FROM content_ai_analysis
@@ -975,7 +989,7 @@ exports.getFeed = async (req, res) => {
     console.log("Raw feed query result:", result.rows.map(post => ({
       id: post.id,
       username: post.username,
-      user_rep_points: post.user_rep_points,
+      user_total_reputation: post.user_total_reputation,
       visibility_multiplier: post.visibility_multiplier,
       liked_by_user: post.liked_by_user
     })));

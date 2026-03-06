@@ -83,7 +83,8 @@ fn is_retryable_error(error: &anyhow::Error) -> bool {
     false
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../shared/types/MarketUpdate.ts")]
 pub struct MarketUpdate {
     pub event_id: i32,
     pub target_prob: f64, // User's belief (0-1) - now f64 directly
@@ -92,7 +93,8 @@ pub struct MarketUpdate {
     pub referral_click_id: Option<i32>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../shared/types/UpdateResult.ts")]
 pub struct UpdateResult {
     pub prev_prob: f64,
     pub new_prob: f64,
@@ -104,14 +106,16 @@ pub struct UpdateResult {
     pub market_update_id: i32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../shared/types/SellResult.ts")]
 pub struct SellResult {
     pub payout: f64,
     pub new_prob: f64,
     pub current_cost_c: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../shared/types/KellySuggestion.ts")]
 pub struct KellySuggestion {
     pub kelly_suggestion: f64,
     pub quarter_kelly: f64,
@@ -119,7 +123,8 @@ pub struct KellySuggestion {
     pub balance: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../shared/types/MarketOutcomeView.ts")]
 pub struct MarketOutcomeView {
     pub outcome_id: i64,
     pub outcome_key: String,
@@ -130,7 +135,8 @@ pub struct MarketOutcomeView {
     pub upper_bound: Option<f64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../shared/types/OutcomeMarketUpdate.ts")]
 pub struct OutcomeMarketUpdate {
     pub event_id: i32,
     pub outcome_id: i64,
@@ -139,7 +145,8 @@ pub struct OutcomeMarketUpdate {
     pub referral_click_id: Option<i32>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../shared/types/OutcomeUpdateResult.ts")]
 pub struct OutcomeUpdateResult {
     pub event_id: i32,
     pub outcome_id: i64,
@@ -423,7 +430,6 @@ struct OutcomeStateRow {
     outcome_id: i64,
     outcome_key: String,
     label: String,
-    sort_order: i32,
     lower_bound: Option<f64>,
     upper_bound: Option<f64>,
     q_value: f64,
@@ -463,7 +469,6 @@ async fn fetch_outcome_state_rows(
             outcome_id: row.get("outcome_id"),
             outcome_key: row.get("outcome_key"),
             label: row.get("label"),
-            sort_order: row.get("sort_order"),
             lower_bound: row.get("lower_bound"),
             upper_bound: row.get("upper_bound"),
             q_value: row.get("q_value"),

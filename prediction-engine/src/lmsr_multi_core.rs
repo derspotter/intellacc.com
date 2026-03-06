@@ -42,22 +42,6 @@ impl MultiMarket {
         Ok((dq, stake))
     }
 
-    pub fn sell_outcome(&mut self, outcome_idx: usize, shares: f64) -> Result<f64> {
-        if !shares.is_finite() || shares <= 0.0 {
-            return Err(anyhow!("shares must be positive and finite"));
-        }
-        if outcome_idx >= self.q.len() {
-            return Err(anyhow!("invalid outcome index"));
-        }
-        let before = self.cost();
-        self.q[outcome_idx] -= shares;
-        let after = self.cost();
-        let payout = before - after;
-        if !payout.is_finite() || payout < 0.0 {
-            return Err(anyhow!("invalid payout computed for sell"));
-        }
-        Ok(payout)
-    }
 }
 
 pub fn cost(q: &[f64], b: f64) -> f64 {

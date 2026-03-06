@@ -185,7 +185,6 @@ async function populateDatabase() {
     await client.query('DELETE FROM posts WHERE user_id > 3');
     await client.query('DELETE FROM predictions WHERE user_id > 3');
     await client.query('DELETE FROM follows WHERE follower_id > 3 OR following_id > 3');
-    await client.query('DELETE FROM user_reputation WHERE user_id > 3');
     await client.query('DELETE FROM users WHERE id > 3');
     
     // Reset sequence (ensure minimum value is 1)
@@ -293,31 +292,15 @@ async function populateDatabase() {
         const createdAt = randomDate(new Date(2023, 6, 1), new Date());
         const resolvedAt = event.resolved ? randomDate(createdAt, new Date()) : null;
         
-        // Calculate raw_log_loss for resolved predictions
-        let rawLogLoss = null;
-        if (outcome) {
-          const prob = confidence / 100;
-          if (event.event_type === 'binary') {
-            rawLogLoss = outcome === 'correct' ? 
-              -Math.log(prob) : 
-              -Math.log(1 - prob);
-          } else {
-            // For non-binary, use simplified log loss
-            rawLogLoss = outcome === 'correct' ? 
-              -Math.log(prob) : 
-              -Math.log((1 - prob) / 2); // Distribute remaining probability
-          }
-        }
-        
         try {
           await client.query(
             `INSERT INTO predictions (user_id, event_id, event, prediction_value, confidence, 
-             created_at, resolved_at, outcome, prediction_type, numerical_value, raw_log_loss) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+             created_at, resolved_at, outcome, prediction_type, numerical_value) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
             [
               user.id, event.id, event.title, predictionValue, confidence,
               createdAt, resolvedAt, outcome || 'pending', event.event_type, 
-              numericalValue, rawLogLoss
+              numericalValue
             ]
           );
           predictionCount++;
@@ -326,44 +309,6 @@ async function populateDatabase() {
         }
       }
     }
-    }
-    
-    console.log('Generating user reputation scores...');
-    for (const user of users) {
-      // Calculate basic reputation metrics
-      const userPredictions = await client.query(
-        'SELECT * FROM predictions WHERE user_id = $1 AND outcome != $2',
-        [user.id, 'pending']
-      );
-      
-      if (userPredictions.rows.length > 0) {
-        const correctPredictions = userPredictions.rows.filter(p => p.outcome === 'correct').length;
-        const totalPredictions = userPredictions.rows.length;
-        const accuracy = correctPredictions / totalPredictions;
-        
-        // Calculate average log loss
-        const logLosses = userPredictions.rows
-          .filter(p => p.raw_log_loss !== null)
-          .map(p => parseFloat(p.raw_log_loss));
-        const avgLogLoss = logLosses.length > 0 ? 
-          logLosses.reduce((a, b) => a + b, 0) / logLosses.length : 1.0;
-        
-        // Time-weighted score (simplified)
-        const timeWeightedScore = avgLogLoss;
-        
-        // Peer bonus (simplified - based on prediction count)
-        const peerBonus = Math.min(totalPredictions * 0.01, 0.5);
-        
-        // Reputation points using tanh formula: Rep = 10 * tanh(-(Acc + R)) + 1
-        const repInput = -(timeWeightedScore + peerBonus);
-        const repPoints = 10 * Math.tanh(repInput) + 1;
-        
-        await client.query(
-          `INSERT INTO user_reputation (user_id, rep_points, time_weighted_score, peer_bonus, updated_at)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [user.id, repPoints, timeWeightedScore, peerBonus, new Date()]
-        );
-      }
     }
     
     console.log('Generating posts and comments...');
