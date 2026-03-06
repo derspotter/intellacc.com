@@ -40,6 +40,9 @@ function VanSidebar() {
           <a href="#home">Home</a>
         </div>
         <div class="sidebar-item">
+          <a href="#search">Search</a>
+        </div>
+        <div class="sidebar-item">
           <a href="#predictions">Predictions</a>
         </div>
         <div class="sidebar-item">

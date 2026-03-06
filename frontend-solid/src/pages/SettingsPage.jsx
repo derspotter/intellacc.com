@@ -1,4 +1,4 @@
-import { createSignal, onMount } from 'solid-js';
+import { createSignal, onMount, Show } from 'solid-js';
 import SkinPreferenceSettings from '../components/settings/SkinPreferenceSettings';
 import PasskeyManager from '../components/settings/PasskeyManager';
 import DeviceManager from '../components/settings/DeviceManager';
@@ -8,6 +8,8 @@ import NotificationSettings from '../components/settings/NotificationSettings';
 import VaultSettings from '../components/settings/VaultSettings';
 import PasswordResetCancel from '../components/settings/PasswordResetCancel';
 import DangerZone from '../components/settings/DangerZone';
+import AiFlaggedContent from '../components/admin/AiFlaggedContent';
+import { isAdmin } from '../services/auth';
 
 export default function SettingsPage() {
   const [isDarkMode, setIsDarkMode] = createSignal(false);
@@ -54,20 +56,26 @@ export default function SettingsPage() {
     <section class="settings-page">
       <h1>Settings</h1>
       <SkinPreferenceSettings />
-      <div class="setting-item">
-        <label>
-          <input
-            type="checkbox"
-            checked={isDarkMode()}
-            onChange={handleDarkModeToggle}
-          />
-          Dark Mode
-        </label>
+      <div class="settings-section appearance-settings">
+        <h3 class="settings-section-title">Appearance</h3>
+        <div class="setting-item">
+          <label>
+            <input
+              type="checkbox"
+              checked={isDarkMode()}
+              onChange={handleDarkModeToggle}
+            />
+            {' '}Dark Mode
+          </label>
+        </div>
       </div>
       <PasskeyManager />
       <DeviceManager />
       <VerificationSettings />
       <ApiKeysManager />
+      <Show when={isAdmin()}>
+        <AiFlaggedContent />
+      </Show>
       <NotificationSettings />
       <VaultSettings />
       <PasswordResetCancel />

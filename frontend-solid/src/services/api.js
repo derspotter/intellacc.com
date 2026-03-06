@@ -63,6 +63,19 @@ async function request(endpoint, options = {}) {
     if (!response.ok) {
       // Handle authentication errors
       if (response.status === 401) {
+        // If there is no token at all, this is not a "session expired" case.
+        // Avoid forced login redirects for accidentally-auth-gated public calls.
+        if (!token) {
+          let errorMessage = 'Unauthorized';
+          let errorData = {};
+          try {
+            const errorResponse = await response.json();
+            errorMessage = errorResponse.message || errorResponse.error || errorMessage;
+            errorData = errorResponse;
+          } catch {}
+          throw new ApiError(response.status, errorMessage, errorData);
+        }
+
         // Try to parse error response
         try {
           const errorData = await response.json();
@@ -653,7 +666,18 @@ export const api = {
   // Weekly assignment endpoints
   weekly: {
     getUserStatus: (userId) =>
-      request(`/weekly/user/${userId}/status`)
+      request(`/weekly/user/${userId}/status`),
+    assign: () => request('/weekly/assign', { method: 'POST' }),
+    processCompleted: () => request('/weekly/process-completed', { method: 'POST' }),
+    applyDecay: () => request('/weekly/apply-decay', { method: 'POST' }),
+    runAll: () => request('/weekly/run-all', { method: 'POST' }),
+    getStats: () => request('/weekly/stats')
+  },
+
+  // Persuasion / Alpha rewards
+  persuasion: {
+    runRewards: () => request('/admin/persuasion-score/run', { method: 'POST' }),
+    getStatus: () => request('/admin/persuasion-score/status')
   },
 
   // MLS / Core Crypto endpoints

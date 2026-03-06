@@ -11,6 +11,7 @@ import MessagesPage from './pages/MessagesPage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
+import SearchPage from './pages/SearchPage';
 
 const ROUTES = {
   home: 'home',
@@ -24,7 +25,8 @@ const ROUTES = {
   messages: 'messages',
   notifications: 'notifications',
   settings: 'settings',
-  'verify-email': 'verify-email'
+  'verify-email': 'verify-email',
+  search: 'search'
 };
 
 const NOT_FOUND_ROUTE = 'notFound';
@@ -94,7 +96,7 @@ export default function App() {
       return <ResetPasswordPage />;
     }
     if (page() === 'predictions') {
-      return <PredictionsPage />;
+      return <PredictionsPage marketId={routeParam()} />;
     }
     if (page() === 'settings') {
       return <SettingsPage />;
@@ -113,6 +115,9 @@ export default function App() {
     }
     if (page() === 'user') {
       return <ProfilePage userId={profilePageId} />;
+    }
+    if (page() === 'search') {
+      return <SearchPage />;
     }
 
     if (page() === 'notFound' || page() === 'not-found') {

@@ -3,6 +3,7 @@ import { getFeedPage, getPostsPage, getPostsPayloadItems, getPostsPaging } from 
 import CreatePostForm from '../components/posts/CreatePostForm';
 import PostsList from '../components/posts/PostsList';
 import { isAuthenticated } from '../services/auth';
+import SearchPage from './SearchPage';
 
 const DEFAULT_PAGE_LIMIT = 20;
 
@@ -113,6 +114,11 @@ export default function HomePage() {
           </button>
         </div>
       </Show>
+      
+      <div style={{ "margin-bottom": "2rem" }}>
+        <SearchPage showHeader={false} showHints={false} />
+      </div>
+
       <Show when={isAuthenticated()}>
         <CreatePostForm onCreated={handlePostCreated} />
       </Show>
