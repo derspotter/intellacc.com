@@ -254,7 +254,7 @@ export default function MarketQuestionHub() {
   };
 
   const renderSubmissionForm = () => (
-    <section class="market-question-card">
+    <>
       {configNode()}
       <form class="market-question-form" onSubmit={createSubmission}>
         <label for="mq-title">Title</label>
@@ -295,7 +295,7 @@ export default function MarketQuestionHub() {
           </button>
         </div>
       </form>
-    </section>
+    </>
   );
 
   const renderReviewQueue = () => {
@@ -305,6 +305,7 @@ export default function MarketQuestionHub() {
 
     return (
       <section class="market-question-card">
+        <h3 class="market-question-section-title">Review Queue</h3>
         <p class="market-question-card-subtitle">Review questions submitted by other users.</p>
         <Show when={queueLoading()}>
           <p>Loading queue…</p>
@@ -322,24 +323,22 @@ export default function MarketQuestionHub() {
                     <div class="market-question-title">{submission.title || 'Untitled'}</div>
                     <div class="market-question-meta">
                       <span>{`Creator: ${submission.creator_username || `User #${submission.creator_user_id}`}`}</span>
-                      <span> | </span>
                       <span>{`Category: ${submission.category || 'General'}`}</span>
-                      <span> | </span>
                       <span>{`Closes: ${formatDateTime(submission.closing_date)}`}</span>
                     </div>
                   </div>
                   <p class="market-question-details">{submission.details || 'No details provided.'}</p>
                   <div class="market-question-votes">
-                    <span>{`Current: ${submission.approvals || 0}/${submission.required_approvals} approvals | `}</span>
+                    <span>{`Current: ${submission.approvals || 0}/${submission.required_approvals} approvals`}</span>
                     <span>{`${submission.rejections || 0}/${submission.required_validators - Number(submission.rejections || 0)} rejections`}</span>
                   </div>
                   <div class="market-question-note">
                     <textarea
+                      class="market-question-note-input"
                       placeholder="Optional note (visible to creator)"
                       rows={2}
                       value={noteFor(submission.id)}
                       onInput={(event) => setNoteFor(submission.id, event.target.value)}
-                      style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg, transparent); color: var(--text-color); margin-bottom: 0.5rem; resize: vertical;"
                     />
                   </div>
                   <div class="market-question-item-actions">
@@ -376,6 +375,7 @@ export default function MarketQuestionHub() {
 
     return (
       <section class="market-question-card">
+        <h3 class="market-question-section-title">My Submissions</h3>
         <div class="market-question-filters">
           <label for="mq-status-filter">Status:</label>
           <select
@@ -418,13 +418,9 @@ export default function MarketQuestionHub() {
                 </div>
                 <div class="market-question-meta">
                   <span>{`Creator bond: ${Number(submission.creator_bond_rp || 0)} RP`}</span>
-                  <span> | </span>
                   <span>{`Reviews: ${submission.total_reviews || 0}/${submission.required_validators || 5}`}</span>
-                  <span> | </span>
                   <span>{`Approvals: ${submission.approvals || 0}`}</span>
-                  <span> | </span>
                   <span>{`Rejections: ${submission.rejections || 0}`}</span>
-                  <span> | </span>
                   <span>{`Closes: ${formatDateTime(submission.closing_date)}`}</span>
                 </div>
                 <p class="market-question-details">{submission.details || ''}</p>
@@ -475,9 +471,11 @@ export default function MarketQuestionHub() {
   };
 
   return (
-    <section class="market-question-hub">
-      <h2>Community Market Questions</h2>
-      <h3>Creator + Validator Flow</h3>
+    <section class="predictions-sidebar market-question-hub">
+      <div class="card-header market-question-hub-header">
+        <h3>Community Market Questions</h3>
+        <p class="header-subtitle">Creator + validator flow for proposing and reviewing new markets.</p>
+      </div>
 
       <div class="market-question-tabs">
         <button
@@ -515,8 +513,8 @@ export default function MarketQuestionHub() {
 
       <Show when={isAdmin()}>
         <section class="market-question-card">
-          <h3>Admin Helpers</h3>
-          <p>Automatically process traction + resolution rewards for eligible approved questions.</p>
+          <h3 class="market-question-section-title">Admin Helpers</h3>
+          <p class="market-question-card-subtitle">Automatically process traction and resolution rewards for eligible approved questions.</p>
           <button
             type="button"
             class="button button-secondary"

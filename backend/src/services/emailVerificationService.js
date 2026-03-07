@@ -17,6 +17,38 @@ const SMTP_IGNORE_TLS = process.env.SMTP_IGNORE_TLS;
 // Email transporter - configure based on environment
 let transporter;
 
+const isJestRuntime = () => {
+    return Boolean(
+        process.env.JEST_WORKER_ID ||
+        process.env.npm_lifecycle_event === 'test' ||
+        process.argv.some((arg) => arg.endsWith('/jest') || arg.includes('/jest') || arg.includes('\\jest'))
+    );
+};
+
+const isNonDeliverableRecipient = (to) => {
+    const recipients = Array.isArray(to) ? to : [to];
+    return recipients.every((recipient) => {
+        const email = String(recipient || '').trim().toLowerCase();
+        if (!email) return true;
+        const domain = email.split('@')[1] || '';
+        return (
+            domain === 'example.com' ||
+            domain.endsWith('.example') ||
+            domain.endsWith('.invalid') ||
+            domain.endsWith('.test') ||
+            domain === 'localhost'
+        );
+    });
+};
+
+const logConsoleDelivery = async (options) => {
+    console.log('[EmailVerification] Would send email:');
+    console.log('  To:', options.to);
+    console.log('  Subject:', options.subject);
+    console.log('  URL:', options.html?.match(/href="([^"]+)"/)?.[1] || 'N/A');
+    return { messageId: 'console-' + Date.now() };
+};
+
 const initTransporter = () => {
     if (transporter) return transporter;
 
@@ -67,6 +99,10 @@ const initTransporter = () => {
 };
 
 const sendEmail = async ({ to, subject, html, text }) => {
+    if (isJestRuntime() || isNonDeliverableRecipient(to)) {
+        return logConsoleDelivery({ to, subject, html, text });
+    }
+
     const transport = initTransporter();
     return transport.sendMail({
         from: `"Intellacc" <${process.env.SMTP_FROM || 'noreply@intellacc.com'}>`,
@@ -102,8 +138,6 @@ const hashToken = (token) => {
  * @returns {Promise<{success: boolean, messageId?: string}>}
  */
 exports.sendVerificationEmail = async (userId, email) => {
-    const transport = initTransporter();
-
     // Generate token
     const token = generateToken(userId, email);
     const tokenHash = hashToken(token);
@@ -128,7 +162,7 @@ exports.sendVerificationEmail = async (userId, email) => {
     const verifyUrl = `${FRONTEND_URL}/#verify-email?token=${token}`;
 
     // Send email
-    const result = await transport.sendMail({
+    const result = await sendEmail({
         from: `"Intellacc" <${process.env.SMTP_FROM || 'noreply@intellacc.com'}>`,
         to: email,
         subject: 'Verify your Intellacc account',

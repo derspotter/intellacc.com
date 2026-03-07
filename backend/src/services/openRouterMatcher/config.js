@@ -83,7 +83,9 @@ module.exports = {
   embedding: {
     model: process.env.POST_SIGNAL_MATCH_EMBEDDING_MODEL || 'text-embedding-3-small',
     dimensions: toInt(process.env.POST_SIGNAL_MATCH_EMBEDDING_DIMENSIONS, 768),
-    timeoutMs: toInt(process.env.POST_SIGNAL_MATCH_EMBEDDING_TIMEOUT_MS, 10000)
+    timeoutMs: toInt(process.env.POST_SIGNAL_MATCH_EMBEDDING_TIMEOUT_MS, 10000),
+    retryAttempts: Math.max(1, toInt(process.env.POST_SIGNAL_MATCH_EMBEDDING_RETRY_ATTEMPTS, 3)),
+    retryBackoffMs: Math.max(100, toInt(process.env.POST_SIGNAL_MATCH_EMBEDDING_RETRY_BACKOFF_MS, 500))
   },
   openRouterBaseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
   openRouterApiKey: process.env.OPENROUTER_API_KEY || '',

@@ -52,7 +52,7 @@ export const isAuthenticated = () => {
   return !!getStoredToken();
 };
 
-export const login = (email, password) => api.auth.login(email, password);
+export const login = (identifier, password) => api.auth.login(identifier, password);
 
 export const register = (username, email, password) => api.auth.register(username, email, password);
 

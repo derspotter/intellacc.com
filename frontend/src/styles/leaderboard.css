@@ -55,7 +55,7 @@
   padding: 1.25rem;
   margin-bottom: 0.75rem;
   background: var(--card-bg);
-  border-radius: 16px;
+  border-radius: var(--border-radius);
   border: 2px solid var(--border-color-light, rgba(0,0,0,0.1));
   transition: all 0.3s ease;
   box-shadow: 0 4px 12px rgba(0,0,0,0.08);

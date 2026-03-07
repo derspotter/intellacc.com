@@ -1,0 +1,99 @@
+- generic [active] [ref=e1]:
+  - img [ref=e2]
+  - generic [ref=e11]:
+    - generic [ref=e12]:
+      - generic [ref=e13]: INTELLACC
+      - generic [ref=e14]:
+        - link "Home" [ref=e16] [cursor=pointer]:
+          - /url: "#home"
+        - link "Predictions" [ref=e18] [cursor=pointer]:
+          - /url: "#predictions"
+        - link "Search" [ref=e20] [cursor=pointer]:
+          - /url: "#search"
+        - link "Settings" [ref=e22] [cursor=pointer]:
+          - /url: "#settings"
+        - link "Login" [ref=e24] [cursor=pointer]:
+          - /url: "#login"
+    - generic [ref=e26]:
+      - heading "Settings" [level=1] [ref=e27]
+      - generic [ref=e28]:
+        - heading "UI Skin" [level=3] [ref=e29]
+        - paragraph [ref=e30]: Choose how the app is rendered. Logged-in users sync this preference to your account.
+        - generic [ref=e32]:
+          - text: Skin style
+          - combobox "Skin style" [ref=e33]:
+            - option "Van-style" [selected]
+            - option "Terminal/Bloomberg"
+      - generic [ref=e35]:
+        - checkbox "Dark Mode" [ref=e36]
+        - text: Dark Mode
+      - generic [ref=e37]:
+        - heading "🔑 Passkeys" [level=3] [ref=e38]:
+          - generic [ref=e39]: 🔑
+          - text: Passkeys
+        - generic [ref=e40]:
+          - paragraph [ref=e41]: Passkeys allow you to sign in securely without a password using your device (TouchID, FaceID, etc).
+          - list [ref=e42]:
+            - listitem [ref=e43]: No passkeys registered
+          - button "Add Passkey" [ref=e44] [cursor=pointer]
+      - generic [ref=e45]:
+        - heading "📱 Linked Devices" [level=3] [ref=e46]:
+          - generic [ref=e47]: 📱
+          - text: Linked Devices
+        - generic [ref=e48]:
+          - paragraph [ref=e49]: These devices are trusted to access your end-to-end encrypted conversations.
+          - list [ref=e50]:
+            - listitem [ref=e51]: No devices registered
+          - generic [ref=e53]:
+            - paragraph [ref=e54]: Unlock your vault with your password to manage linked devices and approve trust requests.
+            - generic [ref=e55]:
+              - textbox "Password" [ref=e56]
+              - button "Unlock Vault" [ref=e57] [cursor=pointer]
+      - generic [ref=e58]:
+        - heading "Verification" [level=3] [ref=e59]
+        - generic [ref=e60]:
+          - generic [ref=e61]:
+            - generic [ref=e62]: "Current tier: 0 / 3"
+            - button "Refresh Status" [ref=e63] [cursor=pointer]
+          - generic [ref=e64]:
+            - button "Email" [ref=e65] [cursor=pointer]
+            - button "Phone" [ref=e66] [cursor=pointer]
+            - button "Payment" [ref=e67] [cursor=pointer]
+          - generic [ref=e69]:
+            - paragraph [ref=e70]: "Unauthorized: No token provided"
+            - button "Retry" [ref=e71] [cursor=pointer]
+      - generic [ref=e72]:
+        - heading "🔑 Agent API Keys" [level=3] [ref=e73]:
+          - generic [ref=e74]: 🔑
+          - text: Agent API Keys
+        - paragraph [ref=e75]: Create secure, scoped API keys for headless bots or AI orchestrators (like OpenClaw). These keys bypass the need for passkeys but are strictly limited in what they can do.
+        - generic [ref=e76]:
+          - generic [ref=e77]: "Unauthorized: No token provided"
+          - generic [ref=e78]:
+            - heading "Generate New Key" [level=3] [ref=e79]
+            - generic [ref=e80]:
+              - generic [ref=e81]: Key Name (e.g. "Trading Bot Alpha")
+              - textbox "Enter a name" [ref=e82]
+            - generic [ref=e84] [cursor=pointer]:
+              - checkbox "This is an AI/Bot (Appends ✨ tag)" [ref=e85]
+              - generic [ref=e86]: This is an AI/Bot (Appends ✨ tag)
+            - button "Generate Key" [ref=e87] [cursor=pointer]
+          - paragraph [ref=e88]: No API keys active.
+      - heading "Push Notifications" [level=2] [ref=e90]
+      - generic [ref=e91]:
+        - heading "🔒 Encryption Vault & Security" [level=3] [ref=e92]:
+          - generic [ref=e93]: 🔒
+          - text: Encryption Vault & Security
+        - paragraph [ref=e95]: Your vault has not been set up yet. Log out and log back in to set it up automatically.
+      - generic [ref=e96]:
+        - heading "🔐 Password Reset" [level=3] [ref=e97]:
+          - generic [ref=e98]: 🔐
+          - text: Password Reset
+        - paragraph [ref=e99]: If you requested a password reset and still have access to this device, you can cancel it here.
+        - button "Cancel pending reset" [ref=e100] [cursor=pointer]
+      - generic [ref=e101]:
+        - heading "Danger Zone" [level=3] [ref=e102]
+        - paragraph [ref=e103]: Delete your account. This cannot be undone. Your profile will be anonymized and access revoked immediately.
+        - textbox "Confirm your password" [ref=e105]
+        - textbox "Type DELETE to confirm" [ref=e107]
+        - button "Delete Account" [ref=e108] [cursor=pointer]

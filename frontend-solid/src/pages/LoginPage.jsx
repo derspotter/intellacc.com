@@ -10,7 +10,7 @@ const normalizeLoginError = (message) => {
 };
 
 export default function LoginPage() {
-  const [email, setEmail] = createSignal('');
+  const [identifier, setIdentifier] = createSignal('');
   const [password, setPassword] = createSignal('');
   const [blueskyHandle, setBlueskyHandle] = createSignal('');
   const [mastodonInstance, setMastodonInstance] = createSignal('');
@@ -29,11 +29,11 @@ export default function LoginPage() {
 
     setError('');
     setMessage('');
-    const emailValue = email().trim();
+    const identifierValue = identifier().trim();
     const passwordValue = password();
 
-    if (!emailValue || !passwordValue) {
-      setError('Email and password are required.');
+    if (!identifierValue || !passwordValue) {
+      setError('Email/username and password are required.');
       return;
     }
 
@@ -41,7 +41,7 @@ export default function LoginPage() {
     setStage('logging_in');
 
     try {
-      const response = await login(emailValue, passwordValue);
+      const response = await login(identifierValue, passwordValue);
       if (!response?.token) {
         setError(response?.message || 'Login failed.');
         setStage('form');
@@ -89,14 +89,14 @@ export default function LoginPage() {
               style={`display: ${stage() === 'logging_in' ? 'none' : 'block'}`}
             >
               <div class="form-group">
-                <label for="email">Email</label>
+                <label for="email">Email or Username</label>
                 <input
                   id="email"
-                  type="email"
-                  value={email()}
-                  onInput={(event) => setEmail(event.target.value)}
-                  placeholder="Enter your email"
-                  autocomplete="email"
+                  type="text"
+                  value={identifier()}
+                  onInput={(event) => setIdentifier(event.target.value)}
+                  placeholder="Enter your email or username"
+                  autocomplete="username"
                   required
                   disabled={pending()}
                 />

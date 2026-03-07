@@ -261,7 +261,7 @@ export default function DeviceManager() {
 
                         !linkingToken.val ?
                             button({ class: 'button button-secondary', onclick: startLinking }, 'Link another device') :
-                            div({ class: 'token-display', style: 'background: #f4f4f4; padding: 15px; border-radius: 8px; text-align: center;' },
+                            div({ class: 'token-display', style: 'background: #f4f4f4; padding: 15px; border-radius: var(--border-radius); text-align: center;' },
                                 p('This request is pending on the new device. Paste its token here to approve linking:'),
                                 p({ style: 'font-size: 0.9em; color: #666;' }, 'Waiting for approval...'),
                                 button({ class: 'button button-secondary button-sm', onclick: () => { isPolling.val = false; linkingToken.val = null; } }, 'Cancel')

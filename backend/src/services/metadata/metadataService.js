@@ -1,6 +1,4 @@
 const axios = require('axios');
-const { JSDOM } = require('jsdom');
-const { Readability } = require('@mozilla/readability');
 const { assertSsrfSafeUrl } = require('../activitypub/ssrf');
 const metascraper = require('metascraper')([
   require('metascraper-author')(),
@@ -33,6 +31,17 @@ const REQUEST_OPTIONS = {
   maxRedirects: 0,
   responseType: 'text',
   validateStatus: (status) => status >= 200 && status < 400
+};
+
+let readabilityDeps = null;
+
+const getReadabilityDeps = () => {
+  if (!readabilityDeps) {
+    const { JSDOM } = require('jsdom');
+    const { Readability } = require('@mozilla/readability');
+    readabilityDeps = { JSDOM, Readability };
+  }
+  return readabilityDeps;
 };
 
 const fetchPublicHttpText = async (url) => {
@@ -100,6 +109,7 @@ const fetchMetadata = async (url) => {
 const fetchArticleContent = async (url) => {
   try {
     const { html, finalUrl } = await fetchPublicHttpText(url);
+    const { JSDOM, Readability } = getReadabilityDeps();
     const doc = new JSDOM(html, { url: finalUrl });
     const reader = new Readability(doc.window.document);
     const article = reader.parse();

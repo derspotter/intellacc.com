@@ -28,17 +28,24 @@ const toVectorLiteral = (embedding) => {
   return `[${embedding.map(Number).join(',')}]`;
 };
 
-const embedText = async (text) => {
+const embedText = async (text, { usageRecorder, usageStage = 'retrieval' } = {}) => {
   const normalized = cleanText(text);
   if (!normalized) {
     throw new Error('No text to embed');
   }
 
-  return callEmbedding({
+  const result = await callEmbedding({
     input: normalized,
     model: config.embedding.model,
-    timeoutMs: config.embedding.timeoutMs
+    timeoutMs: config.embedding.timeoutMs,
+    usageRecorder,
+    usageContext: {
+      stage: usageStage,
+      operation: 'embedding'
+    }
   });
+
+  return result.embedding;
 };
 
 const setEventEmbedding = async ({ eventId, title, details }) => {

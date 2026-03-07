@@ -1,8 +1,15 @@
 // backend/src/db.js
 const { Pool } = require('pg');
 
+const isJestRuntime = () => Boolean(
+  process.env.JEST_WORKER_ID ||
+  process.env.npm_lifecycle_event === 'test' ||
+  process.argv.some((arg) => arg.endsWith('/jest') || arg.includes('/jest') || arg.includes('\\jest'))
+);
+
 const createPool = () => new Pool({
   connectionString: process.env.DATABASE_URL,
+  allowExitOnIdle: isJestRuntime()
 });
 
 let pool = createPool();

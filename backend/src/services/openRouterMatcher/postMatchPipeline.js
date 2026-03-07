@@ -20,8 +20,24 @@ const REASONING_TABLES = [
   'verification_actions'
 ];
 const RUN_LOG_TABLE = 'post_match_pipeline_runs';
+const USAGE_LOG_TABLE = 'post_match_api_usage';
+const EMPTY_USAGE_SUMMARY = Object.freeze({
+  api_call_count: 0,
+  api_success_count: 0,
+  prompt_tokens: 0,
+  completion_tokens: 0,
+  total_tokens: 0,
+  reasoning_tokens: 0,
+  cached_tokens: 0,
+  cost_credits: 0
+});
 
 let schemaCapabilityCache = null;
+
+const shouldIgnoreLoggingError = (error) => {
+  const code = String(error?.code || '').trim();
+  return code === '42P01' || code === '23503';
+};
 
 const toPostId = (value) => {
   const parsed = Number.parseInt(value, 10);
@@ -41,6 +57,49 @@ const normalizeErrorClass = (error) => {
   return error?.name || 'Error';
 };
 
+const toSafeInt = (value, fallback = 0) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) ? parsed : fallback;
+};
+
+const toSafeNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeUsageRecord = (record) => ({
+  stage: String(record?.stage || 'unknown'),
+  operation: String(record?.operation || 'unknown'),
+  requestedModel: record?.requestedModel ? String(record.requestedModel) : null,
+  usedModel: record?.usedModel ? String(record.usedModel) : null,
+  success: record?.success === true,
+  latencyMs: toSafeInt(record?.latencyMs, null),
+  promptTokens: toSafeInt(record?.promptTokens),
+  completionTokens: toSafeInt(record?.completionTokens),
+  totalTokens: toSafeInt(record?.totalTokens),
+  reasoningTokens: toSafeInt(record?.reasoningTokens),
+  cachedTokens: toSafeInt(record?.cachedTokens),
+  costCredits: toSafeNumber(record?.costCredits),
+  providerResponseId: record?.providerResponseId ? String(record.providerResponseId) : null,
+  errorClass: record?.errorClass ? String(record.errorClass) : null,
+  errorMessage: record?.errorMessage ? clampError(record.errorMessage) : null
+});
+
+const summarizeUsageRecords = (records = []) => records.reduce((summary, record) => {
+  const normalized = normalizeUsageRecord(record);
+  summary.api_call_count += 1;
+  if (normalized.success) {
+    summary.api_success_count += 1;
+  }
+  summary.prompt_tokens += normalized.promptTokens;
+  summary.completion_tokens += normalized.completionTokens;
+  summary.total_tokens += normalized.totalTokens;
+  summary.reasoning_tokens += normalized.reasoningTokens;
+  summary.cached_tokens += normalized.cachedTokens;
+  summary.cost_credits += normalized.costCredits;
+  return summary;
+}, { ...EMPTY_USAGE_SUMMARY });
+
 const logPipelineRun = async ({
   postId,
   status,
@@ -48,6 +107,7 @@ const logPipelineRun = async ({
   durationMs = null,
   processingErrors = null,
   error,
+  usageSummary = EMPTY_USAGE_SUMMARY,
   reasonerAttempted = false,
   reasonerMatch = false
 }) => {
@@ -55,9 +115,11 @@ const logPipelineRun = async ({
     await db.query(
       `INSERT INTO ${RUN_LOG_TABLE} (
          post_id, status, candidate_count, duration_ms, processing_errors,
-         error_class, gate_enabled, reasoner_enabled, reasoner_attempted, reasoner_match
+         error_class, gate_enabled, reasoner_enabled, reasoner_attempted, reasoner_match,
+         api_call_count, api_success_count, prompt_tokens, completion_tokens,
+         total_tokens, reasoning_tokens, cached_tokens, cost_credits
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
       [
         postId,
         status,
@@ -68,11 +130,19 @@ const logPipelineRun = async ({
         config.isEnabled,
         config.reasoner.enabled,
         reasonerAttempted,
-        reasonerMatch
+        reasonerMatch,
+        usageSummary.api_call_count,
+        usageSummary.api_success_count,
+        usageSummary.prompt_tokens,
+        usageSummary.completion_tokens,
+        usageSummary.total_tokens,
+        usageSummary.reasoning_tokens,
+        usageSummary.cached_tokens,
+        usageSummary.cost_credits
       ]
     );
   } catch (logError) {
-    if (logError?.code === '42P01') {
+    if (shouldIgnoreLoggingError(logError)) {
       return;
     }
 
@@ -86,6 +156,7 @@ const logPipelineResult = async ({
   candidateCount,
   durationMs,
   processingErrors,
+  usageSummary = EMPTY_USAGE_SUMMARY,
   reasonerAttempted = false,
   reasonerMatch = false
 }) => {
@@ -95,6 +166,7 @@ const logPipelineResult = async ({
     candidateCount,
     durationMs,
     processingErrors,
+    usageSummary,
     reasonerAttempted,
     reasonerMatch
   });
@@ -187,9 +259,17 @@ const upsertAnalysis = async (client, postId, values) => {
        reason_model,
        gate_latency_ms,
        reason_latency_ms,
+       api_call_count,
+       api_success_count,
+       prompt_tokens,
+       completion_tokens,
+       total_tokens,
+       reasoning_tokens,
+       cached_tokens,
+       cost_credits,
        updated_at
      )
-     VALUES ($1, $2, $3, $4, $5::text[], $6, $7, $8, $9, $10, $11, $12, NOW())
+     VALUES ($1, $2, $3, $4, $5::text[], $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW())
      ON CONFLICT (post_id) DO UPDATE SET
        has_claim = EXCLUDED.has_claim,
        domain = EXCLUDED.domain,
@@ -202,6 +282,14 @@ const upsertAnalysis = async (client, postId, values) => {
        reason_model = EXCLUDED.reason_model,
        gate_latency_ms = EXCLUDED.gate_latency_ms,
        reason_latency_ms = EXCLUDED.reason_latency_ms,
+       api_call_count = EXCLUDED.api_call_count,
+       api_success_count = EXCLUDED.api_success_count,
+       prompt_tokens = EXCLUDED.prompt_tokens,
+       completion_tokens = EXCLUDED.completion_tokens,
+       total_tokens = EXCLUDED.total_tokens,
+       reasoning_tokens = EXCLUDED.reasoning_tokens,
+       cached_tokens = EXCLUDED.cached_tokens,
+       cost_credits = EXCLUDED.cost_credits,
        updated_at = NOW()`,
     [
       postId,
@@ -215,9 +303,62 @@ const upsertAnalysis = async (client, postId, values) => {
       values.gate_model,
       values.reason_model,
       values.gate_latency_ms,
-      values.reason_latency_ms
+      values.reason_latency_ms,
+      values.api_call_count ?? 0,
+      values.api_success_count ?? 0,
+      values.prompt_tokens ?? 0,
+      values.completion_tokens ?? 0,
+      values.total_tokens ?? 0,
+      values.reasoning_tokens ?? 0,
+      values.cached_tokens ?? 0,
+      values.cost_credits ?? 0
     ]
   );
+};
+
+const persistUsageRecords = async ({ postId, records }) => {
+  if (!Array.isArray(records) || records.length === 0) {
+    return;
+  }
+
+  try {
+    for (const record of records) {
+      const normalized = normalizeUsageRecord(record);
+      await db.query(
+        `INSERT INTO ${USAGE_LOG_TABLE} (
+           post_id, stage, operation, requested_model, used_model,
+           success, latency_ms, prompt_tokens, completion_tokens, total_tokens,
+           reasoning_tokens, cached_tokens, cost_credits, provider_response_id,
+           error_class, error_message
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+        [
+          postId,
+          normalized.stage,
+          normalized.operation,
+          normalized.requestedModel,
+          normalized.usedModel,
+          normalized.success,
+          normalized.latencyMs,
+          normalized.promptTokens,
+          normalized.completionTokens,
+          normalized.totalTokens,
+          normalized.reasoningTokens,
+          normalized.cachedTokens,
+          normalized.costCredits,
+          normalized.providerResponseId,
+          normalized.errorClass,
+          normalized.errorMessage
+        ]
+      );
+    }
+  } catch (error) {
+    if (shouldIgnoreLoggingError(error)) {
+      return;
+    }
+
+    console.error('[PostMatchPipeline] Failed to persist API usage rows:', error.message || error);
+  }
 };
 
 const updateCandidates = async (client, postId, candidates) => {
@@ -532,6 +673,11 @@ const runPipeline = async (postId, content) => {
 
   const pool = db.getPool();
   const client = await pool.connect();
+  const usageRecords = [];
+  const usageRecorder = async (record) => {
+    usageRecords.push(normalizeUsageRecord(record));
+  };
+  const currentUsageSummary = () => summarizeUsageRecords(usageRecords);
 
   let capabilities;
   try {
@@ -545,6 +691,7 @@ const runPipeline = async (postId, content) => {
       candidateCount: 0,
       durationMs: Date.now() - start,
       processingErrors: normalizeErrorClass(capabilitiesError),
+      usageSummary: currentUsageSummary(),
       reasonerAttempted: false,
       reasonerMatch: false
     });
@@ -589,7 +736,8 @@ const runPipeline = async (postId, content) => {
       gate_model: null,
       reason_model: null,
       gate_latency_ms: null,
-      reason_latency_ms: null
+      reason_latency_ms: null,
+      ...currentUsageSummary()
     });
 
     if (!normalizedContent) {
@@ -604,7 +752,8 @@ const runPipeline = async (postId, content) => {
         gate_model: null,
         reason_model: null,
         gate_latency_ms: null,
-        reason_latency_ms: null
+        reason_latency_ms: null,
+        ...currentUsageSummary()
       });
       await updateCandidates(client, normalizedPostId, []);
       await client.query('COMMIT');
@@ -614,6 +763,7 @@ const runPipeline = async (postId, content) => {
         candidateCount: 0,
         durationMs: Date.now() - start,
         processingErrors: null,
+        usageSummary: currentUsageSummary(),
         reasonerAttempted: false,
         reasonerMatch: false
       });
@@ -668,13 +818,17 @@ const runPipeline = async (postId, content) => {
       gate_model: config.gate.model,
       reason_model: null,
       gate_latency_ms: null,
-      reason_latency_ms: null
+      reason_latency_ms: null,
+      ...currentUsageSummary()
     });
 
     if (config.gate.enabled) {
       try {
         const gateStart = Date.now();
-        gateResult = await runSafeGate({ postContent: augmentedContent });
+        gateResult = await runSafeGate({
+          postContent: augmentedContent,
+          usageRecorder
+        });
         gateLatencyMs = Date.now() - gateStart;
       } catch (error) {
         processingErrors = normalizeResultError(error, 'gate failed');
@@ -685,7 +839,8 @@ const runPipeline = async (postId, content) => {
       candidates = await retrieveCandidateMarkets(
         gateResult.claim_summary || augmentedContent,
         gateResult.entities,
-        gateResult.domain
+        gateResult.domain,
+        { usageRecorder }
       );
       candidates = withMatchMethod(candidates, matchMethod);
       candidateCount = await updateCandidates(client, normalizedPostId, candidates);
@@ -700,7 +855,8 @@ const runPipeline = async (postId, content) => {
         gate_model: config.gate.model,
         reason_model: config.reasoner.enabled ? config.reasoner.model : null,
         gate_latency_ms: gateLatencyMs,
-        reason_latency_ms: reasonLatencyMs
+        reason_latency_ms: reasonLatencyMs,
+        ...currentUsageSummary()
       });
 
       let wordCount = 0;
@@ -715,7 +871,8 @@ const runPipeline = async (postId, content) => {
             postContent: augmentedContent,
             candidates,
             overrideModel: isHeavy ? config.reasoner.heavyModel : null,
-            overrideFallbackModels: isHeavy ? config.reasoner.heavyFallbackModels : null
+            overrideFallbackModels: isHeavy ? config.reasoner.heavyFallbackModels : null,
+            usageRecorder
           });
           reasonLatencyMs = Date.now() - reasonStart;
 
@@ -745,16 +902,22 @@ const runPipeline = async (postId, content) => {
         gate_model: config.gate.model,
         reason_model: reasonerAttempted ? (wordCount > 400 ? config.reasoner.heavyModel : config.reasoner.model) : null,
         gate_latency_ms: gateLatencyMs,
-        reason_latency_ms: reasonLatencyMs
+        reason_latency_ms: reasonLatencyMs,
+        ...currentUsageSummary()
       });
 
       await client.query('COMMIT');
+      await persistUsageRecords({
+        postId: normalizedPostId,
+        records: usageRecords
+      });
       await logPipelineResult({
         postId: normalizedPostId,
         status: 'complete',
         candidateCount,
         durationMs: Date.now() - start,
         processingErrors,
+        usageSummary: currentUsageSummary(),
         reasonerAttempted,
         reasonerMatch: hasReasonerMatch
       });
@@ -778,16 +941,22 @@ const runPipeline = async (postId, content) => {
       gate_model: config.gate.model,
       reason_model: null,
       gate_latency_ms: gateLatencyMs,
-      reason_latency_ms: reasonLatencyMs
+      reason_latency_ms: reasonLatencyMs,
+      ...currentUsageSummary()
     });
     await updateCandidates(client, normalizedPostId, []);
     await client.query('COMMIT');
+    await persistUsageRecords({
+      postId: normalizedPostId,
+      records: usageRecords
+    });
     await logPipelineResult({
       postId: normalizedPostId,
       status: 'gated_out',
       candidateCount: 0,
       durationMs: Date.now() - start,
       processingErrors,
+      usageSummary: currentUsageSummary(),
       reasonerAttempted: false,
       reasonerMatch: false
     });
@@ -800,29 +969,56 @@ const runPipeline = async (postId, content) => {
   } catch (error) {
     await client.query('ROLLBACK');
     const durationMs = Date.now() - start;
+    const usageSummary = currentUsageSummary();
 
     try {
       await db.query(
         `INSERT INTO post_analysis (
-           post_id, has_claim, processing_status, processing_errors, candidates_count, updated_at
-         ) VALUES ($1, FALSE, 'failed', $2, 0, NOW())
+           post_id, has_claim, processing_status, processing_errors, candidates_count,
+           api_call_count, api_success_count, prompt_tokens, completion_tokens,
+           total_tokens, reasoning_tokens, cached_tokens, cost_credits, updated_at
+         ) VALUES ($1, FALSE, 'failed', $2, 0, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
          ON CONFLICT (post_id) DO UPDATE SET
            has_claim = FALSE,
            processing_status = 'failed',
            processing_errors = EXCLUDED.processing_errors,
+           api_call_count = EXCLUDED.api_call_count,
+           api_success_count = EXCLUDED.api_success_count,
+           prompt_tokens = EXCLUDED.prompt_tokens,
+           completion_tokens = EXCLUDED.completion_tokens,
+           total_tokens = EXCLUDED.total_tokens,
+           reasoning_tokens = EXCLUDED.reasoning_tokens,
+           cached_tokens = EXCLUDED.cached_tokens,
+           cost_credits = EXCLUDED.cost_credits,
            updated_at = NOW()`,
-        [normalizedPostId, clampError(error)]
+        [
+          normalizedPostId,
+          clampError(error),
+          usageSummary.api_call_count,
+          usageSummary.api_success_count,
+          usageSummary.prompt_tokens,
+          usageSummary.completion_tokens,
+          usageSummary.total_tokens,
+          usageSummary.reasoning_tokens,
+          usageSummary.cached_tokens,
+          usageSummary.cost_credits
+        ]
       );
     } catch (statusErr) {
       console.error('[PostMatchPipeline] Failed to persist error status:', statusErr.message || statusErr);
     }
 
+    await persistUsageRecords({
+      postId: normalizedPostId,
+      records: usageRecords
+    });
     await logPipelineResult({
       postId: normalizedPostId,
       status: 'failed',
       candidateCount: 0,
       durationMs,
       processingErrors: clampError(error),
+      usageSummary,
       reasonerAttempted: false,
       reasonerMatch: false
     });

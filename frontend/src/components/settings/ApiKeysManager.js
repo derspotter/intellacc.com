@@ -121,7 +121,7 @@ export const ApiKeysManager = () => {
                         div({ class: 'success-icon' }, 'OK'),
                         p({ class: 'success-message' }, 'Key Generated Successfully!'),
                         p('Please copy this key now. You will not be able to see it again.'),
-                        div({ style: 'display: flex; align-items: center; justify-content: space-between; background: var(--bg-color); padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border-color); margin-top: 0.5rem;' }, [
+                        div({ style: 'display: flex; align-items: center; justify-content: space-between; background: var(--bg-color); padding: 0.5rem; border-radius: var(--border-radius); border: 1px solid var(--border-color); margin-top: 0.5rem;' }, [
                             code({ style: 'word-break: break-all; font-size: 0.9em;' }, newKeyDisplay.val),
                             button({
                                 type: 'button',

@@ -532,7 +532,8 @@ export default function PostItem(props) {
   });
 
   return (
-    <article class="post-card">
+    <article class="card post-card">
+      <div class="card-content">
       <header class="post-header">
         <div class="post-header-main">
           <div class="post-author">
@@ -560,28 +561,13 @@ export default function PostItem(props) {
             <span class="post-date">{postDate()}</span>
           </div>
         </div>
-        <div class="post-header-sub">
-          <div class="post-meta post-meta-sub">
-            <div class="post-header-expand-wrap">
-              <Show when={currentCommentCount() > 0}>
-                <span
-                  class="post-header-expand"
-                  role="button"
-                  tabindex="0"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleToggleExpandCollapseAll();
-                  }}
-                >
-                  {allCommentsExpanded() ? 'Collapse All' : 'Expand All'}
-                </span>
-              </Show>
-            </div>
-            <Show when={post().ai_is_flagged}>
+        <Show when={post().ai_is_flagged}>
+          <div class="post-header-sub">
+            <div class="post-meta post-meta-sub">
               <span class="ai-content-badge">AI Flagged</span>
-            </Show>
+            </div>
           </div>
-        </div>
+        </Show>
       </header>
 
       <Show when={isEditing()} fallback={
@@ -617,7 +603,7 @@ export default function PostItem(props) {
             <div class="reposted-post" style="border: 1px solid var(--border-color); padding: 1rem; border-radius: var(--border-radius); margin-bottom: 0.5rem; background: var(--bg-card);">
               <div class="post-header" style="margin-bottom: 0.5rem;">
                 <div class="post-author">
-                  <span style="margin-right: 0.5rem;">♻️ Reposted from </span>
+                  <span style="margin-right: 0.5rem;">Reposted from </span>
                   <a href={`#user/${post().reposted_post.user_id}`} class="username-link">
                     {post().reposted_post.username}
                   </a>
@@ -734,33 +720,27 @@ export default function PostItem(props) {
       </Show>
 
       <div class="post-actions">
-        <div class="post-actions-left">
-          <Show when={isEditing()} fallback={
-            <Show when={canEdit()}>
-              <button type="button" class="post-action edit" onClick={handleStartEdit}>
-                Edit
+        <Show when={!isEditing() && canEdit()}>
+          <div class="post-actions-left">
+            <button type="button" class="post-action edit" onClick={handleStartEdit}>
+              Edit
+            </button>
+            <Show when={isAdmin()}>
+              <button type="button" class="post-action delete" onClick={handleDelete}>
+                Delete
               </button>
-              <Show when={isAdmin()}>
-                <button type="button" class="post-action delete" onClick={handleDelete}>
-                  Delete
-                </button>
-              </Show>
             </Show>
-          }>
-            <span />
-          </Show>
-        </div>
-        <div class="post-actions-center">
+          </div>
+        </Show>
+        <div class="post-actions-main">
           <button
             type="button"
             class="post-action like-button"
             classList={{ liked: likedByUser() }}
             onClick={handleLike}
           >
-            {likedByUser() ? `Liked (${likeCount()})` : `Like (${likeCount()})`}
+            {likedByUser() ? 'Liked' : 'Like'}
           </button>
-        </div>
-        <div class="post-actions-right">
           <button
             type="button"
             class="post-action repost-button"
@@ -779,6 +759,21 @@ export default function PostItem(props) {
       </div>
 
       <div class="comments-section">
+        <Show when={currentCommentCount() > 0 && !autoExpand()}>
+          <div class="post-card-footer-meta">
+            <span
+              class="post-header-expand"
+              role="button"
+              tabindex="0"
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleToggleExpandCollapseAll();
+              }}
+            >
+              {allCommentsExpanded() ? 'Collapse All' : 'Expand All'}
+            </span>
+          </div>
+        </Show>
         <div class="comment-form-container">
           <Show when={commentFormVisible()}>
             <form class="comment-form" onSubmit={submitComment}>
@@ -806,6 +801,7 @@ export default function PostItem(props) {
         <div class="comments-list-container">
           <Show when={commentListVisible()}>{renderComments()}</Show>
         </div>
+      </div>
       </div>
     </article>
   );

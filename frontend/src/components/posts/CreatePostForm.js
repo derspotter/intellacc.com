@@ -127,7 +127,7 @@ export default function CreatePostForm() {
       
       // Debug information display
       () => debugInfo.val ? 
-        div({ class: "debug-info", style: "margin-top: 10px; font-size: 12px; overflow: auto; max-height: 200px; background: #f7f7f7; padding: 8px; border-radius: 4px;" }, [
+        div({ class: "debug-info", style: "margin-top: 10px; font-size: 12px; overflow: auto; max-height: 200px; background: #f7f7f7; padding: 8px; border-radius: var(--border-radius);" }, [
           div({ style: "font-weight: bold" }, "Debug Info:"),
           pre({ style: "margin: 0; white-space: pre-wrap;" }, debugInfo.val)
         ]) : null

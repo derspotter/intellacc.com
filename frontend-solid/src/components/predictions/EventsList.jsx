@@ -65,11 +65,29 @@ export default function EventsList(props) {
       setError(null);
 
       const response = await getEvents(search);
-      setEvents(normalizeRows(response));
       const loaded = normalizeRows(response);
+      setEvents(loaded);
       const current = selectedEvent();
-      if (current && !loaded.some((item) => String(item.id) === String(current.id))) {
-        setSelectedEvent(null);
+      if (current) {
+        const refreshedSelected = loaded.find((item) => String(item.id) === String(current.id));
+        setSelectedEvent(refreshedSelected || null);
+      }
+
+      const assignment = weeklyAssignment();
+      if (assignment?.event_id || assignment?.event?.id) {
+        const assignmentEventId = String(assignment.event_id || assignment.event?.id || '');
+        const refreshedAssignmentEvent = loaded.find((item) => String(item.id) === assignmentEventId);
+        if (refreshedAssignmentEvent) {
+          setWeeklyAssignment({
+            ...assignment,
+            event: refreshedAssignmentEvent
+          });
+        } else if (assignment?.event) {
+          setWeeklyAssignment({
+            ...assignment,
+            event: null
+          });
+        }
       }
     } catch (errorMessage) {
       setError(errorMessage?.message || 'Failed to load prediction markets.');
@@ -476,18 +494,6 @@ export default function EventsList(props) {
       </div>
 
       <div class="selected-event-container">
-        <Show when={selectedEvent()}>
-            <button
-              type="button"
-              class="back-button secondary"
-              onClick={() => {
-                setSelectedEvent(null);
-              }}
-            >
-            ← Back to List
-          </button>
-        </Show>
-
         {renderSelectedEvent()}
       </div>
     </section>

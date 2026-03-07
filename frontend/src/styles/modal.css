@@ -115,7 +115,7 @@
   text-align: left;
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   padding: 1rem;
   margin: 1.5rem 0;
 }
@@ -202,7 +202,7 @@
   text-align: center;
   padding: 1rem;
   background: rgba(255, 0, 0, 0.05);
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   margin-bottom: 1.5rem;
 }
 
@@ -215,7 +215,7 @@
   text-align: center;
   padding: 1rem;
   border: 1px dashed var(--border-color);
-  border-radius: 10px;
+  border-radius: var(--border-radius);
   background: var(--card-bg);
   margin-top: 0.75rem;
 }

@@ -1,7 +1,11 @@
 import { createSignal, createResource, Show, For } from 'solid-js';
 import api from '../../services/api';
+import { isAuthenticated } from '../../services/auth';
 
 const fetchMarkets = async (postId) => {
+  if (!isAuthenticated()) {
+    return [];
+  }
   try {
     const res = await api.posts.getMarkets(postId);
     return res.markets || res || [];

@@ -43,6 +43,12 @@ const marketQuestionUiState = {
   tabVersion: van.state(0)
 };
 
+const importProviders = [
+  { id: 'metaculus', label: 'Metaculus' },
+  { id: 'manifold', label: 'Manifold' },
+  { id: 'polymarket', label: 'Polymarket' }
+];
+
 export default function MarketQuestionHub() {
   const activeTab = () => marketQuestionUiState.activeTab;
   const tabVersion = marketQuestionUiState.tabVersion;
@@ -68,8 +74,13 @@ export default function MarketQuestionHub() {
   const reviewQueue = van.state([]);
   const reviewSubmitting = van.state(null);
   const reviewNotes = new Map();
+  const importStatusLoading = van.state(false);
+  const importStatusLoaded = van.state(false);
+  const importRuns = van.state([]);
+  const importBusyKey = van.state('');
 
   const isReviewerBusy = (id) => reviewSubmitting.val === id;
+  const isImportBusy = (key) => importBusyKey.val === key;
 
   const getReviewNoteState = (id) => {
     const key = String(id);
@@ -232,6 +243,80 @@ export default function MarketQuestionHub() {
     } catch (err) {
       console.error('[MarketQuestionHub] Auto rewards failed:', err);
       error.val = err.message || 'Failed to run reward sweep';
+    }
+  };
+
+  const loadImportStatus = async ({ quiet = false } = {}) => {
+    if (importStatusLoading.val) return;
+    importStatusLoading.val = true;
+    if (!quiet) clearMessages();
+
+    try {
+      const result = await api.externalImports.getStatus({ limit: 12 });
+      importRuns.val = Array.isArray(result?.runs) ? result.runs : [];
+      importStatusLoaded.val = true;
+    } catch (err) {
+      console.error('[MarketQuestionHub] Failed to load import status:', err);
+      if (!quiet) error.val = err.message || 'Failed to load import status';
+    } finally {
+      importStatusLoading.val = false;
+    }
+  };
+
+  const describeImportRun = (run) => {
+    const provider = String(run?.provider || 'provider');
+    const fetched = Number(run?.fetched_count || 0);
+    const created = Number(run?.created_count || 0);
+    const linked = Number(run?.linked_count || 0);
+    const merged = Number(run?.merged_count || 0);
+    const excluded = Number(run?.excluded_count || 0);
+    const errors = Number(run?.error_count || 0);
+    return `${provider}: fetched ${fetched}, created ${created}, linked ${linked}, merged ${merged}, excluded ${excluded}, errors ${errors}`;
+  };
+
+  const runImportSyncAll = async ({ full = false } = {}) => {
+    const busyKey = full ? 'sync-all-full' : 'sync-all';
+    if (importBusyKey.val) return;
+    importBusyKey.val = busyKey;
+    clearMessages();
+
+    try {
+      const result = await api.externalImports.syncAll({ full });
+      const runs = Array.isArray(result?.runs) ? result.runs : [];
+      const summary = result?.summary || {};
+      const modeLabel = full ? 'full import' : 'incremental sync';
+      success.val = `External ${modeLabel} complete. Created ${summary.created_count || 0}, linked ${summary.linked_count || 0}, excluded ${summary.excluded_count || 0}, errors ${summary.error_count || 0}.`;
+      importRuns.val = runs;
+      importStatusLoaded.val = true;
+      await loadImportStatus({ quiet: true });
+    } catch (err) {
+      console.error('[MarketQuestionHub] External import sync-all failed:', err);
+      error.val = err.message || 'Failed to run external import sync';
+    } finally {
+      importBusyKey.val = '';
+    }
+  };
+
+  const runImportSyncProvider = async (provider, { full = false } = {}) => {
+    const busyKey = `${provider}-${full ? 'full' : 'sync'}`;
+    if (importBusyKey.val) return;
+    importBusyKey.val = busyKey;
+    clearMessages();
+
+    try {
+      const result = await api.externalImports.syncProvider(provider, { full });
+      const run = result?.run || null;
+      const providerLabel = importProviders.find((item) => item.id === provider)?.label || provider;
+      const modeLabel = full ? 'full import' : 'incremental sync';
+      success.val = run
+        ? `${providerLabel} ${modeLabel} complete. ${describeImportRun(run)}.`
+        : `${providerLabel} ${modeLabel} complete.`;
+      await loadImportStatus({ quiet: true });
+    } catch (err) {
+      console.error(`[MarketQuestionHub] External import sync failed for ${provider}:`, err);
+      error.val = err.message || `Failed to sync ${provider}`;
+    } finally {
+      importBusyKey.val = '';
     }
   };
 
@@ -490,6 +575,91 @@ export default function MarketQuestionHub() {
     });
   };
 
+  const renderExternalImportAdmin = () => {
+    if (!importStatusLoaded.val && !importStatusLoading.val) {
+      loadImportStatus({ quiet: true });
+    }
+
+    return Card({
+      className: 'market-question-admin market-import-admin',
+      title: 'External Market Imports',
+      children: [
+        p('Import open markets from Metaculus, Manifold, and Polymarket. Kalshi is intentionally excluded from sync-all until credentials are configured.'),
+        div({ class: 'market-import-actions' }, [
+          Button({
+            onclick: () => runImportSyncAll({ full: false }),
+            className: 'button-secondary',
+            disabled: () => !!importBusyKey.val || importStatusLoading.val,
+            children: () => isImportBusy('sync-all') ? 'Syncing...' : 'Sync Recent Batch'
+          }),
+          Button({
+            onclick: () => runImportSyncAll({ full: true }),
+            className: 'button-primary',
+            disabled: () => !!importBusyKey.val || importStatusLoading.val,
+            children: () => isImportBusy('sync-all-full') ? 'Importing...' : 'Import All Open Markets'
+          }),
+          Button({
+            onclick: () => loadImportStatus(),
+            className: 'button-secondary',
+            disabled: () => importStatusLoading.val || !!importBusyKey.val,
+            children: () => importStatusLoading.val ? 'Refreshing...' : 'Refresh Status'
+          })
+        ]),
+        small({ class: 'market-import-hint' }, 'Full import pages through the provider APIs and can take longer on large datasets.'),
+        div({ class: 'market-import-provider-grid' },
+          importProviders.map((provider) =>
+            div({ class: 'market-import-provider-row' }, [
+              div({ class: 'market-import-provider-label' }, provider.label),
+              div({ class: 'market-import-provider-actions' }, [
+                Button({
+                  onclick: () => runImportSyncProvider(provider.id, { full: false }),
+                  className: 'button-secondary',
+                  disabled: () => !!importBusyKey.val || importStatusLoading.val,
+                  children: () => isImportBusy(`${provider.id}-sync`) ? 'Syncing...' : 'Sync'
+                }),
+                Button({
+                  onclick: () => runImportSyncProvider(provider.id, { full: true }),
+                  className: 'button-secondary',
+                  disabled: () => !!importBusyKey.val || importStatusLoading.val,
+                  children: () => isImportBusy(`${provider.id}-full`) ? 'Importing...' : 'Import All'
+                })
+              ])
+            ])
+          )
+        ),
+        () => importStatusLoading.val && importRuns.val.length === 0
+          ? p('Loading import history...')
+          : null,
+        () => importRuns.val.length > 0
+          ? div({ class: 'market-import-runs' }, [
+              h3('Recent Import Runs'),
+              ul({ class: 'market-question-list market-import-run-list' },
+                importRuns.val.map((run) =>
+                  li({ class: 'market-question-item market-import-run-item' }, [
+                    div({ class: 'market-question-item-header' }, [
+                      div({ class: 'market-question-title' }, `${String(run.provider || 'provider')} ${run.success ? 'succeeded' : 'failed'}`),
+                      div({ class: 'market-question-status' }, formatDateTime(run.started_at))
+                    ]),
+                    div({ class: 'market-question-meta' }, [
+                      span(`Fetched: ${Number(run.fetched_count || 0)}`),
+                      span(` | Created: ${Number(run.created_count || 0)}`),
+                      span(` | Linked: ${Number(run.linked_count || 0)}`),
+                      span(` | Merged: ${Number(run.merged_count || 0)}`),
+                      span(` | Excluded: ${Number(run.excluded_count || 0)}`),
+                      span(` | Errors: ${Number(run.error_count || 0)}`)
+                    ]),
+                    run.errors && Array.isArray(run.errors) && run.errors.length > 0
+                      ? p({ class: 'market-question-details' }, run.errors.join(' | '))
+                      : null
+                  ])
+                )
+              )
+            ])
+          : p('No external import runs recorded yet.')
+      ]
+    });
+  };
+
   return div({ class: 'events-list-card market-question-hub card' }, [
     h2({ class: 'events-list-title' }, 'Community Market Questions'),
 
@@ -526,18 +696,21 @@ export default function MarketQuestionHub() {
     },
 
     () => isAdminState.val
-      ? Card({
-        className: 'market-question-admin',
-        title: 'Admin Helpers',
-        children: [
-          p('Automatically process traction + resolution rewards for eligible approved questions.'),
-          Button({
-            onclick: runAutoRewards,
-            className: 'button-secondary',
-            children: 'Run reward sweep now'
-          })
-        ]
-      })
+      ? div({ class: 'market-question-admin-stack' }, [
+          Card({
+            className: 'market-question-admin',
+            title: 'Admin Helpers',
+            children: [
+              p('Automatically process traction + resolution rewards for eligible approved questions.'),
+              Button({
+                onclick: runAutoRewards,
+                className: 'button-secondary',
+                children: 'Run reward sweep now'
+              })
+            ]
+          }),
+          renderExternalImportAdmin()
+        ])
       : null
   ]);
 }

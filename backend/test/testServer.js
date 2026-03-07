@@ -18,7 +18,10 @@ const startServer = () => {
   });
 
   return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', resolve);
+    server.listen(0, '127.0.0.1', () => {
+      server.unref?.();
+      resolve();
+    });
   });
 };
 
@@ -61,7 +64,13 @@ const releaseTestServer = async () => {
   server = null;
 };
 
+const forceCloseTestServer = async () => {
+  activeCount = 0;
+  await releaseTestServer();
+};
+
 module.exports = {
   getTestServer,
-  releaseTestServer
+  releaseTestServer,
+  forceCloseTestServer
 };

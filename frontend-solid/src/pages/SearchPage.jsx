@@ -225,12 +225,6 @@ export default function SearchPage(props) {
             type="button"
             class="search-tab"
             classList={{ active: activeTab() === 'posts' }}
-            style={{
-              "border-radius": "0 !important",
-              "background": "var(--card-bg) !important",
-              "border-color": activeTab() === 'posts' ? 'var(--signature-blue)' : 'var(--border-color)',
-              "box-shadow": activeTab() === 'posts' ? '0 0 0 2px var(--focus-ring)' : 'none'
-            }}
             onClick={() => handleTabChange('posts')}
           >
             Posts
@@ -239,12 +233,6 @@ export default function SearchPage(props) {
             type="button"
             class="search-tab"
             classList={{ active: activeTab() === 'users' }}
-            style={{
-              "border-radius": "0 !important",
-              "background": "var(--card-bg) !important",
-              "border-color": activeTab() === 'users' ? 'var(--signature-blue)' : 'var(--border-color)',
-              "box-shadow": activeTab() === 'users' ? '0 0 0 2px var(--focus-ring)' : 'none'
-            }}
             onClick={() => handleTabChange('users')}
           >
             Users
@@ -259,27 +247,25 @@ export default function SearchPage(props) {
         />
       </div>
 
-      <Show when={activeTab() === 'posts'}>
-        <div class="search-scope-row">
+      <div
+        class="search-scope-row"
+        classList={{ 'search-scope-row-hidden': activeTab() !== 'posts' }}
+      >
+        <Show when={activeTab() === 'posts'}>
           <For each={postScopeOptions()}>
             {(option) => (
               <button
                 type="button"
                 class="search-scope"
-                style={{
-                  "border-radius": "0 !important",
-                  "background": "var(--card-bg) !important",
-                  "border-color": postScope() === option.value ? 'var(--signature-blue)' : 'var(--border-color)',
-                  "box-shadow": postScope() === option.value ? '0 0 0 2px var(--focus-ring)' : 'none'
-                }}
+                classList={{ active: postScope() === option.value }}
                 onClick={() => handleScopeChange(option.value)}
               >
                 {option.label}
               </button>
             )}
           </For>
-        </div>
-      </Show>
+        </Show>
+      </div>
 
       <div class="search-result-area">
         <Show when={followError()}>

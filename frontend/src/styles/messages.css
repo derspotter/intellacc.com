@@ -273,7 +273,7 @@
 
 .attachment-preview img {
   max-width: 220px;
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   border: 1px solid var(--border-color);
 }
 
@@ -305,7 +305,7 @@
 
 .attachment-inline-preview img {
   max-height: 120px;
-  border-radius: 6px;
+  border-radius: var(--border-radius);
   border: 1px solid var(--border-color);
 }
 
@@ -828,7 +828,7 @@
 
 .vault-modal {
   background: var(--card-bg, #1a1a2e);
-  border-radius: 16px;
+  border-radius: var(--border-radius);
   padding: 2rem;
   max-width: 420px;
   width: 100%;
@@ -867,7 +867,7 @@
 .vault-warning {
   background: rgba(255, 193, 7, 0.15);
   border: 1px solid rgba(255, 193, 7, 0.3);
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   padding: 0.75rem 1rem;
   margin-bottom: 1.5rem;
   display: flex;
@@ -914,7 +914,7 @@
   padding: 0.75rem 1rem;
   padding-right: 3rem;
   border: 1px solid var(--border-color, #333);
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   background: var(--input-bg, #16213e);
   color: var(--text-color, #fff);
   font-size: 1rem;
@@ -973,7 +973,7 @@
   border: 1px solid rgba(220, 53, 69, 0.3);
   color: var(--error-color, #dc3545);
   padding: 0.75rem 1rem;
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   font-size: 0.875rem;
 }
 
@@ -986,7 +986,7 @@
   padding: 0.875rem 1.5rem;
   font-size: 1rem;
   font-weight: 600;
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -1058,7 +1058,7 @@
 /* Vault Settings */
 .vault-settings {
   background: var(--card-bg, #1a1a2e);
-  border-radius: 12px;
+  border-radius: var(--border-radius);
   padding: 1.5rem;
   margin-top: 1.5rem;
 }
@@ -1099,7 +1099,7 @@
   padding: 0.75rem 1rem;
   background: var(--hover-bg, rgba(0, 0, 0, 0.03));
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--border-radius);
 }
 
 .status-indicator {
@@ -1132,7 +1132,7 @@
 
 .setting-row select {
   padding: 0.5rem 1rem;
-  border-radius: 6px;
+  border-radius: var(--border-radius);
   border: 1px solid var(--border-color, #333);
   background: var(--input-bg, #16213e);
   color: var(--text-color, #fff);
@@ -1261,7 +1261,7 @@
   padding: 0.75rem 1rem;
   padding-right: 2.5rem;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   background: var(--blue-bg);
   color: var(--text-color);
   font-size: 1rem;
@@ -1286,7 +1286,7 @@
   margin-bottom: 1rem;
   padding: 0.5rem;
   background: rgba(220, 53, 69, 0.1);
-  border-radius: 4px;
+  border-radius: var(--border-radius);
 }
 
 .dm-starting {
@@ -1295,7 +1295,7 @@
   gap: 0.5rem;
   padding: 1rem;
   background: rgba(0, 123, 255, 0.1);
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   margin-bottom: 1rem;
   color: var(--primary-color);
 }
@@ -1326,7 +1326,7 @@
   gap: 0.75rem;
   padding: 0.75rem;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: var(--border-radius);
   transition: background 0.15s;
 }
 
@@ -1448,7 +1448,7 @@
   padding: 0.5rem 0.75rem;
   background: rgba(220, 53, 69, 0.15);
   border: 1px solid rgba(220, 53, 69, 0.3);
-  border-radius: 4px;
+  border-radius: var(--border-radius);
   color: var(--error-color);
   font-size: 0.875rem;
 }

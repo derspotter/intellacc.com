@@ -56,6 +56,23 @@ const sanitizeRoute = (raw) => {
   return ROUTES[route] || NOT_FOUND_ROUTE;
 };
 
+function AppBackground() {
+  return (
+    <svg
+      id="background-svg"
+      style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1;"
+      viewBox="0 0 1000 562.5"
+      preserveAspectRatio="xMidYMid slice"
+      aria-hidden="true"
+    >
+      <rect x="936" y="0" width="18" height="562.5" fill="#FF0000" />
+      <rect x="0" y="350" width="1000" height="18" fill="#000000" />
+      <circle cx="856" cy="288" r="80" fill="#0000FF" />
+      <rect x="900" y="0" width="18" height="562.5" fill="#FF0000" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [page, setPage] = createSignal(sanitizeRoute(window.location.hash || 'home'));
   const [routeParam, setRouteParam] = createSignal(null);
@@ -155,15 +172,18 @@ export default function App() {
   });
 
   return (
-    <Show
-      when={isAuthPage()}
-      fallback={
-        <Layout page={page()}>
-          {renderPage()}
-        </Layout>
-      }
-    >
-      {renderPage()}
-    </Show>
+    <>
+      <AppBackground />
+      <Show
+        when={isAuthPage()}
+        fallback={
+          <Layout page={page()}>
+            {renderPage()}
+          </Layout>
+        }
+      >
+        {renderPage()}
+      </Show>
+    </>
   );
 }

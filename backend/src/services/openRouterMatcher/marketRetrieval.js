@@ -179,7 +179,7 @@ const queryHybrid = async ({
   return mapCandidateRows(result.rows);
 };
 
-const retrieveCandidateMarkets = async (claimSummary, entities, domain) => {
+const retrieveCandidateMarkets = async (claimSummary, entities, domain, { usageRecorder } = {}) => {
   if (!config.retrieval.enabled) {
     return [];
   }
@@ -200,7 +200,10 @@ const retrieveCandidateMarkets = async (claimSummary, entities, domain) => {
   }
 
   try {
-    const embedding = await embedText(normalizedClaim);
+    const embedding = await embedText(normalizedClaim, {
+      usageRecorder,
+      usageStage: 'retrieval'
+    });
     const vectorLiteral = `[${embedding.join(',')}]`;
 
     const withDomain = await queryHybrid({

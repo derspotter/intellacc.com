@@ -89,11 +89,14 @@ pub trait MarketImportProvider {
     fn source_name(&self) -> &'static str;
 }
 
-pub async fn sync_all_markets(pool: &PgPool) -> Result<Vec<ImportRunStats>> {
+pub async fn sync_all_markets(pool: &PgPool, full: bool) -> Result<Vec<ImportRunStats>> {
     ensure_import_tables(pool).await?;
     let mut results = Vec::new();
-    for provider in ImportProvider::all() {
-        match sync_provider(pool, provider).await {
+    for provider in ImportProvider::all()
+        .into_iter()
+        .filter(|provider| provider_enabled_for_sync_all(*provider))
+    {
+        match sync_provider(pool, provider, full).await {
             Ok(stats) => results.push(stats),
             Err(err) => {
                 results.push(ImportRunStats {
@@ -112,9 +115,9 @@ pub async fn sync_all_markets(pool: &PgPool) -> Result<Vec<ImportRunStats>> {
     Ok(results)
 }
 
-pub async fn sync_provider_named(pool: &PgPool, provider: &str) -> Result<ImportRunStats> {
+pub async fn sync_provider_named(pool: &PgPool, provider: &str, full: bool) -> Result<ImportRunStats> {
     ensure_import_tables(pool).await?;
-    sync_provider(pool, ImportProvider::try_from(provider)?).await
+    sync_provider(pool, ImportProvider::try_from(provider)?, full).await
 }
 
 pub async fn get_recent_import_runs(pool: &PgPool, limit: i64) -> Result<Vec<Value>> {
@@ -154,7 +157,7 @@ pub async fn get_recent_import_runs(pool: &PgPool, limit: i64) -> Result<Vec<Val
     Ok(result)
 }
 
-async fn sync_provider(pool: &PgPool, provider: ImportProvider) -> Result<ImportRunStats> {
+async fn sync_provider(pool: &PgPool, provider: ImportProvider, full: bool) -> Result<ImportRunStats> {
     let started_at = Utc::now();
     let mut stats = ImportRunStats {
         provider: provider.as_str().to_string(),
@@ -168,12 +171,10 @@ async fn sync_provider(pool: &PgPool, provider: ImportProvider) -> Result<Import
     };
 
     let markets = match provider {
-        ImportProvider::Metaculus => {
-            crate::metaculus::fetch_open_markets(Some(provider_limit(provider))).await
-        }
-        ImportProvider::Manifold => fetch_manifold_markets(provider_limit(provider)).await,
-        ImportProvider::Polymarket => fetch_polymarket_markets(provider_limit(provider)).await,
-        ImportProvider::Kalshi => fetch_kalshi_markets(provider_limit(provider)).await,
+        ImportProvider::Metaculus => crate::metaculus::fetch_open_markets(provider_fetch_limit(provider, full)).await,
+        ImportProvider::Manifold => fetch_manifold_markets(provider_fetch_limit(provider, full)).await,
+        ImportProvider::Polymarket => fetch_polymarket_markets(provider_fetch_limit(provider, full)).await,
+        ImportProvider::Kalshi => fetch_kalshi_markets(provider_fetch_limit(provider, full)).await,
     };
 
     let markets = match markets {
@@ -907,6 +908,23 @@ fn provider_limit(provider: ImportProvider) -> usize {
         .clamp(1, 2000)
 }
 
+fn provider_enabled_for_sync_all(provider: ImportProvider) -> bool {
+    let key = format!("IMPORT_{}_ENABLED", provider.as_str().to_uppercase());
+    let default = !matches!(provider, ImportProvider::Kalshi);
+    env::var(&key)
+        .ok()
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(default)
+}
+
+fn provider_fetch_limit(provider: ImportProvider, full: bool) -> Option<usize> {
+    if full {
+        None
+    } else {
+        Some(provider_limit(provider))
+    }
+}
+
 fn embedding_to_vector_literal(values: &[f64]) -> String {
     let joined = values
         .iter()
@@ -967,14 +985,17 @@ async fn embed_text(text: &str) -> Result<Vec<f64>> {
     Ok(row.embedding)
 }
 
-async fn fetch_manifold_markets(max_markets: usize) -> Result<Vec<ImportedMarket>> {
+async fn fetch_manifold_markets(max_markets: Option<usize>) -> Result<Vec<ImportedMarket>> {
     let client = Client::new();
     let page_limit = 100usize;
     let mut before: Option<String> = None;
     let mut output = Vec::new();
 
-    while output.len() < max_markets {
-        let request_limit = page_limit.min(max_markets - output.len()).max(1);
+    while max_markets.map(|max| output.len() < max).unwrap_or(true) {
+        let remaining = max_markets
+            .map(|max| max.saturating_sub(output.len()))
+            .unwrap_or(page_limit);
+        let request_limit = page_limit.min(remaining).max(1);
         let mut url = format!(
             "https://api.manifold.markets/v0/markets?limit={}",
             request_limit
@@ -990,7 +1011,7 @@ async fn fetch_manifold_markets(max_markets: usize) -> Result<Vec<ImportedMarket
         }
 
         for row in &batch {
-            if output.len() >= max_markets {
+            if max_markets.map(|max| output.len() >= max).unwrap_or(false) {
                 break;
             }
             if row
@@ -1071,16 +1092,19 @@ async fn fetch_manifold_market_details(client: &Client, market_id: &str) -> Resu
     Ok(Some(payload))
 }
 
-async fn fetch_polymarket_markets(max_markets: usize) -> Result<Vec<ImportedMarket>> {
+async fn fetch_polymarket_markets(max_markets: Option<usize>) -> Result<Vec<ImportedMarket>> {
     let client = Client::new();
     let page_limit = 100usize;
     let mut offset = 0usize;
     let mut output = Vec::new();
 
-    while output.len() < max_markets {
+    while max_markets.map(|max| output.len() < max).unwrap_or(true) {
+        let remaining = max_markets
+            .map(|max| max.saturating_sub(output.len()))
+            .unwrap_or(page_limit);
         let url = format!(
             "https://gamma-api.polymarket.com/markets?active=true&closed=false&limit={}&offset={}",
-            page_limit.min(max_markets - output.len()),
+            page_limit.min(remaining).max(1),
             offset
         );
         let batch: Vec<Value> = client.get(&url).send().await?.json().await?;
@@ -1089,7 +1113,7 @@ async fn fetch_polymarket_markets(max_markets: usize) -> Result<Vec<ImportedMark
         }
 
         for row in &batch {
-            if output.len() >= max_markets {
+            if max_markets.map(|max| output.len() >= max).unwrap_or(false) {
                 break;
             }
             let Some(id) = value_to_string(row.get("id")) else {
@@ -1142,7 +1166,7 @@ async fn fetch_polymarket_markets(max_markets: usize) -> Result<Vec<ImportedMark
     Ok(output)
 }
 
-async fn fetch_kalshi_markets(max_markets: usize) -> Result<Vec<ImportedMarket>> {
+async fn fetch_kalshi_markets(max_markets: Option<usize>) -> Result<Vec<ImportedMarket>> {
     let client = Client::new();
     let base = env::var("IMPORT_KALSHI_BASE_URL")
         .unwrap_or_else(|_| "https://trading-api.kalshi.com/trade-api/v2".to_string());
@@ -1151,14 +1175,17 @@ async fn fetch_kalshi_markets(max_markets: usize) -> Result<Vec<ImportedMarket>>
     let mut output = Vec::new();
 
     loop {
-        if output.len() >= max_markets {
+        if max_markets.map(|max| output.len() >= max).unwrap_or(false) {
             break;
         }
 
+        let remaining = max_markets
+            .map(|max| max.saturating_sub(output.len()))
+            .unwrap_or(page_limit);
         let mut url = format!(
             "{}/markets?status=open&limit={}",
             base,
-            page_limit.min(max_markets - output.len())
+            page_limit.min(remaining).max(1)
         );
         if let Some(ref c) = cursor {
             url.push_str("&cursor=");
@@ -1182,7 +1209,7 @@ async fn fetch_kalshi_markets(max_markets: usize) -> Result<Vec<ImportedMarket>>
         }
 
         for row in &markets {
-            if output.len() >= max_markets {
+            if max_markets.map(|max| output.len() >= max).unwrap_or(false) {
                 break;
             }
 

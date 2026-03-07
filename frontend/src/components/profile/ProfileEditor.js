@@ -108,7 +108,7 @@ export default function ProfileEditor({ onCancel }) {
         div({ class: "form-group", style: "display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem;" }, [
           () => avatarUrlState.val ? img({ src: avatarUrlState.val, style: "width: 64px; height: 64px; border-radius: 50%; object-fit: cover;" }) : div({ style: "width: 64px; height: 64px; border-radius: 50%; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center;" }, "👤"),
           div([
-            label({ for: avatarInputId, style: "cursor: pointer; padding: 0.5rem 1rem; background: var(--bg-secondary); border-radius: 4px; border: 1px solid var(--border-color); display: inline-block;" }, () => editState.val.uploadingAvatar ? "Uploading..." : "Change Avatar"),
+            label({ for: avatarInputId, style: "cursor: pointer; padding: 0.5rem 1rem; background: var(--bg-secondary); border-radius: var(--border-radius); border: 1px solid var(--border-color); display: inline-block;" }, () => editState.val.uploadingAvatar ? "Uploading..." : "Change Avatar"),
             input({
               id: avatarInputId,
               type: "file",

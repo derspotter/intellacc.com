@@ -506,7 +506,7 @@ export default function PostItem({ post }) {
       PostCritiques({ postId: post.id, authorId: post.user_id }),
 
       // 5. Actions (Toggle Edit Options)
-      () => isLoggedIn() ? div({ class: "post-actions" }, [
+      () => (isLoggedIn() || isEditing()) ? div({ class: "post-actions" }, [
         div({
           class: "post-actions-left",
           style: () => {
@@ -534,7 +534,7 @@ export default function PostItem({ post }) {
               : null
           ])
         ),
-        div({ class: "post-actions-main" }, [
+        isLoggedIn() ? div({ class: "post-actions-main" }, [
           LikeButton({ postId: post.id }),
           button({
             type: "button",
@@ -552,7 +552,7 @@ export default function PostItem({ post }) {
               handleShowCommentForm(post.id);
             }
           }, "Comment")
-        ])
+        ]) : null
       ]) : null,
 
       // 7. Comments List and Form

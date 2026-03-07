@@ -3,7 +3,23 @@
 /* Import modal styles */
 
 /* Fonts */
-@import url('https://fonts.googleapis.com/css2?family=League+Spartan:wght@300;400;500;600;700&display=swap');
+@font-face {
+  font-family: 'League Spartan';
+  src: url('/fonts/league-spartan-latin.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'League Spartan';
+  src: url('/fonts/league-spartan-latin-ext.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 /* CSS Custom Properties */
 :root {
@@ -1457,7 +1473,7 @@ body.dark-mode .device-item {
 
 .post-date {
   color: var(--secondary-text);
-  font-size: 0.875rem;
+  font-size: 0.8rem;
 }
 
 .post-meta {
@@ -1743,16 +1759,14 @@ body.dark-mode .post-content-toggle {
   margin-bottom: 0.25rem;
   justify-content: flex-start;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .post-actions-left,
+.post-actions-main,
 .post-actions-center,
 .post-actions-right {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.5rem;
-  min-width: 0;
+  display: contents;
 }
 
 .post-action {
@@ -1777,10 +1791,18 @@ body.dark-mode .post-content-toggle {
   transition: background-color var(--transition);
 }
 
+.post-action.edit,
 .post-action.like-button,
+.post-action.repost-button,
 .post-action.comment-button {
-  width: 5rem;
   white-space: nowrap;
+}
+
+.post-action.like-button {
+  min-width: 3.9rem;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.1;
 }
 
 .post-action:hover {
@@ -1919,6 +1941,12 @@ body.dark-mode .post-action.liked:hover {
   color: var(--text-color);
 }
 
+.post-card-footer-meta {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
 /* Predictions */
 .predictions-page>h1 {
   text-align: center;
@@ -2017,21 +2045,23 @@ body.dark-mode .post-action.liked:hover {
 .market-question-hub {
   width: 100%;
   max-width: 100%;
+  align-self: start;
 }
 
 .market-question-hub .market-question-tabs {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.75rem;
   flex-wrap: wrap;
-  margin: 0.5rem 0 0.75rem;
+  margin: 0;
 }
 
 .market-question-hub .market-question-tab {
-  min-height: 2.25rem;
-  padding: 0.45rem 0.9rem;
+  min-height: 2.5rem;
+  padding: 0.55rem 1rem;
   border: 1px solid var(--button-border);
   color: var(--text-color);
   background: var(--card-bg);
+  font-weight: 600;
 }
 
 .market-question-hub .market-question-tab.is-active {
@@ -2040,28 +2070,42 @@ body.dark-mode .post-action.liked:hover {
   background: linear-gradient(135deg, var(--signature-blue), var(--signature-blue-dark));
 }
 
+.market-question-hub .market-question-hub-header {
+  margin-bottom: 0;
+}
+
 .market-question-hub .market-question-card {
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--predictions-radius);
-  margin-bottom: 1rem;
+  border-radius: var(--border-radius);
+  padding: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.market-question-hub .market-question-section-title {
+  margin: 0;
+  font-size: 1rem;
 }
 
 .market-question-hub .market-question-config,
 .market-question-hub .market-question-card-subtitle {
   color: var(--secondary-text);
-  margin-bottom: 0.6rem;
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .market-question-hub .market-question-form,
 .market-question-hub .market-question-filters {
   display: grid;
-  gap: 0.6rem;
+  gap: 0.75rem;
 }
 
 .market-question-hub .market-question-form label,
 .market-question-hub .market-question-filters label {
-  font-weight: 500;
+  font-weight: 600;
+  margin-bottom: -0.25rem;
 }
 
 .market-question-hub input,
@@ -2073,26 +2117,30 @@ body.dark-mode .post-action.liked:hover {
 }
 
 .market-question-hub .market-question-form-actions {
-  margin-top: 0.75rem;
+  margin-top: 0.25rem;
 }
 
-.market-question-hub .market-question-note textarea {
+.market-question-hub .market-question-note-input {
   width: 100%;
+  margin: 0;
+  resize: vertical;
 }
 
 .market-question-hub .market-question-list {
   list-style: none;
   padding: 0;
-  margin: 0.75rem 0 0;
+  margin: 0;
   display: grid;
   gap: 0.75rem;
 }
 
 .market-question-hub .market-question-item {
   border: 1px solid var(--border-color);
-  border-radius: var(--predictions-radius);
-  padding: 0.75rem;
+  border-radius: var(--border-radius);
+  padding: 0.85rem 0.9rem;
   background: var(--bg-card, var(--card-bg));
+  display: grid;
+  gap: 0.5rem;
 }
 
 .market-question-hub .market-question-item-header {
@@ -2100,7 +2148,8 @@ body.dark-mode .post-action.liked:hover {
   justify-content: space-between;
   gap: 0.5rem;
   flex-wrap: wrap;
-  margin-bottom: 0.4rem;
+  align-items: flex-start;
+  margin-bottom: 0;
 }
 
 .market-question-hub .market-question-title,
@@ -2112,29 +2161,31 @@ body.dark-mode .post-action.liked:hover {
 .market-question-hub .market-question-votes {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.2rem;
+  gap: 0.5rem 0.9rem;
   color: var(--secondary-text);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  margin: 0;
 }
 
 .market-question-hub .market-question-details {
-  margin: 0.5rem 0;
+  margin: 0;
   white-space: pre-wrap;
+  line-height: 1.5;
 }
 
 .market-question-hub .market-question-item-actions {
   display: flex;
   gap: 0.5rem;
-  margin-top: 0.5rem;
   flex-wrap: wrap;
+  margin-top: 0.25rem;
 }
 
 .market-question-hub .market-question-item-actions button {
-  min-width: 8.25rem;
+  min-width: 9rem;
 }
 
 .market-question-hub .market-question-submission-meta {
-  margin-top: 0.5rem;
+  margin-top: 0.25rem;
 }
 
 .events-list-column,
@@ -5017,8 +5068,9 @@ body.dark-mode .belief-slider::-moz-range-thumb {
   padding: 1rem;
   border-bottom: 1px solid var(--border-color);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
   margin: 0;
+  box-sizing: border-box;
 }
 
 .event-list-item:last-child {
@@ -5032,8 +5084,7 @@ body.dark-mode .belief-slider::-moz-range-thumb {
 .event-list-item.selected {
   background-color: #0000ff;
   color: white;
-  border: 2px solid #0000cc;
-  box-shadow: 0 2px 8px rgba(0, 0, 255, 0.3);
+  box-shadow: inset 0 0 0 2px #0000cc, 0 2px 8px rgba(0, 0, 255, 0.3);
 }
 
 .event-list-item.resolved {
@@ -5936,32 +5987,32 @@ select {
     font-size: 0.9rem;
   }
 
-  /* On mobile, make the three main actions fill the full width evenly. */
   .post-actions {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: 1fr;
-    align-items: stretch;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
     gap: 0.5rem;
+    flex-wrap: wrap;
   }
 
   .post-actions-left,
+  .post-actions-main,
   .post-actions-center,
   .post-actions-right {
-    align-items: stretch;
-    justify-content: stretch;
-    width: 100%;
+    display: contents;
   }
 
   .post-actions-left .post-action,
+  .post-actions-main .post-action,
   .post-actions-center .post-action,
   .post-actions-right .post-action {
-    flex: 1 1 0;
-    min-width: 0;
+    flex: 0 0 auto;
     width: auto;
   }
 
+  .post-action.edit,
   .post-action.like-button,
+  .post-action.repost-button,
   .post-action.comment-button {
     width: auto;
   }
@@ -9041,6 +9092,104 @@ body.dark-mode .user-rank {
 
 .user-search-modal .modal-body {
   padding: 1.5rem;
+}
+
+.search-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.search-page h2 {
+  margin: 0 0 0.25rem 0;
+}
+
+.search-page .search-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.search-page .search-tab-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.search-page .search-tab,
+.search-page .search-scope {
+  border: 1px solid var(--border-color);
+  border-radius: 0;
+  background: var(--card-bg);
+  color: var(--text-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition), color var(--transition), box-shadow var(--transition), background-color var(--transition);
+  outline: none;
+}
+
+.search-page .search-tab {
+  padding: 0.75rem 1.2rem;
+  min-height: 42px;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.search-page .search-scope-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  min-height: 40px;
+  align-items: stretch;
+}
+
+.search-page .search-scope-row.search-scope-row-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.search-page .search-scope {
+  padding: 0.65rem 1rem;
+  min-height: 40px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.search-page .search-tab:hover,
+.search-page .search-tab:focus-visible,
+.search-page .search-scope:hover,
+.search-page .search-scope:focus-visible {
+  border-color: var(--signature-blue);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.search-page .search-tab.active,
+.search-page .search-scope.active {
+  border-color: var(--signature-blue);
+  background: var(--signature-blue);
+  color: #fff;
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.search-page .search-input {
+  width: 100%;
+  max-width: 100%;
+  min-height: 52px;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--card-bg);
+  color: var(--text-color);
+  font-size: 1rem;
+}
+
+.search-page .search-input:focus {
+  outline: none;
+  border-color: var(--signature-blue);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .search-input-container {

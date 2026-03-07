@@ -582,6 +582,9 @@ export const api = {
     getShares: (eventId) =>
       request(`/events/${eventId}/shares`),
 
+    getKelly: (eventId, belief) =>
+      request(`/events/${eventId}/kelly?belief=${encodeURIComponent(belief)}`),
+
     update: (eventId, { stake, target_prob }) =>
       request(`/events/${eventId}/update`, { method: 'POST', body: { stake, target_prob } }),
 

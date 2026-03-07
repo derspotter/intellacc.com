@@ -6,6 +6,7 @@ import SkinPreferenceSettings from './SkinPreferenceSettings.js';
 import NotificationSettings from './NotificationSettings.js';
 import VerificationSettings from '../verification/VerificationSettings.js';
 import AiFlaggedContent from '../admin/AiFlaggedContent.js';
+import PostMatchUsageDashboard from '../admin/PostMatchUsageDashboard.js';
 import DangerZone from './DangerZone.js';
 import PasswordResetCancel from './PasswordResetCancel.js';
 import { ApiKeysManager } from './ApiKeysManager.js';
@@ -69,6 +70,7 @@ export default function SettingsPage() {
 
     // Admin AI moderation
     () => isAdminState.val ? AiFlaggedContent() : null,
+    () => isAdminState.val ? PostMatchUsageDashboard() : null,
 
     // Push Notification Settings
     NotificationSettings(),

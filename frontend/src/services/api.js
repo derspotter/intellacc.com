@@ -786,6 +786,11 @@ export const api = {
       })
   },
 
+  postMatchUsage: {
+    getSummary: ({ days = 7, limit = 10 } = {}) =>
+      request(`/admin/post-match-usage/summary?days=${Math.max(1, Math.min(90, days))}&limit=${Math.max(1, Math.min(50, limit))}`)
+  },
+
   // Push notification endpoints
   push: {
     getVapidKey: () =>

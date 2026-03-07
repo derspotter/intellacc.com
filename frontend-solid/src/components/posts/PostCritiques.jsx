@@ -5,32 +5,42 @@ import { getCurrentUserId, isAuthenticated } from '../../services/auth';
 
 const fetchAnalysis = async (postId) => {
   if (!isAuthenticated()) {
-    return { status: null, link: null };
+    return { status: null, link: null, markets: [] };
   }
   try {
-    const [statusRes, linkRes] = await Promise.all([
+    const [statusRes, linkRes, marketsRes] = await Promise.all([
       api.posts.getAnalysisStatus(postId).catch(() => null),
-      api.posts.getMarketLink(postId).catch(() => null)
+      api.posts.getMarketLink(postId).catch(() => null),
+      api.posts.getMarkets(postId).catch(() => [])
     ]);
+
+    const markets = Array.isArray(marketsRes?.markets)
+      ? marketsRes.markets
+      : Array.isArray(marketsRes)
+        ? marketsRes
+        : [];
     
     return {
       status: statusRes || null,
-      link: (linkRes && linkRes.linked_market) ? linkRes.linked_market : null
+      link: (linkRes && linkRes.linked_market) ? linkRes.linked_market : null,
+      markets
     };
   } catch (err) {
     console.error('Failed to load analysis for post', postId, err);
-    return { status: null, link: null };
+    return { status: null, link: null, markets: [] };
   }
 };
 
 export default function PostCritiques(props) {
   const [data, { mutate, refetch }] = createResource(() => props.postId, fetchAnalysis);
   const [isConfirming, setIsConfirming] = createSignal(false);
+  const currentData = () => data() || data.latest || null;
+  const loadingMessageStyle = { color: "var(--text-muted, #888)", "font-size": "0.85em", "font-style": "italic" };
 
   createEffect(() => {
-    const currentData = data();
-    if (currentData && currentData.status) {
-      const status = currentData.status.processing_status;
+    const nextData = currentData();
+    if (nextData && nextData.status) {
+      const status = nextData.status.processing_status;
       if (['pending', 'retrieving', 'reasoning'].includes(status)) {
         const timer = setTimeout(refetch, 5000);
         onCleanup(() => clearTimeout(timer));
@@ -73,49 +83,49 @@ export default function PostCritiques(props) {
 
   return (
     <div class="post-critiques-container" style={{ "margin-top": "8px" }}>
-      <Show when={data.loading}>
-        <div style={{ color: "var(--text-muted, #888)", "font-size": "0.85em", "font-style": "italic" }}>AI is matching markets...</div>
-      </Show>
-
-      <Show when={data()}>
+      <Show when={currentData()}>
         {(d) => {
           const s = d().status;
           const link = d().link;
+          const markets = Array.isArray(d().markets) ? d().markets : [];
+          const hasDuplicateMarketChip = !!link && markets.some((market) => String(market.event_id) === String(link.event_id));
 
           if (!s || s.processing_status === 'gated_out') return null;
 
           if (['pending', 'retrieving', 'reasoning'].includes(s.processing_status)) {
-            return <div style={{ color: "var(--text-muted, #888)", "font-size": "0.85em", "font-style": "italic" }}>AI is matching markets...</div>;
+            return <div style={loadingMessageStyle}>AI is matching markets...</div>;
           }
 
           if (!link) return null;
 
           return (
             <div style={{ display: "flex", "flex-wrap": "wrap", gap: "8px", "align-items": "center" }}>
-              <a 
-                href={`#market/${link.event_id}`}
-                class="market-chip"
-                style={{
-                  background: "var(--bg-secondary, rgba(0, 123, 255, 0.1))",
-                  color: "var(--text-link, #007bff)",
-                  padding: "4px 10px",
-                  "border-radius": "16px",
-                  "font-size": "0.85em",
-                  "text-decoration": "none",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  "align-items": "center",
-                  gap: "4px"
-                }}
-                onClick={(e) => handleMarketClick(e, link.event_id)}
-              >
-                <span class="market-chip-title">{link.title}</span>
-                <Show when={link.market_prob != null}>
-                  <span class="market-chip-prob" style={{ "font-weight": "bold" }}>
-                    {Math.round(link.market_prob * 100)}%
-                  </span>
-                </Show>
-              </a>
+              <Show when={!hasDuplicateMarketChip}>
+                <a 
+                  href={`#market/${link.event_id}`}
+                  class="market-chip"
+                  style={{
+                    background: "var(--bg-secondary, rgba(0, 123, 255, 0.1))",
+                    color: "var(--text-link, #007bff)",
+                    padding: "4px 10px",
+                    "border-radius": "16px",
+                    "font-size": "0.85em",
+                    "text-decoration": "none",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    "align-items": "center",
+                    gap: "4px"
+                  }}
+                  onClick={(e) => handleMarketClick(e, link.event_id)}
+                >
+                  <span class="market-chip-title">{link.title}</span>
+                  <Show when={link.market_prob != null}>
+                    <span class="market-chip-prob" style={{ "font-weight": "bold" }}>
+                      {Math.round(link.market_prob * 100)}%
+                    </span>
+                  </Show>
+                </a>
+              </Show>
 
               {/* Confirmation Actions (Author Only) */}
               <Show when={isAuthor() && !link.confirmed}>

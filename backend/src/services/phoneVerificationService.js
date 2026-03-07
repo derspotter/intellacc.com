@@ -17,6 +17,14 @@ const execFileAsync = promisify(execFile);
 let twilioClient = null;
 let twilioClientKey = null;
 
+const isJestRuntime = () => {
+  return Boolean(
+    process.env.JEST_WORKER_ID ||
+    process.env.npm_lifecycle_event === 'test' ||
+    process.argv.some((arg) => arg.endsWith('/jest') || arg.includes('/jest') || arg.includes('\\jest'))
+  );
+};
+
 const parseBool = (value, defaultValue = false) => {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return defaultValue;
@@ -46,9 +54,9 @@ const getSmsGatewayStatusCheckAttempts = () => toInt(process.env.SMS_GATEWAY_STA
 const getSmsGatewayStatusCheckIntervalMs = () => toInt(process.env.SMS_GATEWAY_STATUS_CHECK_INTERVAL_MS, 350);
 const getOpenClawTimeoutMs = () => toInt(process.env.OPENCLAW_TIMEOUT_MS, 15000);
 
-const useTwilio = () => !!(getTwilioSid() && getTwilioAuthToken() && getTwilioVerifySid());
-const useSmsGateway = () => !!(getSmsGatewayUrl() && getSmsGatewayUsername() && getSmsGatewayPassword());
-const useOpenClawFallback = () => !!(getOpenClawUrl() && getOpenClawToken());
+const useTwilio = () => !isJestRuntime() && !!(getTwilioSid() && getTwilioAuthToken() && getTwilioVerifySid());
+const useSmsGateway = () => !isJestRuntime() && !!(getSmsGatewayUrl() && getSmsGatewayUsername() && getSmsGatewayPassword());
+const useOpenClawFallback = () => !isJestRuntime() && !!(getOpenClawUrl() && getOpenClawToken());
 const isProduction = () => process.env.NODE_ENV === 'production';
 const isEnabled = () => {
   const explicit = parseBool(getPhoneVerificationEnabledEnv(), true);

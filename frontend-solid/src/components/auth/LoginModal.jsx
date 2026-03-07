@@ -4,19 +4,19 @@ import { saveToken, userData } from "../../services/tokenService";
 import vaultService from "../../services/mls/vaultService";
 
 export const LoginModal = () => {
-    // Stage: 'email' | 'password' | 'register' | 'loading'
-    const [stage, setStage] = createSignal("email");
-    const [email, setEmail] = createSignal("");
+    // Stage: 'identifier' | 'password' | 'register' | 'loading'
+    const [stage, setStage] = createSignal("identifier");
+    const [identifier, setIdentifier] = createSignal("");
     const [password, setPassword] = createSignal("");
     const [registerUsername, setRegisterUsername] = createSignal("");
     const [registerEmail, setRegisterEmail] = createSignal("");
     const [registerPassword, setRegisterPassword] = createSignal("");
     const [error, setError] = createSignal(null);
 
-    // Handle email submit - just move to password stage (client-side only)
-    const handleEmailSubmit = (e) => {
+    // Handle identifier submit - just move to password stage (client-side only)
+    const handleIdentifierSubmit = (e) => {
         e.preventDefault();
-        if (!email().trim()) return;
+        if (!identifier().trim()) return;
         setError(null);
         setStage("password");
     };
@@ -30,7 +30,7 @@ export const LoginModal = () => {
         setStage("loading");
 
         try {
-            const result = await api.auth.login(email(), password());
+            const result = await api.auth.login(identifier(), password());
 
             if (result && result.token) {
                 saveToken(result.token);
@@ -111,21 +111,21 @@ export const LoginModal = () => {
     const handleBack = () => {
         setError(null);
         setPassword("");
-        setStage("email");
+        setStage("identifier");
     };
 
     const handleGoToRegister = () => {
         setError(null);
-        setRegisterEmail(email());
+        setRegisterEmail(identifier());
         setRegisterPassword(password());
         setStage("register");
     };
 
     const handleGoToLogin = () => {
         setError(null);
-        setEmail(registerEmail());
+        setIdentifier(registerEmail());
         setPassword("");
-        setStage("email");
+        setStage("identifier");
     };
 
     return (
@@ -147,18 +147,19 @@ export const LoginModal = () => {
                         </div>
                     </Show>
 
-                    {/* === EMAIL STAGE === */}
-                    <Show when={stage() === "email"}>
-                        <form onSubmit={handleEmailSubmit} class="flex flex-col gap-4 font-mono text-sm">
+                    {/* === IDENTIFIER STAGE === */}
+                    <Show when={stage() === "identifier"}>
+                        <form onSubmit={handleIdentifierSubmit} class="flex flex-col gap-4 font-mono text-sm">
                             <div class="flex flex-col gap-1">
-                                <label class="text-bb-muted text-xs uppercase">Credentials // Email</label>
+                                <label class="text-bb-muted text-xs uppercase">Credentials // Email or Username</label>
                                 <input
-                                    type="email"
-                                    value={email()}
-                                    onInput={(e) => setEmail(e.target.value)}
+                                    type="text"
+                                    value={identifier()}
+                                    onInput={(e) => setIdentifier(e.target.value)}
                                     class="bg-bb-bg border border-bb-border p-2 text-bb-text focus:border-bb-accent focus:outline-none"
-                                    placeholder="Enter system address..."
+                                    placeholder="Enter email or handle..."
                                     required
+                                    autocomplete="username"
                                     autofocus
                                 />
                             </div>
@@ -182,7 +183,7 @@ export const LoginModal = () => {
                     <Show when={stage() === "password"}>
                         <form onSubmit={handlePasswordSubmit} class="flex flex-col gap-4 font-mono text-sm">
                             <div class="text-bb-muted text-xs text-center mb-2">
-                                Logging in as: <span class="text-bb-accent">{email()}</span>
+                                Logging in as: <span class="text-bb-accent">{identifier()}</span>
                             </div>
                             <div class="flex flex-col gap-1">
                                 <label class="text-bb-muted text-xs uppercase">Security // Password</label>
@@ -204,7 +205,7 @@ export const LoginModal = () => {
                                 onClick={handleBack}
                                 class="text-bb-muted text-xs hover:text-bb-text text-center"
                             >
-                                Use a different email
+                                Use a different email or username
                             </button>
                         </form>
                     </Show>

@@ -58,7 +58,7 @@ const toPostMatchResult = (raw) => {
   };
 };
 
-const runGate = async (content) => {
+const runGate = async (content, { usageRecorder } = {}) => {
   const messages = [{ role: 'user', content: buildPrompt(content) }];
 
   const first = await callLLMWithFallback(
@@ -66,7 +66,12 @@ const runGate = async (content) => {
       messages,
       maxTokens: config.gate.maxTokens,
       temperature: config.gate.temperature,
-      timeoutMs: config.gate.timeoutMs
+      timeoutMs: config.gate.timeoutMs,
+      usageRecorder,
+      usageContext: {
+        stage: 'gate',
+        operation: 'chat_completion'
+      }
     },
     {
       primaryModel: config.gate.model,
@@ -74,21 +79,26 @@ const runGate = async (content) => {
     }
   );
 
-  const parsed = toPostMatchResult(first);
+  const parsed = toPostMatchResult(first.output);
   if (parsed.has_claim && !parsed.claim_summary) {
     const second = await callLLMWithFallback(
       {
         messages: [{ role: 'user', content: buildRetryPrompt(content) }],
         maxTokens: config.gate.maxTokens,
         temperature: config.gate.temperature,
-        timeoutMs: config.gate.timeoutMs
+        timeoutMs: config.gate.timeoutMs,
+        usageRecorder,
+        usageContext: {
+          stage: 'gate',
+          operation: 'chat_completion'
+        }
       },
       {
         primaryModel: config.gate.model,
         fallbackModels: config.gate.fallbackModels
       }
     );
-    const retried = toPostMatchResult(second);
+    const retried = toPostMatchResult(second.output);
     if (retried.has_claim && retried.claim_summary) {
       return retried;
     }
@@ -97,7 +107,7 @@ const runGate = async (content) => {
   return parsed;
 };
 
-const runSafeGate = async ({ postContent }) => {
+const runSafeGate = async ({ postContent, usageRecorder }) => {
   if (!config.gate.enabled) {
     return {
       has_claim: false,
@@ -129,7 +139,7 @@ const runSafeGate = async ({ postContent }) => {
     throw new Error('OpenRouter API key missing');
   }
 
-  return runGate(postContent);
+  return runGate(postContent, { usageRecorder });
 };
 
 module.exports = {
