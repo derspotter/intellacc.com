@@ -11,13 +11,7 @@ WORKDIR /app
 # Copy package.json (and package-lock.json if available)
 COPY package*.json ./
 
-# Copy local packages
-COPY openmls-pkg ./openmls-pkg
-
-# Install dependencies (include optional native bindings for Alpine)
-RUN npm install && npm install @rollup/rollup-linux-x64-musl --save-optional
-
-# Copy the rest of your frontend source code
+# Copy the frontend source. The shared OpenMLS package is mounted at runtime via `/shared`.
 COPY . .
 
 # Expose the port Vite uses (default is 5173)

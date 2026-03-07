@@ -18,18 +18,15 @@ const [token, setToken] = createSignal(localStorage.getItem('token') || '');
 const [isLoggedIn, setIsLoggedIn] = createSignal(!!localStorage.getItem('token'));
 const [userData, setUserData] = createSignal(null);
 
+import { api } from './api';
+
 // Fetch full profile from backend to supplement token data
 async function refreshProfile() {
     const t = token();
     if (!t) return;
     try {
-        const res = await fetch('/api/me', {
-            headers: { 'Authorization': `Bearer ${t}` }
-        });
-        if (res.ok) {
-            const profile = await res.json();
-            setUserData(prev => ({ ...prev, ...profile }));
-        }
+        const profile = await api.users.getProfile();
+        setUserData(prev => ({ ...prev, ...profile }));
     } catch (e) {
         console.warn('Failed to refresh profile', e);
     }

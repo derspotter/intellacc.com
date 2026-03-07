@@ -4,7 +4,7 @@ import path from 'path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@openmls': path.resolve(__dirname, './openmls-pkg'),
+      '@openmls': path.resolve(__dirname, '../shared/openmls-pkg'),
       '@shared': path.resolve(__dirname, '../shared'),
       '@app-services': path.resolve(__dirname, './src/services'),
       '@app-vault-service': path.resolve(__dirname, './src/services/vaultService.js'),

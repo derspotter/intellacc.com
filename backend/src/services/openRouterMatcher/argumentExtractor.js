@@ -392,7 +392,13 @@ const buildReasonerExtraParams = ({ useSchema, includeReasoning }) => {
   return params;
 };
 
-const runReasoner = async ({ postContent, candidates, overrideModel, overrideFallbackModels }) => {
+const runReasoner = async ({
+  postContent,
+  candidates,
+  overrideModel,
+  overrideFallbackModels,
+  usageRecorder
+}) => {
   const messages = [{
     role: 'user',
     content: buildPrompt(postContent, candidates)
@@ -407,7 +413,12 @@ const runReasoner = async ({ postContent, candidates, overrideModel, overrideFal
       maxTokens: config.reasoner.maxTokens,
       temperature: config.reasoner.temperature,
       timeoutMs: config.reasoner.timeoutMs,
-      extraParams
+      extraParams,
+      usageRecorder,
+      usageContext: {
+        stage: 'reasoner',
+        operation: 'chat_completion'
+      }
     },
     {
       primaryModel,
@@ -415,10 +426,10 @@ const runReasoner = async ({ postContent, candidates, overrideModel, overrideFal
     }
   );
 
-  let raw;
+  let rawResult;
   try {
     // Preferred path: strict schema + reasoning output enabled.
-    raw = await runCall(buildReasonerExtraParams({
+    rawResult = await runCall(buildReasonerExtraParams({
       useSchema: true,
       includeReasoning: true
     }));
@@ -429,27 +440,35 @@ const runReasoner = async ({ postContent, candidates, overrideModel, overrideFal
     }
 
     // Recovery path: keep reasoning enabled, but don't require schema.
-    raw = await runCall(buildReasonerExtraParams({
+    rawResult = await runCall(buildReasonerExtraParams({
       useSchema: false,
       includeReasoning: false
     }));
   }
 
+  let raw = rawResult?.output ?? rawResult;
   let normalized = toPostMatchOutput(raw, candidates);
   if (normalized.best_market || normalized.propositions.length > 0 || normalized.critiques.length > 0) {
     return normalized;
   }
 
   // One salvage retry for degenerate-but-valid empty outputs.
-  raw = await runCall(buildReasonerExtraParams({
+  rawResult = await runCall(buildReasonerExtraParams({
     useSchema: false,
     includeReasoning: false
   }));
+  raw = rawResult?.output ?? rawResult;
   normalized = toPostMatchOutput(raw, candidates);
   return normalized;
 };
 
-const runSafeReasoner = async ({ postContent, candidates, overrideModel, overrideFallbackModels }) => {
+const runSafeReasoner = async ({
+  postContent,
+  candidates,
+  overrideModel,
+  overrideFallbackModels,
+  usageRecorder
+}) => {
   if (!config.reasoner.enabled) {
     return null;
   }
@@ -470,7 +489,13 @@ const runSafeReasoner = async ({ postContent, candidates, overrideModel, overrid
     throw new Error('OpenRouter API key missing');
   }
 
-  return runReasoner({ postContent, candidates, overrideModel, overrideFallbackModels });
+  return runReasoner({
+    postContent,
+    candidates,
+    overrideModel,
+    overrideFallbackModels,
+    usageRecorder
+  });
 };
 
 module.exports = {
