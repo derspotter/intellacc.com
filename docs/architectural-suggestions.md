@@ -1,6 +1,6 @@
-# Architectural Suggestions for Intellacc
+# Architectural Suggestions for Intellacc (ALL ITEMS RESOLVED)
 
-Based on a survey of the Intellacc application architecture, the following observations and suggestions for improvement have been identified.
+Based on a survey of the Intellacc application architecture, the following observations and suggestions for improvement have been identified and executed.
 
 ## 🏗️ Architectural Overview
 The system follows a microservices-style split to handle different concerns optimally:
@@ -29,9 +29,9 @@ The system follows a microservices-style split to handle different concerns opti
 *   **Observation:** There is a robust SQL-based ledger audit system (`run_ledger_audit`), which is excellent for catching discrepancies within the database.
 *   **Implementation:** An automated reconciliation worker was created (`LedgerAuditService`) that executes the SQL audit and recursively queries the Rust engine's `/lmsr/verify-consistency` and `/lmsr/verify-balance-invariant` endpoints. This ensures absolute mathematical consistency between the Node.js user ledgers and the Rust engine's LMSR core. A database trigger was also implemented to guarantee `cumulative_stake` (LMSR Cost) is correctly calculated upon market creation to prevent drift.
 
-### 5. Distributed Tracing and Logging
+### 5. Distributed Tracing and Logging (SKIPPED)
 *   **Observation:** Debugging user actions that span across the frontend, Node.js proxy, and Rust engine can be difficult without a unified view.
-*   **Suggestion:** Implement distributed tracing (such as OpenTelemetry). Injecting a `trace-id` at the Node.js API boundary and passing it to the Rust service will make diagnosing latency spikes and cross-service errors much easier.
+*   **Status:** Reviewed and deemed overkill for the current architectural scale. This will be deferred until cross-service debugging or latency tracking becomes a tangible operational bottleneck.
 
 ### 6. Streamline WASM Dependencies (COMPLETED)
 *   **Observation:** The E2EE relies on WASM artifacts from `openmls-wasm`. Managing WASM binaries across environments can be tricky and lead to duplication.
