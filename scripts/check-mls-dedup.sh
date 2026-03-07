@@ -36,8 +36,8 @@ for path in "${duplicate_wasm_files[@]}"; do
   fi
 done
 
-canonical_wasm_js="frontend/openmls-pkg/openmls_wasm.js"
-canonical_wasm_bin="frontend/openmls-pkg/openmls_wasm_bg.wasm"
+canonical_wasm_js="shared/openmls-pkg/openmls_wasm.js"
+canonical_wasm_bin="shared/openmls-pkg/openmls_wasm_bg.wasm"
 [[ -f "$canonical_wasm_js" ]] || fail "missing canonical wasm JS binding: $canonical_wasm_js"
 [[ -f "$canonical_wasm_bin" ]] || fail "missing canonical wasm binary: $canonical_wasm_bin"
 

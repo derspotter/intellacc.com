@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import solid from 'vite-plugin-solid';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
+import viteCompression from 'vite-plugin-compression';
 import path from 'path';
 import tailwindcss from 'tailwindcss';
 import autoprefixer from 'autoprefixer';
@@ -22,7 +23,19 @@ export default defineConfig({
   plugins: [
     solid(),
     wasm(),
-    topLevelAwait()
+    topLevelAwait(),
+    viteCompression({
+      algorithm: 'brotliCompress',
+      ext: '.br',
+      threshold: 1024,
+      filter: /\.(js|css|html|wasm)$/i,
+    }),
+    viteCompression({
+      algorithm: 'gzip',
+      ext: '.gz',
+      threshold: 1024,
+      filter: /\.(js|css|html|wasm)$/i,
+    }),
   ],
   css: {
     postcss: {
@@ -32,11 +45,21 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@openmls': path.resolve(__dirname, '../frontend/openmls-pkg'),
+      '@openmls': path.resolve(__dirname, '../shared/openmls-pkg'),
       '@shared': path.resolve(__dirname, '../shared'),
       '@app-services': path.resolve(__dirname, './src/services'),
       '@app-vault-service': path.resolve(__dirname, './src/services/mls/vaultService.js'),
       '@app-messaging-store': path.resolve(__dirname, './src/store/messagingStore.js')
+    }
+  },
+  assetsInclude: ['**/*.wasm'],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'openmls-wasm': ['@openmls']
+        }
+      }
     }
   },
   server: {

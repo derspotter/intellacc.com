@@ -14,7 +14,7 @@ services:
     volumes:
       - ./frontend-solid:/app
       - ./shared:/shared
-      - ./frontend/openmls-pkg:/frontend/openmls-pkg
+      - ./shared/openmls-pkg:/shared/openmls-pkg
       - frontend_solid_node_modules:/app/node_modules
     networks:
       - intellacc-network
