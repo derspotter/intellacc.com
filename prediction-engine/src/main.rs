@@ -11,9 +11,8 @@ use axum::{
 };
 use chrono;
 use futures_util::{sink::SinkExt, stream::StreamExt};
-use jsonwebtoken::{decode, DecodingKey, Validation};
 use moka::future::Cache;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
@@ -35,13 +34,6 @@ mod metaculus; // Configuration management
 #[cfg(test)]
 mod integration_tests;
 // Removed outdated tests.rs - lmsr_core.rs has comprehensive property-based tests
-
-#[derive(Debug, Serialize, Deserialize)]
-#[allow(non_snake_case)]
-struct Claims {
-    userId: i32,
-    exp: usize,
-}
 
 // DRY helper types and functions
 type ApiResult<T> = Result<Json<T>, (axum::http::StatusCode, Json<Value>)>;
@@ -86,26 +78,6 @@ async fn auth_guard(State(app_state): State<AppState>, req: Request<Body>, next:
         }
     }
 
-    // 2. Check for JWT Authorization header (Direct Frontend/CLI Access)
-    if let Some(jwt_secret) = &app_state.jwt_secret {
-        if let Some(auth_header) = req.headers().get("Authorization").and_then(|v| v.to_str().ok()) {
-            if auth_header.starts_with("Bearer ") {
-                let token = &auth_header[7..];
-                let mut validation = Validation::default();
-                validation.validate_exp = true;
-                
-                if let Ok(_token_data) = decode::<Claims>(
-                    token,
-                    &DecodingKey::from_secret(jwt_secret.as_bytes()),
-                    &validation,
-                ) {
-                    // Successfully decoded and validated JWT
-                    return next.run(req).await;
-                }
-            }
-        }
-    }
-
     (
         StatusCode::UNAUTHORIZED,
         Json(json!({"error": "Unauthorized"})),
@@ -133,7 +105,6 @@ struct AppState {
     cache: Cache<String, String>,
     config: config::Config,
     auth_token: Option<String>,
-    jwt_secret: Option<String>,
 }
 
 // This is our main function - but notice the #[tokio::main] attribute!
@@ -185,21 +156,15 @@ async fn main() -> anyhow::Result<()> {
         ));
     }
 
-    let jwt_secret = std::env::var("JWT_SECRET")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-
     let app_state = AppState {
         db: pool,
         tx: tx.clone(),
         cache,
         config,
         auth_token,
-        jwt_secret,
     };
 
-    // Create our web application routes with shared state - UNIFIED LOG SCORING ONLY
+    // Create our web application routes with shared state.
     let app = Router::new()
         .route("/", get(hello_world))
         .route("/health", get(health_check))

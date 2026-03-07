@@ -31,10 +31,24 @@ const normalizeEventType = (raw) => {
   return ALLOWED_EVENT_TYPES.has(value) ? value : 'binary';
 };
 
+const ensureUniqueOutcomeKeys = (rows) => {
+  const seen = new Map();
+  return rows.map((row, idx) => {
+    const fallbackKey = `choice_${idx + 1}`;
+    const baseKey = String(row?.key || fallbackKey).trim().toLowerCase().replace(/[^a-z0-9_]/g, '_') || fallbackKey;
+    const count = seen.get(baseKey) || 0;
+    seen.set(baseKey, count + 1);
+    return {
+      ...row,
+      key: count === 0 ? baseKey : `${baseKey}_${count + 1}`
+    };
+  });
+};
+
 const normalizeOutcomeRows = (eventType, outcomes, numericBuckets) => {
   if (eventType === 'multiple_choice') {
     if (!Array.isArray(outcomes)) return [];
-    return outcomes
+    return ensureUniqueOutcomeKeys(outcomes
       .map((item, idx) => {
         if (typeof item === 'string') {
           const label = item.trim();
@@ -59,12 +73,12 @@ const normalizeOutcomeRows = (eventType, outcomes, numericBuckets) => {
           upperBound: null
         };
       })
-      .filter(Boolean);
+      .filter(Boolean));
   }
 
   if (eventType === 'numeric') {
     if (!Array.isArray(numericBuckets)) return [];
-    return numericBuckets
+    return ensureUniqueOutcomeKeys(numericBuckets
       .map((bucket, idx) => {
         if (!bucket || typeof bucket !== 'object') return null;
         const lower = Number(bucket.lower_bound);
@@ -81,7 +95,7 @@ const normalizeOutcomeRows = (eventType, outcomes, numericBuckets) => {
           upperBound: upper
         };
       })
-      .filter(Boolean);
+      .filter(Boolean));
   }
 
   return [];
@@ -318,10 +332,32 @@ exports.createEvent = asyncHandler(async (req, res) => {
 
   const newEvent = await db.executeWithTransaction(async (client) => {
     let result;
-    result = await client.query(
-      "INSERT INTO events (title, details, closing_date, domain, event_type) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [title, details, closing_date, normalizedDomain, normalizedEventType]
-    );
+    try {
+      result = await client.query(
+        "INSERT INTO events (title, details, closing_date, domain, event_type) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+        [title, details, closing_date, normalizedDomain, normalizedEventType]
+      );
+    } catch (insertErr) {
+      if (insertErr.code === '42703') {
+        try {
+          result = await client.query(
+            "INSERT INTO events (title, details, closing_date, event_type) VALUES ($1, $2, $3, $4) RETURNING *",
+            [title, details, closing_date, normalizedEventType]
+          );
+        } catch (fallbackErr) {
+          if (fallbackErr.code === '42703') {
+            result = await client.query(
+              "INSERT INTO events (title, details, closing_date) VALUES ($1, $2, $3) RETURNING *",
+              [title, details, closing_date]
+            );
+          } else {
+            throw fallbackErr;
+          }
+        }
+      } else {
+        throw insertErr;
+      }
+    }
 
     const createdEvent = result.rows[0];
     await seedEventOutcomes(client, createdEvent.id, normalizedEventType, outcomeRows);
@@ -521,6 +557,8 @@ exports.resolvePrediction = asyncHandler(async (req, res) => {
   if (req.app.get('io')) {
     req.app.get('io').emit('predictionResolved', result.rows[0]);
   }
+
+  const prediction = result.rows[0];
 
   res.status(200).json(result.rows[0]);
 });
