@@ -51,12 +51,16 @@ moka = { version = "0.12", features = ["future"] }
 # Environment variables
 dotenv = "0.15"
 
+# JWT verification for direct access
+jsonwebtoken = "9.2"
+
 # Parallel processing for benchmarks
 rayon = "1.8"
 rand = "0.8"
 
 # Property-based testing for LMSR
 proptest = "1.0"
+ts-rs = { version = "12.0.1", features = ["chrono-impl"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
