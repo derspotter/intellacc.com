@@ -13,9 +13,10 @@ import (
 
 // CLI struct holds the top-level command line definitions
 type CLI struct {
-	JSON   bool   `help:"Output as strict JSON." env:"INTELLACC_JSON"`
-	APIKey string `help:"Intellacc API Key." env:"INTELLACC_API_KEY"`
-	APIURL string `help:"Intellacc API URL." default:"http://localhost:5173" env:"INTELLACC_API_URL"`
+	JSON      bool   `help:"Output as strict JSON." env:"INTELLACC_JSON"`
+	APIKey    string `help:"Intellacc API Key." env:"INTELLACC_API_KEY"`
+	APIURL    string `help:"Intellacc API URL." default:"http://localhost:5173" env:"INTELLACC_API_URL"`
+	EngineURL string `help:"Intellacc Prediction Engine URL." default:"http://localhost:3001" env:"INTELLACC_ENGINE_URL"`
 
 	Config ConfigCmd `cmd:"" help:"Manage configuration and authentication."`
 	Market MarketCmd `cmd:"" help:"Interact with prediction markets."`
@@ -28,6 +29,22 @@ type CLI struct {
 
 func (cli *CLI) request(method, path string, body io.Reader) (*http.Response, error) {
 	url := fmt.Sprintf("%s%s", cli.APIURL, path)
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if cli.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cli.APIKey)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	return client.Do(req)
+}
+
+func (cli *CLI) engineRequest(method, path string, body io.Reader) (*http.Response, error) {
+	url := fmt.Sprintf("%s%s", cli.EngineURL, path)
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return nil, err
@@ -223,18 +240,7 @@ func (cmd *MarketTradeCmd) Run(cli *CLI) error {
 	}
 	bodyData, _ := json.Marshal(payload)
 
-	req, err := http.NewRequest("POST", cli.APIURL+path, bytes.NewBuffer(bodyData))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	if cli.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cli.APIKey)
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := cli.request("POST", path, bytes.NewBuffer(bodyData))
 	if err != nil {
 		return fmt.Errorf("failed to execute trade: %w", err)
 	}
