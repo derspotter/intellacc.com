@@ -33,6 +33,8 @@ Prediction-market social platform with encrypted messaging and community-driven 
 - `docker compose ps`
 - `docker exec intellacc_backend npm test`
 - `docker exec intellacc_frontend npm test`
+- `./scripts/test_prediction_engine.sh` (standard quick prediction-engine suite)
+- `./scripts/test_prediction_engine.sh --full` (full prediction-engine suite)
 - `docker exec -it intellacc_db psql -U intellacc_user -d intellaccdb`
 
 ## Docs

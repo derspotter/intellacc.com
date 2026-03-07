@@ -131,6 +131,24 @@ This verifies:
 - Hold period configuration is loaded correctly
 - Environment variables override defaults
 
+## Standard Prediction Engine Test Path
+
+Use the Dockerized prediction-engine harness as the standard test path:
+
+```bash
+./scripts/test_prediction_engine.sh
+```
+
+That runs the quick suite against an isolated Postgres container and skips only the explicitly ignored expensive stress test.
+
+Run the full suite with:
+
+```bash
+./scripts/test_prediction_engine.sh --full
+```
+
+The full suite uses the same isolated harness, includes the integration tests, and is the path used in CI.
+
 ## Implementation Details
 
 - Configuration is loaded once at startup in `src/config.rs`

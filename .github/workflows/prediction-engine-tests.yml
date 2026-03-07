@@ -1,0 +1,27 @@
+name: Prediction Engine Tests
+
+on:
+  push:
+    paths:
+      - 'prediction-engine/**'
+      - 'scripts/test_prediction_engine.sh'
+      - '.github/workflows/prediction-engine-tests.yml'
+  pull_request:
+    paths:
+      - 'prediction-engine/**'
+      - 'scripts/test_prediction_engine.sh'
+      - '.github/workflows/prediction-engine-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  prediction-engine-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run quick prediction-engine suite
+        run: ./scripts/test_prediction_engine.sh
+
+      - name: Run full prediction-engine suite
+        run: ./scripts/test_prediction_engine.sh --full

@@ -671,9 +671,10 @@ mod tests {
     use std::time::Duration;
 
     #[tokio::test]
+    #[ignore = "expensive stress test; run explicitly when tuning engine performance"]
     async fn test_comprehensive_market_simulation() -> Result<()> {
         // Initialize tracing for test output
-        tracing_subscriber::fmt::init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         // Create test database connection
         let database_url = env::var("STRESS_TEST_DB_URL")

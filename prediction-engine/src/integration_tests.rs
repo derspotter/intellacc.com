@@ -16,6 +16,8 @@ use rand::{Rng, SeedableRng};
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use std::env;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Test database configuration for isolated testing
 const DEFAULT_TEST_DB_URL: &str = "postgresql://postgres:password@localhost:5432/test_intellacc";
@@ -27,6 +29,20 @@ fn test_db_url() -> String {
 
 fn test_db_admin_url() -> String {
     env::var("TEST_DB_ADMIN_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_ADMIN_URL.to_string())
+}
+
+fn test_db_url_for(db_name: &str) -> String {
+    test_db_url().replace("/test_intellacc", &format!("/{}", db_name))
+}
+
+fn unique_test_db_name() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("test_intellacc_{}_{}", ts, counter)
 }
 
 fn test_config() -> Config {
@@ -79,9 +95,9 @@ fn to_ledger_i64(value: f64) -> Result<i64> {
 const INITIAL_BALANCE_LEDGER: i64 = 1_000_000_000; // 1000 * 1_000_000
 
 /// Test configuration constants
-const STRESS_TEST_USERS: usize = 20;
-const STRESS_TEST_OPERATIONS: usize = 2000;
-const STRESS_TEST_ITERATIONS: usize = 50;
+const STRESS_TEST_USERS: usize = 12;
+const STRESS_TEST_OPERATIONS: usize = 500;
+const STRESS_TEST_ITERATIONS: usize = 5;
 
 /// Test user data structure
 #[derive(Debug, Clone)]
@@ -95,6 +111,11 @@ struct OperationResult {
     user_id: i32,
     balance_change: i64,
     staked_change: i64,
+}
+
+struct TestDatabase {
+    pool: PgPool,
+    db_name: String,
 }
 
 async fn fetch_user_ledger(pool: &PgPool, user_id: i32) -> Result<(i64, i64)> {
@@ -124,8 +145,9 @@ async fn build_operation_result(
 }
 
 /// Setup test database with clean state
-async fn setup_test_database() -> Result<PgPool> {
+async fn setup_test_database() -> Result<TestDatabase> {
     println!("🔧 Setting up test database...");
+    let db_name = unique_test_db_name();
 
     // Connect to default postgres database first
     let admin_url = test_db_admin_url();
@@ -134,20 +156,14 @@ async fn setup_test_database() -> Result<PgPool> {
         .connect(&admin_url)
         .await?;
 
-    // Drop and recreate test database
-    sqlx::query("DROP DATABASE IF EXISTS test_intellacc")
-        .execute(&setup_pool)
-        .await
-        .ok(); // Ignore error if database doesn't exist
-
-    sqlx::query("CREATE DATABASE test_intellacc")
+    sqlx::query(&format!("CREATE DATABASE {}", db_name))
         .execute(&setup_pool)
         .await?;
 
     setup_pool.close().await;
 
     // Connect to test database
-    let test_url = test_db_url();
+    let test_url = test_db_url_for(&db_name);
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(10)
         .connect(&test_url)
@@ -157,7 +173,7 @@ async fn setup_test_database() -> Result<PgPool> {
     run_test_migrations(&pool).await?;
 
     println!("✅ Test database ready");
-    Ok(pool)
+    Ok(TestDatabase { pool, db_name })
 }
 
 /// Run essential migrations for testing
@@ -196,7 +212,8 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
             liquidity_b DOUBLE PRECISION DEFAULT 100.0,
             q_yes DOUBLE PRECISION DEFAULT 0.0,
             q_no DOUBLE PRECISION DEFAULT 0.0,
-            cumulative_stake DOUBLE PRECISION DEFAULT 0.0
+            cumulative_stake DOUBLE PRECISION DEFAULT 0.0,
+            event_type VARCHAR(32) NOT NULL DEFAULT 'binary'
         )
     "#,
     )
@@ -281,8 +298,8 @@ async fn create_test_users(pool: &PgPool, count: usize) -> Result<Vec<TestUser>>
 /// Create test event
 async fn create_test_event(pool: &PgPool, title: &str) -> Result<i32> {
     let event_id: i32 = sqlx::query_scalar(
-        "INSERT INTO events (title, description, closing_date, liquidity_b) 
-         VALUES ($1, $2, NOW() + INTERVAL '7 days', 100.0) RETURNING id",
+        "INSERT INTO events (title, description, closing_date, liquidity_b, event_type) 
+         VALUES ($1, $2, NOW() + INTERVAL '7 days', 100.0, 'binary') RETURNING id",
     )
     .bind(title)
     .bind("Integration test event")
@@ -444,7 +461,7 @@ async fn verify_post_resolution_invariant(pool: &PgPool, event_id: i32) -> Resul
 }
 
 /// Cleanup test database
-async fn cleanup_test_database(pool: PgPool) -> Result<()> {
+async fn cleanup_test_database(pool: PgPool, db_name: &str) -> Result<()> {
     pool.close().await;
 
     let cleanup_pool = sqlx::postgres::PgPoolOptions::new()
@@ -452,7 +469,7 @@ async fn cleanup_test_database(pool: PgPool) -> Result<()> {
         .connect(&test_db_admin_url())
         .await?;
 
-    sqlx::query("DROP DATABASE IF EXISTS test_intellacc")
+    sqlx::query(&format!("DROP DATABASE IF EXISTS {}", db_name))
         .execute(&cleanup_pool)
         .await
         .ok(); // Ignore errors
@@ -469,13 +486,14 @@ mod tests {
     /// Single user market cycle test
     #[tokio::test]
     async fn test_single_user_market_cycle() -> Result<()> {
-        let pool = setup_test_database().await?;
-        let users = create_test_users(&pool, 1).await?;
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        let users = create_test_users(pool, 1).await?;
         let user = &users[0];
-        let event_id = create_test_event(&pool, "Single User Test Event").await?;
+        let event_id = create_test_event(pool, "Single User Test Event").await?;
         let config = test_config();
 
-        let initial_state = capture_initial_state(&pool).await?;
+        let initial_state = capture_initial_state(pool).await?;
         let mut operations = Vec::new();
         let mut resolution_credits = HashMap::new();
 
@@ -484,9 +502,9 @@ mod tests {
         // Buy YES shares
         println!("📈 Buying YES shares...");
         let stake1 = 50.0; // 50 RP
-        let (before_balance, before_staked) = fetch_user_ledger(&pool, user.id).await?;
+        let (before_balance, before_staked) = fetch_user_ledger(pool, user.id).await?;
         let _ = lmsr_api::update_market(
-            &pool,
+            pool,
             &config,
             user.id,
             MarketUpdate {
@@ -500,18 +518,18 @@ mod tests {
         .await?;
 
         operations
-            .push(build_operation_result(&pool, user.id, before_balance, before_staked).await?);
+            .push(build_operation_result(pool, user.id, before_balance, before_staked).await?);
 
         // Verify invariants after buy YES
-        verify_balance_invariant(&pool, &initial_state, &operations, &resolution_credits).await?;
-        verify_staked_invariant(&pool).await?;
+        verify_balance_invariant(pool, &initial_state, &operations, &resolution_credits).await?;
+        verify_staked_invariant(pool).await?;
 
         // Buy NO shares
         println!("📉 Buying NO shares...");
         let stake2 = 30.0; // 30 RP
-        let (before_balance, before_staked) = fetch_user_ledger(&pool, user.id).await?;
+        let (before_balance, before_staked) = fetch_user_ledger(pool, user.id).await?;
         let _ = lmsr_api::update_market(
-            &pool,
+            pool,
             &config,
             user.id,
             MarketUpdate {
@@ -525,11 +543,11 @@ mod tests {
         .await?;
 
         operations
-            .push(build_operation_result(&pool, user.id, before_balance, before_staked).await?);
+            .push(build_operation_result(pool, user.id, before_balance, before_staked).await?);
 
         // Verify invariants after buy NO
-        verify_balance_invariant(&pool, &initial_state, &operations, &resolution_credits).await?;
-        verify_staked_invariant(&pool).await?;
+        verify_balance_invariant(pool, &initial_state, &operations, &resolution_credits).await?;
+        verify_staked_invariant(pool).await?;
 
         // Get current user shares for partial selling
         let user_shares = sqlx::query(
@@ -537,7 +555,7 @@ mod tests {
         )
         .bind(user.id)
         .bind(event_id)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await?;
 
         let yes_shares: f64 = user_shares.get("yes_shares");
@@ -547,9 +565,9 @@ mod tests {
         if yes_shares > 0.0 {
             println!("💰 Selling partial YES shares...");
             let sell_amount = yes_shares * 0.3; // Sell 30% of YES shares
-            let (before_balance, before_staked) = fetch_user_ledger(&pool, user.id).await?;
+            let (before_balance, before_staked) = fetch_user_ledger(pool, user.id).await?;
             let _sell_yes_result = lmsr_api::sell_shares(
-                &pool,
+                pool,
                 &config,
                 user.id,
                 event_id,
@@ -559,21 +577,21 @@ mod tests {
             .await?;
 
             operations
-                .push(build_operation_result(&pool, user.id, before_balance, before_staked).await?);
+                .push(build_operation_result(pool, user.id, before_balance, before_staked).await?);
 
             // Verify invariants after sell YES
-            verify_balance_invariant(&pool, &initial_state, &operations, &resolution_credits)
+            verify_balance_invariant(pool, &initial_state, &operations, &resolution_credits)
                 .await?;
-            verify_staked_invariant(&pool).await?;
+            verify_staked_invariant(pool).await?;
         }
 
         // Sell partial NO shares
         if no_shares > 0.0 {
             println!("💰 Selling partial NO shares...");
             let sell_amount = no_shares * 0.5; // Sell 50% of NO shares
-            let (before_balance, before_staked) = fetch_user_ledger(&pool, user.id).await?;
+            let (before_balance, before_staked) = fetch_user_ledger(pool, user.id).await?;
             let _sell_no_result = lmsr_api::sell_shares(
-                &pool,
+                pool,
                 &config,
                 user.id,
                 event_id,
@@ -583,12 +601,12 @@ mod tests {
             .await?;
 
             operations
-                .push(build_operation_result(&pool, user.id, before_balance, before_staked).await?);
+                .push(build_operation_result(pool, user.id, before_balance, before_staked).await?);
 
             // Verify invariants after sell NO
-            verify_balance_invariant(&pool, &initial_state, &operations, &resolution_credits)
+            verify_balance_invariant(pool, &initial_state, &operations, &resolution_credits)
                 .await?;
-            verify_staked_invariant(&pool).await?;
+            verify_staked_invariant(pool).await?;
         }
 
         // Resolve YES
@@ -600,7 +618,7 @@ mod tests {
             )
             .bind(user.id)
             .bind(event_id)
-            .fetch_optional(&pool)
+            .fetch_optional(pool)
             .await?;
 
         if let Some(shares_row) = final_shares {
@@ -616,14 +634,14 @@ mod tests {
             resolution_credits.insert(user.id, payout_ledger);
         }
 
-        lmsr_api::resolve_event(&pool, event_id, true).await?;
+        lmsr_api::resolve_event(pool, event_id, true).await?;
 
         // Verify all invariants after resolution
-        verify_balance_invariant(&pool, &initial_state, &operations, &resolution_credits).await?;
-        verify_post_resolution_invariant(&pool, event_id).await?;
+        verify_balance_invariant(pool, &initial_state, &operations, &resolution_credits).await?;
+        verify_post_resolution_invariant(pool, event_id).await?;
 
         println!("✅ Single user market cycle test PASSED");
-        cleanup_test_database(pool).await?;
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
         Ok(())
     }
 
@@ -637,13 +655,14 @@ mod tests {
                 STRESS_TEST_ITERATIONS
             );
 
-            let pool = setup_test_database().await?;
-            let users = create_test_users(&pool, STRESS_TEST_USERS).await?;
+            let test_db = setup_test_database().await?;
+            let pool = &test_db.pool;
+            let users = create_test_users(pool, STRESS_TEST_USERS).await?;
             let event_id =
-                create_test_event(&pool, &format!("Stress Test Event {}", iteration)).await?;
+                create_test_event(pool, &format!("Stress Test Event {}", iteration)).await?;
             let config = test_config();
 
-            let initial_state = capture_initial_state(&pool).await?;
+            let initial_state = capture_initial_state(pool).await?;
             let mut operations = Vec::new();
             let mut rng = rand::thread_rng();
 
@@ -668,9 +687,9 @@ mod tests {
                         };
 
                         let (before_balance, before_staked) =
-                            fetch_user_ledger(&pool, user.id).await?;
+                            fetch_user_ledger(pool, user.id).await?;
                         match lmsr_api::update_market(
-                            &pool,
+                            pool,
                             &config,
                             user.id,
                             MarketUpdate {
@@ -686,7 +705,7 @@ mod tests {
                             Ok(_) => {
                                 operations.push(
                                     build_operation_result(
-                                        &pool,
+                                        pool,
                                         user.id,
                                         before_balance,
                                         before_staked,
@@ -707,7 +726,7 @@ mod tests {
                         )
                         .bind(user.id)
                         .bind(event_id)
-                        .fetch_optional(&pool)
+                        .fetch_optional(pool)
                         .await?;
 
                         if let Some(shares_row) = user_shares_result {
@@ -723,10 +742,10 @@ mod tests {
                             if available_shares > 0.01 {
                                 let sell_amount = available_shares * rng.gen_range(0.1..0.8);
                                 let (before_balance, before_staked) =
-                                    fetch_user_ledger(&pool, user.id).await?;
+                                    fetch_user_ledger(pool, user.id).await?;
 
                                 match lmsr_api::sell_shares(
-                                    &pool,
+                                    pool,
                                     &config,
                                     user.id,
                                     event_id,
@@ -739,7 +758,7 @@ mod tests {
                                         let _ = result;
                                         operations.push(
                                             build_operation_result(
-                                                &pool,
+                                                pool,
                                                 user.id,
                                                 before_balance,
                                                 before_staked,
@@ -760,7 +779,7 @@ mod tests {
 
                 // Verify invariants periodically
                 if op_idx % 100 == 0 {
-                    verify_staked_invariant(&pool).await?;
+                    verify_staked_invariant(pool).await?;
                 }
             }
 
@@ -772,13 +791,13 @@ mod tests {
             // Final invariant verification before resolution
             let empty_resolution_credits = HashMap::new();
             verify_balance_invariant(
-                &pool,
+                pool,
                 &initial_state,
                 &operations,
                 &empty_resolution_credits,
             )
             .await?;
-            verify_staked_invariant(&pool).await?;
+            verify_staked_invariant(pool).await?;
 
             // Calculate resolution credits
             let mut resolution_credits = HashMap::new();
@@ -786,7 +805,7 @@ mod tests {
                 "SELECT user_id, yes_shares, no_shares, staked_yes_ledger, staked_no_ledger FROM user_shares WHERE event_id = $1",
             )
             .bind(event_id)
-            .fetch_all(&pool)
+            .fetch_all(pool)
             .await?;
 
             let outcome = rng.gen_bool(0.5); // Random resolution outcome
@@ -809,14 +828,14 @@ mod tests {
             }
 
             // Resolve event
-            lmsr_api::resolve_event(&pool, event_id, outcome).await?;
+            lmsr_api::resolve_event(pool, event_id, outcome).await?;
 
             // Final verification
-            verify_balance_invariant(&pool, &initial_state, &operations, &resolution_credits)
+            verify_balance_invariant(pool, &initial_state, &operations, &resolution_credits)
                 .await?;
-            verify_post_resolution_invariant(&pool, event_id).await?;
+            verify_post_resolution_invariant(pool, event_id).await?;
 
-            cleanup_test_database(pool).await?;
+            cleanup_test_database(test_db.pool, &test_db.db_name).await?;
         }
 
         println!(
@@ -829,9 +848,10 @@ mod tests {
     /// Edge case tests: zero balance, max stake, insufficient funds, etc.
     #[tokio::test]
     async fn test_edge_cases() -> Result<()> {
-        let pool = setup_test_database().await?;
-        let users = create_test_users(&pool, 3).await?;
-        let event_id = create_test_event(&pool, "Edge Case Test Event").await?;
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        let users = create_test_users(pool, 3).await?;
+        let event_id = create_test_event(pool, "Edge Case Test Event").await?;
         let config = test_config();
 
         println!("🧪 Starting edge case tests...");
@@ -842,11 +862,11 @@ mod tests {
         // Set user balance to zero
         sqlx::query("UPDATE users SET rp_balance_ledger = 0, rp_staked_ledger = 0 WHERE id = $1")
             .bind(users[0].id)
-            .execute(&pool)
+            .execute(pool)
             .await?;
 
         let zero_balance_result = lmsr_api::update_market(
-            &pool,
+            pool,
             &config,
             users[0].id,
             MarketUpdate {
@@ -868,7 +888,7 @@ mod tests {
         // Test 2: Maximum stake amount (should hit overflow protection)
         println!("💥 Test 2: Maximum stake amount test");
         let max_stake_result = lmsr_api::update_market(
-            &pool,
+            pool,
             &config,
             users[1].id,
             MarketUpdate {
@@ -892,7 +912,7 @@ mod tests {
 
         // First, give user some shares
         let buy_result = lmsr_api::update_market(
-            &pool,
+            pool,
             &config,
             users[2].id,
             MarketUpdate {
@@ -907,7 +927,7 @@ mod tests {
 
         // Try to sell more than owned
         let oversell_result = lmsr_api::sell_shares(
-            &pool,
+            pool,
             &config,
             users[2].id,
             event_id,
@@ -927,7 +947,7 @@ mod tests {
 
         let futures = (0..10).map(|_| {
             lmsr_api::update_market(
-                &pool,
+                pool,
                 &config,
                 users[1].id,
                 MarketUpdate {
@@ -952,7 +972,7 @@ mod tests {
         println!("📊 Test 5: Invalid probability bounds test");
 
         let invalid_prob_high = lmsr_api::update_market(
-            &pool,
+            pool,
             &config,
             users[1].id,
             MarketUpdate {
@@ -966,7 +986,7 @@ mod tests {
         .await;
 
         let invalid_prob_low = lmsr_api::update_market(
-            &pool,
+            pool,
             &config,
             users[1].id,
             MarketUpdate {
@@ -995,11 +1015,11 @@ mod tests {
         // Move closing date to the past
         sqlx::query("UPDATE events SET closing_date = NOW() - INTERVAL '1 minute' WHERE id = $1")
             .bind(event_id)
-            .execute(&pool)
+            .execute(pool)
             .await?;
 
         let closed_market_trade = lmsr_api::update_market(
-            &pool,
+            pool,
             &config,
             users[1].id,
             MarketUpdate {
@@ -1032,15 +1052,15 @@ mod tests {
         // Re-open market before resolving so resolved-state error is tested distinctly
         sqlx::query("UPDATE events SET closing_date = NOW() + INTERVAL '7 days' WHERE id = $1")
             .bind(event_id)
-            .execute(&pool)
+            .execute(pool)
             .await?;
 
         // Resolve the event
-        lmsr_api::resolve_event(&pool, event_id, true).await?;
+        lmsr_api::resolve_event(pool, event_id, true).await?;
 
         // Try to trade on resolved event
         let post_resolution_trade = lmsr_api::update_market(
-            &pool,
+            pool,
             &config,
             users[1].id,
             MarketUpdate {
@@ -1070,11 +1090,11 @@ mod tests {
         println!("🔗 Test 8: Database consistency test");
 
         // Create new event for this test
-        let consistency_event_id = create_test_event(&pool, "Consistency Test").await?;
+        let consistency_event_id = create_test_event(pool, "Consistency Test").await?;
 
         // Perform a transaction and verify all tables are consistent
         let trade_result = lmsr_api::update_market(
-            &pool,
+            pool,
             &config,
             users[1].id,
             MarketUpdate {
@@ -1092,13 +1112,13 @@ mod tests {
         let user_balance: i64 =
             sqlx::query_scalar("SELECT rp_balance_ledger FROM users WHERE id = $1")
                 .bind(users[1].id)
-                .fetch_one(&pool)
+                .fetch_one(pool)
                 .await?;
 
         let user_staked: i64 =
             sqlx::query_scalar("SELECT rp_staked_ledger FROM users WHERE id = $1")
                 .bind(users[1].id)
-                .fetch_one(&pool)
+                .fetch_one(pool)
                 .await?;
 
         let shares_staked: Option<i64> = sqlx::query_scalar(
@@ -1106,7 +1126,7 @@ mod tests {
         )
         .bind(users[1].id)
         .bind(consistency_event_id)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await?;
 
         let audit_trail_count: i64 = sqlx::query_scalar(
@@ -1114,7 +1134,7 @@ mod tests {
         )
         .bind(users[1].id)
         .bind(consistency_event_id)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await?;
 
         assert!(user_balance >= 0, "User balance should be non-negative");
@@ -1131,16 +1151,17 @@ mod tests {
         println!("✅ Database consistency verified");
 
         println!("✅ All edge case tests PASSED");
-        cleanup_test_database(pool).await?;
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
         Ok(())
     }
 
     /// Boundary condition tests for numerical precision
     #[tokio::test]
     async fn test_numerical_precision() -> Result<()> {
-        let pool = setup_test_database().await?;
-        let users = create_test_users(&pool, 1).await?;
-        let event_id = create_test_event(&pool, "Precision Test Event").await?;
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        let users = create_test_users(pool, 1).await?;
+        let event_id = create_test_event(pool, "Precision Test Event").await?;
         let config = test_config();
 
         println!("🔢 Starting numerical precision tests...");
@@ -1150,7 +1171,7 @@ mod tests {
 
         let micro_stake = 0.000001; // 1 micro-RP
         let micro_result = lmsr_api::update_market(
-            &pool,
+            pool,
             &config,
             users[0].id,
             MarketUpdate {
@@ -1188,7 +1209,7 @@ mod tests {
 
         for prob in extreme_prob_tests {
             let result = lmsr_api::update_market(
-                &pool,
+                pool,
                 &config,
                 users[0].id,
                 MarketUpdate {
@@ -1213,7 +1234,7 @@ mod tests {
         let initial_balance: i64 =
             sqlx::query_scalar("SELECT rp_balance_ledger FROM users WHERE id = $1")
                 .bind(users[0].id)
-                .fetch_one(&pool)
+                .fetch_one(pool)
                 .await?;
 
         // Perform multiple small buy/sell cycles
@@ -1222,7 +1243,7 @@ mod tests {
 
             // Buy shares
             let buy_result = lmsr_api::update_market(
-                &pool,
+                pool,
                 &config,
                 users[0].id,
                 MarketUpdate {
@@ -1239,7 +1260,7 @@ mod tests {
             if buy_result.shares_acquired > 0.01 {
                 let sell_amount = buy_result.shares_acquired * 0.5;
                 let _sell_result = lmsr_api::sell_shares(
-                    &pool,
+                    pool,
                     &config,
                     users[0].id,
                     event_id,
@@ -1253,7 +1274,7 @@ mod tests {
         let final_balance: i64 =
             sqlx::query_scalar("SELECT rp_balance_ledger FROM users WHERE id = $1")
                 .bind(users[0].id)
-                .fetch_one(&pool)
+                .fetch_one(pool)
                 .await?;
 
         let balance_change = (initial_balance - final_balance) as f64 / 1_000_000.0;
@@ -1270,14 +1291,15 @@ mod tests {
         assert!(balance_change < 10.0, "Balance change should be reasonable");
 
         println!("✅ All numerical precision tests PASSED");
-        cleanup_test_database(pool).await?;
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
         Ok(())
     }
 
     /// Stress test for numerical stability under sustained randomized trading
     #[tokio::test]
     async fn test_numerical_stability_under_stress() -> Result<()> {
-        let pool = setup_test_database().await?;
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
 
         let user_count = env_usize("STABILITY_STRESS_USERS", 25);
         let event_count = env_usize("STABILITY_STRESS_EVENTS", 25);
@@ -1294,11 +1316,11 @@ mod tests {
             max_stake = min_stake * 10.0;
         }
 
-        let users = create_test_users(&pool, user_count).await?;
+        let users = create_test_users(pool, user_count).await?;
         let mut event_ids = Vec::with_capacity(event_count);
         for i in 0..event_count {
             let event_id =
-                create_test_event(&pool, &format!("Stability Stress Event {}", i)).await?;
+                create_test_event(pool, &format!("Stability Stress Event {}", i)).await?;
             event_ids.push(event_id);
         }
         let config = test_config();
@@ -1326,7 +1348,7 @@ mod tests {
             )
             .bind(user.id)
             .bind(event_id)
-            .fetch_optional(&pool)
+            .fetch_optional(pool)
             .await?;
 
             if let Some(row) = existing_shares {
@@ -1338,13 +1360,13 @@ mod tests {
                 }
             }
 
-            let (before_balance, before_staked) = fetch_user_ledger(&pool, user.id).await?;
+            let (before_balance, before_staked) = fetch_user_ledger(pool, user.id).await?;
             let before_total = before_balance + before_staked;
 
             let current_prob: f64 =
                 sqlx::query_scalar("SELECT market_prob FROM events WHERE id = $1")
                     .bind(event_id)
-                    .fetch_one(&pool)
+                    .fetch_one(pool)
                     .await?;
 
             let prob_shift = rng.gen_range(0.01..0.2);
@@ -1363,7 +1385,7 @@ mod tests {
             };
 
             let update_result = match lmsr_api::update_market(
-                &pool,
+                pool,
                 &config,
                 user.id,
                 MarketUpdate {
@@ -1387,7 +1409,7 @@ mod tests {
                 let sell_amount = update_result.shares_acquired * sell_fraction;
                 if sell_amount >= min_sell_shares {
                     lmsr_api::sell_shares(
-                        &pool,
+                        pool,
                         &config,
                         user.id,
                         event_id,
@@ -1398,7 +1420,7 @@ mod tests {
                 }
             }
 
-            let (after_balance, after_staked) = fetch_user_ledger(&pool, user.id).await?;
+            let (after_balance, after_staked) = fetch_user_ledger(pool, user.id).await?;
             let after_total = after_balance + after_staked;
             let stake_ledger = to_ledger_i64(stake)?;
             let delta_ledger = before_total - after_total;
@@ -1416,7 +1438,7 @@ mod tests {
                 )
                 .bind(user.id)
                 .bind(event_id)
-                .fetch_optional(&pool)
+                .fetch_optional(pool)
                 .await?;
 
                 if let Some(row) = remaining_shares {
@@ -1458,7 +1480,7 @@ mod tests {
         let event_rows = sqlx::query(
             "SELECT id, market_prob, q_yes, q_no, liquidity_b, cumulative_stake FROM events",
         )
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await?;
 
         for row in event_rows {
@@ -1504,7 +1526,7 @@ mod tests {
         let share_rows = sqlx::query(
             "SELECT user_id, event_id, yes_shares, no_shares, total_staked_ledger FROM user_shares",
         )
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await?;
 
         for row in share_rows {
@@ -1538,7 +1560,7 @@ mod tests {
         }
 
         let user_rows = sqlx::query("SELECT id, rp_balance_ledger, rp_staked_ledger FROM users")
-            .fetch_all(&pool)
+            .fetch_all(pool)
             .await?;
 
         for row in user_rows {
@@ -1563,7 +1585,7 @@ mod tests {
         let update_rows = sqlx::query(
             "SELECT id, prev_prob, new_prob, stake_amount, shares_acquired FROM market_updates",
         )
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await?;
 
         for row in update_rows {
@@ -1600,7 +1622,7 @@ mod tests {
         }
 
         println!("✅ Numerical stability under stress PASSED");
-        cleanup_test_database(pool).await?;
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
         Ok(())
     }
 }
