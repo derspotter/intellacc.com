@@ -192,7 +192,7 @@ export default function NonBinaryEventCard({ event, onStakeUpdate, hideTitle = f
             ]),
             div({ class: 'stat' }, [
               span({ class: 'stat-label' }, 'Total RP Staked:'),
-              span({ class: 'stat-value' }, formatRP(market.val.cumulative_stake || 0))
+              span({ class: 'stat-value' }, formatRP(Math.max(0, (market.val.cumulative_stake || 0) - ((market.val.liquidity_b || 5000) * Math.log(outcomes.length)))))
             ])
           ])
         ]),

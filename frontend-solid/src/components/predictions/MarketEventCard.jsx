@@ -1,7 +1,8 @@
-import { createEffect, createSignal, Show } from 'solid-js';
+import { createEffect, createSignal, Show, untrack } from 'solid-js';
 import { getCurrentUserId } from '../../services/auth';
 import { getToken } from '../../services/tokenService';
 import {
+  api,
   getUserPositions,
   sellEventShares,
   placeEventUpdate
@@ -187,33 +188,26 @@ export default function MarketEventCard(props) {
 
     setKellyLoading(true);
     try {
-      const response = await fetch(`/api/events/${eventId()}/kelly?belief=${encodeURIComponent(belief)}`, {
-        headers: { Authorization: `Bearer ${getToken()}` }
+      const data = await api.events.getKelly(eventId(), belief);
+      const currentProb = safeNumber(marketState().market_prob, safeNumber(event().market_prob, 0.5));
+      const edge = getKellyEdge(belief, currentProb);
+      setKellyData({
+        kelly_optimal: safeNumber(data.kelly_suggestion),
+        quarter_kelly: safeNumber(data.quarter_kelly),
+        kelly_growth: safeNumber(data.expected_log_growth),
+        edge,
+        balance: safeNumber(data.balance, 1000),
+        current_prob: currentProb
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        const currentProb = safeNumber(marketState().market_prob, safeNumber(event().market_prob, 0.5));
-        const edge = getKellyEdge(belief, currentProb);
-        setKellyData({
-          kelly_optimal: safeNumber(data.kelly_suggestion),
-          quarter_kelly: safeNumber(data.quarter_kelly),
-          kelly_growth: safeNumber(data.expected_log_growth),
-          edge,
-          balance: safeNumber(data.balance, 1000),
-          current_prob: currentProb
-        });
-      } else if (response.status === 403) {
-        const error = await response.json().catch(() => ({
-          message: 'Verification required to load Kelly suggestion.'
-        }));
-        setVerificationMessage(error.message || 'Verification required to load Kelly suggestion.', {
-          requiredTier: error.required_tier
-        });
-      } else {
-        throw new Error(`Kelly suggestion request failed: ${response.status}`);
-      }
     } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        setVerificationMessage(err.data?.message || 'Verification required to load Kelly suggestion.', {
+          requiredTier: err.data?.required_tier
+        });
+        setKellyData(null);
+        return;
+      }
+
       const fallbackBalance = 1000;
       const currentProb = safeNumber(marketState().market_prob, safeNumber(event().market_prob, 0.5));
       const edge = getKellyEdge(belief, currentProb);
@@ -298,6 +292,10 @@ export default function MarketEventCard(props) {
 
   const executeSell = async (shareType, amount) => {
     const amountValue = safeNumber(amount, 0);
+    if (!isOpen()) {
+      setError('Market is closed or resolved.');
+      return;
+    }
     if (!isLoggedIn()) {
       setError('Please log in first.');
       return;
@@ -352,6 +350,10 @@ export default function MarketEventCard(props) {
   const handleFullExit = async () => {
     const current = position();
     if (!current) {
+      return;
+    }
+    if (!isOpen()) {
+      setError('Market is closed or resolved.');
       return;
     }
 
@@ -496,8 +498,8 @@ export default function MarketEventCard(props) {
   });
 
   createEffect(() => {
-    const current = marketState();
-    const currentPosition = position();
+    marketState();
+    const currentPosition = untrack(() => position());
     if (!currentPosition) {
       return;
     }
@@ -536,7 +538,7 @@ export default function MarketEventCard(props) {
             </div>
             <div class="stat">
               <span class="stat-label">Total RP Staked:</span>
-              <span class="stat-value">{formatCurrency(marketState().cumulative_stake, { includeSymbol: false })}</span>
+              <span class="stat-value">{formatCurrency(Math.max(0, marketState().cumulative_stake - (safeNumber(marketState().liquidity_b, 5000) * Math.LN2)), { includeSymbol: false })}</span>
             </div>
             <div class="stat">
               <span class="stat-label">Liquidity Parameter:</span>
@@ -697,32 +699,34 @@ export default function MarketEventCard(props) {
           </div>
         </div>
 
-        <div class="withdrawal-actions">
-          <button
-            type="button"
-            class={`button withdrawal-btn secondary ${positionHasData() && safeNumber(position()?.yes_shares) > 0 ? '' : 'hidden'}`}
-            onClick={() => executeSell('yes', safeNumber(position()?.yes_shares))}
-            disabled={!!busyAction()}
-          >
-            {busyAction() === 'sell-yes' ? 'Selling...' : `Sell All YES (${safeNumber(position()?.yes_shares).toFixed(2)})`}
-          </button>
-          <button
-            type="button"
-            class={`button withdrawal-btn secondary ${positionHasData() && safeNumber(position()?.no_shares) > 0 ? '' : 'hidden'}`}
-            onClick={() => executeSell('no', safeNumber(position()?.no_shares))}
-            disabled={!!busyAction()}
-          >
-            {busyAction() === 'sell-no' ? 'Selling...' : `Sell All NO (${safeNumber(position()?.no_shares).toFixed(2)})`}
-          </button>
-          <button
-            type="button"
-            class={`button withdrawal-btn primary ${positionHasData() ? '' : 'hidden'}`}
-            onClick={() => void handleFullExit()}
-            disabled={!!busyAction()}
-          >
-            {busyAction() === 'exit' ? 'Exiting...' : 'Exit All Positions'}
-          </button>
-        </div>
+        <Show when={isOpen() && positionHasData()}>
+          <div class="withdrawal-actions">
+            <button
+              type="button"
+              class={`button withdrawal-btn secondary ${safeNumber(position()?.yes_shares) > 0 ? '' : 'hidden'}`}
+              onClick={() => executeSell('yes', safeNumber(position()?.yes_shares))}
+              disabled={!!busyAction()}
+            >
+              {busyAction() === 'sell-yes' ? 'Selling...' : `Sell All YES (${safeNumber(position()?.yes_shares).toFixed(2)})`}
+            </button>
+            <button
+              type="button"
+              class={`button withdrawal-btn secondary ${safeNumber(position()?.no_shares) > 0 ? '' : 'hidden'}`}
+              onClick={() => executeSell('no', safeNumber(position()?.no_shares))}
+              disabled={!!busyAction()}
+            >
+              {busyAction() === 'sell-no' ? 'Selling...' : `Sell All NO (${safeNumber(position()?.no_shares).toFixed(2)})`}
+            </button>
+            <button
+              type="button"
+              class="button withdrawal-btn primary"
+              onClick={() => void handleFullExit()}
+              disabled={!!busyAction()}
+            >
+              {busyAction() === 'exit' ? 'Exiting...' : 'Exit All Positions'}
+            </button>
+          </div>
+        </Show>
 
         <Show when={tradeMessage()}>
           <p class="success">{tradeMessage()}</p>

@@ -731,7 +731,7 @@ export default function EventCard({ event, onStakeUpdate, hideTitle = false }) {
           ]),
           div({ class: 'stat' }, [
             span({ class: 'stat-label' }, 'Total RP Staked:'),
-            span({ class: 'stat-value' }, () => formatRP(marketState.val.cumulative_stake, { includeSymbol: false }))
+            span({ class: 'stat-value' }, () => formatRP(Math.max(0, marketState.val.cumulative_stake - ((marketState.val.liquidity_b || 5000) * Math.LN2)), { includeSymbol: false }))
           ]),
           div({ class: 'stat' }, [
             span({ class: 'stat-label' }, 'Liquidity Parameter:'),

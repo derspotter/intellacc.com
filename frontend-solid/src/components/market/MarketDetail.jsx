@@ -64,25 +64,19 @@ const TradeTicket = (props) => {
         if (!m?.id) return;
         const userId = getUserId();
         if (!userId) return;
-        const token = getToken();
         try {
-            const resp = await fetch(`/api/events/${m.id}/kelly?belief=${beliefVal}&user_id=${userId}`, {
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+            const data = await api.events.getKelly(m.id, beliefVal);
+            const kellyOptimal = data.kelly_suggestion ? parseFloat(data.kelly_suggestion) : 0;
+            const quarterKelly = data.quarter_kelly ? parseFloat(data.quarter_kelly) : kellyOptimal * 0.25;
+            const currentProb = data.current_prob ? parseFloat(data.current_prob) : 0.5;
+            const balance = data.balance ? parseFloat(data.balance) : 1000;
+            setKellyData({
+                kelly_optimal: kellyOptimal,
+                quarter_kelly: quarterKelly,
+                edge: beliefVal - currentProb,
+                balance
             });
-            if (resp.ok) {
-                const data = await resp.json();
-                const kellyOptimal = data.kelly_suggestion ? parseFloat(data.kelly_suggestion) : 0;
-                const quarterKelly = data.quarter_kelly ? parseFloat(data.quarter_kelly) : kellyOptimal * 0.25;
-                const currentProb = data.current_prob ? parseFloat(data.current_prob) : 0.5;
-                const balance = data.balance ? parseFloat(data.balance) : 1000;
-                setKellyData({
-                    kelly_optimal: kellyOptimal,
-                    quarter_kelly: quarterKelly,
-                    edge: beliefVal - currentProb,
-                    balance
-                });
-                return;
-            }
+            return;
         } catch (err) {
             console.error('[Kelly] API error, using fallback:', err);
         }
@@ -162,13 +156,7 @@ const TradeTicket = (props) => {
 
         setSubmitting(true);
         try {
-            const resp = await fetch(`/api/events/${m.id}/update`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${(await import('../../services/tokenService')).getToken()}` },
-                body: JSON.stringify({ stake, target_prob })
-            });
-            if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw { data: d, message: d.message || 'Trade failed' }; }
-            const result = await resp.json();
+            const result = await api.events.update(m.id, { stake, target_prob });
             setLastFill(result);
             setStakeShares("");
         } catch (err) {
