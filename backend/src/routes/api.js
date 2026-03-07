@@ -25,6 +25,7 @@ const atprotoController = require('../controllers/atprotoController');
 const socialAuthController = require('../controllers/socialAuthController');
 const persuasiveAlphaController = require('../controllers/persuasiveAlphaController');
 const ledgerAuditController = require('../controllers/ledgerAuditController');
+const postMatchUsageController = require('../controllers/postMatchUsageController');
 const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const moderationController = require('../controllers/moderationController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
@@ -243,6 +244,8 @@ router.get('/admin/external-imports/status', authenticateJWT, requireAdmin, asyn
         return res.status(502).json({ message: 'Failed to load external import status' });
     }
 });
+
+router.get('/admin/post-match-usage/summary', authenticateJWT, requireAdmin, postMatchUsageController.getSummary);
 
 router.post('/admin/external-imports/sync-all', authenticateJWT, requireAdmin, async (req, res) => {
     try {
