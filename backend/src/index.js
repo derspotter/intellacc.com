@@ -1,8 +1,8 @@
 const express = require('express');
-const { Pool } = require('pg');
 const http = require('http');
 const socketIo = require('socket.io');
 const { verifyToken } = require('./utils/jwt');
+const db = require('./db');
 const notificationService = require('./services/notificationService');
 const passwordResetService = require('./services/passwordResetService');
 const { startDeliveryWorker: startActivityPubDeliveryWorker } = require('./services/activitypub/deliveryWorker');
@@ -12,10 +12,13 @@ const { validateProductionConfig } = require('./utils/productionGuard');
 const app = express();
 const port = process.env.NODE_PORT || 3000;
 
-// PostgreSQL Pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+const pool = db.getPool();
+
+const isJestRuntime = () => Boolean(
+  process.env.JEST_WORKER_ID ||
+  process.env.npm_lifecycle_event === 'test' ||
+  process.argv.some((arg) => arg.endsWith('/jest') || arg.includes('/jest') || arg.includes('\\jest'))
+);
 
 // Create HTTP server
 const server = http.createServer(app);
@@ -140,7 +143,9 @@ app.use(express.json({
 }));
 
 // Background worker for delayed password resets
-passwordResetService.startResetWorker();
+if (!isJestRuntime()) {
+  passwordResetService.startResetWorker();
+}
 
 // Security headers
 app.use((req, res, next) => {
@@ -178,6 +183,10 @@ app.get('/', async (req, res) => {
 // ActivityPub federation endpoints (root-level, not under /api)
 app.use(require('./routes/activitypub'));
 app.use('/api', require('./routes/api'));
+
+// Global Error Handler
+const errorHandler = require('./middleware/errorHandler');
+app.use(errorHandler);
 
 // Attach io instance to app for controllers to use
 app.set('io', io);
