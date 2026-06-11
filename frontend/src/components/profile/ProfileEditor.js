@@ -18,10 +18,14 @@ export default function ProfileEditor({ onCancel }) {
   
   const bioTextareaId = "profile-bio-textarea";
   const usernameInputId = "profile-username-input";
+  const displayNameInputId = "profile-display-name-input";
+  const visibilitySelectId = "profile-visibility-select";
   const avatarInputId = "profile-avatar-input";
   const usernameInputState = van.state(userStore.state.profile.val?.username || '');
+  const displayNameInputState = van.state(userStore.state.profile.val?.display_name || '');
   const bioInputState = van.state(userStore.state.profile.val?.bio || '');
   const avatarUrlState = van.state(userStore.state.profile.val?.avatar_url || '');
+  const visibilityInputState = van.state(userStore.state.profile.val?.profile_visibility || 'public');
 
   const handleAvatarChange = async (e) => {
     const file = e.target.files[0];
@@ -45,7 +49,9 @@ export default function ProfileEditor({ onCancel }) {
   const handleSubmit = async () => { 
     
     const currentUsername = usernameInputState.val.trim();
+    const currentDisplayName = displayNameInputState.val.trim();
     const currentBio = bioInputState.val;
+    const currentVisibility = visibilityInputState.val;
 
     if (!currentUsername) {
       editState.val = {
@@ -62,7 +68,9 @@ export default function ProfileEditor({ onCancel }) {
     try {
       const success = await userStore.actions.updateUserProfile.call(userStore, {
         bio: currentBio,
-        username: currentUsername
+        username: currentUsername,
+        display_name: currentDisplayName,
+        profile_visibility: currentVisibility
       });
 
       if (success) {
@@ -132,6 +140,18 @@ export default function ProfileEditor({ onCancel }) {
           })
         ]),
         div({ class: "form-group" }, [
+          label({ for: displayNameInputId }, "Display Name:"),
+          input({
+            id: displayNameInputId,
+            type: "text",
+            class: "display-name-input",
+            disabled: () => editState.val.submitting,
+            value: displayNameInputState,
+            placeholder: "Optional display name",
+            oninput: e => displayNameInputState.val = e.target.value
+          })
+        ]),
+        div({ class: "form-group" }, [
           label({ for: bioTextareaId }, "Bio:"),
           textarea({
             id: bioTextareaId,
@@ -141,6 +161,20 @@ export default function ProfileEditor({ onCancel }) {
             value: bioInputState,
             oninput: e => bioInputState.val = e.target.value
           })
+        ]),
+        div({ class: "form-group" }, [
+          label({ for: visibilitySelectId }, "Profile Visibility:"),
+          van.tags.select({
+            id: visibilitySelectId,
+            class: "profile-visibility-select",
+            disabled: () => editState.val.submitting,
+            value: visibilityInputState,
+            oninput: e => visibilityInputState.val = e.target.value
+          }, [
+            van.tags.option({ value: "public" }, "Public"),
+            van.tags.option({ value: "followers_only" }, "Followers Only"),
+            van.tags.option({ value: "private" }, "Private")
+          ])
         ]),
         div({ class: "form-buttons" }, [
           Button({

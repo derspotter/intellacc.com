@@ -57,13 +57,13 @@ const userStore = {
       }
     },
     
-    async updateUserProfile({ bio, username } = {}) {
+    async updateUserProfile({ bio, username, display_name, profile_visibility } = {}) {
       if (!isLoggedInState.val) {
         return false;
       }
       try {
         this.state.error.val = '';
-        const updatedProfile = await api.users.updateProfile({ bio, username });
+        const updatedProfile = await api.users.updateProfile({ bio, username, display_name, profile_visibility });
         let rawBio = '';
         try {
           const parsedBio = JSON.parse(updatedProfile.bio); // updatedProfile.bio is '{"bio":"text"}'

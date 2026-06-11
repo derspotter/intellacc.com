@@ -26,8 +26,11 @@ const coerceUser = (user) => {
   return {
     id: user.id || user.userId,
     username: user.username || 'User',
+    display_name: user.display_name || '',
     email: user.email || '',
     bio: user.bio || '',
+    avatar_url: user.avatar_url || '',
+    profile_visibility: user.profile_visibility || 'public',
     rp_balance: Number(user.rp_balance || 0),
     rp_staked: Number(user.rp_staked || 0),
     total_reputation: Number(
@@ -115,7 +118,9 @@ export default function ProfilePage(props) {
 
   const [editing, setEditing] = createSignal(false);
   const [usernameInput, setUsernameInput] = createSignal('');
+  const [displayNameInput, setDisplayNameInput] = createSignal('');
   const [bioInput, setBioInput] = createSignal('');
+  const [profileVisibilityInput, setProfileVisibilityInput] = createSignal('public');
   const [savingProfile, setSavingProfile] = createSignal(false);
 
   const [actionError, setActionError] = createSignal('');
@@ -160,7 +165,9 @@ export default function ProfilePage(props) {
       setReputation(normalizeReputation(normalizedProfile));
       setReputationLoading(false);
       setUsernameInput(normalizedProfile.username);
+      setDisplayNameInput(normalizedProfile.display_name || '');
       setBioInput(normalizedProfile.bio);
+      setProfileVisibilityInput(normalizedProfile.profile_visibility || 'public');
       setFollowers([]);
       setFollowing([]);
       setNetworkLoaded(false);
@@ -215,7 +222,9 @@ export default function ProfilePage(props) {
     }
 
     const username = usernameInput().trim();
+    const display_name = displayNameInput().trim();
     const bio = bioInput().trim();
+    const profile_visibility = profileVisibilityInput();
 
     if (!username) {
       setActionError('Username is required.');
@@ -229,9 +238,11 @@ export default function ProfilePage(props) {
     try {
       await updateProfile({
         username,
-        bio
+        display_name,
+        bio,
+        profile_visibility
       });
-      setProfile((current) => ({ ...current, username, bio }));
+      setProfile((current) => ({ ...current, username, display_name, bio, profile_visibility }));
       setEditing(false);
       setActionMessage('Profile updated.');
     } catch (err) {
@@ -338,7 +349,10 @@ export default function ProfilePage(props) {
               <div class="profile-column main">
                 <Card title={isSelf ? 'Profile' : ''} className="profile-card">
                   <div class="profile-content">
-                    <h3 class="username">{user.username || `user-${user.id}`}</h3>
+                    <h3 class="username">{user.display_name || user.username || `user-${user.id}`}</h3>
+                    <Show when={user.display_name}>
+                      <p class="email">@{user.username || `user-${user.id}`}</p>
+                    </Show>
 
                     <Show when={isSelf}>
                       <Show when={user.email}>
@@ -393,6 +407,10 @@ export default function ProfilePage(props) {
                     <div class="bio-section">
                       <h4>Bio</h4>
                       <p class="bio">{user.bio || EMPTY_BIO_TEXT}</p>
+                    </div>
+                    <div class="bio-section">
+                      <h4>Profile Visibility</h4>
+                      <p class="bio">{String(user.profile_visibility || 'public').replace('_', ' ')}</p>
                     </div>
 
                     <Show when={isAuthenticated() && !isSelf}>
@@ -452,6 +470,17 @@ export default function ProfilePage(props) {
                           />
                         </label>
                         <label class="form-group">
+                          <span>Display Name</span>
+                          <input
+                            class="form-input"
+                            value={displayNameInput()}
+                            onInput={(event) => setDisplayNameInput(event.target.value)}
+                            disabled={savingProfile()}
+                            autocomplete="name"
+                            placeholder="Optional display name"
+                          />
+                        </label>
+                        <label class="form-group">
                           <span>Bio</span>
                           <textarea
                             class="form-textarea"
@@ -460,6 +489,19 @@ export default function ProfilePage(props) {
                             disabled={savingProfile()}
                             maxLength="500"
                           />
+                        </label>
+                        <label class="form-group">
+                          <span>Profile Visibility</span>
+                          <select
+                            class="form-input"
+                            value={profileVisibilityInput()}
+                            onChange={(event) => setProfileVisibilityInput(event.target.value)}
+                            disabled={savingProfile()}
+                          >
+                            <option value="public">Public</option>
+                            <option value="followers_only">Followers Only</option>
+                            <option value="private">Private</option>
+                          </select>
                         </label>
                         <div class="form-actions">
                           <Button

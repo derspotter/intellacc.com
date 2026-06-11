@@ -58,7 +58,11 @@ export default function ProfileCard({ onEdit, user, followButton, title = 'Profi
             userData.avatar_url 
               ? van.tags.img({ src: userData.avatar_url, alt: `${userData.username} avatar`, style: "width: 80px; height: 80px; border-radius: 50%; object-fit: cover;" })
               : div({ style: "width: 80px; height: 80px; border-radius: 50%; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; font-size: 2rem;" }, "👤"),
-            showUsername ? h3({ class: "username", style: "margin: 0;" }, userData.username) : null,
+            div({ class: "profile-header-copy" }, [
+              userData.display_name ? h3({ class: "display-name", style: "margin: 0;" }, userData.display_name) : null,
+              showUsername ? p({ class: "username", style: userData.display_name ? "margin: 0.25rem 0 0;" : "margin: 0;" }, userData.display_name ? `@${userData.username}` : userData.username) : null,
+              userData.profile_visibility ? p({ class: "profile-visibility", style: "margin: 0.25rem 0 0; opacity: 0.75;" }, `Visibility: ${userData.profile_visibility.replace('_', ' ')}`) : null
+            ]),
           ]),
           
           userData.email ? div({ class: "email-section" }, [

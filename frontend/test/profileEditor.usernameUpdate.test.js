@@ -14,7 +14,9 @@ describe('ProfileEditor username update', () => {
     userStore.state.profile.val = {
       id: 1,
       username: 'OldName',
-      bio: 'Old bio'
+      display_name: 'Old Display',
+      bio: 'Old bio',
+      profile_visibility: 'public'
     };
 
     userStore.actions.updateUserProfile = vi.fn().mockResolvedValue(true);
@@ -33,12 +35,18 @@ describe('ProfileEditor username update', () => {
     document.body.appendChild(editor);
 
     const usernameInput = document.getElementById('profile-username-input');
+    const displayNameInput = document.getElementById('profile-display-name-input');
     const bioTextarea = document.getElementById('profile-bio-textarea');
+    const visibilitySelect = document.getElementById('profile-visibility-select');
 
     usernameInput.value = '  NewName  ';
     usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    displayNameInput.value = '  New Display  ';
+    displayNameInput.dispatchEvent(new Event('input', { bubbles: true }));
     bioTextarea.value = 'New bio';
     bioTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+    visibilitySelect.value = 'followers_only';
+    visibilitySelect.dispatchEvent(new Event('input', { bubbles: true }));
 
     const saveButton = Array.from(document.querySelectorAll('button'))
       .find(btn => btn.textContent === 'Save Profile');
@@ -50,7 +58,9 @@ describe('ProfileEditor username update', () => {
     expect(userStore.actions.updateUserProfile).toHaveBeenCalledTimes(1);
     expect(userStore.actions.updateUserProfile).toHaveBeenCalledWith({
       bio: 'New bio',
-      username: 'NewName'
+      username: 'NewName',
+      display_name: 'New Display',
+      profile_visibility: 'followers_only'
     });
     expect(onCancel).toHaveBeenCalledTimes(1);
   });

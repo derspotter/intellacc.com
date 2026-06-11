@@ -332,10 +332,12 @@ export const api = {
     getProfile: () =>
       request('/me'),
 
-    updateProfile: ({ bio, username } = {}) => {
+    updateProfile: ({ bio, username, display_name, profile_visibility } = {}) => {
       const body = {};
       if (typeof bio !== 'undefined') body.bio = bio;
       if (typeof username !== 'undefined') body.username = username;
+      if (typeof display_name !== 'undefined') body.display_name = display_name;
+      if (typeof profile_visibility !== 'undefined') body.profile_visibility = profile_visibility;
       return request('/users/profile', { method: 'PATCH', body });
     },
 
@@ -1032,7 +1034,8 @@ export const runMarketQuestionRewards = () => api.marketQuestions.runAutomaticRe
 
 export const getFollowingStatus = (userId) => api.users.getFollowingStatus(userId);
 
-export const updateProfile = ({ username, bio }) => api.users.updateProfile({ username, bio });
+export const updateProfile = ({ username, display_name, bio, profile_visibility }) =>
+  api.users.updateProfile({ username, display_name, bio, profile_visibility });
 
 export const getCurrentUserId = getCurrentUser;
 

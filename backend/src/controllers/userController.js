@@ -37,6 +37,80 @@ const parseUserId = (value) => {
 };
 
 const ALLOWED_UI_SKINS = new Set(['van', 'terminal']);
+const ALLOWED_PROFILE_VISIBILITY = new Set(['public', 'followers_only', 'private']);
+
+const isNonEmptyString = (value) => typeof value === 'string' && value.length > 0;
+
+const validateWrapGroup = (fields, label) => {
+  const present = fields.map(isNonEmptyString);
+  if (present.some(Boolean) && !present.every(Boolean)) {
+    return `${label} requires wrapped key, salt, and iv`;
+  }
+  return null;
+};
+
+const verifyCurrentPassword = async (userId, currentPassword) => {
+  if (!isNonEmptyString(currentPassword)) {
+    return { ok: false, status: 400, body: { error: 'current_password is required' } };
+  }
+
+  const userRes = await db.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+  if (userRes.rows.length === 0) {
+    return { ok: false, status: 401, body: { error: 'Invalid account' } };
+  }
+
+  const matches = await bcrypt.compare(currentPassword, userRes.rows[0].password_hash);
+  if (!matches) {
+    return { ok: false, status: 403, body: { error: 'Current password is incorrect' } };
+  }
+
+  return { ok: true };
+};
+
+const verifyMasterKeyWriterDevice = async (userId, devicePublicId) => {
+  if (!isNonEmptyString(devicePublicId)) {
+    return { ok: false, status: 403, body: { error: 'Verified device required' } };
+  }
+
+  const deviceRes = await db.query(
+    `SELECT id
+     FROM user_devices
+     WHERE user_id = $1
+       AND device_public_id::text = $2
+       AND revoked_at IS NULL
+       AND last_verified_at IS NOT NULL
+     LIMIT 1`,
+    [userId, devicePublicId]
+  );
+
+  if (deviceRes.rows.length === 0) {
+    return { ok: false, status: 403, body: { error: 'Verified device required' } };
+  }
+
+  return { ok: true };
+};
+
+const buildProfileVisibilityClause = (alias, viewerParamIndex) => {
+  const viewerRef = viewerParamIndex ? `$${viewerParamIndex}` : 'NULL';
+  const viewerSelfClause = viewerParamIndex ? `${alias}.id = ${viewerRef}` : 'FALSE';
+  const viewerFollowerClause = viewerParamIndex
+    ? `EXISTS (
+         SELECT 1
+         FROM follows f
+         WHERE f.follower_id = ${viewerRef}
+           AND f.following_id = ${alias}.id
+       )`
+    : 'FALSE';
+
+  return `(
+    COALESCE(${alias}.profile_visibility, 'public') = 'public'
+    OR ${viewerSelfClause}
+    OR (
+      COALESCE(${alias}.profile_visibility, 'public') = 'followers_only'
+      AND ${viewerFollowerClause}
+    )
+  )`;
+};
 
 async function getLedgerReputationSummary(userId) {
   const result = await db.query(`
@@ -195,23 +269,28 @@ exports.createUser = async (req, res) => {
 // Get a user by ID
 exports.getUser = async (req, res) => {
   const userId = req.params.id;
+  const viewerId = getViewerId(req);
   try {
     const [result, reputation] = await Promise.all([
       db.query(`
       SELECT
         id,
         username,
-        email,
+        display_name,
+        CASE WHEN id = $2 THEN email ELSE NULL END AS email,
         bio,
         avatar_url,
+        COALESCE(profile_visibility, 'public') AS profile_visibility,
         created_at,
         updated_at,
         (COALESCE(rp_balance_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_balance,
         (COALESCE(rp_staked_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_staked,
         ((COALESCE(rp_balance_ledger, 0) + COALESCE(rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) AS total_reputation
       FROM users
-      WHERE id = $1 AND deleted_at IS NULL
-    `, [userId]),
+      WHERE id = $1
+        AND deleted_at IS NULL
+        AND ${buildProfileVisibilityClause('users', 2)}
+    `, [userId, viewerId || null]),
       getLedgerReputationSummary(userId)
     ]);
     if (result.rows.length === 0) {
@@ -231,22 +310,27 @@ exports.getUser = async (req, res) => {
 // Get a user by username
 exports.getUserByUsername = async (req, res) => {
   const username = req.params.username;
+  const viewerId = getViewerId(req);
   try {
     const result = await db.query(`
       SELECT
         id,
         username,
-        email,
+        display_name,
+        CASE WHEN id = $2 THEN email ELSE NULL END AS email,
         bio,
         avatar_url,
+        COALESCE(profile_visibility, 'public') AS profile_visibility,
         created_at,
         updated_at,
         (COALESCE(rp_balance_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_balance,
         (COALESCE(rp_staked_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_staked,
         ((COALESCE(rp_balance_ledger, 0) + COALESCE(rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) AS total_reputation
       FROM users
-      WHERE LOWER(username) = LOWER($1) AND deleted_at IS NULL
-    `, [username]);
+      WHERE LOWER(username) = LOWER($1)
+        AND deleted_at IS NULL
+        AND ${buildProfileVisibilityClause('users', 2)}
+    `, [username, viewerId || null]);
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -280,13 +364,15 @@ exports.searchUsers = async (req, res) => {
     const viewerFilterParam = viewerFilterIndex ? [viewerFilter] : [];
     const params = [`%${query.toLowerCase()}%`, query, ...viewerFilterParam];
     const whereParts = [
-      '(LOWER(u.username) LIKE $1 OR u.id::text = $2)',
+      '(LOWER(u.username) LIKE $1 OR COALESCE(LOWER(u.display_name), \'\') LIKE $1 OR u.id::text = $2)',
       'u.deleted_at IS NULL'
     ];
 
     if (viewerFilterIndex) {
       whereParts.push(`u.id != $${viewerFilterIndex}`);
     }
+
+    whereParts.push(buildProfileVisibilityClause('u', viewerFilterIndex));
 
     const followingSelect = includeFollowing && viewerFilter
       ? `,
@@ -325,7 +411,9 @@ exports.searchUsers = async (req, res) => {
     params.push(limit);
 
     const result = await db.query(`
-      SELECT u.id, u.username, u.bio, u.created_at${followingSelect}
+      SELECT u.id, u.username, u.display_name, u.bio,
+             COALESCE(u.profile_visibility, 'public') AS profile_visibility,
+             u.created_at${followingSelect}
       FROM users u
       WHERE ${whereClause}
       ORDER BY u.username
@@ -584,10 +672,12 @@ exports.getUserProfile = async (req, res) => {
       `SELECT
          id,
          username,
+         display_name,
          email,
          role,
          bio,
          avatar_url,
+         COALESCE(profile_visibility, 'public') AS profile_visibility,
          (COALESCE(rp_balance_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_balance,
          (COALESCE(rp_staked_ledger, 0)::DOUBLE PRECISION / 1000000.0) AS rp_staked,
          ((COALESCE(rp_balance_ledger, 0) + COALESCE(rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) AS total_reputation
@@ -616,7 +706,7 @@ exports.getUserProfile = async (req, res) => {
 // Edit user profile
 exports.editUserProfile = async (req, res) => {
   const userId = req.user.id; // Using standardized user object
-  const { username, bio } = req.body || {};
+  const { username, display_name, bio, profile_visibility } = req.body || {};
 
   try {
     const fields = [];
@@ -645,6 +735,22 @@ exports.editUserProfile = async (req, res) => {
       values.push(bio);
     }
 
+    if (typeof display_name !== 'undefined') {
+      const trimmedDisplayName = String(display_name || '').trim();
+      fields.push('display_name');
+      values.push(trimmedDisplayName || null);
+    }
+
+    if (typeof profile_visibility !== 'undefined') {
+      const normalizedVisibility = String(profile_visibility || '').trim().toLowerCase();
+      if (!ALLOWED_PROFILE_VISIBILITY.has(normalizedVisibility)) {
+        return res.status(400).json({ message: 'Invalid profile visibility' });
+      }
+
+      fields.push('profile_visibility');
+      values.push(normalizedVisibility);
+    }
+
     if (fields.length === 0) {
       return res.status(400).json({ message: 'No profile fields provided' });
     }
@@ -653,7 +759,12 @@ exports.editUserProfile = async (req, res) => {
     setClauses.push('updated_at = NOW()');
 
     const result = await db.query(
-      `UPDATE users SET ${setClauses.join(', ')} WHERE id = $${values.length + 1} RETURNING id, username, email, role, bio, avatar_url, updated_at`,
+      `UPDATE users
+       SET ${setClauses.join(', ')}
+       WHERE id = $${values.length + 1}
+       RETURNING id, username, display_name, email, role, bio, avatar_url,
+                 COALESCE(profile_visibility, 'public') AS profile_visibility,
+                 updated_at`,
       [...values, userId]
     );
     
@@ -1187,7 +1298,9 @@ exports.getMasterKey = async (req, res) => {
     // Check if any of the provided IDs are trusted
     const deviceRes = await db.query(
         `SELECT id, device_public_id, last_verified_at FROM user_devices
-         WHERE user_id = $1 AND device_public_id = ANY($2::uuid[])`,
+         WHERE user_id = $1
+           AND device_public_id = ANY($2::uuid[])
+           AND revoked_at IS NULL`,
         [userId, deviceIds]
     );
 
@@ -1217,17 +1330,46 @@ exports.setMasterKey = async (req, res) => {
   const userId = req.user.id;
   const { 
       wrapped_key, salt, iv, 
-      wrapped_key_prf, salt_prf, iv_prf 
+      wrapped_key_prf, salt_prf, iv_prf,
+      current_password
   } = req.body;
+  const devicePublicId = req.headers['x-device-id'];
 
-  if (!wrapped_key && !wrapped_key_prf) {
+  const passwordWrapError = validateWrapGroup([wrapped_key, salt, iv], 'Password wrap');
+  if (passwordWrapError) {
+      return res.status(400).json({ error: passwordWrapError });
+  }
+
+  const prfWrapError = validateWrapGroup([wrapped_key_prf, salt_prf, iv_prf], 'PRF wrap');
+  if (prfWrapError) {
+      return res.status(400).json({ error: prfWrapError });
+  }
+
+  const hasPasswordWrap = isNonEmptyString(wrapped_key) && isNonEmptyString(salt) && isNonEmptyString(iv);
+  const hasPrfWrap = isNonEmptyString(wrapped_key_prf) && isNonEmptyString(salt_prf) && isNonEmptyString(iv_prf);
+
+  if (!hasPasswordWrap && !hasPrfWrap) {
       return res.status(400).json({ error: 'Missing key data' });
   }
   
   try {
+    const passwordCheck = await verifyCurrentPassword(userId, current_password);
+    if (!passwordCheck.ok) {
+      return res.status(passwordCheck.status).json(passwordCheck.body);
+    }
+
     // Check existence
     const existCheck = await db.query('SELECT 1 FROM user_master_keys WHERE user_id = $1', [userId]);
     const exists = existCheck.rows.length > 0;
+
+    if (exists) {
+      const deviceCheck = await verifyMasterKeyWriterDevice(userId, devicePublicId);
+      if (!deviceCheck.ok) {
+        return res.status(deviceCheck.status).json(deviceCheck.body);
+      }
+    } else if (!hasPasswordWrap) {
+      return res.status(400).json({ error: 'Password-wrapped master key required for first setup' });
+    }
 
     let query = '';
     let params = [];
@@ -1238,20 +1380,17 @@ exports.setMasterKey = async (req, res) => {
         params.push(userId); // $1
         let idx = 2;
 
-        if (wrapped_key && salt && iv) {
+        if (hasPasswordWrap) {
             updates.push(`wrapped_key = $${idx++}, salt = $${idx++}, iv = $${idx++}`);
             params.push(wrapped_key, salt, iv);
         }
-        if (wrapped_key_prf && salt_prf && iv_prf) {
+        if (hasPrfWrap) {
             updates.push(`wrapped_key_prf = $${idx++}, salt_prf = $${idx++}, iv_prf = $${idx++}`);
             params.push(wrapped_key_prf, salt_prf, iv_prf);
         }
-        updates.push(`updated_at = NOW()`); // Always update timestamp (triggers verification requirement?)
-        // Wait, if we only add PRF, do we want to trigger verification for other devices?
-        // Yes, rotating keys usually implies verification.
-        // But adding a passkey shouldn't lock out your phone?
-        // Maybe updated_at only on MAIN key rotation?
-        // For simplicity, any write updates timestamp.
+        if (hasPasswordWrap) {
+            updates.push(`updated_at = NOW()`);
+        }
 
         if (updates.length === 0) return res.json({ success: true }); // Nothing to do
 
