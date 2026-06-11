@@ -145,6 +145,7 @@ app.use(express.json({
 // Background worker for delayed password resets
 if (!isJestRuntime()) {
   passwordResetService.startResetWorker();
+  mlsService.startCleanupWorker();
 }
 
 // Security headers

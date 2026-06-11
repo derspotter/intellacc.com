@@ -1,7 +1,10 @@
 const db = require('../db');
 const pushNotificationService = require('./pushNotificationService');
 
+const RELAY_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // hourly
+
 let io = null;
+let cleanupWorkerStarted = false;
 
 const mlsService = {
   setSocketIo(socketIo) {
@@ -9,21 +12,36 @@ const mlsService = {
     console.log('[MLS] Socket.IO instance set');
   },
 
-  // Ensure device exists in user_devices table (required for message routing)
-  async ensureDeviceRegistered(userId, deviceId) {
+  async getActiveVerifiedDevice(userId, deviceId) {
+    if (!deviceId) {
+      return null;
+    }
+
     const query = `
-      INSERT INTO user_devices (user_id, device_public_id, name, is_primary)
-      VALUES ($1, $2, 'MLS Device', false)
-      ON CONFLICT (device_public_id) DO UPDATE SET last_seen_at = NOW()
-      RETURNING *;
+      SELECT ud.*
+      FROM user_devices ud
+      LEFT JOIN user_master_keys umk ON umk.user_id = ud.user_id
+      WHERE ud.user_id = $1
+        AND ud.device_public_id = $2
+        AND ud.revoked_at IS NULL
+        AND ud.last_verified_at IS NOT NULL
+        AND (umk.updated_at IS NULL OR ud.last_verified_at >= umk.updated_at)
+      LIMIT 1;
     `;
     const { rows } = await db.query(query, [userId, deviceId]);
-    return rows[0];
+    return rows[0] || null;
+  },
+
+  async requireActiveVerifiedDevice(userId, deviceId) {
+    const device = await this.getActiveVerifiedDevice(userId, deviceId);
+    if (!device) {
+      throw new Error('Active verified device required');
+    }
+    return device;
   },
 
   async upsertKeyPackage(userId, deviceId, packageData, hash, notBefore, notAfter, isLastResort = false) {
-    // Ensure device is registered before uploading key package
-    await this.ensureDeviceRegistered(userId, deviceId);
+    await this.requireActiveVerifiedDevice(userId, deviceId);
     if (isLastResort) {
       // Last-resort: UPSERT - only one per (user_id, device_id)
       const query = `
@@ -50,8 +68,7 @@ const mlsService = {
 
   // Bulk insert multiple key packages
   async insertKeyPackages(userId, deviceId, keyPackages) {
-    // Ensure device is registered before uploading key packages
-    await this.ensureDeviceRegistered(userId, deviceId);
+    await this.requireActiveVerifiedDevice(userId, deviceId);
 
     const client = await db.getPool().connect();
     try {
@@ -97,25 +114,90 @@ const mlsService = {
       params.push(deviceId);
       deviceClause = 'AND device_id = $2';
     }
+    if (consume) {
+      const client = await db.getPool().connect();
+      try {
+        await client.query('BEGIN');
+        const { rows } = await client.query(`
+          WITH selected AS (
+            SELECT id
+            FROM mls_key_packages
+            WHERE user_id = $1
+              ${deviceClause}
+              AND is_last_resort = false
+              AND EXISTS (
+                SELECT 1
+                FROM user_devices ud
+                WHERE ud.user_id = mls_key_packages.user_id
+                  AND ud.device_public_id::text = mls_key_packages.device_id
+                  AND ud.revoked_at IS NULL
+                  AND ud.last_verified_at IS NOT NULL
+              )
+              AND (not_before IS NULL OR not_before <= NOW())
+              AND (not_after IS NULL OR not_after > NOW())
+            ORDER BY last_updated_at DESC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+          )
+          DELETE FROM mls_key_packages kp
+          USING selected
+          WHERE kp.id = selected.id
+          RETURNING kp.*;
+        `, params);
+        if (rows[0]) {
+          await client.query('COMMIT');
+          return rows[0];
+        }
+
+        const fallback = await client.query(`
+          SELECT *
+          FROM mls_key_packages
+          WHERE user_id = $1
+            ${deviceClause}
+            AND is_last_resort = true
+            AND EXISTS (
+              SELECT 1
+              FROM user_devices ud
+              WHERE ud.user_id = mls_key_packages.user_id
+                AND ud.device_public_id::text = mls_key_packages.device_id
+                AND ud.revoked_at IS NULL
+                AND ud.last_verified_at IS NOT NULL
+            )
+            AND (not_before IS NULL OR not_before <= NOW())
+            AND (not_after IS NULL OR not_after > NOW())
+          ORDER BY last_updated_at DESC
+          LIMIT 1;
+        `, params);
+        await client.query('COMMIT');
+        return fallback.rows[0] || null;
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+    }
+
     const query = `
       SELECT *
       FROM mls_key_packages
       WHERE user_id = $1
         ${deviceClause}
+        AND EXISTS (
+          SELECT 1
+          FROM user_devices ud
+          WHERE ud.user_id = mls_key_packages.user_id
+            AND ud.device_public_id::text = mls_key_packages.device_id
+            AND ud.revoked_at IS NULL
+            AND ud.last_verified_at IS NOT NULL
+        )
         AND (not_before IS NULL OR not_before <= NOW())
         AND (not_after IS NULL OR not_after > NOW())
       ORDER BY is_last_resort ASC, last_updated_at DESC
       LIMIT 1;
     `;
     const { rows } = await db.query(query, params);
-    const keyPackage = rows[0];
-
-    // Consume (delete) non-last-resort key packages after fetching
-    if (consume && keyPackage && !keyPackage.is_last_resort) {
-      await db.query('DELETE FROM mls_key_packages WHERE id = $1', [keyPackage.id]);
-    }
-
-    return keyPackage;
+    return rows[0] || null;
   },
 
   // Get key package count for a user/device (for monitoring pool size)
@@ -133,6 +215,14 @@ const mlsService = {
       FROM mls_key_packages
       WHERE user_id = $1
         ${deviceClause}
+        AND EXISTS (
+          SELECT 1
+          FROM user_devices ud
+          WHERE ud.user_id = mls_key_packages.user_id
+            AND ud.device_public_id::text = mls_key_packages.device_id
+            AND ud.revoked_at IS NULL
+            AND ud.last_verified_at IS NOT NULL
+        )
         AND (not_before IS NULL OR not_before <= NOW())
         AND (not_after IS NULL OR not_after > NOW());
     `;
@@ -143,14 +233,40 @@ const mlsService = {
     };
   },
 
+  // Fetch one key package per active device, consuming regular (one-time)
+  // packages so they are never handed to more than one inviter. Last-resort
+  // packages are reusable and returned without deletion.
   async getKeyPackages(userId) {
     const query = `
-      SELECT DISTINCT ON (device_id) *
-      FROM mls_key_packages
-      WHERE user_id = $1
-        AND (not_before IS NULL OR not_before <= NOW())
-        AND (not_after IS NULL OR not_after > NOW())
-      ORDER BY device_id, is_last_resort ASC, last_updated_at DESC;
+      WITH eligible AS (
+        SELECT DISTINCT ON (device_id) id, is_last_resort
+        FROM mls_key_packages
+        WHERE user_id = $1
+          AND EXISTS (
+            SELECT 1
+            FROM user_devices ud
+            WHERE ud.user_id = mls_key_packages.user_id
+              AND ud.device_public_id::text = mls_key_packages.device_id
+              AND ud.revoked_at IS NULL
+              AND ud.last_verified_at IS NOT NULL
+          )
+          AND (not_before IS NULL OR not_before <= NOW())
+          AND (not_after IS NULL OR not_after > NOW())
+        ORDER BY device_id, is_last_resort ASC, last_updated_at DESC
+      ),
+      consumed AS (
+        DELETE FROM mls_key_packages kp
+        USING eligible e
+        WHERE kp.id = e.id AND e.is_last_resort = false
+        RETURNING kp.*
+      )
+      SELECT * FROM consumed
+      UNION ALL
+      SELECT kp.*
+      FROM mls_key_packages kp
+      JOIN eligible e ON kp.id = e.id
+      WHERE e.is_last_resort = true
+      ORDER BY device_id;
     `;
     const { rows } = await db.query(query, [userId]);
     return rows;
@@ -170,27 +286,34 @@ const mlsService = {
         throw new Error('Sender is not a member of the group');
     }
 
+    // For DM groups, welcomes may only target the two DM participants.
+    const dmRes = await db.query(
+        'SELECT user_a_id, user_b_id FROM mls_direct_messages WHERE group_id = $1',
+        [groupId]
+    );
+    if (dmRes.rows.length > 0) {
+        const { user_a_id: userAId, user_b_id: userBId } = dmRes.rows[0];
+        const receiver = Number(receiverUserId);
+        if (receiver !== Number(userAId) && receiver !== Number(userBId)) {
+            throw new Error('Receiver is not part of this direct message');
+        }
+    }
+
     const client = await db.getPool().connect();
     try {
         await client.query('BEGIN');
-        
+
         const { rows: [queueRow] } = await client.query(
             'INSERT INTO mls_relay_queue (group_id, sender_device_id, message_type, data, group_info) VALUES ($1, $2, $3, $4, $5) RETURNING id',
             [groupId, senderDeviceId, 'welcome', data, groupInfo]
         );
         const queueId = queueRow.id;
 
-        const devicesRes = await client.query(
-            'SELECT id FROM user_devices WHERE user_id = $1 AND revoked_at IS NULL',
-            [receiverUserId]
+        await client.query(
+            `INSERT INTO mls_relay_recipients (queue_id, recipient_device_id)
+             SELECT $1, id FROM user_devices WHERE user_id = $2 AND revoked_at IS NULL`,
+            [queueId, receiverUserId]
         );
-        
-        for (const device of devicesRes.rows) {
-            await client.query(
-                'INSERT INTO mls_relay_recipients (queue_id, recipient_device_id) VALUES ($1, $2)',
-                [queueId, device.id]
-            );
-        }
 
         await client.query('COMMIT');
         if (io) io.to(`mls:${receiverUserId}`).emit('mls-welcome', { groupId });
@@ -244,19 +367,16 @@ const mlsService = {
     try {
       await client.query('BEGIN');
 
-      let rehydratedCount = 0;
-      for (const message of welcomeMessages) {
-        for (const device of devicesRes.rows) {
-          const result = await client.query(
-            `INSERT INTO mls_relay_recipients (queue_id, recipient_device_id)
-             VALUES ($1, $2)
-             ON CONFLICT (queue_id, recipient_device_id)
-             DO UPDATE SET acked_at = NULL`,
-            [message.id, device.id]
-          );
-          rehydratedCount += result.rowCount || 0;
-        }
-      }
+      const result = await client.query(
+        `INSERT INTO mls_relay_recipients (queue_id, recipient_device_id)
+         SELECT q.id, d.id
+         FROM unnest($1::int[]) AS q(id)
+         CROSS JOIN unnest($2::int[]) AS d(id)
+         ON CONFLICT (queue_id, recipient_device_id)
+         DO UPDATE SET acked_at = NULL`,
+        [welcomeMessages.map((w) => w.id), devicesRes.rows.map((d) => d.id)]
+      );
+      const rehydratedCount = result.rowCount || 0;
 
       await client.query('COMMIT');
       return {
@@ -273,8 +393,6 @@ const mlsService = {
   },
 
   async storeGroupMessage(groupId, senderDeviceId, senderUserId, messageType, data, options = {}) {
-    console.log(`[MLS Store] groupId=${groupId} senderDevice=${senderDeviceId} senderUser=${senderUserId} type=${messageType}`);
-
     const isMember = await this.isGroupMember(groupId, senderUserId);
     if (!isMember) {
         console.log(`[MLS Store] Sender ${senderUserId} is NOT a member of ${groupId}`);
@@ -336,34 +454,29 @@ const mlsService = {
         }
 
         const devicesRes = await client.query(deviceQuery, deviceParams);
-        console.log(`[MLS Store] Found ${devicesRes.rows.length} recipient devices for queueId=${queueId}:`, devicesRes.rows);
 
-        const notifiedUsers = new Set();
-        for (const device of devicesRes.rows) {
+        const notifiedUsers = new Set(devicesRes.rows.map((device) => device.user_id));
+        if (devicesRes.rows.length > 0) {
             await client.query(
-                'INSERT INTO mls_relay_recipients (queue_id, recipient_device_id) VALUES ($1, $2)',
-                [queueId, device.id]
+                `INSERT INTO mls_relay_recipients (queue_id, recipient_device_id)
+                 SELECT $1, unnest($2::int[])`,
+                [queueId, devicesRes.rows.map((device) => device.id)]
             );
-            notifiedUsers.add(device.user_id);
         }
 
         await client.query('COMMIT');
-        console.log(`[MLS Store] COMMITTED queueId=${queueId} with ${devicesRes.rows.length} recipients`);
+        console.log(`[MLS Store] queueId=${queueId} delivered to ${devicesRes.rows.length} device(s)`);
         if (io) {
             for (const uid of notifiedUsers) {
                 io.to(`mls:${uid}`).emit('mls-message', { groupId });
             }
         }
 
-        // Send push notifications for application messages (actual user messages)
+        // Send generic push notifications for application messages.
         if (messageType === 'application') {
-            // Get sender username for push notification
-            const senderRes = await db.query('SELECT username FROM users WHERE id = $1', [senderUserId]);
-            const senderUsername = senderRes.rows[0]?.username || 'Someone';
-
             for (const uid of notifiedUsers) {
                 if (uid !== senderUserId) {
-                    pushNotificationService.sendMessagePush(uid, senderUsername)
+                    pushNotificationService.sendMessagePush(uid)
                         .catch(err => console.error('[Push] Error sending message push:', err));
                 }
             }
@@ -425,7 +538,6 @@ const mlsService = {
       ? messageIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
       : [Number(messageIds)].filter((id) => Number.isInteger(id) && id > 0);
 
-    console.log(`[MLS Ack] deviceIds=${JSON.stringify(normalizedDeviceIds)} messageIds=${JSON.stringify(normalizedMessageIds)}`);
     if (!normalizedMessageIds || normalizedMessageIds.length === 0) return;
     if (!normalizedDeviceIds || normalizedDeviceIds.length === 0) {
       throw new Error('No valid device IDs provided');
@@ -435,32 +547,27 @@ const mlsService = {
     try {
       await client.query('BEGIN');
 
-      // Check if any of the acked messages are welcomes - we'll need to notify about held-back messages
-      const welcomeRes = await client.query(
-        'SELECT q.group_id, ud.user_id FROM mls_relay_queue q JOIN user_devices ud ON ud.id = ANY($2) WHERE q.id = ANY($1) AND q.message_type = \'welcome\'',
+      const ackRes = await client.query(
+        `WITH updated AS (
+           UPDATE mls_relay_recipients
+           SET acked_at = NOW()
+           WHERE recipient_device_id = ANY($2)
+             AND queue_id = ANY($1)
+             AND acked_at IS NULL
+           RETURNING queue_id, recipient_device_id
+         )
+         SELECT updated.queue_id,
+                updated.recipient_device_id,
+                q.group_id,
+                q.message_type,
+                ud.user_id
+         FROM updated
+         JOIN mls_relay_queue q ON q.id = updated.queue_id
+         JOIN user_devices ud ON ud.id = updated.recipient_device_id`,
         [normalizedMessageIds, normalizedDeviceIds]
       );
-      const ackedWelcomes = welcomeRes.rows;
-
-      // Check what recipients exist before update
-      const beforeRes = await client.query(
-        'SELECT queue_id, recipient_device_id, acked_at FROM mls_relay_recipients WHERE queue_id = ANY($1) AND recipient_device_id = ANY($2)',
-        [normalizedMessageIds, normalizedDeviceIds]
-      );
-      console.log(`[MLS Ack] Recipients before update:`, beforeRes.rows);
-
-      await client.query(
-        'UPDATE mls_relay_recipients SET acked_at = NOW() WHERE recipient_device_id = ANY($2) AND queue_id = ANY($1)',
-        [normalizedMessageIds, normalizedDeviceIds]
-      );
-
-      // Check what will be deleted
-      const toDeleteRes = await client.query(`
-        SELECT id FROM mls_relay_queue WHERE id = ANY($1) AND id NOT IN (
-          SELECT queue_id FROM mls_relay_recipients WHERE queue_id = ANY($1) AND acked_at IS NULL
-        )
-      `, [normalizedMessageIds]);
-      console.log(`[MLS Ack] Will delete queue IDs:`, toDeleteRes.rows.map(r => r.id));
+      const ackedRows = ackRes.rows;
+      const ackedWelcomes = ackedRows.filter((row) => row.message_type === 'welcome');
 
       await client.query(`
         DELETE FROM mls_relay_queue
@@ -481,26 +588,20 @@ const mlsService = {
           [welcome.group_id, welcome.user_id]
         );
 
-        // Add this device as recipient to any queued application messages for this group
+        // Add these devices as recipients of any queued application messages for this group
         // (messages sent while user wasn't a member yet)
         // NOTE: Only application messages - commits are for existing members, new members join via welcome
-        const queuedMsgsRes = await client.query(
-          `SELECT q.id FROM mls_relay_queue q
+        const heldBackRes = await client.query(
+          `INSERT INTO mls_relay_recipients (queue_id, recipient_device_id)
+           SELECT q.id, d.id
+           FROM mls_relay_queue q
+           CROSS JOIN unnest($2::int[]) AS d(id)
            WHERE q.group_id = $1 AND q.message_type = 'application'
-             AND NOT EXISTS (SELECT 1 FROM mls_relay_recipients r WHERE r.queue_id = q.id AND r.recipient_device_id = ANY($2))
-             `,
+           ON CONFLICT DO NOTHING`,
           [welcome.group_id, ackRecipientDeviceIds]
         );
-        for (const msg of queuedMsgsRes.rows) {
-          for (const ackRecipientDeviceId of ackRecipientDeviceIds) {
-            await client.query(
-              'INSERT INTO mls_relay_recipients (queue_id, recipient_device_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-              [msg.id, ackRecipientDeviceId]
-            );
-          }
-        }
-        if (queuedMsgsRes.rows.length > 0) {
-          console.log(`[MLS Ack] Added ${queuedMsgsRes.rows.length} held-back messages as recipients for devices ${ackRecipientDeviceIds.join(',')}`);
+        if (heldBackRes.rowCount > 0) {
+          console.log(`[MLS Ack] Added ${heldBackRes.rowCount} held-back recipient rows for group ${welcome.group_id}`);
         }
       }
 
@@ -521,7 +622,25 @@ const mlsService = {
   },
 
   async cleanupExpired() {
-    await db.query('DELETE FROM mls_relay_queue WHERE expires_at < NOW()');
+    const { rowCount } = await db.query('DELETE FROM mls_relay_queue WHERE expires_at < NOW()');
+    return rowCount || 0;
+  },
+
+  startCleanupWorker() {
+    if (cleanupWorkerStarted) return;
+    cleanupWorkerStarted = true;
+
+    const interval = setInterval(async () => {
+      try {
+        const removed = await this.cleanupExpired();
+        if (removed > 0) {
+          console.log(`[MLS] Cleaned up ${removed} expired relay message(s)`);
+        }
+      } catch (err) {
+        console.error('[MLS] Relay queue cleanup failed:', err);
+      }
+    }, RELAY_CLEANUP_INTERVAL_MS);
+    interval.unref();
   },
 
   async getUserGroups(userId) {
@@ -692,6 +811,10 @@ const mlsService = {
       return { groupId, isNew: true };
     } catch (e) {
       await client.query('ROLLBACK');
+      // Concurrent creation of the same DM: the loser returns the existing group.
+      if (e.code === '23505') {
+        return { groupId, isNew: false };
+      }
       throw e;
     } finally {
       client.release();
@@ -731,7 +854,11 @@ const mlsService = {
       JOIN mls_relay_recipients r ON q.id = r.queue_id
       JOIN user_devices ud ON r.recipient_device_id = ud.id
       JOIN user_devices s ON q.sender_device_id = s.id
-      WHERE ud.user_id = $1 AND q.message_type = 'welcome' AND r.acked_at IS NULL
+      WHERE ud.user_id = $1
+        AND ud.revoked_at IS NULL
+        AND ud.last_verified_at IS NOT NULL
+        AND q.message_type = 'welcome'
+        AND r.acked_at IS NULL
       ORDER BY q.created_at ASC;
     `;
     const { rows } = await db.query(query, [userId]);

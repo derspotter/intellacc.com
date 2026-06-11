@@ -7,6 +7,38 @@ const authenticateJWT = require('../middleware/auth');
 // Middleware to ensure user is authenticated
 router.use(authenticateJWT);
 
+// Resolve the requesting user's relay device IDs: the device named in the
+// x-device-id header, or all active verified devices when the header is absent.
+// Sends the error response and returns null when no usable device exists.
+async function resolveRelayDeviceIds(req, res) {
+  const devicePublicId = req.headers['x-device-id'];
+
+  if (devicePublicId) {
+    const device = await mlsService.getActiveVerifiedDevice(req.user.id, devicePublicId);
+    if (!device) {
+      res.status(403).json({ error: 'Active verified device required' });
+      return null;
+    }
+    return [device.id];
+  }
+
+  const allDevicesRes = await db.query(
+    `SELECT ud.id
+     FROM user_devices ud
+     LEFT JOIN user_master_keys umk ON umk.user_id = ud.user_id
+     WHERE ud.user_id = $1
+       AND ud.revoked_at IS NULL
+       AND ud.last_verified_at IS NOT NULL
+       AND (umk.updated_at IS NULL OR ud.last_verified_at >= umk.updated_at)`,
+    [req.user.id]
+  );
+  if (allDevicesRes.rows.length === 0) {
+    res.status(404).json({ error: 'No active devices found' });
+    return null;
+  }
+  return allDevicesRes.rows.map((row) => row.id);
+}
+
 // Upload Key Package (single)
 router.post('/key-package', async (req, res) => {
   try {
@@ -24,6 +56,9 @@ router.post('/key-package', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error(err);
+    if (err.message === 'Active verified device required') {
+      return res.status(403).json({ error: err.message });
+    }
     res.status(500).json({ error: 'Failed to upload key package' });
   }
 });
@@ -45,6 +80,9 @@ router.post('/key-packages', async (req, res) => {
     res.json({ inserted: result.length, keyPackages: result });
   } catch (err) {
     console.error(err);
+    if (err.message === 'Active verified device required') {
+      return res.status(403).json({ error: err.message });
+    }
     res.status(500).json({ error: 'Failed to upload key packages' });
   }
 });
@@ -110,18 +148,8 @@ router.get('/messages/welcome', async (req, res) => {
 // Relay Queue Routes
 router.get('/queue/pending', async (req, res) => {
     try {
-        const devicePublicId = req.headers['x-device-id'];
-        let deviceIds = [];
-
-        if (devicePublicId) {
-            const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, req.user.id]);
-            if (deviceRes.rows.length === 0) return res.status(404).json({ error: 'Device not found' });
-            deviceIds = deviceRes.rows.map((row) => row.id);
-        } else {
-            const allDevicesRes = await db.query('SELECT id FROM user_devices WHERE user_id = $1 AND revoked_at IS NULL', [req.user.id]);
-            if (allDevicesRes.rows.length === 0) return res.status(404).json({ error: 'No active devices found' });
-            deviceIds = allDevicesRes.rows.map((row) => row.id);
-        }
+        const deviceIds = await resolveRelayDeviceIds(req, res);
+        if (!deviceIds) return;
 
         const messages = await mlsService.getPendingMessages(deviceIds);
         res.json(messages);
@@ -133,21 +161,10 @@ router.get('/queue/pending', async (req, res) => {
 
 router.post('/queue/ack', async (req, res) => {
     try {
-        const devicePublicId = req.headers['x-device-id'];
-        const { messageIds } = req.body;
-        let deviceIds = [];
+        const deviceIds = await resolveRelayDeviceIds(req, res);
+        if (!deviceIds) return;
 
-        if (devicePublicId) {
-            const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, req.user.id]);
-            if (deviceRes.rows.length === 0) return res.status(404).json({ error: 'Device not found' });
-            deviceIds = deviceRes.rows.map((row) => row.id);
-        } else {
-            const allDevicesRes = await db.query('SELECT id FROM user_devices WHERE user_id = $1 AND revoked_at IS NULL', [req.user.id]);
-            if (allDevicesRes.rows.length === 0) return res.status(404).json({ error: 'No active devices found' });
-            deviceIds = allDevicesRes.rows.map((row) => row.id);
-        }
-
-        await mlsService.ackMessages(deviceIds, messageIds);
+        await mlsService.ackMessages(deviceIds, req.body.messageIds);
         res.json({ success: true });
     } catch (err) {
         console.error(err);
@@ -162,26 +179,23 @@ router.post('/messages/welcome', async (req, res) => {
     const devicePublicId = req.headers['x-device-id'];
     const senderId = req.user.id;
 
-    console.log('[MLS Welcome] senderId:', senderId, 'devicePublicId:', devicePublicId, 'groupId:', groupId, 'receiverId:', receiverId);
-
     if (!devicePublicId) {
-      console.log('[MLS Welcome] Missing x-device-id header');
       return res.status(400).json({ error: 'x-device-id header required' });
     }
 
-    const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, senderId]);
-    console.log('[MLS Welcome] Device lookup result:', deviceRes.rows);
-
-    if (deviceRes.rows.length === 0) {
-      console.log('[MLS Welcome] Device not found for user');
-      return res.status(404).json({ error: 'Sender device not registered' });
+    const senderDevice = await mlsService.getActiveVerifiedDevice(senderId, devicePublicId);
+    if (!senderDevice) {
+      return res.status(403).json({ error: 'Active verified device required' });
     }
 
-    const result = await mlsService.storeWelcomeMessage(groupId, deviceRes.rows[0].id, senderId, receiverId, data, groupInfo);
-    console.log('[MLS Welcome] Stored successfully:', result);
+    const result = await mlsService.storeWelcomeMessage(groupId, senderDevice.id, senderId, receiverId, data, groupInfo);
     res.json(result);
   } catch (err) {
     console.error('[MLS Welcome] Error:', err);
+    if (err.message === 'Sender is not a member of the group'
+      || err.message === 'Receiver is not part of this direct message') {
+      return res.status(403).json({ error: err.message });
+    }
     res.status(500).json({ error: 'Failed to send welcome message' });
   }
 });
@@ -193,12 +207,12 @@ router.post('/messages/group', async (req, res) => {
     const devicePublicId = req.headers['x-device-id'];
     const senderId = req.user.id;
 
-    const deviceRes = await db.query('SELECT id FROM user_devices WHERE device_public_id = $1 AND user_id = $2', [devicePublicId, senderId]);
-    if (deviceRes.rows.length === 0) return res.status(404).json({ error: 'Sender device not registered' });
+    const senderDevice = await mlsService.getActiveVerifiedDevice(senderId, devicePublicId);
+    if (!senderDevice) return res.status(403).json({ error: 'Active verified device required' });
 
     const result = await mlsService.storeGroupMessage(
       groupId,
-      deviceRes.rows[0].id,
+      senderDevice.id,
       senderId,
       messageType || 'application',
       data,
@@ -304,59 +318,25 @@ router.get('/groups/:groupId/group-info', async (req, res) => {
   }
 });
 
-// Add Member to Group
-router.post('/groups/:groupId/members', async (req, res) => {
-  try {
-    const { userId } = req.body;
-    const { groupId } = req.params;
-    // In a real implementation, we should verify the requester is already a member of the group
-    // For now, we trust the client who has the groupId
-
-    const result = await mlsService.addGroupMember(groupId, userId);
-    res.json(result);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to add member to group' });
-  }
+// Legacy roster mutation endpoints are intentionally disabled. Server-side
+// routing membership is updated only through authorized group creation and
+// recipient-bound welcome ACK handling.
+router.post('/groups/:groupId/members', (req, res) => {
+  res.status(410).json({ error: 'Direct roster mutation is disabled' });
 });
 
-// Sync Group Members from MLS state
 router.post('/groups/:groupId/members/sync', async (req, res) => {
-  try {
-    const { groupId } = req.params;
-    const { memberIds } = req.body;
-
-    if (!Array.isArray(memberIds) || memberIds.length === 0) {
-      return res.status(400).json({ error: 'memberIds array required' });
-    }
-
-    const normalizedIds = memberIds
-      .map(id => Number(id))
-      .filter(Number.isFinite);
-
-    if (normalizedIds.length === 0) {
-      return res.status(400).json({ error: 'memberIds must be numeric' });
-    }
-
-    if (!normalizedIds.includes(req.user.id)) {
-      return res.status(403).json({ error: 'User not in member list' });
-    }
-
-    const result = await mlsService.syncGroupMembers(groupId, normalizedIds);
-    res.json(result);
-  } catch (err) {
-    console.error(err);
-    if (err.message === 'Group not found') {
-      return res.status(404).json({ error: err.message });
-    }
-    res.status(500).json({ error: 'Failed to sync group members' });
-  }
+  res.status(410).json({ error: 'Direct roster sync is disabled' });
 });
 
 // Get Group Messages from relay queue
 router.get('/messages/group/:groupId', async (req, res) => {
   try {
     const { afterId } = req.query;
+    const isMember = await mlsService.isGroupMember(req.params.groupId, req.user.id);
+    if (!isMember) {
+      return res.status(403).json({ error: 'Sender is not a member of the group' });
+    }
     const messages = await mlsService.getGroupMessages(req.params.groupId, afterId || 0);
     res.json(messages);
   } catch (err) {
