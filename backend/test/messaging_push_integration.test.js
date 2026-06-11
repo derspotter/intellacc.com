@@ -113,7 +113,7 @@ describe('Messaging + Push Notification Integration', () => {
 
       // sendMessagePush will fail to actually send (invalid endpoint)
       // but we can verify the function runs without error
-      const result = await pushService.sendMessagePush(recipient.id, sender.username);
+      const result = await pushService.sendMessagePush(recipient.id);
 
       // Result should show attempted sends (will fail due to invalid endpoint)
       expect(result).toBeDefined();

@@ -248,11 +248,11 @@ async function sendFollowPush(userId, followerUsername) {
 /**
  * Send push for a new message (E2EE - no content)
  */
-async function sendMessagePush(userId, senderUsername) {
+async function sendMessagePush(userId) {
   return sendPushToUser(userId, {
     type: 'message',
-    title: 'New message',
-    body: `New message from ${senderUsername}`,
+    title: 'New encrypted message',
+    body: 'New encrypted message',
     url: '/#messages'
   });
 }
