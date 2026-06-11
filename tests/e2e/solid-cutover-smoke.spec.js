@@ -9,8 +9,9 @@ test.describe('Solid cutover smoke', () => {
 
     // 2. Check Terminal Skin (multi-stage login modal)
     await page.goto('/#login?skin=terminal');
-    // First stage: Email input
-    const emailInput = page.locator('input[type="email"]');
+    // First stage: identifier input (accepts email or username since the
+    // email-or-username auth change, so it is type="text")
+    const emailInput = page.locator('input[autocomplete="username"]');
     await expect(emailInput).toBeVisible();
     
     // Advance to password stage to verify full render
