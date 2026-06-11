@@ -58,10 +58,9 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Ops` Persuasive Alpha reward settlement:
   attribution, episode/payout schema, scorer service, prediction-engine scoring endpoint, admin run/status routes, and daily cron entrypoint are implemented.
   Remaining work is production enablement: set `POST_SIGNAL_REWARDS_ENABLED=true`, configure cron auth, run the job on schedule, and monitor `post_signal_run_logs`.
-- `Partial` Solid frontend unification/cutover:
-  `frontend-solid` contains parity slices for auth, feed/posts, profile/settings, notifications/messages, predictions, skin preference, and analytics.
-  Runtime cutover executed 2026-06-11: gate green, both production domains serve Solid, VanJS container stopped, `fallback/vanjs-final` tagged.
-  Remaining work is to remove the VanJS app code (`frontend/`) from mainline and clean up Van-only specs/compose files.
+- `Done` Solid frontend unification/cutover:
+  Runtime cutover executed 2026-06-11: gate green, both production domains serve Solid, VanJS containers/images removed.
+  VanJS code removed from mainline the same day; preserved at tag `fallback/vanjs-final` and branch `archive/vanjs`.
 
 ## Priority 2 - Medium
 - `Done` Profile editing:
@@ -98,11 +97,10 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   Remaining work is infra hardening, capacity testing, and CI/CD automation.
 
 ## Recommended Next Execution Order
-1. `Solid frontend unification/cutover`: finish parity gate and remove the dual-frontend runtime path.
-2. `Verification production smoke`: run Tier 2/Tier 3 staging-provider flows, especially Stripe Elements + webhook upgrade.
-3. `Persuasive Alpha production enablement`: turn on scheduled scorer/payout runs with monitoring and rollback knobs.
-4. `Attachment storage decision`: either explicitly keep local disk as the production path or implement object-storage presign endpoints.
-5. `Messaging UX upgrades`: add MLS-safe edit/delete/read-receipt semantics only after the active frontend/runtime path is settled.
+1. `Verification production smoke`: run Tier 2/Tier 3 staging-provider flows, especially Stripe Elements + webhook upgrade.
+2. `Persuasive Alpha production enablement`: turn on scheduled scorer/payout runs with monitoring and rollback knobs.
+3. `Attachment storage decision`: either explicitly keep local disk as the production path or implement object-storage presign endpoints.
+4. `Messaging UX upgrades`: add MLS-safe edit/delete/read-receipt semantics (unblocked by the completed Solid cutover).
 
 ## Source References
 - `next-steps.md`
