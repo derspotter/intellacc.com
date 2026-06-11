@@ -1,5 +1,6 @@
 services:
   prediction-engine:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
@@ -9,8 +10,6 @@ services:
       - ./.env
     environment:
       - RUST_LOG=info
-    ports:
-      - "3001:3001"
     depends_on:
       - db
     networks:

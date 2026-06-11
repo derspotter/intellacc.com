@@ -1,5 +1,6 @@
 services:
   postfix:
+    restart: unless-stopped
     image: boky/postfix:latest
     container_name: postfix
     environment:
@@ -11,20 +12,20 @@ services:
       - intellacc-network
 
   db:
+    restart: unless-stopped
     image: pgvector/pgvector:pg18
     container_name: intellacc_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "${POSTGRES_PORT}:5432"
     volumes:
       - db-data-pg18:/var/lib/postgresql
     networks:
       - intellacc-network
 
   backend:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
@@ -113,13 +114,12 @@ services:
       - ./migrations:/usr/src/app/migrations  # mount migrations for auto-run
       - ./uploads:/usr/src/app/uploads
     working_dir: /usr/src/app
-    ports:
-      - "${NODE_PORT}:3000"
     command: ["./scripts/docker-dev-entrypoint.sh"]
     depends_on:
       - db
     networks:
       - intellacc-network
+      - proxy-intellacc
 
   # caddy:
   #   image: caddy:latest
@@ -143,6 +143,8 @@ services:
 
 networks:
   intellacc-network:
+    external: true
+  proxy-intellacc:
     external: true
 
 volumes:
