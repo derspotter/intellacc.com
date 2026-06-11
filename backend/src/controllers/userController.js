@@ -1412,6 +1412,24 @@ exports.setMasterKey = async (req, res) => {
     }
 
     await db.query(query, params);
+
+    // The device performing this write holds the new key material, so it
+    // stays trusted across the epoch bump (updated_at). Without this, the
+    // first device is distrusted moments after onboarding (its
+    // last_verified_at predates the master key insert) and a rotating
+    // device locks itself out. Other devices must still re-verify.
+    if (devicePublicId) {
+      await db.query(
+        `UPDATE user_devices
+         SET last_verified_at = NOW()
+         WHERE user_id = $1
+           AND device_public_id::text = $2
+           AND revoked_at IS NULL
+           AND last_verified_at IS NOT NULL`,
+        [userId, String(devicePublicId)]
+      );
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error(err);
