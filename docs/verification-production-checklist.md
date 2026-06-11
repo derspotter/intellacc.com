@@ -57,7 +57,21 @@ If enabled:
 
 ## End-to-end smoke test
 - Register a fresh user, open mail link, confirm Tier 1 unlock.
-- For Tier 2/3 (if enabled), run the flow using a real device and confirm tier upgrades in settings.
+- For Tier 2 (if enabled), run the real-device phone flow and confirm tier upgrade in settings.
+- For Tier 3 (if enabled), run a browser-level Stripe staging flow:
+  - start from a Tier 2 user
+  - open `#settings` and confirm the payment verification step is available
+  - click `Start payment verification`
+  - confirm Stripe Elements loads without frontend or backend errors
+  - complete SetupIntent confirmation with a staging payment method
+  - verify Stripe webhook delivery upgrades the user to Tier 3 without manual DB edits
+  - confirm the upgraded tier is reflected in settings after refresh/relogin
+- Automate the Tier 3 browser path with Playwright when staging Stripe keys are available:
+  - provide a real Tier 2 staging user via:
+    - `PAYMENT_VERIFICATION_E2E_USER_EMAIL`
+    - `PAYMENT_VERIFICATION_E2E_USER_PASSWORD`
+  - run:
+    - `PAYMENT_VERIFICATION_E2E=1 PLAYWRIGHT_BASE_URL=https://intellacc.com npx playwright test tests/e2e/payment-verification.spec.js`
 - Verify protected actions still return `Higher verification required` with upgrade metadata for lower tiers.
 - Backend verification regression tests:
   - `docker exec intellacc_backend npm test -- production_guard.test.js verification.test.js --runInBand`

@@ -7,7 +7,6 @@ const weeklyAssignmentService = require('../services/weeklyAssignmentService');
  */
 const assignWeeklyPredictions = async (req, res) => {
   try {
-    // TODO: Add admin authentication check
     console.log('🗓️ Manual weekly assignment triggered');
     
     const result = await weeklyAssignmentService.assignWeeklyPredictions();

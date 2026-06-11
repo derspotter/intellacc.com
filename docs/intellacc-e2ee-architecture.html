@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Intellacc E2EE Architecture</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f7f4;
+      --fg: #171717;
+      --muted: #555;
+      --panel: #fff;
+      --border: #d8d8d2;
+      --accent: #0000ff;
+      --warn: #9a4d00;
+      --code: #111827;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111;
+        --fg: #eee;
+        --muted: #aaa;
+        --panel: #181818;
+        --border: #333;
+        --accent: #8fa8ff;
+        --warn: #ffb45c;
+        --code: #f3f4f6;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+      background: var(--bg);
+      color: var(--fg);
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 18px 60px;
+    }
+
+    header {
+      border-bottom: 2px solid var(--fg);
+      padding-bottom: 18px;
+      margin-bottom: 30px;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 5vw, 4.5rem);
+      line-height: 0.95;
+      margin: 0 0 14px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 1.6rem;
+      margin: 42px 0 12px;
+      border-top: 1px solid var(--border);
+      padding-top: 24px;
+    }
+
+    h3 {
+      font-size: 1.05rem;
+      margin: 24px 0 8px;
+    }
+
+    p, li {
+      max-width: 84ch;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    .subtitle {
+      color: var(--muted);
+      max-width: 76ch;
+      font-size: 1.05rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+      margin: 20px 0;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+    }
+
+    .card h3 {
+      margin-top: 0;
+    }
+
+    .diagram {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      margin: 18px 0 26px;
+      overflow-x: auto;
+    }
+
+    .mermaid {
+      min-width: 680px;
+    }
+
+    code {
+      color: var(--code);
+      background: color-mix(in srgb, var(--panel) 78%, var(--border));
+      padding: 0.08rem 0.24rem;
+      border-radius: 3px;
+      font-size: 0.93em;
+    }
+
+    pre.code {
+      overflow-x: auto;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--code);
+    }
+
+    .warning {
+      border-left: 4px solid var(--warn);
+      padding: 10px 14px;
+      background: color-mix(in srgb, var(--panel) 85%, var(--warn));
+      max-width: 86ch;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      margin: 16px 0 26px;
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--border);
+      padding: 10px 12px;
+    }
+
+    th {
+      font-weight: 700;
+    }
+  </style>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default",
+      securityLevel: "strict",
+      flowchart: { curve: "basis" },
+      sequence: { mirrorActors: false }
+    });
+  </script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Intellacc E2EE Architecture</h1>
+      <p class="subtitle">
+        This page captures the active browser E2EE design in the Intellacc repo:
+        a split-key local vault, OpenMLS WASM for group encryption, and a backend
+        relay that stores ciphertext and delivery metadata.
+      </p>
+      <p class="small">Generated from repository inspection on 2026-05-22.</p>
+    </header>
+
+    <section>
+      <h2>One-Screen Summary</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Vault Layer</h3>
+          <p>
+            Protects MLS state, decrypted message cache, TOFU fingerprints, and
+            processed-message IDs in IndexedDB. The vault key is derived from
+            both the server-gated Master Key and the device-local Local Key.
+          </p>
+        </article>
+        <article class="card">
+          <h3>MLS Layer</h3>
+          <p>
+            OpenMLS compiled to WASM creates identities, key packages, groups,
+            welcomes, commits, proposals, application ciphertexts, AAD, and
+            confirmation tags.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Relay Layer</h3>
+          <p>
+            Express/PostgreSQL routes key packages, welcomes, commits, and
+            application ciphertexts to recipient devices. It should not receive
+            plaintext message bodies or local MLS ratchet state.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Key Hierarchy</h2>
+      <p>
+        The core vault design is split-key. An offline server database dump alone
+        should not decrypt local MLS state because the Local Key is device-local.
+        A disk or browser-profile copy alone should not decrypt it because the
+        Master Key is server-gated and wrapped. A server that can ship malicious
+        browser code is a different threat model and can attack unlocked clients.
+      </p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TD
+  P[User password] --> A[Argon2id wrapping key]
+  PRF[WebAuthn PRF output] --> H[HKDF PRF wrapping key]
+
+  A --> MKW[Server: password-wrapped Master Key]
+  H --> MKP[Server: PRF-wrapped Master Key]
+
+  A --> LKW[IndexedDB: password-wrapped Local Key]
+  H --> LKP[IndexedDB: PRF-wrapped Local Key]
+
+  MK[Master Key]
+  LK[Local Key]
+  MK --> C[Composite Key = SHA-256 of Master Key plus Local Key]
+  LK --> C
+
+  C --> V[Encrypted IndexedDB vault]
+  V --> MLS[MLS identity and group ratchet state]
+  V --> MSG[Encrypted local plaintext cache]
+  V --> FP[Encrypted contact fingerprints]
+  V --> DEDUPE[Processed message IDs]
+        </pre>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Where It Lives</th>
+            <th>What It Protects</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Master Key</code></td>
+            <td>Wrapped on backend in <code>user_master_keys</code></td>
+            <td>One half of the composite vault key. Server-gated by trusted device checks.</td>
+          </tr>
+          <tr>
+            <td><code>Local Key</code></td>
+            <td>Wrapped in browser IndexedDB</td>
+            <td>Device-local half of the composite vault key.</td>
+          </tr>
+          <tr>
+            <td><code>Composite Key</code></td>
+            <td>Memory only while unlocked</td>
+            <td>Encrypts local MLS state, message cache, fingerprints, and dedupe records.</td>
+          </tr>
+          <tr>
+            <td><code>MLS State</code></td>
+            <td>Encrypted in IndexedDB granular storage</td>
+            <td>OpenMLS identity, groups, epochs, secrets, pending commits, and ratchets.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Unlock Path</h2>
+      <p>
+        Unlocking is not just password login. The browser must also present a
+        trusted local device id so the backend will release the wrapped Master
+        Key. The device must have been verified after the Master Key was last
+        updated.
+      </p>
+      <div class="diagram">
+        <pre class="mermaid">
+sequenceDiagram
+  participant Browser
+  participant Backend
+  participant IndexedDB
+  participant OpenMLS
+
+  Browser->>Backend: Login and receive JWT
+  Browser->>IndexedDB: Read local device ids
+  Browser->>Backend: GET /users/master-key with x-device-ids
+  Backend->>Backend: Check user_devices.last_verified_at >= user_master_keys.updated_at
+  Backend-->>Browser: Wrapped Master Key or LINK_REQUIRED
+  Browser->>Browser: Unwrap Master Key with password or PRF
+  Browser->>IndexedDB: Load wrapped Local Key
+  Browser->>Browser: Unwrap Local Key
+  Browser->>Browser: Derive Composite Key
+  Browser->>IndexedDB: Decrypt MLS state
+  Browser->>OpenMLS: Restore identity, groups, ratchets
+  Browser->>Backend: Refresh/upload MLS key packages
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>First Device And Device Linking</h2>
+      <p>
+        The first device is implicitly trusted because it creates the first
+        Master Key and local vault. Later devices must be approved by an
+        already verified device, with the approver password and <code>x-device-id</code>.
+      </p>
+      <div class="diagram">
+        <pre class="mermaid">
+sequenceDiagram
+  participant NewDevice
+  participant Backend
+  participant TrustedDevice
+
+  NewDevice->>Backend: POST /devices/link/start with new device_public_id
+  Backend-->>NewDevice: Short-lived linking token
+  Backend-->>TrustedDevice: deviceLinkRequest event
+  TrustedDevice->>Backend: Approve token + approver_password + x-device-id
+  Backend->>Backend: Verify password
+  Backend->>Backend: Verify approving device is trusted
+  Backend->>Backend: Insert/update new user_devices row with last_verified_at
+  NewDevice->>Backend: Poll link status
+  NewDevice->>Backend: GET /users/master-key with local device id
+  Backend-->>NewDevice: Wrapped Master Key
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>MLS Bootstrap And Key Packages</h2>
+      <p>
+        Once unlocked, the client creates or restores an OpenMLS identity. It
+        keeps a pool of public key packages on the backend so other users can
+        add each device to MLS groups while that device is offline.
+      </p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+  U[Unlocked browser device] --> W[OpenMLS WASM client]
+  W --> I[Identity: user id as MLS credential]
+  W --> K[Generate key packages]
+  K --> R[Regular package pool]
+  K --> L[Last-resort package]
+  R --> B[Backend mls_key_packages]
+  L --> B
+  B --> O[Other clients fetch packages for invitations]
+        </pre>
+      </div>
+      <p>
+        Regular key packages are consumed when fetched. Last-resort packages are
+        retained as fallback. The client also checks package lifetime ranges
+        before accepting packages.
+      </p>
+    </section>
+
+    <section>
+      <h2>Starting A Direct Message</h2>
+      <p>
+        A direct message is still an MLS group. The backend tracks the pair in
+        <code>mls_direct_messages</code>, while the clients perform the actual
+        MLS group creation and member addition.
+      </p>
+      <div class="diagram">
+        <pre class="mermaid">
+sequenceDiagram
+  participant Alice
+  participant Backend
+  participant Bob
+
+  Alice->>Backend: POST /mls/direct-messages/:bobId
+  Backend->>Backend: Find or create deterministic DM group id
+  Backend-->>Alice: groupId and isNew
+
+  alt New DM
+    Alice->>Alice: Create local MLS group
+    Alice->>Backend: Fetch Bob key packages, all devices
+    Alice->>Alice: OpenMLS add_member per Bob key package
+    Alice->>Backend: Relay commit to existing members only
+    Alice->>Backend: Relay welcome to Bob devices
+  else Existing DM
+    Alice->>Alice: Require local group state
+    Alice->>Backend: Optionally sync pending welcomes
+  end
+
+  Bob->>Backend: GET pending queue
+  Bob->>Bob: Stage welcome
+  Bob->>Bob: Validate members and sender
+  Bob->>Bob: Accept or keep pending
+  Bob->>Backend: Ack welcome after acceptance
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Welcome Handling</h2>
+      <p>
+        Welcomes are staged before acceptance. The client validates credentials,
+        lifetimes, and DM membership rules before joining. Contacts followed by
+        the receiver may be auto-accepted. Other welcomes can remain pending for
+        UI approval.
+      </p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TD
+  Q[Pending welcome from relay queue] --> S[stage_welcome in WASM]
+  S --> V{Validation passes?}
+  V -- No --> R[Reject staged welcome and mark processed]
+  V -- Yes --> F{Receiver follows sender?}
+  F -- Yes --> A[Accept staged welcome]
+  F -- No --> P[Keep pending or ask UI handler]
+  P --> D{User/handler decision}
+  D -- Accept --> A
+  D -- Reject --> R
+  A --> M[Persist MLS state]
+  A --> KP[Regenerate key package]
+  A --> G[Sync group members to backend]
+  A --> ACK[Ack welcome]
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Sending And Receiving Messages</h2>
+      <p>
+        Message plaintext is encrypted by OpenMLS in the browser. The backend
+        stores and forwards the MLS ciphertext. The receiver decrypts locally
+        and then stores the plaintext only inside the encrypted local vault.
+      </p>
+      <div class="diagram">
+        <pre class="mermaid">
+sequenceDiagram
+  participant Sender
+  participant MLS1 as Sender OpenMLS
+  participant Backend
+  participant MLS2 as Receiver OpenMLS
+  participant Receiver
+
+  Sender->>MLS1: encrypt_message(groupId, plaintext)
+  MLS1-->>Sender: MLS ciphertext with AAD
+  Sender->>Backend: POST /mls/messages/group with application ciphertext
+  Backend->>Backend: Verify sender device and group membership
+  Backend->>Backend: Store in mls_relay_queue
+  Backend->>Receiver: Socket event / push notification
+  Receiver->>Backend: GET /mls/queue/pending
+  Receiver->>MLS2: decrypt_message_with_aad(groupId, ciphertext)
+  Receiver->>Receiver: Validate AAD groupId, epoch, type
+  Receiver->>Receiver: Persist plaintext encrypted in local vault
+  Receiver->>Backend: POST /mls/queue/ack
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Commit And Membership Flow</h2>
+      <p>
+        Membership changes produce commits. The sender only merges a pending
+        commit after the relay accepts it. The backend enforces commit epoch
+        uniqueness for a group, and fans commits to existing members.
+      </p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TD
+  A[Client wants membership/key update] --> B[Create rollback state]
+  B --> C[Set AAD type = commit]
+  C --> D[OpenMLS creates commit]
+  D --> E[POST commit to relay with groupId and epoch]
+  E --> F{Relay accepts?}
+  F -- No --> G[Clear pending commit and restore rollback]
+  F -- Yes --> H[merge_pending_commit]
+  H --> I[Persist new MLS state]
+  I --> J[Broadcast confirmation tag]
+  J --> K[Other clients compare tags for fork detection]
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Backend Relay Data Model</h2>
+      <p>
+        The relay has enough information to route messages, not enough to read
+        them. It does know social and delivery metadata.
+      </p>
+      <div class="diagram">
+        <pre class="mermaid">
+erDiagram
+  users ||--o{ user_devices : owns
+  users ||--|| user_master_keys : has
+  users ||--o{ mls_key_packages : publishes
+  user_devices ||--o{ mls_key_packages : provides
+  mls_groups ||--o{ mls_group_members : contains
+  users ||--o{ mls_group_members : joins
+  mls_groups ||--o{ mls_relay_queue : has
+  user_devices ||--o{ mls_relay_queue : sends
+  mls_relay_queue ||--o{ mls_relay_recipients : targets
+  user_devices ||--o{ mls_relay_recipients : receives
+  mls_groups ||--o| mls_direct_messages : may_be_dm
+  users ||--o{ mls_direct_messages : user_a
+  users ||--o{ mls_direct_messages : user_b
+
+  user_master_keys {
+    int user_id
+    text wrapped_key
+    text salt
+    text iv
+    text wrapped_key_prf
+    text salt_prf
+    text iv_prf
+    timestamp updated_at
+  }
+
+  mls_relay_queue {
+    bigint id
+    text group_id
+    int sender_device_id
+    text message_type
+    bytea data
+    bytea group_info
+    bigint epoch
+    timestamp expires_at
+  }
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>What The Server Can And Cannot See</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Visible To Backend</th>
+            <th>Not Visible To Backend In Normal Operation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>User ids, device ids, group ids, DM pair metadata</td>
+            <td>Plaintext message bodies</td>
+          </tr>
+          <tr>
+            <td>Message type: welcome, commit, proposal, application</td>
+            <td>Local MLS ratchet state and group secrets</td>
+          </tr>
+          <tr>
+            <td>Ciphertext blobs and delivery/ack state</td>
+            <td>Decrypted local message cache</td>
+          </tr>
+          <tr>
+            <td>Key packages and package lifetime metadata</td>
+            <td>Contact safety-number verification state contents</td>
+          </tr>
+          <tr>
+            <td>Generic push-notification event for application messages</td>
+            <td>Composite vault key, Local Key, unwrapped Master Key</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>AAD, Dedupe, And Fork Detection</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>AAD Binding</h3>
+          <p>
+            Application, commit, and proposal messages bind <code>groupId</code>,
+            <code>epoch</code>, and <code>type</code>. If decrypted AAD does not
+            match the expected context, the client marks the message invalid.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Persistent Dedupe</h3>
+          <p>
+            Processed relay queue ids are stored in IndexedDB so already handled
+            messages are skipped across page reloads and restarts.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Confirmation Tags</h3>
+          <p>
+            After commits, clients send encrypted system messages containing
+            confirmation tags. Mismatches indicate a possible group fork.
+          </p>
+        </article>
+      </div>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TD
+  D[Decrypt MLS application message] --> A{AAD matches groupId, epoch, type?}
+  A -- No --> X[Mark invalid and skip UI]
+  A -- Yes --> P{Plaintext is confirmation tag?}
+  P -- Yes --> T[Compare local and remote confirmation tags]
+  T --> F{Mismatch?}
+  F -- Yes --> W[Emit fork warning]
+  F -- No --> S[Skip as system message]
+  P -- No --> M[Persist plaintext encrypted locally]
+  M --> U[Display in message UI]
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Safety Numbers And TOFU</h2>
+      <p>
+        Contact fingerprints are based on MLS signature keys. The first seen
+        fingerprint is stored in the encrypted vault. If the fingerprint changes,
+        verification is reset and the UI can warn about a possible MITM or device
+        reset. Users can compare safety numbers out of band.
+      </p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+  W[Welcome/member info] --> S[Extract signature key]
+  S --> F[Derive fingerprint]
+  F --> E{Existing fingerprint?}
+  E -- No --> N[Save as first seen, unverified]
+  E -- Same --> O[Keep current status]
+  E -- Changed --> C[Store previous fingerprint, mark changed]
+  N --> V[User may verify safety number]
+  O --> V
+  C --> ALERT[Show warning]
+  V --> DONE[Mark verified in encrypted vault]
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Password And Passkey PRF Unlock</h2>
+      <p>
+        Password unlock and WebAuthn PRF unlock are dual wrapping paths. Both
+        paths must recover the same Master Key and Local Key before the composite
+        vault key can be derived.
+      </p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TD
+  subgraph Password path
+    P[Password] --> PA[Argon2id]
+    PA --> PMK[Unwrap server Master Key]
+    PA --> PLK[Unwrap local Local Key]
+  end
+
+  subgraph Passkey PRF path
+    PRF[Authenticator PRF output] --> HK1[HKDF MasterKey_PRF]
+    PRF --> HK2[HKDF LocalKey_PRF]
+    HK1 --> RMK[Unwrap server PRF Master Key]
+    HK2 --> RLK[Unwrap local PRF Local Key]
+  end
+
+  PMK --> MK[Master Key]
+  RMK --> MK
+  PLK --> LK[Local Key]
+  RLK --> LK
+  MK --> C[Composite vault key]
+  LK --> C
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Main Caveat</h2>
+      <p class="warning">
+        This is browser-based E2EE. The backend database should not be able to
+        decrypt stored MLS ciphertexts, but the web client still trusts the
+        server to deliver honest JavaScript and WASM. A malicious or compromised
+        deployment pipeline could serve altered client code. That is the normal
+        caveat for web-delivered E2EE.
+      </p>
+    </section>
+
+    <section>
+      <h2>Implementation Anchors</h2>
+      <pre class="code">frontend/src/services/vaultService.js
+  Split-key vault, Master Key wrapping, Local Key wrapping, PRF unlock,
+  encrypted IndexedDB storage, fingerprints, processed message ids.
+
+shared/mls/coreCryptoClient.js
+  OpenMLS WASM bootstrap, key packages, group creation, invites,
+  welcome staging, encryption/decryption, AAD, commits, confirmation tags.
+
+backend/src/services/mlsService.js
+  Key package storage, welcome relay, group message relay, queue ack,
+  group membership metadata, direct-message lookup.
+
+backend/src/controllers/userController.js
+  Server-gated wrapped Master Key fetch and update.
+
+backend/src/controllers/deviceController.js
+  Device listing, revocation, linking token, trusted-device approval.</pre>
+    </section>
+  </main>
+</body>
+</html>

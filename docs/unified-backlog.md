@@ -1,5 +1,5 @@
 # Unified Backlog
-Updated: 2026-03-01 (audited against current codebase)
+Updated: 2026-05-06 (audited against current codebase)
 
 Status legend:
 - `Done`: implemented in app code (may still require production rollout/config).
@@ -35,15 +35,17 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Done` Home feed infinite scroll:
   cursor pagination + frontend virtualization/windowed rendering are implemented.
 - `Partial` Tiered verification (phone + payment):
-  email, phone, and payment flows plus middleware and UI exist.
+  email, phone, and payment flows plus middleware, provider guards, and UI are implemented.
+  Repository coverage already includes tier progression, provider-unavailable behavior, and Stripe webhook robustness.
   Production readiness is mostly present via feature-flagged provider validation and docs/checklist:
   `docs/verification-implementation-plan.md`, `docs/verification-production-checklist.md`.
-  Phone verification now supports Twilio or self-hosted SMS gateway, with optional OpenClaw WhatsApp fallback on SMS send failure,
+  Phone verification supports Twilio or self-hosted SMS gateway, with optional OpenClaw WhatsApp fallback on SMS send failure,
   plus server-side OTP challenge persistence (TTL + max-attempt controls).
-  Remaining risk is production-e2e coverage (automated user-level flow for webhooks + provider staging checks).
+  Browser-level payment verification E2E scaffolding exists; remaining work is staging-provider execution with real Stripe/Twilio-or-SMS-gateway config.
   Backend blocks provider-unavailable starts in production and exposes provider availability + requirements in status payload.
-- `Done` PWA foundation:
-  manifest, Apple touch icons, and offline caching via Stale-While-Revalidate service worker are implemented.
+- `Done` PWA/install + push foundation:
+  manifest, icons, push subscription/preferences, push delivery, and notification-click handling are implemented.
+  The service worker intentionally does not intercept fetches or cache the app shell to avoid stale hashed deploys.
 - `Done` MLS key rotation UX:
   manual "Refresh Keys" settings UI implemented, tested with Playwright. Periodic scheduler postponed as a stretch goal.
 - `Done` MLS staged-welcome inspection UI:
@@ -53,10 +55,17 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Done` Controlled onboarding with admin approval:
   registration flow supports admin-gated user onboarding, single-use approval tokens, approval queue capacity limits, resend cooldowns, stale/expired token handling, and front-end pending-registration UX.
   Covered by route/service tests and email notification plumbing.
+- `Ops` Persuasive Alpha reward settlement:
+  attribution, episode/payout schema, scorer service, prediction-engine scoring endpoint, admin run/status routes, and daily cron entrypoint are implemented.
+  Remaining work is production enablement: set `POST_SIGNAL_REWARDS_ENABLED=true`, configure cron auth, run the job on schedule, and monitor `post_signal_run_logs`.
+- `Partial` Solid frontend unification/cutover:
+  `frontend-solid` contains parity slices for auth, feed/posts, profile/settings, notifications/messages, predictions, skin preference, and analytics.
+  Both `frontend/` and `frontend-solid/` are still included in compose/build paths, so the cutover is not complete.
+  Remaining work is to run the Solid cutover gate, complete both-skin parity checks, switch the main frontend entrypoint, and retire the VanJS runtime.
 
 ## Priority 2 - Medium
-- `Partial` Profile editing:
-  username + bio editing exists; avatar/display-name/visibility settings are still missing.
+- `Done` Profile editing:
+  username, bio, avatar upload/editing, display-name support, and profile visibility controls are implemented in backend, VanJS, Solid, and tests.
 - `Done` Passkey PRF vault unlock:
   WebAuthn/passkey management now persists PRF seed input, uses server-verified PRF output in passkey login responses, and supports local PRF unlock flow.
 - `Done` Persistent message dedup across restarts:
@@ -74,16 +83,26 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Done` Mobile navigation overhaul:
   mobile header/hamburger, bottom nav, and responsive touch-target CSS are present.
 - `Partial` Enhanced offline + push notifications + background sync:
-  push notifications and offline caching are implemented; background sync is still missing.
+  push notifications are implemented. Offline app-shell/data caching, offline action queueing, and background sync are not implemented.
 - `Open` Messaging UX upgrades:
-  reactions, message edit/delete, read receipts, and disappearing messages not implemented.
+  MLS message edit/delete, read receipts, and disappearing messages are not implemented in the active backend route/UI path.
+  Reactions are intentionally out of scope.
 - `Partial` Advanced social features:
-  follow system exists; sharing/boosting and social groups remain open.
-- `Partial` Prediction analytics + user insights dashboards:
-  LMSR ledger, market history, and leaderboard APIs exist; dedicated analytics dashboard UX is still missing.
+  follow system, repost/boost sharing, ActivityPub MVP, ATProto publishing, and ATProto/Mastodon social login exist.
+  Remaining work is richer social-graph/product UX, social groups, and production federation hardening.
+- `Done` Prediction analytics + user insights dashboards:
+  LMSR ledger, history, open-position, and leaderboard data are surfaced through a dedicated solid analytics dashboard,
+  with backend aggregation endpoint support for forecasting summary, recent predictions, and current exposure.
 - `Partial` Performance/scaling work:
   DB/index and feed-performance work are in place, and runtime stack was upgraded to Node 25 + Postgres 18.
   Remaining work is infra hardening, capacity testing, and CI/CD automation.
+
+## Recommended Next Execution Order
+1. `Solid frontend unification/cutover`: finish parity gate and remove the dual-frontend runtime path.
+2. `Verification production smoke`: run Tier 2/Tier 3 staging-provider flows, especially Stripe Elements + webhook upgrade.
+3. `Persuasive Alpha production enablement`: turn on scheduled scorer/payout runs with monitoring and rollback knobs.
+4. `Attachment storage decision`: either explicitly keep local disk as the production path or implement object-storage presign endpoints.
+5. `Messaging UX upgrades`: add MLS-safe edit/delete/read-receipt semantics only after the active frontend/runtime path is settled.
 
 ## Source References
 - `next-steps.md`
@@ -94,6 +113,11 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Intellacc Feature Roadmap.md`
 - `docs/email-plan.md`
 - `backend/test/registration_approval.test.js`
+- `docs/solid-unification-plan.md`
+- `docs/persuasive-alpha-v1-implementation-plan.md`
+- `docs/verification-production-checklist.md`
+- `backend/test/profile_update.test.js`
+- `tests/e2e/payment-verification.spec.js`
 
 ## Audit Notes
 - This pass validates repository/app implementation state, not production runtime state.
