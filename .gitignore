@@ -94,3 +94,6 @@ recherche/2504.01781v2.pdf
 
 # Playwright ad-hoc run artifacts
 .playwright-test-results/
+
+# Codex CLI workspace
+.codex
