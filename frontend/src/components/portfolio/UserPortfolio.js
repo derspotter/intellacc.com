@@ -236,8 +236,7 @@ export default function UserPortfolio() {
                 button({
                   class: 'market-link',
                   onclick: () => {
-                    window.location.hash = `predictions`;
-                    // TODO: Auto-select this event in the predictions page
+                    window.location.hash = `#market/${position.eventId}`;
                   }
                 }, position.eventTitle)
               ]),

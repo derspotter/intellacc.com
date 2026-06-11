@@ -721,6 +721,11 @@ export const api = {
       request('/leaderboard/rank')
   },
 
+  analytics: {
+    getPredictionDashboard: () =>
+      request('/analytics/predictions/me')
+  },
+
   // Notification endpoints
   notifications: {
     getAll: (options = {}) => {
@@ -1008,6 +1013,7 @@ export const getLeaderboardNetwork = (limit = 10) => api.leaderboard.getNetwork(
 export const getLeaderboardUserRank = () => api.leaderboard.getUserRank();
 
 export const getPredictionLeaderboardFallback = () => api.leaderboard.getGlobal(10);
+export const getPredictionAnalyticsDashboard = () => api.analytics.getPredictionDashboard();
 
 export const getMarketQuestionConfig = () => api.marketQuestions.getConfig();
 

@@ -7,6 +7,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import ProfilePage from './pages/ProfilePage';
 import PredictionsPage from './pages/PredictionsPage';
+import AnalyticsPage from './pages/AnalyticsPage';
 import MessagesPage from './pages/MessagesPage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
@@ -22,6 +23,7 @@ const ROUTES = {
   profile: 'profile',
   user: 'user',
   predictions: 'predictions',
+  analytics: 'analytics',
   messages: 'messages',
   notifications: 'notifications',
   settings: 'settings',
@@ -114,6 +116,9 @@ export default function App() {
     }
     if (page() === 'predictions') {
       return <PredictionsPage marketId={routeParam()} />;
+    }
+    if (page() === 'analytics') {
+      return <AnalyticsPage />;
     }
     if (page() === 'settings') {
       return <SettingsPage />;

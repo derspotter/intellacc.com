@@ -26,6 +26,7 @@ const socialAuthController = require('../controllers/socialAuthController');
 const persuasiveAlphaController = require('../controllers/persuasiveAlphaController');
 const ledgerAuditController = require('../controllers/ledgerAuditController');
 const postMatchUsageController = require('../controllers/postMatchUsageController');
+const predictionAnalyticsController = require('../controllers/predictionAnalyticsController');
 const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const moderationController = require('../controllers/moderationController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
@@ -339,6 +340,7 @@ router.get("/leaderboard/followers", authenticateJWT, leaderboardController.getF
 router.get("/leaderboard/following", authenticateJWT, leaderboardController.getFollowingLeaderboard);
 router.get("/leaderboard/network", authenticateJWT, leaderboardController.getNetworkLeaderboard);
 router.get("/leaderboard/rank", authenticateJWT, leaderboardController.getUserRank);
+router.get("/analytics/predictions/me", authenticateJWT, predictionAnalyticsController.getMyPredictionDashboard);
 
 // Admin AI moderation routes
 router.get('/admin/ai-flags', authenticateJWT, aiModerationController.getFlaggedContent);

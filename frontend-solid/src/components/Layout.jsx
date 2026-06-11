@@ -46,6 +46,9 @@ function VanSidebar() {
           <a href="#predictions">Predictions</a>
         </div>
         <div class="sidebar-item">
+          <a href="#analytics">Analytics</a>
+        </div>
+        <div class="sidebar-item">
           <a href="#notifications">Notifications</a>
         </div>
         <div class="sidebar-item">
@@ -122,6 +125,9 @@ export default function Layout(props) {
           </button>
           <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'notifications')}>
             Notifications
+          </button>
+          <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'analytics')}>
+            Analytics
           </button>
           <button type="button" class="nav-btn" onClick={() => (window.location.hash = 'settings')}>
             Settings
