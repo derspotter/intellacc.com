@@ -13,12 +13,16 @@ Intellacc is a prediction and social platform with:
 ## Architecture
 
 ```
-Frontend (VanJS + Vite)          Backend (Express.js)         Prediction Engine (Rust)
-port 5173                        port 3000                    port 3001
+Frontend (SolidJS + Vite)        Backend (Express.js)         Prediction Engine (Rust)
+port 4174                        port 3000                    port 3001
 ├─ openmls-wasm (E2EE)          ├─ Socket.io (realtime)      ├─ Axum web framework
-├─ VanJS reactive stores        ├─ MLS message relay         ├─ LMSR market maker
+├─ Solid reactive stores        ├─ MLS message relay         ├─ LMSR market maker
 └─ Hash-based routing           └─ PostgreSQL queries        └─ SQLx + PostgreSQL
 ```
+
+The legacy VanJS frontend (`frontend/`) was removed from mainline after the
+2026-06-11 Solid cutover; it is preserved at the `fallback/vanjs-final` tag
+and the `archive/vanjs` branch.
 
 **Database**: PostgreSQL (container: `intellacc_db`, user: `intellacc_user`, db: `intellaccdb`)
 
@@ -33,7 +37,7 @@ docker compose up -d
 
 # View logs
 docker logs -f intellacc_backend
-docker logs -f intellacc_frontend
+docker logs -f intellacc_frontend_solid
 docker logs -f intellacc_prediction_engine
 
 # Database access
@@ -45,12 +49,12 @@ docker exec intellacc_backend npm test
 # Run single backend test
 docker exec intellacc_backend npx jest test/messaging_e2e.test.js
 
-# Run frontend tests
-docker exec intellacc_frontend npm test
-
 # E2E tests (from host, uses Playwright)
 ./tests/e2e/reset-test-users.sh
-npx playwright test tests/e2e/messaging-full.spec.js
+npx playwright test tests/e2e/messaging-v2-smoke.spec.js
+
+# Solid cutover gate (build + smoke checks)
+RUN_PLAYWRIGHT=1 ./scripts/solid-cutover-gate.sh
 
 # Rebuild after Rust changes
 docker compose up -d --build prediction-engine
@@ -58,14 +62,13 @@ docker compose up -d --build prediction-engine
 
 ## Key Technical Details
 
-### Frontend (`frontend/`)
-- **Framework**: VanJS (lightweight reactive UI) - see `vanjs.md` for patterns
-- **State**: Lazy-loaded stores in `src/store/` (navigation, posts, predictions, user)
-- **Routing**: Hash-based (`#home`, `#predictions`, `#profile`, `#messages`)
-- **E2EE Client**: `src/services/mls/coreCryptoClient.js` - OpenMLS WASM wrapper
-- **Vault**: `src/services/vaultService.js` - encrypted keystore for MLS credentials
-- **Hot Reload**: Vite HMR is enabled - DO NOT restart frontend container after code changes, changes apply automatically
-- **VanJS Input Pattern**: Use show/hide via CSS for multi-stage forms, NOT conditional rendering (causes input focus loss)
+### Frontend (`frontend-solid/`)
+- **Framework**: SolidJS + Vite, container `intellacc_frontend_solid` (serves a production `vite preview` build on port 4174)
+- **State**: Stores in `src/store/` (messaging, vault, user)
+- **Routing**: Hash-based (`#home`, `#predictions`, `#profile`, `#messages`, `#analytics`)
+- **E2EE Client**: `shared/mls/coreCryptoClient.js` - OpenMLS WASM wrapper shared via the `@shared` Vite alias (exposed as `window.coreCryptoClient` for E2E)
+- **Vault**: `src/services/mls/vaultService.js` - encrypted keystore for MLS credentials
+- **Dev server**: `docker compose -p solid-local -f docker-compose.solid-local.yml up -d` (source-mounted Vite dev on host port 4174; ALWAYS use `-p solid-local` so it does not replace the production container)
 
 ### Backend (`backend/`)
 - **Entry**: `src/index.js`
@@ -95,7 +98,7 @@ user2@example.com / password123 (ID: 25)
 Uses `userId` (not username) for MLS identity - immutable and already in JWT.
 
 ## Ports
-- Frontend: 5173
+- Frontend (Solid): 4174
 - Backend: 3000
 - Prediction Engine: 3001
 - Database: 5432
@@ -113,8 +116,8 @@ Example prompt structure:
 We're implementing [feature] in this codebase.
 
 RELEVANT FILES:
-- frontend/src/services/auth.js - current auth flow
-- frontend/src/components/vault/DeviceLinkModal.js - device verification UI
+- frontend-solid/src/services/auth.js - current auth flow
+- frontend-solid/src/components/vault/DeviceLinkModal.jsx - device verification UI
 - backend/src/controllers/deviceController.js - device verification backend
 
 CURRENT IMPLEMENTATION:

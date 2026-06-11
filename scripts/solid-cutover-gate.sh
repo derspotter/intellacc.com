@@ -31,7 +31,6 @@ run_step "frontend-solid production build (containerized)" \
   docker run --rm \
     -v "${ROOT_DIR}/frontend-solid:/app" \
     -v "${ROOT_DIR}/shared:/shared" \
-    -v "${ROOT_DIR}/frontend:/frontend" \
     -w /app \
     "${SOLID_BUILD_IMAGE}" \
     sh -lc "npm ci --no-audit --no-fund >/tmp/npm-ci.log && npm run build"
