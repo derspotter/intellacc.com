@@ -1,9 +1,9 @@
 // frontend/src/services/vaultService.js
 // Device Keystore service: Manages device-local keys using Split-Key Architecture (V8)
-// 1. Local DB encrypted by Composite Key = HKDF(MasterKey, LocalKey).
+// 1. Local DB encrypted by Composite Key = SHA-256(MasterKey || LocalKey).
 // 2. Master Key (MK) synced via server (Server-Gated).
 // 3. Local Key (LK) stored locally (Wrapped by Password).
-// 4. Provides defense-in-depth: Compromising server OR device is insufficient to decrypt.
+// 4. Provides defense-in-depth for offline DB-only or browser-profile-only compromise.
 
 import init, { MlsClient } from 'openmls-wasm';
 import vaultStore from '../stores/vaultStore.js';
@@ -198,7 +198,7 @@ class VaultService {
         return mk;
     }
 
-    async updateMasterKeyOnServer(masterKey, password) {
+    async updateMasterKeyOnServer(masterKey, password, currentPassword = password) {
         const salt = window.crypto.getRandomValues(new Uint8Array(32));
         const wrappingKey = await this.deriveWrappingKey(password, salt);
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
@@ -207,14 +207,17 @@ class VaultService {
         await api.users.setMasterKey(
             Array.from(new Uint8Array(ciphertext)).join(','),
             Array.from(salt).join(','),
-            Array.from(iv).join(',')
+            Array.from(iv).join(','),
+            undefined,
+            undefined,
+            undefined,
+            currentPassword
         );
     }
 
     async deriveCompositeKey(masterKey, localKey) {
-        // Combine MK and LK using HKDF-ish logic (Import both as raw bytes, concat, hash?)
-        // Or encrypt one with other?
-        // Simple: Key = SHA-256(RawMK || RawLK)
+        // Current V8 derivation: Key = SHA-256(RawMK || RawLK).
+        // A future migration should version this and move to HKDF with domain separation.
         const rawMK = new Uint8Array(await window.crypto.subtle.exportKey('raw', masterKey));
         const rawLK = new Uint8Array(await window.crypto.subtle.exportKey('raw', localKey));
 
@@ -311,12 +314,23 @@ class VaultService {
         const userId = vaultStore.userId;
         if (!userId) throw new Error('No user ID set');
 
+        await this.initDB();
+        const deviceId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : 'rand';
+        this.setDeviceId(deviceId);
+
+        // Register the first device before creating the first server Master Key.
+        // Later devices remain untrusted and must still complete linking.
+        try {
+            const deviceName = `${navigator.platform || 'Web'} - ${navigator.userAgent.split('/')[0]}`;
+            await api.devices.register(deviceId, deviceName);
+        } catch (e) {
+            console.warn('[Vault] Device registration failed:', e.message || e);
+            throw e;
+        }
+
         if (!this.masterKey) {
             this.masterKey = await this.getOrCreateMasterKey(password);
         }
-
-        await this.initDB();
-        const deviceId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : 'rand';
 
         // Generate Local Key
         this.localKey = await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
@@ -328,18 +342,6 @@ class VaultService {
 
         // Derive Composite
         this.compositeKey = await this.deriveCompositeKey(this.masterKey, this.localKey);
-
-        // Set deviceId BEFORE MLS operations so saveState() can persist
-        this.setDeviceId(deviceId);
-
-        // Register device on server BEFORE MLS bootstrap
-        // Bootstrap calls syncMessages() which needs device to exist
-        try {
-            const deviceName = `${navigator.platform || 'Web'} - ${navigator.userAgent.split('/')[0]}`;
-            await api.devices.register(deviceId, deviceName);
-        } catch (e) {
-            console.warn('[Vault] Device registration failed:', e.message || e);
-        }
 
         await coreCryptoClient.ensureMlsBootstrap(String(userId));
         const mlsState = await coreCryptoClient.exportStateForVault();
@@ -1152,7 +1154,7 @@ class VaultService {
         await new Promise(r => store.put(record).onsuccess = r);
 
         // Update Server
-        await this.updateMasterKeyOnServer(this.masterKey, newPassword);
+        await this.updateMasterKeyOnServer(this.masterKey, newPassword, oldPassword);
         console.log('[Keystore] Password changed & keys re-wrapped');
     }
 
@@ -1305,8 +1307,9 @@ class VaultService {
         });
     }
 
-    async setupPrfWrapping(prfOutput, credentialId, prfInput = null) {
+    async setupPrfWrapping(prfOutput, credentialId, prfInput = null, currentPassword = null) {
         if (!this.masterKey || !this.localKey || !this.deviceId) throw new Error('Vault locked');
+        if (!currentPassword) throw new Error('Password confirmation required');
 
         // 1. Wrap Master Key
         const mkSalt = window.crypto.getRandomValues(new Uint8Array(32));
@@ -1326,7 +1329,8 @@ class VaultService {
             undefined, undefined, undefined, // Don't touch password wrap
             Array.from(new Uint8Array(ciphertextMK)).join(','),
             Array.from(mkSalt).join(','),
-            Array.from(ivMK).join(',')
+            Array.from(ivMK).join(','),
+            currentPassword
         );
 
         // 2. Wrap Local Key

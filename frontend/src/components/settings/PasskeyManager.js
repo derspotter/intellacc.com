@@ -10,6 +10,7 @@ export default function PasskeyManager() {
     const isRegistering = van.state(false);
     const error = van.state('');
     const newPasskeyName = van.state('');
+    const currentPassword = van.state('');
     const showAddForm = van.state(false);
 
     const loadCredentials = async () => {
@@ -33,6 +34,10 @@ export default function PasskeyManager() {
         try {
             const name = newPasskeyName.val || 'My Passkey';
             const prfInput = await webauthnService.isAvailable() ? await vaultService.getPrfInput() : null;
+            const passwordForPrf = vaultService.isUnlocked() ? currentPassword.val : null;
+            if (vaultService.isUnlocked() && !passwordForPrf) {
+                throw new Error('Current password is required to update vault passkey unlock');
+            }
 
             const result = await webauthnService.register(name, prfInput);
 
@@ -41,7 +46,7 @@ export default function PasskeyManager() {
             // established later after an explicit unlock flow.
             if (result.prfOutput && vaultService.isUnlocked()) {
                 try {
-                    await vaultService.setupPrfWrapping(result.prfOutput, result.credentialID, result.prfInput);
+                    await vaultService.setupPrfWrapping(result.prfOutput, result.credentialID, result.prfInput, passwordForPrf);
                 } catch (e) {
                     console.warn('Passkey added, but PRF wrapping was not updated:', e);
                 }
@@ -50,6 +55,7 @@ export default function PasskeyManager() {
             await loadCredentials();
             showAddForm.val = false;
             newPasskeyName.val = '';
+            currentPassword.val = '';
         } catch (err) {
             console.error(err);
             error.val = err.message || 'Failed to register passkey';
@@ -111,11 +117,24 @@ export default function PasskeyManager() {
                             class: 'form-input'
                         })
                     ),
+                    () => vaultService.isUnlocked() ? div({ class: 'form-group' },
+                        input({
+                            type: 'password',
+                            placeholder: 'Current password',
+                            value: currentPassword,
+                            oninput: e => currentPassword.val = e.target.value,
+                            autocomplete: 'current-password',
+                            class: 'form-input'
+                        })
+                    ) : null,
                     div({ class: 'form-actions' },
                          button({ 
                             class: 'button button-secondary',
                             type: 'button',
-                            onclick: () => showAddForm.val = false
+                            onclick: () => {
+                                showAddForm.val = false;
+                                currentPassword.val = '';
+                            }
                         }, 'Cancel'),
                         button({ 
                             class: 'button button-primary',

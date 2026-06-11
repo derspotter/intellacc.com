@@ -96,7 +96,12 @@ const resolveApproverDeviceId = async (userId, headerApproverDevicePublicId = nu
     }
 
     const approverRes = await db.query(
-        'SELECT id, last_verified_at FROM user_devices WHERE user_id = $1 AND device_public_id = $2 AND revoked_at IS NULL',
+        `SELECT ud.id, ud.last_verified_at, umk.updated_at AS master_key_updated_at
+         FROM user_devices ud
+         LEFT JOIN user_master_keys umk ON umk.user_id = ud.user_id
+         WHERE ud.user_id = $1
+           AND ud.device_public_id = $2
+           AND ud.revoked_at IS NULL`,
         [userId, headerApproverDevicePublicId]
     );
 
@@ -105,6 +110,13 @@ const resolveApproverDeviceId = async (userId, headerApproverDevicePublicId = nu
     }
 
     if (!approverRes.rows[0].last_verified_at) {
+        return null;
+    }
+
+    if (
+        approverRes.rows[0].master_key_updated_at
+        && new Date(approverRes.rows[0].last_verified_at) < new Date(approverRes.rows[0].master_key_updated_at)
+    ) {
         return null;
     }
 
@@ -212,11 +224,16 @@ exports.registerDevice = async (req, res) => {
 
 // Internal helper for bootstrapping (first device)
 exports.registerInitialDevice = async (userId, devicePublicId, name) => {
-    // Check if any devices exist
-    const countRes = await db.query('SELECT count(*) FROM user_devices WHERE user_id = $1', [userId]);
-    const isFirst = parseInt(countRes.rows[0].count) === 0;
+    const [countRes, masterKeyRes] = await Promise.all([
+        db.query('SELECT count(*) FROM user_devices WHERE user_id = $1', [userId]),
+        db.query('SELECT 1 FROM user_master_keys WHERE user_id = $1', [userId])
+    ]);
+    const hasNoDevices = parseInt(countRes.rows[0].count) === 0;
+    const hasMasterKey = masterKeyRes.rows.length > 0;
+    const isFirst = hasNoDevices && !hasMasterKey;
 
     // First device is implicitly trusted because it creates the user's first master key on this account.
+    // If a master key already exists, an empty device table is not a safe bootstrap state.
     // Subsequent devices must go through explicit linking/approval.
     const result = await db.query(
         `INSERT INTO user_devices (user_id, device_public_id, name, is_primary, last_verified_at)

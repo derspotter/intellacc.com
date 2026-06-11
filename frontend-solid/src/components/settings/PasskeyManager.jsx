@@ -24,6 +24,7 @@ export default function PasskeyManager() {
   const [registering, setRegistering] = createSignal(false);
   const [errorMessage, setErrorMessage] = createSignal('');
   const [newName, setNewName] = createSignal('');
+  const [currentPassword, setCurrentPassword] = createSignal('');
   const [showForm, setShowForm] = createSignal(false);
   const [webauthnAvailable, setWebauthnAvailable] = createSignal(false);
 
@@ -52,6 +53,10 @@ export default function PasskeyManager() {
 
     try {
       const prfInput = vaultService.isUnlocked() ? await vaultService.getPrfInput() : null;
+      const passwordForPrf = vaultService.isUnlocked() ? currentPassword() : null;
+      if (vaultService.isUnlocked() && !passwordForPrf) {
+        throw new Error('Current password is required to update vault passkey unlock');
+      }
       const result = await webauthnService.register(preferred, prfInput);
       const credentialId = result?.credentialID || result?.credentialId || result?.id;
       if (result?.prfOutput) {
@@ -60,7 +65,8 @@ export default function PasskeyManager() {
             await vaultService.setupPrfWrapping(
               result.prfOutput,
               credentialId,
-              result.prfInput
+              result.prfInput,
+              passwordForPrf
             );
           } catch (err) {
             console.warn('[PasskeyManager] PRF setup skipped:', err);
@@ -76,6 +82,7 @@ export default function PasskeyManager() {
 
       setShowForm(false);
       setNewName('');
+      setCurrentPassword('');
     } catch (err) {
       setErrorMessage(err?.message || 'Failed to register passkey.');
     } finally {
@@ -166,6 +173,19 @@ export default function PasskeyManager() {
                   disabled={registering()}
                 />
               </div>
+              <Show when={vaultService.isUnlocked()}>
+                <div class="form-group">
+                  <input
+                    type="password"
+                    placeholder="Current password"
+                    class="form-input"
+                    value={currentPassword()}
+                    onInput={(event) => setCurrentPassword(event.target.value)}
+                    autocomplete="current-password"
+                    disabled={registering()}
+                  />
+                </div>
+              </Show>
               <div class="form-actions">
                 <button
                   type="button"
@@ -173,6 +193,7 @@ export default function PasskeyManager() {
                   onClick={() => {
                     setShowForm(false);
                     setNewName('');
+                    setCurrentPassword('');
                   }}
                   disabled={registering()}
                 >

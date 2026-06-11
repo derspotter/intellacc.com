@@ -58,7 +58,7 @@ describe('WebAuthn PRF contract', () => {
         jest.clearAllMocks();
     });
 
-    test('verifyAuthentication returns prfOutput and userId from verified auth response', async () => {
+    test('verifyAuthentication returns login result without exposing PRF output', async () => {
         generateAuthenticationOptions.mockResolvedValue({ challenge: 'auth-challenge' });
 
         const optionsReq = {
@@ -103,8 +103,7 @@ describe('WebAuthn PRF contract', () => {
         expect(authRes.json).toHaveBeenCalledWith({
             verified: true,
             token: 'mock-jwt-token',
-            userId: 42,
-            prfOutput: [1, 2, 3, 4]
+            userId: 42
         });
     });
 

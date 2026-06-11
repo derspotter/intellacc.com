@@ -72,7 +72,7 @@ exports.generateRegistrationOptions = async (req, res) => {
       excludeCredentials,
       authenticatorSelection: {
         residentKey: 'preferred',
-        userVerification: 'preferred',
+        userVerification: 'required',
         authenticatorAttachment: 'platform',
       },
       extensions: {
@@ -114,7 +114,7 @@ exports.verifyRegistration = async (req, res) => {
       expectedChallenge,
       expectedOrigin: ORIGIN,
       expectedRPID: RP_ID,
-      requireUserVerification: false,
+      requireUserVerification: true,
     });
 
     if (verification.verified && verification.registrationInfo) {
@@ -231,8 +231,6 @@ exports.verifyAuthentication = async (req, res) => {
     if (verification.verified) {
         const { authenticationInfo } = verification;
         const { newCounter } = authenticationInfo;
-        const prfOutput = authenticationInfo.authenticatorExtensionResults?.prf?.results?.first;
-        
         await db.query('UPDATE webauthn_credentials SET counter = $1, last_used_at = NOW() WHERE id = $2', [newCounter, credential.id]);
         
         const token = generateToken({
@@ -244,8 +242,7 @@ exports.verifyAuthentication = async (req, res) => {
         res.json({
             verified: true,
             token,
-            userId: user.id,
-            prfOutput: prfOutput ? Array.from(new Uint8Array(prfOutput)) : null
+            userId: user.id
         });
     } else {
         res.status(400).json({ verified: false, error: 'Verification failed' });

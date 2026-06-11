@@ -13,6 +13,21 @@ const coercePrfOutput = (value) => {
   }
 };
 
+const stripPrfResults = (response) => {
+  const sanitized = { ...response };
+  const prfEnabled = response.clientExtensionResults?.prf?.enabled;
+
+  if (typeof prfEnabled === 'boolean') {
+    sanitized.clientExtensionResults = {
+      prf: { enabled: prfEnabled }
+    };
+  } else {
+    delete sanitized.clientExtensionResults;
+  }
+
+  return sanitized;
+};
+
 export const webauthnService = {
   isAvailable: async () => {
     if (typeof window === 'undefined' || !window.PublicKeyCredential) {
@@ -49,7 +64,7 @@ export const webauthnService = {
     const response = await startRegistration(options);
     const prfOutput = coercePrfOutput(response.clientExtensionResults?.prf?.results?.first);
     const result = await api.webauthn.registerFinish({
-      ...response,
+      ...stripPrfResults(response),
       name,
       challenge
     });
@@ -79,7 +94,7 @@ export const webauthnService = {
     const response = await startAuthentication(options);
     const prfOutput = coercePrfOutput(response.clientExtensionResults?.prf?.results?.first);
     const result = await api.webauthn.authFinish({
-      ...response,
+      ...stripPrfResults(response),
       challenge
     });
 

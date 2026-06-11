@@ -1,6 +1,21 @@
 import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 import { api } from './api';
 
+const stripPrfResults = (response) => {
+    const sanitized = { ...response };
+    const prfEnabled = response.clientExtensionResults?.prf?.enabled;
+
+    if (typeof prfEnabled === 'boolean') {
+        sanitized.clientExtensionResults = {
+            prf: { enabled: prfEnabled }
+        };
+    } else {
+        delete sanitized.clientExtensionResults;
+    }
+
+    return sanitized;
+};
+
 export const webauthnService = {
     isAvailable: async () => {
         return typeof window !== 'undefined' && 
@@ -32,7 +47,7 @@ export const webauthnService = {
         
         // 3. Verify
         const body = {
-            ...response,
+            ...stripPrfResults(response),
             name,
             challenge // Send it back so server can verify
         };
@@ -71,20 +86,19 @@ export const webauthnService = {
         
         // 3. Verify
         const body = {
-            ...response,
+            ...stripPrfResults(response),
             challenge
         };
 
         const result = await api.webauthn.authFinish(body);
         
         // Return PRF output if available
-        const prfResults = result.prfOutput ? new Uint8Array(result.prfOutput) : null;
         const fallbackPrfResults = response.clientExtensionResults?.prf?.results?.first
             ? new Uint8Array(response.clientExtensionResults.prf.results.first)
             : null;
         return {
             ...result,
-            prfOutput: prfResults || fallbackPrfResults
+            prfOutput: fallbackPrfResults
         };
     },
     
