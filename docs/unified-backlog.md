@@ -60,8 +60,8 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   Remaining work is production enablement: set `POST_SIGNAL_REWARDS_ENABLED=true`, configure cron auth, run the job on schedule, and monitor `post_signal_run_logs`.
 - `Partial` Solid frontend unification/cutover:
   `frontend-solid` contains parity slices for auth, feed/posts, profile/settings, notifications/messages, predictions, skin preference, and analytics.
-  Both `frontend/` and `frontend-solid/` are still included in compose/build paths, so the cutover is not complete.
-  Remaining work is to run the Solid cutover gate, complete both-skin parity checks, switch the main frontend entrypoint, and retire the VanJS runtime.
+  Runtime cutover executed 2026-06-11: gate green, both production domains serve Solid, VanJS container stopped, `fallback/vanjs-final` tagged.
+  Remaining work is to remove the VanJS app code (`frontend/`) from mainline and clean up Van-only specs/compose files.
 
 ## Priority 2 - Medium
 - `Done` Profile editing:

@@ -163,6 +163,13 @@ Use the `playwright-cli` skill to run parity checks on every migration slice:
 
 ## Current Sprint Log
 
+- `2026-06-11`: Production runtime cutover to Solid executed.
+  - Full cutover gate green (`RUN_PLAYWRIGHT=1 ./scripts/solid-cutover-gate.sh`): MLS de-dup guard, containerized production build, and smoke matrix (smoke selector updated for email-or-username login).
+  - Tagged `fallback/vanjs-final` and pushed for rollback.
+  - Switched Caddy `intellacc.de` site block from `intellacc_frontend:5173` to `intellacc_frontend_solid:4174` (`intellacc.com` already pointed at Solid); both domains verified serving the Solid build with `/api` healthy.
+  - Stopped the `intellacc_frontend` (VanJS) container. Remaining Phase 5 work: remove VanJS app code from mainline.
+  - Operational note: the Caddyfile is a single-file bind mount; edits that replace the inode are invisible to the container. Sync with `docker exec -i caddy sh -c 'cat > /etc/caddy/Caddyfile' < /var/opt/docker/caddy/Caddyfile` before `caddy reload`.
+
 - `2026-02-24`: Prediction market route and local solid parity dev harness tuned.
   - Updated `frontend-solid/src/pages/PredictionsPage.jsx` to stabilize trade-message lifecycle (no leaked timers), reduce side effects in auth-gated refreshes, and keep position/prediction refreshes aligned after trade actions.
   - Added resilient HMR defaults in `frontend-solid/vite.config.js` to avoid local websocket host/port mismatches in containerized dev.
