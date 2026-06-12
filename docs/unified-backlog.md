@@ -32,6 +32,8 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Done` Attachments storage:
   local disk storage + JWT-gated downloads are implemented for posts/messages.
   Presign endpoints exist as scaffold for later object-storage migration.
+  Decision 2026-06-12: local disk IS the production path for the single-server deployment;
+  ensure `backend/uploads/` is part of the host backup routine. Revisit only if scaling out.
 - `Done` Home feed infinite scroll:
   cursor pagination + frontend virtualization/windowed rendering are implemented.
 - `Partial` Tiered verification (phone + payment):
@@ -55,9 +57,16 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Done` Controlled onboarding with admin approval:
   registration flow supports admin-gated user onboarding, single-use approval tokens, approval queue capacity limits, resend cooldowns, stale/expired token handling, and front-end pending-registration UX.
   Covered by route/service tests and email notification plumbing.
-- `Ops` Persuasive Alpha reward settlement:
+- `Done` Persuasive Alpha reward settlement:
   attribution, episode/payout schema, scorer service, prediction-engine scoring endpoint, admin run/status routes, and daily cron entrypoint are implemented.
-  Remaining work is production enablement: set `POST_SIGNAL_REWARDS_ENABLED=true`, configure cron auth, run the job on schedule, and monitor `post_signal_run_logs`.
+  Verified live 2026-06-12: `POST_SIGNAL_REWARDS_ENABLED=true`, cron shared secret configured
+  (timing-safe check), supercronic daily run at 01:00 UTC (100+ clean runs logged), and a manual
+  cron-endpoint smoke executed the full pipeline with zero errors. Architecture review: idempotent
+  episode/payout creation, single-consume click claims, self-attribution excluded, meaningful-update
+  thresholds; NO reward caps by documented policy (kill switch is the only stop).
+  Note: the pipeline has never had real attributed traffic (0 episodes ever); watch
+  `post_signal_run_logs` and `post_signal_reward_payouts` when the first real
+  click-then-trade flows occur.
 - `Done` Solid frontend unification/cutover:
   Runtime cutover executed 2026-06-11: gate green, both production domains serve Solid, VanJS containers/images removed.
   VanJS code removed from mainline the same day; preserved at tag `fallback/vanjs-final` and branch `archive/vanjs`.
@@ -108,10 +117,8 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   Remaining work is infra hardening, capacity testing, and CI/CD automation.
 
 ## Recommended Next Execution Order
-1. `Verification production smoke`: run Tier 2/Tier 3 staging-provider flows, especially Stripe Elements + webhook upgrade.
-2. `Persuasive Alpha production enablement`: turn on scheduled scorer/payout runs with monitoring and rollback knobs.
-3. `Attachment storage decision`: either explicitly keep local disk as the production path or implement object-storage presign endpoints.
-4. `Messaging UX upgrades`: add MLS-safe edit/delete/read-receipt semantics (unblocked by the completed Solid cutover).
+1. `Verification production smoke`: run Tier 2/Tier 3 staging-provider flows, especially Stripe Elements + webhook upgrade (needs staging credentials).
+2. CI/CD automation: backend test suite + cutover-gate checks on push (no pipeline exists today).
 
 ## Source References
 - `next-steps.md`
