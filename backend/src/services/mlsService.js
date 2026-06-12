@@ -280,7 +280,7 @@ const mlsService = {
     return rows.length > 0;
   },
 
-  async storeWelcomeMessage(groupId, senderDeviceId, senderUserId, receiverUserId, data, groupInfo = null) {
+  async storeWelcomeMessage(groupId, senderDeviceId, senderUserId, receiverUserId, data, groupInfo = null, epoch = null) {
     const isMember = await this.isGroupMember(groupId, senderUserId);
     if (!isMember) {
         throw new Error('Sender is not a member of the group');
@@ -303,9 +303,11 @@ const mlsService = {
     try {
         await client.query('BEGIN');
 
+        const parsedEpoch = Number(epoch);
+        const welcomeEpoch = Number.isSafeInteger(parsedEpoch) ? parsedEpoch : null;
         const { rows: [queueRow] } = await client.query(
-            'INSERT INTO mls_relay_queue (group_id, sender_device_id, message_type, data, group_info) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-            [groupId, senderDeviceId, 'welcome', data, groupInfo]
+            'INSERT INTO mls_relay_queue (group_id, sender_device_id, message_type, data, group_info, epoch) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+            [groupId, senderDeviceId, 'welcome', data, groupInfo, welcomeEpoch]
         );
         const queueId = queueRow.id;
 
@@ -560,6 +562,7 @@ const mlsService = {
                 updated.recipient_device_id,
                 q.group_id,
                 q.message_type,
+                q.epoch,
                 ud.user_id
          FROM updated
          JOIN mls_relay_queue q ON q.id = updated.queue_id
@@ -569,12 +572,26 @@ const mlsService = {
       const ackedRows = ackRes.rows;
       const ackedWelcomes = ackedRows.filter((row) => row.message_type === 'welcome');
 
+      // A row is only deletable when every CURRENT recipient acked it AND the
+      // group has no pending joiner (unacked welcome): joiners are backfilled
+      // as recipients when they ack their welcome, so deleting earlier would
+      // race them out of messages (observed: second invitee missing the
+      // group's first message). Rows for never-joining invitees fall to the
+      // expiry cleanup instead.
       await client.query(`
-        DELETE FROM mls_relay_queue
-        WHERE id = ANY($1)
-          AND message_type != 'welcome'
-          AND id NOT IN (
+        DELETE FROM mls_relay_queue q
+        WHERE q.id = ANY($1)
+          AND q.message_type != 'welcome'
+          AND q.id NOT IN (
             SELECT queue_id FROM mls_relay_recipients WHERE queue_id = ANY($1) AND acked_at IS NULL
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM mls_relay_queue w
+            JOIN mls_relay_recipients wr ON wr.queue_id = w.id
+            WHERE w.group_id = q.group_id
+              AND w.message_type = 'welcome'
+              AND wr.acked_at IS NULL
           )
       `, [normalizedMessageIds]);
 
@@ -588,17 +605,31 @@ const mlsService = {
           [welcome.group_id, welcome.user_id]
         );
 
-        // Add these devices as recipients of any queued application messages for this group
-        // (messages sent while user wasn't a member yet)
-        // NOTE: Only application messages - commits are for existing members, new members join via welcome
+        // Add these devices as recipients of queued messages for this group
+        // that were sent while the user wasn't a member yet:
+        // - application messages unconditionally (the client skips any it
+        //   cannot decrypt)
+        // - commits from the joiner's welcome epoch onward (the joiner is a
+        //   member from that epoch and must process them to keep up; commits
+        //   from before the join are not theirs to process)
+        const welcomeEpoch = Number(welcome.epoch);
         const heldBackRes = await client.query(
           `INSERT INTO mls_relay_recipients (queue_id, recipient_device_id)
            SELECT q.id, d.id
            FROM mls_relay_queue q
            CROSS JOIN unnest($2::int[]) AS d(id)
-           WHERE q.group_id = $1 AND q.message_type = 'application'
+           WHERE q.group_id = $1
+             AND (
+               q.message_type = 'application'
+               OR (
+                 q.message_type = 'commit'
+                 AND $3::bigint IS NOT NULL
+                 AND q.epoch IS NOT NULL
+                 AND q.epoch >= $3::bigint
+               )
+             )
            ON CONFLICT DO NOTHING`,
-          [welcome.group_id, ackRecipientDeviceIds]
+          [welcome.group_id, ackRecipientDeviceIds, Number.isSafeInteger(welcomeEpoch) ? welcomeEpoch : null]
         );
         if (heldBackRes.rowCount > 0) {
           console.log(`[MLS Ack] Added ${heldBackRes.rowCount} held-back recipient rows for group ${welcome.group_id}`);
@@ -727,6 +758,23 @@ const mlsService = {
       }
     }
     return row;
+  },
+
+  // Self-removal from the routing roster. The MLS-level removal happens via
+  // the member's self-remove proposal + a remaining member's commit; this
+  // only stops relay fanout and group listing for the leaver.
+  async leaveGroup(groupId, userId) {
+    if (await this.isDirectMessage(groupId)) {
+      throw new Error('Cannot leave a direct message');
+    }
+    const { rows } = await db.query(
+      'DELETE FROM mls_group_members WHERE group_id = $1 AND user_id = $2 RETURNING user_id',
+      [groupId, userId]
+    );
+    if (rows.length === 0) {
+      throw new Error('Not a member of the group');
+    }
+    return { groupId, left: true };
   },
 
   async addGroupMember(groupId, userId) {

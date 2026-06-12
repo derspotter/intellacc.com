@@ -175,7 +175,7 @@ router.post('/queue/ack', async (req, res) => {
 // Send Welcome Message
 router.post('/messages/welcome', async (req, res) => {
   try {
-    const { groupId, receiverId, data, groupInfo } = req.body;
+    const { groupId, receiverId, data, groupInfo, epoch } = req.body;
     const devicePublicId = req.headers['x-device-id'];
     const senderId = req.user.id;
 
@@ -188,7 +188,7 @@ router.post('/messages/welcome', async (req, res) => {
       return res.status(403).json({ error: 'Active verified device required' });
     }
 
-    const result = await mlsService.storeWelcomeMessage(groupId, senderDevice.id, senderId, receiverId, data, groupInfo);
+    const result = await mlsService.storeWelcomeMessage(groupId, senderDevice.id, senderId, receiverId, data, groupInfo, epoch);
     res.json(result);
   } catch (err) {
     console.error('[MLS Welcome] Error:', err);
@@ -315,6 +315,23 @@ router.get('/groups/:groupId/group-info', async (req, res) => {
       return res.status(403).json({ error: err.message });
     }
     res.status(500).json({ error: 'Failed to fetch group info' });
+  }
+});
+
+// Leave a group chat (self-removal from the routing roster only).
+router.post('/groups/:groupId/leave', async (req, res) => {
+  try {
+    const result = await mlsService.leaveGroup(req.params.groupId, req.user.id);
+    res.json(result);
+  } catch (err) {
+    if (err.message === 'Cannot leave a direct message') {
+      return res.status(400).json({ error: err.message });
+    }
+    if (err.message === 'Not a member of the group') {
+      return res.status(403).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to leave group' });
   }
 });
 

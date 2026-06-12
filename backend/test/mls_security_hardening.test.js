@@ -71,6 +71,20 @@ describe('MLS security hardening', () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  test('leaveGroup rejects direct messages and non-members', async () => {
+    jest.spyOn(db, 'query').mockImplementation(async (sql) => {
+      if (String(sql).includes('FROM mls_direct_messages')) {
+        return { rows: [{ '?column?': 1 }] };
+      }
+      return { rows: [] };
+    });
+    await expect(mlsService.leaveGroup('dm_1_2', 1)).rejects.toThrow('Cannot leave a direct message');
+
+    jest.restoreAllMocks();
+    jest.spyOn(db, 'query').mockResolvedValue({ rows: [] });
+    await expect(mlsService.leaveGroup('somegroup', 1)).rejects.toThrow('Not a member of the group');
+  });
+
   test('ackMessages does not add group membership for guessed queue ids', async () => {
     const queries = [];
     const client = {
