@@ -143,10 +143,15 @@ export default function SocialGraph3D(props) {
 
     raycaster = new THREE.Raycaster();
 
+    let lastWidth = 0;
+    let lastHeight = 0;
     const resize = () => {
       const rect = container.getBoundingClientRect();
-      const width = Math.max(rect.width, 1);
-      const height = Math.max(rect.height, 1);
+      const width = Math.max(Math.round(rect.width), 1);
+      const height = Math.max(Math.round(rect.height), 1);
+      if (width === lastWidth && height === lastHeight) return;
+      lastWidth = width;
+      lastHeight = height;
       renderer.setSize(width, height);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();

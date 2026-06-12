@@ -10094,12 +10094,21 @@ body.skin-terminal * {
 .social-graph-container {
   position: relative;
   flex: 1;
-  min-height: 540px;
+  height: 60vh;
+  min-height: 420px;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
   overflow: hidden;
   background: #05070d;
   cursor: grab;
+}
+
+/* Keep the canvas out of normal flow: in-flow canvases create a resize
+   feedback loop (setSize grows the container, ResizeObserver re-fires). */
+.social-graph-container canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
 }
 
 .social-graph-label {
