@@ -14,10 +14,13 @@ privacy. Unblocked along the way: epoch keypair storage in the WASM
 provider (cross-member commits were universally broken) and the
 isNumericIdentity regex (group welcomes were always rejected).
 
-Remaining group polish (not blocking):
-- Leave group (MLS self-remove proposal exists in WASM; needs commit flow + UI)
-- Message-request UI for invites from non-followed users (staged-welcome
-  inspection API exists)
+Group polish shipped 2026-06-12: leave group (self-remove proposal,
+auto-committed by a remaining member with relay-level race arbitration) and
+the message-request UI (accept/decline invites from non-followed users).
+Fixed along the way: relay rows no longer deleted while a group has pending
+joiners (second-invitee message loss), welcomes record their epoch so
+joiners are backfilled the commits they must process, and the commit-rollback
+path no longer deadlocks the client by awaiting its own sync.
 
 ## Now: Persuasive Alpha visibility
 

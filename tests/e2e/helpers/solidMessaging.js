@@ -224,6 +224,7 @@ module.exports = {
 // Best-effort removal of users this spec created. E2E runs hit the real
 // backend/database, so without this test users accumulate in production.
 function cleanupUsers(users) {
+  if (process.env.KEEP_E2E_USERS === '1') return;
   const ids = (users || []).map((user) => Number(user?.id)).filter((id) => Number.isInteger(id) && id > 0);
   if (ids.length === 0) return;
   const list = ids.join(',');

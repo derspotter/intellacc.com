@@ -156,6 +156,9 @@ export default function MessagesPage() {
   const [groupMembers, setGroupMembers] = createSignal([]);
   const [addMemberId, setAddMemberId] = createSignal('');
   const [addMemberBusy, setAddMemberBusy] = createSignal(false);
+  const [messageRequests, setMessageRequests] = createSignal([]);
+  const [confirmLeave, setConfirmLeave] = createSignal(false);
+  const [leaveBusy, setLeaveBusy] = createSignal(false);
   const [editingMessageId, setEditingMessageId] = createSignal(null);
   const [editText, setEditText] = createSignal('');
   const [confirmDeleteId, setConfirmDeleteId] = createSignal(null);
@@ -335,6 +338,7 @@ export default function MessagesPage() {
     try {
       await coreCryptoClient.ensureMlsBootstrap(String(userId));
       await processPendingQueue();
+      seedMessageRequests();
       await loadConversations();
       setIsInitialized(true);
     } catch (err) {
@@ -410,6 +414,10 @@ export default function MessagesPage() {
     scheduleMlsSync(groupId, { forceReloadConversations: true });
   });
 
+  const offWelcomeRequest = coreCryptoClient.onWelcomeRequest((summary) => {
+    upsertMessageRequest(summary);
+  });
+
   onCleanup(() => {
     disposed = true;
     if (mlsSyncTimer) {
@@ -418,6 +426,9 @@ export default function MessagesPage() {
     }
     try {
       mlsUnsubMessage?.();
+    } catch {}
+    try {
+      offWelcomeRequest?.();
     } catch {}
     try {
       mlsUnsubWelcome?.();
@@ -491,6 +502,7 @@ export default function MessagesPage() {
     setSelectedGroup(next);
     setEditingMessageId(null);
     setConfirmDeleteId(null);
+    setConfirmLeave(false);
     void loadMessages(next);
   };
 
@@ -571,6 +583,68 @@ export default function MessagesPage() {
       setGroupError(err?.message || 'Failed to add member.');
     } finally {
       setAddMemberBusy(false);
+    }
+  };
+
+  // Invites from users the recipient does not follow stay pending as
+  // message requests until explicitly accepted or declined.
+  const upsertMessageRequest = (summary) => {
+    if (!summary || summary.id == null) return;
+    setMessageRequests((current) => {
+      if (current.some((item) => item.id === summary.id)) return current;
+      return [...current, summary];
+    });
+    if (summary.senderUserId) void resolveUsernames([summary.senderUserId]);
+  };
+
+  const seedMessageRequests = () => {
+    try {
+      for (const record of coreCryptoClient.pendingWelcomes?.values?.() || []) {
+        upsertMessageRequest(record);
+      }
+    } catch { /* client not ready yet */ }
+  };
+
+  const acceptMessageRequest = async (request) => {
+    try {
+      setError('');
+      await coreCryptoClient.acceptWelcome(request);
+      setMessageRequests((current) => current.filter((item) => item.id !== request.id));
+      await loadConversations();
+      if (request.groupId) selectConversation(request.groupId);
+    } catch (err) {
+      setError(err?.message || 'Failed to accept invite.');
+    }
+  };
+
+  const declineMessageRequest = async (request) => {
+    try {
+      setError('');
+      await coreCryptoClient.rejectWelcome(request);
+      setMessageRequests((current) => current.filter((item) => item.id !== request.id));
+    } catch (err) {
+      setError(err?.message || 'Failed to decline invite.');
+    }
+  };
+
+  const leaveGroup = async () => {
+    // Two-step inline confirm (no browser dialogs).
+    if (!confirmLeave()) {
+      setConfirmLeave(true);
+      return;
+    }
+    try {
+      setLeaveBusy(true);
+      setGroupError('');
+      await coreCryptoClient.leaveGroupChat(String(selectedGroup()));
+      setConfirmLeave(false);
+      setSelectedGroup('');
+      setGroupMessages([]);
+      await loadConversations();
+    } catch (err) {
+      setGroupError(err?.message || 'Failed to leave group.');
+    } finally {
+      setLeaveBusy(false);
     }
   };
 
@@ -803,6 +877,37 @@ export default function MessagesPage() {
             />
           </div>
 
+          <Show when={messageRequests().length > 0}>
+            <div class="message-requests">
+              <h3 class="message-requests-title">Message requests</h3>
+              <For each={messageRequests()}>
+                {(request) => (
+                  <div class="message-request">
+                    <span class="message-request-from">
+                      {usernameFor(request.senderUserId)} invited you
+                    </span>
+                    <span class="message-request-actions">
+                      <button
+                        type="button"
+                        class="post-action"
+                        onClick={() => void acceptMessageRequest(request)}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        class="post-action"
+                        onClick={() => void declineMessageRequest(request)}
+                      >
+                        Decline
+                      </button>
+                    </span>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+
           <div class="conversations-list">
             <Show when={loading()}>
               <p class="loading">Loading conversations…</p>
@@ -884,6 +989,14 @@ export default function MessagesPage() {
                       {addMemberBusy() ? 'Adding…' : 'Add'}
                     </button>
                   </form>
+                  <button
+                    type="button"
+                    class="post-action leave-group-btn"
+                    disabled={leaveBusy()}
+                    onClick={() => void leaveGroup()}
+                  >
+                    {leaveBusy() ? 'Leaving…' : confirmLeave() ? 'Confirm leave' : 'Leave'}
+                  </button>
                 </Show>
                 <label class="disappearing-timer">
                   <span class="disappearing-timer-label">Disappearing</span>

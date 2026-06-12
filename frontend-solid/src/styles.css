@@ -8464,6 +8464,35 @@ body.dark-mode .user-rank {
   width: 9rem;
 }
 
+.leave-group-btn {
+  font-size: 0.75rem;
+}
+
+.message-requests {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.message-requests-title {
+  font-size: 0.8rem;
+  margin: 0 0 0.35rem;
+  color: var(--secondary-text);
+}
+
+.message-request {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  padding: 0.2rem 0;
+}
+
+.message-request-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
 .read-indicator {
   color: var(--success-color);
   font-weight: 600;
