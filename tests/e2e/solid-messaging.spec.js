@@ -313,6 +313,50 @@ test.describe('Solid messaging E2E', () => {
         pageA.locator('.message-item.received.deleted .message-text'),
         { timeout: 90000, reopenConversation: true }
       );
+
+      // Disappearing messages: set a short TTL via the client API (the UI
+      // select offers minutes and up; 5s keeps the test fast), confirm the
+      // encrypted control message propagates, then watch a message expire
+      // from both vaults.
+      const dmGroupId = `dm_${Math.min(alice.id, bob.id)}_${Math.max(alice.id, bob.id)}`;
+      await pageA.evaluate(
+        (groupId) => window.coreCryptoClient.setDisappearingTimer(groupId, 5),
+        dmGroupId
+      );
+      await expect
+        .poll(async () => {
+          await pageB.evaluate(async () => {
+            try { await window.coreCryptoClient.syncMessages(); } catch {}
+          });
+          return pageB.evaluate(
+            (groupId) => window.coreCryptoClient.getDisappearingTimer(groupId),
+            dmGroupId
+          );
+        }, { timeout: 60000, message: 'disappearing TTL propagated to Bob' })
+        .toBe(5);
+
+      const vanishingText = `now you see me ${Date.now()}`;
+      await pageA.fill('textarea.message-textarea', vanishingText);
+      await pageA.locator('button.send-button').click();
+      await expect(pageA.locator('.message-item.sent .message-text', { hasText: vanishingText }))
+        .toBeVisible({ timeout: 30000 });
+      await waitWithSync(
+        pageB,
+        pageB.locator('.message-item.received .message-text', { hasText: vanishingText }),
+        { timeout: 90000, reopenConversation: true }
+      );
+
+      // After the TTL elapses, reads purge the message on both sides.
+      await pageA.waitForTimeout(6000);
+      for (const page of [pageA, pageB]) {
+        await expect
+          .poll(async () => {
+            await page.locator('.conversation-item').first().click();
+            await page.waitForTimeout(500);
+            return page.locator('.message-item .message-text', { hasText: vanishingText }).count();
+          }, { timeout: 30000, message: 'expired message purged' })
+          .toBe(0);
+      }
     } finally {
       await contextA.close();
       await contextB.close();

@@ -85,11 +85,12 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   mobile header/hamburger, bottom nav, and responsive touch-target CSS are present.
 - `Partial` Enhanced offline + push notifications + background sync:
   push notifications are implemented. Offline app-shell/data caching, offline action queueing, and background sync are not implemented.
-- `Partial` Messaging UX upgrades:
-  MLS-safe message edit/delete and read receipts implemented 2026-06-12 as encrypted in-group
-  control messages (`__mls_type` edit/delete/read_receipt; no backend changes, sender-match
-  authorization on receive, covered by the solid-messaging E2E spec).
-  Disappearing messages are not implemented. Reactions are intentionally out of scope.
+- `Done` Messaging UX upgrades:
+  MLS-safe message edit/delete, read receipts, and disappearing messages implemented 2026-06-12
+  as encrypted in-group control messages (`__mls_type` edit/delete/read_receipt/expiration; no
+  backend changes, sender-match authorization for edit/delete on receive, per-message expiry
+  stamped at persist time with hard-delete purge on read). Covered end-to-end by the
+  solid-messaging E2E spec. Reactions are intentionally out of scope.
 - `Done` E2EE onboarding/vault hardening follow-ups (found 2026-06-11 while building the solid-messaging E2E spec, fixed 2026-06-12):
   1. Unlock paths no longer create the server master key as a side effect
      (`getOrCreateMasterKey` gained `createIfMissing: false` for `findAndUnlock`), so a failed

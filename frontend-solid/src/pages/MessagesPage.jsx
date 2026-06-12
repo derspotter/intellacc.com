@@ -144,6 +144,7 @@ export default function MessagesPage() {
   const [isInitialized, setIsInitialized] = createSignal(false);
   const [groupError, setGroupError] = createSignal('');
   const [readReceipts, setReadReceipts] = createSignal({});
+  const [disappearingTtl, setDisappearingTtl] = createSignal(0);
   const [editingMessageId, setEditingMessageId] = createSignal(null);
   const [editText, setEditText] = createSignal('');
   const [confirmDeleteId, setConfirmDeleteId] = createSignal(null);
@@ -217,6 +218,7 @@ export default function MessagesPage() {
       const rows = normalizeMessageRows(response);
       setGroupMessages(rows);
       setReadReceipts(await vaultService.getReadReceipts(groupId).catch(() => ({})));
+      setDisappearingTtl(await coreCryptoClient.getDisappearingTimer(groupId).catch(() => 0));
       setError('');
       setGroupError('');
 
@@ -451,6 +453,20 @@ export default function MessagesPage() {
     }, 0);
   });
 
+  const changeDisappearingTimer = async (value) => {
+    const ttl = Number(value);
+    if (!Number.isFinite(ttl) || ttl < 0) return;
+    const previous = disappearingTtl();
+    try {
+      setGroupError('');
+      setDisappearingTtl(ttl);
+      await coreCryptoClient.setDisappearingTimer(selectedGroup(), ttl);
+    } catch (err) {
+      setDisappearingTtl(previous);
+      setGroupError(err?.message || 'Failed to update disappearing-message timer.');
+    }
+  };
+
   const startEditMessage = (message) => {
     setConfirmDeleteId(null);
     setEditingMessageId(message.id);
@@ -684,6 +700,20 @@ export default function MessagesPage() {
                   </h3>
                   <div class="encryption-status mls-active">MLS conversation</div>
                 </div>
+                <label class="disappearing-timer">
+                  <span class="disappearing-timer-label">Disappearing</span>
+                  <select
+                    class="disappearing-timer-select"
+                    value={String(disappearingTtl())}
+                    onChange={(event) => void changeDisappearingTimer(event.target.value)}
+                  >
+                    <option value="0">Off</option>
+                    <option value="60">1 minute</option>
+                    <option value="3600">1 hour</option>
+                    <option value="86400">24 hours</option>
+                    <option value="604800">7 days</option>
+                  </select>
+                </label>
               </div>
 
               <div class="messages-list">

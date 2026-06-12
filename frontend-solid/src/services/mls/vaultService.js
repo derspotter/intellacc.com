@@ -22,8 +22,9 @@ import {
 let wasmInitialized = false;
 
 const KEYSTORE_DB_NAME = 'intellacc_keystore';
-const KEYSTORE_DB_VERSION = 10; // Bump for message_receipts store
+const KEYSTORE_DB_VERSION = 11; // Bump for group_settings store
 const MESSAGE_RECEIPTS_STORE = 'message_receipts';
+const GROUP_SETTINGS_STORE = 'group_settings';
 const KEYSTORE_STORE_NAME = 'device_keystore';
 const MESSAGES_STORE_NAME = 'encrypted_messages';
 const MLS_GRANULAR_STORE_NAME = 'mls_granular_storage';
@@ -134,6 +135,12 @@ class VaultService {
                 // V10: Read receipts received from other group members
                 if (!db.objectStoreNames.contains(MESSAGE_RECEIPTS_STORE)) {
                     const store = db.createObjectStore(MESSAGE_RECEIPTS_STORE, { keyPath: 'id' });
+                    store.createIndex('groupId', 'groupId', { unique: false });
+                    store.createIndex('deviceId', 'deviceId', { unique: false });
+                }
+                // V11: Per-group settings (disappearing-message TTL)
+                if (!db.objectStoreNames.contains(GROUP_SETTINGS_STORE)) {
+                    const store = db.createObjectStore(GROUP_SETTINGS_STORE, { keyPath: 'id' });
                     store.createIndex('groupId', 'groupId', { unique: false });
                     store.createIndex('deviceId', 'deviceId', { unique: false });
                 }
@@ -448,9 +455,12 @@ class VaultService {
     }
 
     async persistMessage(message) {
-        if (!this.compositeKey || !this.deviceId) return; 
+        if (!this.compositeKey || !this.deviceId) return;
         await this.initDB();
-        const payload = JSON.stringify({ plaintext: message.plaintext, senderId: message.senderId, type: message.type });
+        const payload = JSON.stringify({
+            plaintext: message.plaintext, senderId: message.senderId, type: message.type,
+            ...(message.expiresAt ? { expiresAt: message.expiresAt } : {})
+        });
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
         const encryptedBuffer = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, this.compositeKey, new TextEncoder().encode(payload));
         const record = {
@@ -473,19 +483,40 @@ class VaultService {
             req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
         });
         const deviceRecords = records.filter(r => r.deviceId === this.deviceId);
+        const now = Date.now();
+        const expiredKeys = [];
         const messages = await Promise.all(deviceRecords.map(async (rec) => {
             try {
                 const iv = new Uint8Array(rec.encryptedData.iv);
                 const ciphertext = new Uint8Array(rec.encryptedData.ciphertext);
                 const plainBuffer = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, this.compositeKey, ciphertext);
                 const payload = JSON.parse(new TextDecoder().decode(plainBuffer));
+                if (payload.expiresAt && Number(payload.expiresAt) <= now) {
+                    expiredKeys.push(rec.id);
+                    return null;
+                }
                 return {
                     id: rec.messageId, groupId: rec.groupId, timestamp: rec.timestamp,
                     senderId: payload.senderId, plaintext: payload.plaintext, type: payload.type,
-                    editedAt: payload.editedAt || null, deleted: !!payload.deleted
+                    editedAt: payload.editedAt || null, deleted: !!payload.deleted,
+                    expiresAt: payload.expiresAt || null
                 };
             } catch (e) { return null; }
         }));
+        // Disappearing messages: hard-delete anything past its TTL.
+        if (expiredKeys.length > 0) {
+            await new Promise((resolve) => {
+                try {
+                    const tx = this.db.transaction([MESSAGES_STORE_NAME], 'readwrite');
+                    const store = tx.objectStore(MESSAGES_STORE_NAME);
+                    for (const key of expiredKeys) store.delete(key);
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = () => resolve(); // Non-fatal
+                } catch (e) {
+                    resolve();
+                }
+            });
+        }
         return messages.filter(m => m !== null).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
     }
 
@@ -642,6 +673,51 @@ class VaultService {
                 tx.onerror = () => resolve(); // Non-fatal
             } catch (e) {
                 resolve();
+            }
+        });
+    }
+
+    /**
+     * Persist the disappearing-message TTL for a group (0 disables).
+     */
+    async setGroupExpiration(groupId, ttlSeconds, setBy = null) {
+        if (!this.deviceId) return;
+        await this.initDB();
+        const ttl = Number(ttlSeconds);
+        if (!Number.isFinite(ttl) || ttl < 0) return;
+        return new Promise((resolve) => {
+            try {
+                const tx = this.db.transaction([GROUP_SETTINGS_STORE], 'readwrite');
+                tx.objectStore(GROUP_SETTINGS_STORE).put({
+                    id: `${this.deviceId}|${groupId}`,
+                    groupId,
+                    deviceId: this.deviceId,
+                    ttlSeconds: ttl,
+                    setBy: setBy !== null ? String(setBy) : null,
+                    updatedAt: Date.now()
+                });
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve(); // Non-fatal
+            } catch (e) {
+                resolve();
+            }
+        });
+    }
+
+    /**
+     * Disappearing-message TTL for a group in seconds (0 = disabled).
+     */
+    async getGroupExpiration(groupId) {
+        if (!this.deviceId) return 0;
+        await this.initDB();
+        return new Promise((resolve) => {
+            try {
+                const tx = this.db.transaction([GROUP_SETTINGS_STORE], 'readonly');
+                const req = tx.objectStore(GROUP_SETTINGS_STORE).get(`${this.deviceId}|${groupId}`);
+                req.onsuccess = () => resolve(Number(req.result?.ttlSeconds) || 0);
+                req.onerror = () => resolve(0);
+            } catch (e) {
+                resolve(0);
             }
         });
     }

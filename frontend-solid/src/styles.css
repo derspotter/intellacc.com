@@ -8410,6 +8410,25 @@ body.dark-mode .user-rank {
   gap: 0.5rem;
 }
 
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.disappearing-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--secondary-text);
+}
+
+.disappearing-timer-select {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.3rem;
+}
+
 .read-indicator {
   color: var(--success-color);
   font-weight: 600;

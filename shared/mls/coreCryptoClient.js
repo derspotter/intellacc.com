@@ -1143,7 +1143,8 @@ class CoreCryptoClient {
             await vault.persistMessage({
                 id: messageId, groupId: groupIdValue,
                 senderId: this.identityName || localStorage.getItem('userId'),
-                plaintext, type: 'application', timestamp: new Date().toISOString()
+                plaintext, type: 'application', timestamp: new Date().toISOString(),
+                expiresAt: await this._messageExpiryFor(vault, groupIdValue)
             });
         } catch (e) {
             console.warn('[MLS] Failed to store sent message:', e);
@@ -1212,6 +1213,35 @@ class CoreCryptoClient {
             __mls_type: 'read_receipt',
             last_read_id: lastReadId
         });
+    }
+
+    // Set the group's disappearing-message TTL (0 disables) and broadcast it
+    // so every member's client applies the same setting to new messages.
+    async setDisappearingTimer(groupId, ttlSeconds) {
+        const ttl = Number(ttlSeconds);
+        if (!Number.isFinite(ttl) || ttl < 0) throw new Error('Invalid disappearing-message TTL');
+        const { str: groupIdValue } = this.normalizeGroupId(groupId);
+        const vault = await this.getVaultService();
+        await vault.setGroupExpiration(groupIdValue, ttl, this.identityName);
+        await this.sendSystemMessage(groupIdValue, {
+            __mls_type: 'expiration',
+            ttl_seconds: ttl
+        });
+    }
+
+    async getDisappearingTimer(groupId) {
+        const { str: groupIdValue } = this.normalizeGroupId(groupId);
+        const vault = await this.getVaultService();
+        return vault.getGroupExpiration(groupIdValue);
+    }
+
+    async _messageExpiryFor(vault, groupId) {
+        try {
+            const ttl = await vault.getGroupExpiration(groupId);
+            return ttl > 0 ? Date.now() + ttl * 1000 : null;
+        } catch (e) {
+            return null;
+        }
     }
 
     // Key rotation for Post-Compromise Security
@@ -1767,6 +1797,12 @@ class CoreCryptoClient {
                     await vault.saveReadReceipt(group_id, senderUserId, payload.last_read_id);
                     return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
                 }
+                if (payload && payload.__mls_type === 'expiration') {
+                    // Any group member may change the disappearing-message TTL
+                    // (applies to new messages only, never retroactively).
+                    await vault.setGroupExpiration(group_id, payload.ttl_seconds, senderUserId);
+                    return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
+                }
             }
 
             const messageObj = {
@@ -1776,12 +1812,12 @@ class CoreCryptoClient {
                 senderDeviceId: sender_id,
                 plaintext,
                 type: 'application',
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                expiresAt: await this._messageExpiryFor(vault, group_id)
             };
 
             // Persist to encrypted local storage
             if (plaintext && plaintext !== '[Encrypted Message]') {
-                const vault = await this.getVaultService();
                 await vault.persistMessage(messageObj);
             }
 
