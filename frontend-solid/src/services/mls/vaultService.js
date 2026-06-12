@@ -158,7 +158,10 @@ class VaultService {
         });
     }
 
-    async getOrCreateMasterKey(password) {
+    // createIfMissing must stay false on unlock paths: creating the master
+    // key before the first device registers demotes that device out of the
+    // implicitly-trusted first-device bootstrap. Only setup flows create.
+    async getOrCreateMasterKey(password, { createIfMissing = true } = {}) {
         const deviceIds = await this.getLocalDeviceIds();
         this.masterKeyCreated = false;
         try {
@@ -177,7 +180,10 @@ class VaultService {
             }
         } catch (e) {
             if (e.status === 403 && e.data?.code === 'LINK_REQUIRED') throw e;
-            if (e.status !== 404) throw e; 
+            if (e.status !== 404) throw e;
+        }
+        if (!createIfMissing) {
+            throw new Error('No master key on server');
         }
         const mk = await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
         await this.updateMasterKeyOnServer(mk, password);
@@ -219,7 +225,7 @@ class VaultService {
     async findAndUnlock(password, userId) {
         if (!userId) return false;
         try {
-            this.masterKey = await this.getOrCreateMasterKey(password);
+            this.masterKey = await this.getOrCreateMasterKey(password, { createIfMissing: false });
         } catch (e) {
             if (e.status === 403) throw e;
             return false;
@@ -1065,7 +1071,7 @@ class VaultService {
         // (Code from findAndUnlock above)
         if (!userId) return false;
         try {
-            this.masterKey = await this.getOrCreateMasterKey(password);
+            this.masterKey = await this.getOrCreateMasterKey(password, { createIfMissing: false });
         } catch (e) {
             if (e.status === 403) throw e;
             return false;

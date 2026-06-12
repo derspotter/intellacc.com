@@ -88,14 +88,12 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Open` Messaging UX upgrades:
   MLS message edit/delete, read receipts, and disappearing messages are not implemented in the active backend route/UI path.
   Reactions are intentionally out of scope.
-- `Open` E2EE onboarding/vault hardening follow-ups (found 2026-06-11 while building the solid-messaging E2E spec):
-  1. `vaultService.unlockWithPassword` creates the server master key as a side effect
-     (`getOrCreateMasterKey`), so any client path that attempts an unlock before first-device
-     registration permanently demotes that account out of implicit first-device trust.
-     Unlock should not create key material.
-  2. Welcome acceptance logs `Failed to broadcast confirmation tag after welcome acceptance:
-     Failed to send group message` (non-fatal, exchange still works); the joining device's
-     confirmation-tag broadcast is rejected by the relay and should be diagnosed.
+- `Done` E2EE onboarding/vault hardening follow-ups (found 2026-06-11 while building the solid-messaging E2E spec, fixed 2026-06-12):
+  1. Unlock paths no longer create the server master key as a side effect
+     (`getOrCreateMasterKey` gained `createIfMissing: false` for `findAndUnlock`), so a failed
+     unlock can no longer demote an account out of implicit first-device trust.
+  2. The auto-accept welcome path now acks before `acceptStagedWelcome`, matching the explicit
+     accept path, so the confirmation-tag broadcast is sent as a registered group member.
 - `Partial` Advanced social features:
   follow system, repost/boost sharing, ActivityPub MVP, ATProto publishing, and ATProto/Mastodon social login exist.
   Remaining work is richer social-graph/product UX, social groups, and production federation hardening.

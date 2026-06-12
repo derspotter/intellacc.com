@@ -1574,6 +1574,10 @@ class CoreCryptoClient {
                         }
 
                         if (welcomeOutcome === 'accepted') {
+                            // Ack first so the server registers us as a group member
+                            // before acceptStagedWelcome broadcasts the confirmation
+                            // tag (same ordering as the explicit accept path).
+                            if (messageId) await api.mls.ackMessages([messageId]);
                             const groupId = await this.acceptStagedWelcome(staged.stagingId);
                             this.pendingWelcomes.delete(messageId);
                             this.welcomeHandlers.forEach(h => h({ groupId, groupInfoBytes }));
