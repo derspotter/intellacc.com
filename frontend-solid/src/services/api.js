@@ -518,7 +518,10 @@ export const api = {
       request(`/posts/${postId}/confirm-market`, { method: 'POST', body: { event_id: eventId, action, stance } }),
 
     marketClick: (postId, eventId) =>
-      request(`/posts/${postId}/market-click`, { method: 'POST', body: { event_id: eventId } })
+      request(`/posts/${postId}/market-click`, { method: 'POST', body: { event_id: eventId } }),
+
+    getSignalSummary: (postId) =>
+      request(`/posts/${postId}/signal-summary`)
   },
 
   // Community market question workflow

@@ -68,6 +68,8 @@ export default function PredictionAnalyticsDashboard() {
   const activity = () => dashboard()?.activity || {};
   const recentPredictions = () => dashboard()?.recent_predictions || [];
   const openPositions = () => dashboard()?.open_positions || [];
+  const persuasion = () => dashboard()?.persuasion || {};
+  const persuasionPayouts = () => persuasion().recent_payouts || [];
 
   if (!isAuthenticated()) {
     return (
@@ -175,6 +177,52 @@ export default function PredictionAnalyticsDashboard() {
                     <div class="analytics-position-stats">
                       <span>{formatRp(item.staked_rp)}</span>
                       <span>{formatPercent(Number(item.market_prob || 0) * 100, '—')}</span>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
+
+        <div class="analytics-panel">
+          <h3>Persuasion Rewards</h3>
+          <p class="analytics-panel-subtitle">
+            Earned when readers trade on markets via your posts and the market moves.
+          </p>
+          <div class="analytics-summary-grid">
+            <div class="analytics-stat-card">
+              <span class="analytics-stat-label">Earned</span>
+              <span class="analytics-stat-value">{Number(persuasion().reward_rp || 0).toFixed(2)} RP</span>
+            </div>
+            <div class="analytics-stat-card">
+              <span class="analytics-stat-label">Rewarded Posts</span>
+              <span class="analytics-stat-value">{formatNumber(persuasion().rewarded_posts)}</span>
+            </div>
+            <div class="analytics-stat-card">
+              <span class="analytics-stat-label">Market Moves Attributed</span>
+              <span class="analytics-stat-value">{formatNumber(persuasion().episode_count)}</span>
+            </div>
+          </div>
+          <Show when={persuasionPayouts().length > 0} fallback={
+            <p class="analytics-empty-state">
+              No persuasion rewards yet. Attach markets to your posts; when readers
+              follow them and trade, meaningful moves mint RP for you.
+            </p>
+          }>
+            <div class="analytics-list">
+              <For each={persuasionPayouts()}>
+                {(item) => (
+                  <div class="analytics-list-row">
+                    <div>
+                      <div class="analytics-row-title">{item.event_title || `Market ${item.event_id}`}</div>
+                      <div class="analytics-row-meta">
+                        {Math.round(Math.abs(Number(item.p_after) - Number(item.p_before)) * 100)} pp move
+                        · {item.component} · {formatDate(item.created_at)}
+                      </div>
+                    </div>
+                    <div class="analytics-position-stats">
+                      <span>+{Number(item.reward_rp || 0).toFixed(2)} RP</span>
                     </div>
                   </div>
                 )}

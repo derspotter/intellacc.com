@@ -174,6 +174,35 @@ exports.createPostMarketClick = async (req, res) => {
   }
 };
 
+// Public attribution summary for a post: whether trades referred by this
+// post meaningfully moved markets, and how much was minted for the author.
+exports.getPostSignalSummary = async (req, res) => {
+  try {
+    const postId = parseIntParam(req.params.postId, 'postId');
+
+    const result = await db.query(
+      `SELECT
+         COUNT(*)::INT AS episode_count,
+         COUNT(DISTINCT pse.event_id)::INT AS market_count,
+         COALESCE(MAX(ABS(pse.p_after - pse.p_before)), 0)::DOUBLE PRECISION AS max_prob_move,
+         (COALESCE(SUM(pay.reward_ledger), 0) / 1000000.0)::DOUBLE PRECISION AS reward_rp
+       FROM post_signal_episodes pse
+       LEFT JOIN post_signal_reward_payouts pay ON pay.episode_id = pse.id
+       WHERE pse.post_id = $1
+         AND pse.is_meaningful`,
+      [postId]
+    );
+
+    res.json(result.rows[0] || { episode_count: 0, market_count: 0, max_prob_move: 0, reward_rp: 0 });
+  } catch (err) {
+    if (/^Invalid /.test(err.message || '')) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error('Error fetching post signal summary:', err);
+    res.status(500).json({ error: 'Failed to fetch post signal summary' });
+  }
+};
+
 exports.getPostMarkets = async (req, res) => {
   try {
     const postId = parseIntParam(req.params.postId, 'postId');

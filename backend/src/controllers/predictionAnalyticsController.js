@@ -10,7 +10,15 @@ exports.getMyPredictionDashboard = async (req, res) => {
   }
 
   try {
-    const [summaryResult, activityResult, recentPredictionsResult, openPositionsResult] = await Promise.all([
+    const [
+      summaryResult,
+      activityResult,
+      recentPredictionsResult,
+      openPositionsResult,
+      persuasionTotalsResult,
+      persuasionEpisodesResult,
+      persuasionRecentResult
+    ] = await Promise.all([
       db.query(
         `
           SELECT
@@ -174,6 +182,50 @@ exports.getMyPredictionDashboard = async (req, res) => {
           LIMIT 8
         `,
         [userId]
+      ),
+      // Persuasive Alpha: rewards minted for this user's posts moving markets.
+      db.query(
+        `
+          SELECT
+            COALESCE(SUM(reward_ledger), 0)::BIGINT AS reward_ledger_total,
+            COUNT(*) FILTER (WHERE reward_ledger > 0)::INT AS payout_count,
+            COUNT(DISTINCT post_id) FILTER (WHERE reward_ledger > 0)::INT AS rewarded_posts
+          FROM post_signal_reward_payouts
+          WHERE author_user_id = $1
+        `,
+        [userId]
+      ),
+      db.query(
+        `
+          SELECT COUNT(*)::INT AS episode_count,
+                 COUNT(DISTINCT pse.event_id)::INT AS market_count
+          FROM post_signal_episodes pse
+          JOIN posts p ON p.id = pse.post_id
+          WHERE p.user_id = $1
+            AND pse.is_meaningful
+        `,
+        [userId]
+      ),
+      db.query(
+        `
+          SELECT
+            pay.post_id,
+            pay.event_id,
+            e.title AS event_title,
+            pay.component,
+            (pay.reward_ledger / 1000000.0)::DOUBLE PRECISION AS reward_rp,
+            pay.created_at,
+            pse.p_before,
+            pse.p_after
+          FROM post_signal_reward_payouts pay
+          JOIN post_signal_episodes pse ON pse.id = pay.episode_id
+          LEFT JOIN events e ON e.id = pay.event_id
+          WHERE pay.author_user_id = $1
+            AND pay.reward_ledger > 0
+          ORDER BY pay.created_at DESC
+          LIMIT 10
+        `,
+        [userId]
       )
     ]);
 
@@ -197,7 +249,15 @@ exports.getMyPredictionDashboard = async (req, res) => {
         active_markets: 0
       },
       recent_predictions: recentPredictionsResult.rows || [],
-      open_positions: openPositionsResult.rows || []
+      open_positions: openPositionsResult.rows || [],
+      persuasion: {
+        reward_rp: Number(persuasionTotalsResult.rows[0]?.reward_ledger_total || 0) / LEDGER_DIVISOR,
+        payout_count: persuasionTotalsResult.rows[0]?.payout_count || 0,
+        rewarded_posts: persuasionTotalsResult.rows[0]?.rewarded_posts || 0,
+        episode_count: persuasionEpisodesResult.rows[0]?.episode_count || 0,
+        market_count: persuasionEpisodesResult.rows[0]?.market_count || 0,
+        recent_payouts: persuasionRecentResult.rows || []
+      }
     });
   } catch (error) {
     console.error('Error fetching prediction analytics dashboard:', error);

@@ -15,8 +15,29 @@ const fetchMarkets = async (postId) => {
   }
 };
 
+// Persuasive Alpha attribution: did trades referred by this post move markets?
+const fetchSignalSummary = async (postId) => {
+  if (!isAuthenticated()) {
+    return null;
+  }
+  try {
+    return await api.posts.getSignalSummary(postId);
+  } catch (err) {
+    return null;
+  }
+};
+
 export default function PostMarkets(props) {
   const [markets] = createResource(() => props.postId, fetchMarkets);
+  const [signal] = createResource(() => props.postId, fetchSignalSummary);
+
+  const movedMarkets = () => Number(signal()?.episode_count || 0) > 0;
+  const moveLabel = () => {
+    const data = signal() || {};
+    const movePp = Math.round(Number(data.max_prob_move || 0) * 100);
+    const marketWord = Number(data.market_count) === 1 ? 'a market' : `${data.market_count} markets`;
+    return `Moved ${marketWord}${movePp > 0 ? ` · biggest move ${movePp} pp` : ''}`;
+  };
 
   const handleMarketClick = async (e, eventId) => {
     // We let the link navigation happen naturally, just record the click asynchronously
@@ -59,6 +80,11 @@ export default function PostMarkets(props) {
             )}
           </For>
         </div>
+        <Show when={movedMarkets()}>
+          <div class="post-signal-badge" title="Readers traded on linked markets via this post and the market moved meaningfully">
+            📈 {moveLabel()}
+          </div>
+        </Show>
       </div>
     </Show>
   );

@@ -10066,3 +10066,15 @@ body.skin-terminal,
 body.skin-terminal * {
   font-family: "JetBrains Mono", monospace;
 }
+
+.analytics-panel-subtitle {
+  font-size: 0.8rem;
+  color: var(--secondary-text);
+  margin: 0 0 0.6rem;
+}
+
+.post-signal-badge {
+  margin-top: 6px;
+  font-size: 0.8em;
+  color: var(--secondary-text);
+}
