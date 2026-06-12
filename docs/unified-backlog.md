@@ -67,13 +67,10 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   username, bio, avatar upload/editing, display-name support, and profile visibility controls are implemented in backend, VanJS, Solid, and tests.
 - `Done` Passkey PRF vault unlock:
   WebAuthn/passkey management now persists PRF seed input, uses server-verified PRF output in passkey login responses, and supports local PRF unlock flow.
-- `Partial` Persistent message dedup across restarts:
-  vault-backed processed-ID persistence was created using IndexedDB in the VanJS vaultService,
-  but the Solid `frontend-solid/src/services/mls/vaultService.js` never implemented
-  `getRecentProcessedMessages`/`markMessageProcessed`, so the now-active frontend falls back to
-  in-memory dedup only (errors are swallowed into console.warn; observed 2026-06-11 via the
-  solid-messaging E2E spec). Port the two methods from `archive/vanjs`
-  `frontend/src/services/vaultService.js`.
+- `Done` Persistent message dedup across restarts:
+  vault-backed processed-ID persistence using IndexedDB; the Solid vaultService gap
+  (missing `getRecentProcessedMessages`/`markMessageProcessed`, found 2026-06-11 via the
+  solid-messaging E2E spec) was ported from the archived VanJS implementation on 2026-06-12.
 - `Done` AI moderation pipeline:
   Pangram service + flagged-content admin API/UI + `AiContentBadge` integration are present.
 - `Done` OpenMLS integration surface cleanup:

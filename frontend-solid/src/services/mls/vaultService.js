@@ -22,11 +22,12 @@ import {
 let wasmInitialized = false;
 
 const KEYSTORE_DB_NAME = 'intellacc_keystore';
-const KEYSTORE_DB_VERSION = 8; // Bump for Contact Fingerprints (TOFU)
+const KEYSTORE_DB_VERSION = 9; // Bump for processed_messages dedup store
 const KEYSTORE_STORE_NAME = 'device_keystore';
 const MESSAGES_STORE_NAME = 'encrypted_messages';
 const MLS_GRANULAR_STORE_NAME = 'mls_granular_storage';
 const CONTACT_FINGERPRINTS_STORE = 'contact_fingerprints';
+const PROCESSED_MESSAGES_STORE = 'processed_messages';
 
 const normalizePrfInput = (input) => {
   if (input === null || typeof input === 'undefined') return null;
@@ -122,6 +123,12 @@ class VaultService {
                     store.createIndex('contactUserId', 'contactUserId', { unique: false });
                     store.createIndex('status', 'status', { unique: false });
                     store.createIndex('deviceId', 'deviceId', { unique: false });
+                }
+                // V9: Processed messages deduplication
+                if (!db.objectStoreNames.contains(PROCESSED_MESSAGES_STORE)) {
+                    const store = db.createObjectStore(PROCESSED_MESSAGES_STORE, { keyPath: 'id' });
+                    store.createIndex('deviceId', 'deviceId', { unique: false });
+                    store.createIndex('timestamp', 'timestamp', { unique: false });
                 }
             };
         });
@@ -463,6 +470,54 @@ class VaultService {
             } catch (e) { return null; }
         }));
         return messages.filter(m => m !== null).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    }
+
+    /**
+     * Record a relay message ID as processed so it is deduplicated across
+     * restarts (the MLS client also keeps an in-memory set).
+     */
+    async markMessageProcessed(messageId) {
+        if (!this.deviceId) return;
+        await this.initDB();
+        return new Promise((resolve) => {
+            try {
+                const tx = this.db.transaction([PROCESSED_MESSAGES_STORE], 'readwrite');
+                tx.objectStore(PROCESSED_MESSAGES_STORE).put({
+                    id: String(messageId),
+                    deviceId: this.deviceId,
+                    timestamp: Date.now()
+                });
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve(); // Non-fatal
+            } catch (e) {
+                resolve();
+            }
+        });
+    }
+
+    /**
+     * Load recent processed message IDs into memory to prevent duplicates.
+     */
+    async getRecentProcessedMessages(limit = 2000) {
+        if (!this.deviceId) return [];
+        await this.initDB();
+        return new Promise((resolve) => {
+            try {
+                const tx = this.db.transaction([PROCESSED_MESSAGES_STORE], 'readonly');
+                const store = tx.objectStore(PROCESSED_MESSAGES_STORE);
+                const index = store.index('deviceId');
+                const req = index.getAll(this.deviceId);
+
+                req.onsuccess = () => {
+                    const records = req.result || [];
+                    records.sort((a, b) => b.timestamp - a.timestamp);
+                    resolve(records.slice(0, limit).map(r => r.id));
+                };
+                req.onerror = () => resolve([]);
+            } catch (e) {
+                resolve([]);
+            }
+        });
     }
 
     /**
