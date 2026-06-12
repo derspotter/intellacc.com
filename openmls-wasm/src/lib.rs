@@ -2311,6 +2311,7 @@ impl MlsClient {
                      "confirmation_tag" => Self::apply_event(&storage.confirmation_tags, key_bytes, event.value),
                      "own_leaf_index" => Self::apply_event(&storage.own_leaf_index, key_bytes, event.value),
                      "sent_message" => Self::apply_event(&storage.sent_messages, key_bytes, event.value),
+                     "epoch_key_pairs" => Self::apply_event(&storage.epoch_key_pairs, key_bytes, event.value),
                      _ => {
                          wasm_log!(&format!("[WASM] Unknown category in import: {}", event.category));
                      }
@@ -2405,6 +2406,15 @@ pub struct GranularStorage {
     // Key: group_id || msg_id bytes, Value: plaintext bytes
     #[serde(default)]
     pub sent_messages: RwLock<HashMap<Vec<u8>, Vec<u8>>>,
+
+    // Epoch encryption key pairs (own path/leaf secrets per epoch).
+    // Key: serialized (group_id, epoch, leaf_index), Value: serialized Vec<HpkeKeyPair>.
+    // REQUIRED for processing other members' commits: OpenMLS stores the
+    // receiver-side decryption keys here on join/merge and reads them back in
+    // read_epoch_keypairs(); stubbing this out breaks every cross-member
+    // commit with "Expected sender to be in the tree".
+    #[serde(default)]
+    pub epoch_key_pairs: RwLock<HashMap<Vec<u8>, Vec<u8>>>,
 
     // The "Dirty Log"
     #[serde(skip)]
@@ -2874,22 +2884,42 @@ impl StorageProvider<1> for GranularStorage {
         Ok(())
     }
     
-    fn encryption_epoch_key_pairs<GroupId, EpochKey, HpkeKeyPair>(&self, _group_id: &GroupId, _epoch_key: &EpochKey, _leaf_index: u32) -> Result<Vec<HpkeKeyPair>, Self::Error> 
-    where GroupId: st::GroupId<1>, EpochKey: st::EpochKey<1>, HpkeKeyPair: st::HpkeKeyPair<1>
+    fn encryption_epoch_key_pairs<GroupId, EpochKey, HpkeKeyPair>(&self, group_id: &GroupId, epoch_key: &EpochKey, leaf_index: u32) -> Result<Vec<HpkeKeyPair>, Self::Error>
+    where GroupId: st::GroupId<1> + serde::Serialize, EpochKey: st::EpochKey<1> + serde::Serialize, HpkeKeyPair: st::HpkeKeyPair<1> + serde::de::DeserializeOwned
     {
-        Ok(Vec::new()) 
+        let k = server_ser(&(group_id, epoch_key, leaf_index))?;
+        let map = self.epoch_key_pairs.read().unwrap();
+        match map.get(&k) {
+            Some(v) => server_de(v),
+            None => Ok(Vec::new()),
+        }
     }
-    
-    fn write_encryption_epoch_key_pairs<GroupId, EpochKey, HpkeKeyPair>(&self, _group_id: &GroupId, _epoch_key: &EpochKey, _leaf_index: u32, _key_pairs: &[HpkeKeyPair]) -> Result<(), Self::Error> 
-    where GroupId: st::GroupId<1>, EpochKey: st::EpochKey<1>, HpkeKeyPair: st::HpkeKeyPair<1>
+
+    fn write_encryption_epoch_key_pairs<GroupId, EpochKey, HpkeKeyPair>(&self, group_id: &GroupId, epoch_key: &EpochKey, leaf_index: u32, key_pairs: &[HpkeKeyPair]) -> Result<(), Self::Error>
+    where GroupId: st::GroupId<1> + serde::Serialize, EpochKey: st::EpochKey<1> + serde::Serialize, HpkeKeyPair: st::HpkeKeyPair<1> + serde::Serialize
     {
-       Ok(())
+        let k = server_ser(&(group_id, epoch_key, leaf_index))?;
+        let v = server_ser(&key_pairs)?;
+        self.epoch_key_pairs.write().unwrap().insert(k.clone(), v.clone());
+        self.dirty_events.write().unwrap().push(StorageEvent {
+            key: hex::encode(&k),
+            value: Some(v),
+            category: "epoch_key_pairs".to_string(),
+        });
+        Ok(())
     }
-    
-    fn delete_encryption_epoch_key_pairs<GroupId, EpochKey>(&self, _group_id: &GroupId, _epoch_key: &EpochKey, _leaf_index: u32) -> Result<(), Self::Error> 
-    where GroupId: st::GroupId<1>, EpochKey: st::EpochKey<1>
+
+    fn delete_encryption_epoch_key_pairs<GroupId, EpochKey>(&self, group_id: &GroupId, epoch_key: &EpochKey, leaf_index: u32) -> Result<(), Self::Error>
+    where GroupId: st::GroupId<1> + serde::Serialize, EpochKey: st::EpochKey<1> + serde::Serialize
     {
-       Ok(())
+        let k = server_ser(&(group_id, epoch_key, leaf_index))?;
+        self.epoch_key_pairs.write().unwrap().remove(&k);
+        self.dirty_events.write().unwrap().push(StorageEvent {
+            key: hex::encode(&k),
+            value: None,
+            category: "epoch_key_pairs".to_string(),
+        });
+        Ok(())
     }
 
     fn own_leaf_index<GroupId, LeafNodeIndex>(&self, group_id: &GroupId) -> Result<Option<LeafNodeIndex>, Self::Error>
