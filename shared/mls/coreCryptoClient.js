@@ -881,10 +881,13 @@ class CoreCryptoClient {
                     await this._broadcastGroupConfirmationTag(groupId, 'after invite commit');
 
                     // 5. Upload Welcome Message (new members only, after commit accepted)
+                    // The current (post-merge) epoch is the epoch the joiner
+                    // starts at; the relay uses it to backfill later commits.
                     await this.mlsFetch('/messages/welcome', {
                         groupId, receiverId: userId,
                         data: this.toPostgresHex(welcomeBytes),
-                        groupInfo: groupInfoBytes ? this.toPostgresHex(groupInfoBytes) : null
+                        groupInfo: groupInfoBytes ? this.toPostgresHex(groupInfoBytes) : null,
+                        epoch: this.getGroupEpoch(groupId)
                     });
 
                     addedCount++;
@@ -1391,6 +1394,36 @@ class CoreCryptoClient {
         return result;
     }
 
+    // Full leave flow: broadcast the self-remove proposal (a remaining member
+    // auto-commits it), drop the routing roster entry so the relay stops
+    // fanning out to us, and discard local crypto state.
+    async leaveGroupChat(groupId) {
+        const { str: groupIdValue } = this.normalizeGroupId(groupId);
+        if (this.isDirectMessage(groupIdValue)) {
+            throw new Error('Direct messages cannot be left');
+        }
+        await this.leaveGroup(groupIdValue);
+        await this.mlsFetch(`/groups/${encodeURIComponent(groupIdValue)}/leave`, {});
+        try { this.removeGroup(groupIdValue); } catch (e) { /* already gone */ }
+        await this.saveState();
+        return { groupId: groupIdValue, left: true };
+    }
+
+    // A self-remove proposal needs a remaining member to commit it. Every
+    // member that processes the proposal races to commit; the relay's
+    // per-epoch commit guard lets exactly one win, and the losers roll back
+    // (inside _sendGroupCommit) and process the winner's commit instead.
+    async _autoCommitPendingProposals(groupId) {
+        try {
+            await this.commitPendingProposals(groupId);
+        } catch (err) {
+            const message = String(err?.message || err);
+            if (!/Commit already pending for epoch/i.test(message)) {
+                console.warn('[MLS] Auto-commit of pending proposals failed:', message);
+            }
+        }
+    }
+
     getOwnLeafIndex(groupId) {
         this.requireClient();
         const groupIdBytes = this.groupIdToBytes(groupId);
@@ -1724,6 +1757,12 @@ class CoreCryptoClient {
                         if (!result.skipped) {
                             this.messageHandlers.forEach(h => h(result));
                         }
+
+                        // Accepted proposals (e.g. a member's self-remove)
+                        // need a commit from a remaining member to take effect.
+                        if (result.type === 'proposal' && result.accepted) {
+                            await this._autoCommitPendingProposals(msg.group_id);
+                        }
                     }
                     if (messageId) {
                         processedIds.push(messageId);
@@ -2020,7 +2059,8 @@ class CoreCryptoClient {
                     await this.mlsFetch('/messages/welcome', {
                         groupId, receiverId,
                         data: this.toPostgresHex(welcomeBytes),
-                        groupInfo: groupInfoBytes ? this.toPostgresHex(groupInfoBytes) : null
+                        groupInfo: groupInfoBytes ? this.toPostgresHex(groupInfoBytes) : null,
+                        epoch: this.getGroupEpoch(groupId)
                     });
                 } catch (welcomeErr) {
                     console.warn(`[MLS] Error sending welcome to ${receiverId}:`, welcomeErr);
@@ -2118,8 +2158,13 @@ class CoreCryptoClient {
             } catch (e) { }
 
             this.setupSocketListeners();
-            const processed = await this.syncMessages();
-            if (processed.length > 0) await this.saveState();
+            // Do not chain a sync when restore happens INSIDE one (the
+            // commit-rollback path): syncMessages() would return the
+            // currently-executing sync's own promise and deadlock forever.
+            if (!this.syncPromise) {
+                const processed = await this.syncMessages();
+                if (processed.length > 0) await this.saveState();
+            }
             return true;
         } catch (error) {
             console.error('[MLS] Error restoring state from vault:', error);
