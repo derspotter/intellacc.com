@@ -87,7 +87,11 @@ export default function ApiKeysManager() {
         Agent API Keys
       </h3>
       <p style="font-size: 0.85rem; color: var(--secondary-text); margin-bottom: 1rem;">
-        Create secure, scoped API keys for headless bots or AI orchestrators (like OpenClaw). These keys bypass the need for passkeys but are strictly limited in what they can do.
+        Create one secure, scoped API key for a headless agent or AI orchestrator
+        (like OpenClaw) — usable with the intellacc CLI. One key per account;
+        revoke it to issue a new one. Agent keys can read markets, trade, and
+        post, but are locked out of messaging, credentials, devices, and account
+        settings.
       </p>
 
       <Show when={error() && error() !== 'You must complete Email and Phone verification before generating API keys.'}>

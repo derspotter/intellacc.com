@@ -75,6 +75,16 @@ jobs:
       - uses: actions/checkout@v4
       - run: ./scripts/check-mls-dedup.sh
 
+  agent-cli:
+    name: Agent CLI tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node cli/test.mjs
+
   solid-build:
     name: frontend-solid production build
     runs-on: ubuntu-latest

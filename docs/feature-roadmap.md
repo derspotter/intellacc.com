@@ -31,6 +31,16 @@ rewarded posts, attributed market moves, recent payouts) and a public
 seeded episode/payout data. First-payout notification deferred until the
 pipeline sees real traffic.
 
+## Done 2026-06-12: Agent CLI
+
+Shipped: zero-dependency JSON-first CLI (`cli/intellacc.js`) for headless
+agents — markets (list/get/trade with idempotency keys), social (feed/post),
+whoami/config-verify. Backend hardening on the pre-existing api_keys system:
+one key per user, agent lockout from sensitive surfaces (MLS, credentials,
+devices, key management, account lifecycle, admin), 120 req/min rate limit,
+Idempotency-Key replay protection on trades/posts. Usage: docs/agent-cli.md.
+E2EE messaging for agents deliberately deferred.
+
 ## Later (unordered)
 
 - **Offline + background sync (PWA)**: offline app shell, queued actions,
@@ -39,7 +49,7 @@ pipeline sees real traffic.
   repost surfacing.
 - **Social groups/communities**: public topic/market groups with
   membership and moderation. Needs product design first.
-- **Agent CLI**: see `agent-cli-plan.md` (unexecuted plan).
+
 - **Nightly E2E job**: scheduled run of the messaging spec with test-user
   cleanup; deferred in favor of feature work.
 
