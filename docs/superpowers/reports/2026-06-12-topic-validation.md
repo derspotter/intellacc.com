@@ -1,0 +1,52 @@
+# Topic classification validation — 2026-06-12
+
+- Judge: qwen (local)
+- Sample judged: 100/100
+- **Top-1 agreement: 44.0%**
+- **Any-overlap agreement: 57.0%** (gate: ≥ 80%)
+- Verdict: FAIL — reconsider (LLM-at-import fallback)
+
+## Disagreements (43)
+- [1329] "Donut Battery is essentially Lithium free?" — embedding: crypto | llm: science,ai-technology
+- [104] "Will EMR's market close price on 2026-01-03 be higher than its market close price on 2025-12-30?" — embedding: crypto,climate-environment | llm: economics-finance
+- [1743] "Event create test 1772900732231" — embedding: crypto | llm: politics
+- [2239] "Event create test 1781293923486" — embedding: crypto | llm: politics
+- [72] "Will the interest in “delcy rodriguez” change between 2026-01-06 and 2026-01-14 according to Google Trends?" — embedding: health,culture-media | llm: politics
+- [1351] "Will I get a 5 on APUSH?" — embedding: health,economics-finance | llm: politics
+- [1566] "Will the interest in “gisele pelicot” change between 2026-02-17 and 2026-02-26 according to Google Trends?" — embedding: climate-environment,economics-finance | llm: culture-media
+- [1470] "How much will Crude Oil Futures total price returns exceed S&P 500 Futures's in these biweekly periods of Q1 2026? (Mar 16 - Mar 27)" — embedding: crypto | llm: economics-finance
+- [1468] "What will be the maximum intraday value of the VIX over these biweekly periods in Q1 2026? (Mar 16 - Mar 27)" — embedding: crypto,health | llm: economics-finance
+- [108] "Will the community prediction be higher than 36.00% on 2025-12-31 for the Metaculus question "Will presidential impoundment authority be expanded by the Supreme Court or by law before November 3, 2026?"?" — embedding: crypto,health | llm: politics
+- [1396] "Will Sad Braders beat IMB?" — embedding: crypto,ai-technology | llm: sports
+- [1602] "What will be the largest GDPR fine before 2031, measured in billions of Euros?" — embedding: climate-environment,crypto | llm: economics-finance,ai-technology
+- [1288] "Will Platinum spot price on NYMEX exceed 1100 USD/oz on May 31, 2026?" — embedding: crypto | llm: economics-finance
+- [1352] "Will "Increasing returns to effort are common" make the top fifty posts in LessWrong's 2025 Annual Review?" — embedding: ai-technology,climate-environment | llm: culture-media
+- [1133] "MC test market" — embedding: ai-technology,economics-finance | llm: culture-media
+- [1555] "Will the community prediction be higher than 12.00% on 2026-02-26 for the Metaculus question "Will Nvidia's stock price close below $100 on any day in 2026?"?" — embedding: crypto | llm: economics-finance,ai-technology
+- [1436] "Will the interest in “grants for reentry programs 2026” change between 2026-03-03 and 2026-03-14 according to Google Trends?" — embedding: health,climate-environment | llm: politics
+- [1535] "Will the community prediction be higher than 60.00% on 2026-02-25 for the Metaculus question "Will Keir Starmer cease to be Prime Minister of the UK during 2026?"?" — embedding: climate-environment,crypto | llm: politics
+- [1441] "Will EXR's market close price on 2026-03-10 be higher than its market close price on 2026-03-03?" — embedding: crypto | llm: economics-finance
+- [1371] "Will China 300-series stainless steel prices exceed $2500/ton in 2026 exceed 2500 units on December 31, 2027?" — embedding: climate-environment,crypto | llm: economics-finance
+- [1323] "When will freedom.gov go live?" — embedding: ai-technology,crypto | llm: politics
+- [1462] "What will be the Economist Democracy Index for Iran in 2026?" — embedding: ai-technology,economics-finance | llm: politics,geopolitics
+- [58] "Will VICI's market close price on 2026-01-16 be higher than its market close price on 2026-01-06?" — embedding: ai-technology,crypto | llm: economics-finance
+- [101] "Will Beyond Meat file for bankruptcy protection before 2028?" — embedding: crypto,ai-technology | llm: economics-finance
+- [943] "Event create test 1772127349095" — embedding: crypto | llm: politics
+- [892] "Event create test 1771887730845" — embedding: crypto | llm: politics
+- [44] "Will the interest in “jack smith” change between 2026-01-08 and 2026-01-17 according to Google Trends?" — embedding: health,culture-media | llm: politics
+- [116] "Will HPQ's market close price on 2026-01-03 be higher than its market close price on 2025-12-27?" — embedding: ai-technology,crypto | llm: economics-finance
+- [162] "What will be Donald Trump's approval rating on January 14, 2026?" — embedding: crypto,economics-finance | llm: politics
+- [1445] "Will INCY's market close price on 2026-03-14 be higher than its market close price on 2026-03-03?" — embedding: crypto | llm: economics-finance
+- [1920] "Event create test 1772901617151" — embedding: crypto | llm: politics
+- [1425] "Will the community prediction be higher than 79.00% on 2026-03-12 for the Metaculus question "Will the Community beat Nathan Young in the Metaculus Cup Spring 2026?"?" — embedding: climate-environment,health | llm: culture-media
+- [1044] "Will SYY's market close price on 2026-03-13 be higher than its market close price on 2026-03-02?" — embedding: crypto | llm: economics-finance
+- [1271] "U.S. – Iran nuclear milestones in 2026" — embedding: climate-environment,crypto | llm: geopolitics
+- [1035] "Will the interest in “fox” change between 2026-03-02 and 2026-03-12 according to Google Trends?" — embedding: economics-finance,crypto | llm: culture-media
+- [1251] "Will I get an A on my short story about prediction markets? [EP. 2]" — embedding: ai-technology,crypto | llm: culture-media
+- [129] "Will FANG's market close price on 2026-01-01 be higher than its market close price on 2025-12-24?" — embedding: crypto | llm: economics-finance
+- [46] "Will the interest in “trump approval rating” change between 2026-01-07 and 2026-01-16 according to Google Trends?" — embedding: health,crypto | llm: politics
+- [1348] "Will Drake say something about Kendrick in Iceman?" — embedding: crypto,ai-technology | llm: culture-media
+- [1027] "Will Harvey Weinstein be sentenced to less than 5 years in prison?" — embedding: crypto,ai-technology | llm: culture-media
+- [1860] "Event create test 1772901384638" — embedding: crypto | llm: politics
+- [2159] "Event create test 1781259697696" — embedding: crypto | llm: politics
+- [826] "Event create test 1771886857538" — embedding: crypto | llm: politics
