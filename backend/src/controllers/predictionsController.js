@@ -4,6 +4,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const db = require('../db');
 const { setEventEmbedding } = require('../services/openRouterMatcher/embeddingService');
 const matchConfig = require('../services/openRouterMatcher/config');
+const topicService = require('../services/topicService');
 
 const normalizeMarketOutcome = (raw) => {
   if (typeof raw === 'boolean') {
@@ -368,8 +369,10 @@ exports.createEvent = asyncHandler(async (req, res) => {
     eventId: newEvent.id,
     title: newEvent.title,
     details: newEvent.details
+  }).then(() => {
+    return topicService.classifyEvent(newEvent.id);
   }).catch((error) => {
-    console.error('[Event Embedding] Failed to create embedding:', error.message || error);
+    console.error('[Event] Background embedding/classification failed for event', newEvent.id, error.message);
   });
   res.status(201).json(newEvent);
 });
