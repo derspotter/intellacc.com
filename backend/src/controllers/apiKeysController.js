@@ -23,10 +23,11 @@ const createKey = async (req, res) => {
 
         const isBotBool = Boolean(isBot);
 
-        // Limit the number of keys per user (e.g., max 5)
+        // One agent key per user: regenerating requires revoking the old one,
+        // so a leaked key cannot quietly coexist with a fresh one.
         const countResult = await db.query('SELECT COUNT(*) FROM api_keys WHERE user_id = $1', [userId]);
-        if (parseInt(countResult.rows[0].count) >= 5) {
-            return res.status(400).json({ error: 'Maximum number of API keys reached (5)' });
+        if (parseInt(countResult.rows[0].count) >= 1) {
+            return res.status(400).json({ error: 'An agent key already exists. Revoke it before creating a new one.' });
         }
 
         const plainKey = generateApiKey();

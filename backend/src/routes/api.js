@@ -3,6 +3,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
+const { rejectAgentKeys, idempotent } = require('../middleware/agentGuard');
 const userController = require('../controllers/userController');
 const postController = require('../controllers/postController');
 const likeController = require('../controllers/likeController');
@@ -90,8 +91,8 @@ router.get('/users/:id/block', authenticateJWT, userController.getBlockStatus);
 router.get('/users/me/blocks', authenticateJWT, userController.getBlockedUsers);
 router.get('/users/me/preferences', authenticateJWT, userController.getUserUiPreferences);
 router.put('/users/me/preferences', authenticateJWT, userController.updateUserUiPreferences);
-router.get('/users/master-key', authenticateJWT, userController.getMasterKey);
-router.post('/users/master-key', authenticateJWT, userController.setMasterKey);
+router.get('/users/master-key', authenticateJWT, rejectAgentKeys, userController.getMasterKey);
+router.post('/users/master-key', authenticateJWT, rejectAgentKeys, userController.setMasterKey);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
 router.get("/users/:id", authenticateJWT, userController.getUser);
 router.post('/login', userController.loginUser);
@@ -173,17 +174,17 @@ const apiKeysController = require('../controllers/apiKeysController');
 // Password reset routes
 router.post('/auth/forgot-password', passwordResetRateLimit, passwordResetController.forgotPassword);
 router.post('/auth/reset-password', passwordResetRateLimit, passwordResetController.resetPassword);
-router.post('/auth/reset-password/cancel', authenticateJWT, passwordResetController.cancelReset);
+router.post('/auth/reset-password/cancel', authenticateJWT, rejectAgentKeys, passwordResetController.cancelReset);
 
-router.post('/users/change-password', authenticateJWT, userController.changePassword);
+router.post('/users/change-password', authenticateJWT, rejectAgentKeys, userController.changePassword);
 router.get("/me", authenticateJWT, userController.getUserProfile);
-router.delete("/me", authenticateJWT, userController.deleteAccount);
+router.delete("/me", authenticateJWT, rejectAgentKeys, userController.deleteAccount);
 router.patch("/users/profile", authenticateJWT, userController.editUserProfile);
 
 // API Key Routes (requires full verification: email & phone)
-router.get('/users/me/api-keys', authenticateJWT, requireEmailVerified, requirePhoneVerified, apiKeysController.listKeys);
-router.post('/users/me/api-keys', authenticateJWT, requireEmailVerified, requirePhoneVerified, apiKeysController.createKey);
-router.delete('/users/me/api-keys/:id', authenticateJWT, requireEmailVerified, requirePhoneVerified, apiKeysController.revokeKey);
+router.get('/users/me/api-keys', authenticateJWT, rejectAgentKeys, requireEmailVerified, requirePhoneVerified, apiKeysController.listKeys);
+router.post('/users/me/api-keys', authenticateJWT, rejectAgentKeys, requireEmailVerified, requirePhoneVerified, apiKeysController.createKey);
+router.delete('/users/me/api-keys/:id', authenticateJWT, rejectAgentKeys, requireEmailVerified, requirePhoneVerified, apiKeysController.revokeKey);
 
 // Follow System Routes
 router.post("/users/:id/follow", authenticateJWT, userController.followUser);
@@ -289,7 +290,7 @@ router.post("/assignments/:id/bet", authenticateJWT, requirePhoneVerified, predi
 router.get("/bets/stats", authenticateJWT, predictionsController.getMonthlyBettingStats);
 
 // Post Routes (require email verification - Tier 1)
-router.post("/posts", authenticateJWT, requireEmailVerified, requireScope('social:post'), postController.createPost);
+router.post("/posts", authenticateJWT, requireEmailVerified, requireScope('social:post'), idempotent, postController.createPost);
 router.post("/posts/:postId/market-click", authenticateJWT, persuasiveAlphaController.createPostMarketClick);
 router.get("/posts/:postId/markets", authenticateJWT, persuasiveAlphaController.getPostMarkets);
 router.get("/posts/:postId/signal-summary", authenticateJWT, persuasiveAlphaController.getPostSignalSummary);
@@ -492,7 +493,7 @@ router.post("/events/:eventId/sell", authenticateJWT, requirePhoneVerified, requ
     }
 });
 
-router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, requireScope('market:trade'), async (req, res) => {
+router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, requireScope('market:trade'), idempotent, async (req, res) => {
     const { eventId } = req.params;
     const { stake, target_prob } = req.body;
     const userId = req.user.id;
@@ -640,7 +641,7 @@ router.post("/events/:eventId/update", authenticateJWT, requirePhoneVerified, re
     }
 });
 
-router.post("/events/:eventId/update-outcome", authenticateJWT, requirePhoneVerified, requireScope('market:trade'), async (req, res) => {
+router.post("/events/:eventId/update-outcome", authenticateJWT, requirePhoneVerified, requireScope('market:trade'), idempotent, async (req, res) => {
     const { eventId } = req.params;
     const { stake, outcome_id } = req.body;
     const userId = req.user.id;

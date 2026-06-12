@@ -7,6 +7,10 @@ const authenticateJWT = require('../middleware/auth');
 // Middleware to ensure user is authenticated
 router.use(authenticateJWT);
 
+// E2EE endpoints require a real device session; agent API keys are excluded.
+const { rejectAgentKeys } = require('../middleware/agentGuard');
+router.use(rejectAgentKeys);
+
 // Resolve the requesting user's relay device IDs: the device named in the
 // x-device-id header, or all active verified devices when the header is absent.
 // Sends the error response and returns null when no usable device exists.

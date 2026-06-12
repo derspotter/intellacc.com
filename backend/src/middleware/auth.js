@@ -1,6 +1,7 @@
 // backend/src/middleware/auth.js
 const db = require('../db');
 const { verifyToken, getUserFromToken } = require('../utils/jwt');
+const { agentRateLimit } = require('./agentGuard');
 const crypto = require('crypto');
 
 let supportsDeletedAt = null;
@@ -67,8 +68,9 @@ const authenticateJWT = async (req, res, next) => {
         isBot: userRow.is_bot || false,
         scopes: userRow.scopes || []
       };
-      
-      return next();
+
+      // Per-user rate limit applies to agent traffic only.
+      return agentRateLimit(req, res, next);
     } catch (err) {
       console.error('API key auth error:', err);
       return res.status(500).json({ message: 'Authentication failed: Server error' });
@@ -134,6 +136,11 @@ module.exports.requireAdmin = async (req, res, next) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Agent API keys never get admin surface, regardless of the owner's role.
+    if (req.user.isAgent) {
+      return res.status(403).json({ error: 'Admin access required' });
     }
 
     if (req.user.role === 'admin') {
