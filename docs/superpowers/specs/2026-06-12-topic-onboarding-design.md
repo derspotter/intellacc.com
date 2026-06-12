@@ -153,6 +153,29 @@ actually running in prod is half the feature.
 5. Verify/fix the existing weekly cron run end-to-end in prod (diagnose the
    zero-assignments issue, enable topic-aware selection).
 
+## Amendment (2026-06-12): gate outcome — classification flipped to LLM
+
+The validation gate FAILED for embedding-centroid classification (57% any-overlap,
+44% top-1 vs Qwen judge; report: `docs/superpowers/reports/2026-06-12-topic-validation.md`).
+Root causes: single centroid per topic is too crude for broad topics, and the
+crypto topic description contained generic market phrasing that magnetized
+stock-price questions (398/786 events → crypto).
+
+Decision (Justus): classify with OpenRouter `google/gemma-4-26b-a4b-it:free`
+(model env-configurable) instead.
+
+- `topicService` gains an LLM classifier writing `source='llm'` rows (replacing
+  that event's previous topic rows); the embedding classifier remains as
+  fallback when the LLM call fails.
+- Import hook and backfill use LLM-first classification.
+- Topic descriptions get cleaned of generic market phrasing anyway (fallback
+  hygiene); topic embeddings regenerated.
+- The validation gate re-runs with Qwen as the (independent) judge against
+  `source='llm'` data; same ≥80% any-overlap threshold.
+- Contingency: OpenRouter free-tier daily caps may throttle the 786-event
+  backfill; if so, the bulk backfill runs host-side against local Qwen while
+  import-time classification stays on Gemma.
+
 ## Out of scope
 
 - Topic-filtered feed browsing/tabs for users who already follow people.
