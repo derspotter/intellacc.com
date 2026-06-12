@@ -1,5 +1,7 @@
 # Unified Backlog
-Updated: 2026-05-06 (audited against current codebase)
+Updated: 2026-06-12 (audited against current codebase)
+
+Forward feature plan: `docs/feature-roadmap.md`. Completed plan documents are in `docs/archive/`.
 
 Status legend:
 - `Done`: implemented in app code (may still require production rollout/config).
@@ -13,7 +15,7 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Done` Password reset + recovery flow:
   backend routes/service/worker + frontend screens/cancel UX + tests are present.
   Production hardening is now also wired through startup validation and an ops checklist:
-  `docs/password-reset-production-checklist.md`.
+  `docs/archive/password-reset-production-checklist.md`.
 - `Done` Account deletion (GDPR/CCPA):
   soft-delete/anonymization flow + password-confirm UI + backend test coverage are present.
 - `Done` Prediction engine access control:
@@ -40,7 +42,7 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   email, phone, and payment flows plus middleware, provider guards, and UI are implemented.
   Repository coverage already includes tier progression, provider-unavailable behavior, and Stripe webhook robustness.
   Production readiness is mostly present via feature-flagged provider validation and docs/checklist:
-  `docs/verification-implementation-plan.md`, `docs/verification-production-checklist.md`.
+  `docs/archive/verification-implementation-plan.md`, `docs/verification-production-checklist.md`.
   Phone verification supports Twilio or self-hosted SMS gateway, with optional OpenClaw WhatsApp fallback on SMS send failure,
   plus server-side OTP challenge persistence (TTL + max-attempt controls).
   Browser-level payment verification E2E scaffolding exists; remaining work is staging-provider execution with real Stripe/Twilio-or-SMS-gateway config.
@@ -129,19 +131,11 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 1. `Verification production smoke`: run Tier 2/Tier 3 staging-provider flows, especially Stripe Elements + webhook upgrade (needs staging credentials).
 
 ## Source References
-- `next-steps.md`
-- `production-checklist.md`
-- `mobile-pwa-plan.md`
-- `e2ee-next-steps.md`
-- `docs/mls-status.md`
-- `Intellacc Feature Roadmap.md`
-- `docs/email-plan.md`
-- `backend/test/registration_approval.test.js`
-- `docs/solid-unification-plan.md`
-- `docs/persuasive-alpha-v1-implementation-plan.md`
-- `docs/verification-production-checklist.md`
-- `backend/test/profile_update.test.js`
-- `tests/e2e/payment-verification.spec.js`
+- `docs/feature-roadmap.md` (forward plan)
+- `docs/verification-production-checklist.md` (open ops item)
+- `docs/archive/` (completed plan documents: Solid cutover, MLS unification,
+  Persuasive Alpha implementation, email/phone/password-reset plans, VanJS notes)
+- `backend/test/` and `tests/e2e/` (behavioral evidence for Done statuses)
 
 ## Audit Notes
 - This pass validates repository/app implementation state, not production runtime state.
