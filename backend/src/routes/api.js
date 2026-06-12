@@ -190,6 +190,7 @@ router.delete('/users/me/api-keys/:id', authenticateJWT, rejectAgentKeys, requir
 router.post("/users/:id/follow", authenticateJWT, userController.followUser);
 router.delete("/users/:id/follow", authenticateJWT, userController.unfollowUser);
 router.get("/users/:id/following-status", authenticateJWT, userController.getFollowingStatus);
+router.get("/network/graph", authenticateJWT, userController.getNetworkGraph);
 router.get("/users/:id/followers", authenticateJWT, userController.getFollowers);
 router.get("/users/:id/following", authenticateJWT, userController.getFollowing);
 

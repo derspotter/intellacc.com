@@ -45,8 +45,10 @@ E2EE messaging for agents deliberately deferred.
 
 - **Offline + background sync (PWA)**: offline app shell, queued actions,
   background sync. Currently push-only.
-- **Social graph UX**: follower/following pages, user discovery,
-  repost surfacing.
+- **Social graph UX (remaining)**: follower/following list pages, repost
+  surfacing. The discovery centerpiece shipped 2026-06-12: a 3D follow-network
+  page (#network) with WebGL force graph (repurposed from the DT project),
+  node size = followers, color = forecasting accuracy, click-to-follow.
 - **Social groups/communities**: public topic/market groups with
   membership and moderation. Needs product design first.
 

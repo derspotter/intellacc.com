@@ -15,7 +15,8 @@
     "socket.io-client": "^4.7.5",
     "solid-js": "^1.9.10",
     "solid-transition-group": "^0.2.3",
-    "tailwind-merge": "^2.3.0"
+    "tailwind-merge": "^2.3.0",
+    "three": "^0.170.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

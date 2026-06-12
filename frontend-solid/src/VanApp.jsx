@@ -8,6 +8,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import ProfilePage from './pages/ProfilePage';
 import PredictionsPage from './pages/PredictionsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import NetworkPage from './pages/NetworkPage';
 import MessagesPage from './pages/MessagesPage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
@@ -24,6 +25,7 @@ const ROUTES = {
   user: 'user',
   predictions: 'predictions',
   analytics: 'analytics',
+  network: 'network',
   messages: 'messages',
   notifications: 'notifications',
   settings: 'settings',
@@ -119,6 +121,9 @@ export default function App() {
     }
     if (page() === 'analytics') {
       return <AnalyticsPage />;
+    }
+    if (page() === 'network') {
+      return <NetworkPage />;
     }
     if (page() === 'settings') {
       return <SettingsPage />;

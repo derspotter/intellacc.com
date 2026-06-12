@@ -998,6 +998,48 @@ exports.getFollowingStatus = async (req, res) => {
   }
 };
 
+// Full follow network for the 3D social graph: every visible user as a node
+// (with follower count and forecasting accuracy for sizing/coloring) and
+// every follow edge. Bounded; revisit with pagination if the user base grows
+// past the cap.
+exports.getNetworkGraph = async (req, res) => {
+  try {
+    const [nodesResult, edgesResult] = await Promise.all([
+      db.query(`
+        SELECT u.id,
+               u.username,
+               COALESCE(f.followers, 0)::INT AS followers,
+               ROUND(
+                 (
+                   100.0 * COUNT(p.id) FILTER (WHERE LOWER(COALESCE(p.outcome, '')) = 'correct')
+                   / NULLIF(COUNT(p.id) FILTER (WHERE p.outcome IS NOT NULL), 0)
+                 )::NUMERIC, 1
+               )::DOUBLE PRECISION AS accuracy_percent
+        FROM users u
+        LEFT JOIN (
+          SELECT following_id, COUNT(*) AS followers
+          FROM follows
+          GROUP BY following_id
+        ) f ON f.following_id = u.id
+        LEFT JOIN predictions p ON p.user_id = u.id
+        WHERE u.deleted_at IS NULL
+        GROUP BY u.id, u.username, f.followers
+        ORDER BY COALESCE(f.followers, 0) DESC, u.id ASC
+        LIMIT 2000
+      `),
+      db.query('SELECT follower_id, following_id FROM follows LIMIT 20000')
+    ]);
+
+    res.json({
+      nodes: nodesResult.rows,
+      edges: edgesResult.rows.map((row) => [row.follower_id, row.following_id])
+    });
+  } catch (err) {
+    console.error('Error building network graph:', err);
+    res.status(500).json({ message: 'Failed to load network graph' });
+  }
+};
+
 // Get followers of a user
 exports.getFollowers = async (req, res) => {
   const userIdParam = req.params.id;

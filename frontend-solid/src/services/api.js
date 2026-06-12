@@ -743,6 +743,11 @@ export const api = {
       request('/analytics/predictions/me')
   },
 
+  network: {
+    getGraph: () =>
+      request('/network/graph')
+  },
+
   // Notification endpoints
   notifications: {
     getAll: (options = {}) => {

@@ -49,6 +49,9 @@ function VanSidebar() {
           <a href="#analytics">Analytics</a>
         </div>
         <div class="sidebar-item">
+          <a href="#network">Network</a>
+        </div>
+        <div class="sidebar-item">
           <a href="#notifications">Notifications</a>
         </div>
         <div class="sidebar-item">
