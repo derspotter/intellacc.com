@@ -327,6 +327,20 @@ input[type="submit"]:disabled {
   text-align: center;
 }
 
+/* Home: pin the empty-feed notice to the bottom middle of the center column
+   without changing the column's size. It sits inside the card's 2rem bottom padding. */
+.main-content.page-home {
+  position: relative;
+}
+
+.main-content.page-home .empty-feed {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+}
+
 .enable-push-btn,
 .retry-btn {
   margin-top: 0.25rem;
