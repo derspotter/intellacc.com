@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Show, onCleanup } from 'solid-js';
-import { getDirectMessages } from '../services/api';
+import { getDirectMessages, getUser } from '../services/api';
 import { getCurrentUserId as getAuthUserId, isAuthenticated } from '../services/auth';
 import vaultStore from '../store/vaultStore';
 import vaultService from '../services/mls/vaultService';
@@ -102,6 +102,10 @@ const getConversationName = (conversation, groupId) => {
     return `Conversation ${groupId}`;
   }
 
+  if (typeof conversation.name === 'string' && conversation.name.trim()) {
+    return conversation.name;
+  }
+
   if (conversation.participant_usernames) {
     const users = conversation.participant_usernames;
     if (Array.isArray(users) && users.length) {
@@ -145,6 +149,13 @@ export default function MessagesPage() {
   const [groupError, setGroupError] = createSignal('');
   const [readReceipts, setReadReceipts] = createSignal({});
   const [disappearingTtl, setDisappearingTtl] = createSignal(0);
+  const [newConversationKind, setNewConversationKind] = createSignal('dm');
+  const [groupName, setGroupName] = createSignal('');
+  const [groupMembersInput, setGroupMembersInput] = createSignal('');
+  const [usernames, setUsernames] = createSignal({});
+  const [groupMembers, setGroupMembers] = createSignal([]);
+  const [addMemberId, setAddMemberId] = createSignal('');
+  const [addMemberBusy, setAddMemberBusy] = createSignal(false);
   const [editingMessageId, setEditingMessageId] = createSignal(null);
   const [editText, setEditText] = createSignal('');
   const [confirmDeleteId, setConfirmDeleteId] = createSignal(null);
@@ -194,8 +205,19 @@ export default function MessagesPage() {
     try {
       setLoading(true);
       setError('');
-      const response = await getDirectMessages();
-      const rows = normalizeRows(response);
+      const [dmResponse, groupRows] = await Promise.all([
+        getDirectMessages(),
+        coreCryptoClient.listGroupChats().catch(() => [])
+      ]);
+      const rows = [
+        ...normalizeRows(dmResponse).map((row) => ({ ...row, kind: 'dm' })),
+        ...groupRows.map((group) => ({
+          group_id: group.group_id || group.groupId,
+          name: group.name || `Group ${String(group.group_id || group.groupId).slice(0, 8)}`,
+          created_at: group.created_at,
+          kind: 'group'
+        }))
+      ];
       setDirects(rows);
       return rows;
     } catch (err) {
@@ -204,6 +226,45 @@ export default function MessagesPage() {
       return [];
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Resolve user ids to usernames for sender labels and member lists.
+  const resolveUsernames = async (ids) => {
+    const known = usernames();
+    const missing = [...new Set(ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+      .filter((id) => !(id in known));
+    if (missing.length === 0) return;
+    const resolved = {};
+    await Promise.all(missing.map(async (id) => {
+      try {
+        const user = await getUser(id);
+        resolved[id] = user?.username || user?.user?.username || `User ${id}`;
+      } catch {
+        resolved[id] = `User ${id}`;
+      }
+    }));
+    setUsernames((current) => ({ ...current, ...resolved }));
+  };
+
+  const usernameFor = (userId) => usernames()[Number(userId)] || `User ${userId || 'unknown'}`;
+
+  const isGroupChat = (groupId) => Boolean(groupId) && !coreCryptoClient.isDirectMessage(String(groupId));
+
+  // Member list comes from local MLS group state (authoritative once joined).
+  const refreshGroupMembers = (groupId) => {
+    if (!groupId || !isGroupChat(groupId)) {
+      setGroupMembers([]);
+      return;
+    }
+    try {
+      const memberIds = coreCryptoClient.getGroupMemberIdentities(String(groupId))
+        .filter((identity) => /^\d+$/.test(String(identity)))
+        .map(Number);
+      setGroupMembers(memberIds);
+      void resolveUsernames(memberIds);
+    } catch {
+      setGroupMembers([]);
     }
   };
 
@@ -219,6 +280,8 @@ export default function MessagesPage() {
       setGroupMessages(rows);
       setReadReceipts(await vaultService.getReadReceipts(groupId).catch(() => ({})));
       setDisappearingTtl(await coreCryptoClient.getDisappearingTimer(groupId).catch(() => 0));
+      refreshGroupMembers(groupId);
+      void resolveUsernames(rows.map((message) => getSenderId(message)).filter(Boolean));
       setError('');
       setGroupError('');
 
@@ -453,6 +516,64 @@ export default function MessagesPage() {
     }, 0);
   });
 
+  const createGroupChat = async (event) => {
+    event.preventDefault();
+    const name = groupName().trim();
+    const memberIds = groupMembersInput().split(/[\s,;]+/).filter(Boolean);
+
+    if (!isAuthenticated()) {
+      setError('Sign in to start messages.');
+      return;
+    }
+
+    try {
+      setConversationBusy(true);
+      setError('');
+      const result = await coreCryptoClient.startGroupChat(name, memberIds);
+      await loadConversations();
+      if (result.groupId) {
+        setSelectedGroup(String(result.groupId));
+        await loadMessages(String(result.groupId));
+      }
+      if (result.failed?.length) {
+        setError(`Group created, but some invites failed: ${result.failed.map((f) => `user ${f.userId}`).join(', ')}`);
+      }
+      setGroupName('');
+      setGroupMembersInput('');
+      setShowNewConversation(false);
+    } catch (err) {
+      if (isLinkRequiredError(err)) {
+        vaultStore.setShowDeviceLinkModal(true);
+        setError('Verify this device before creating a group.');
+        return;
+      }
+      setError(err?.message || 'Failed to create group.');
+    } finally {
+      setConversationBusy(false);
+    }
+  };
+
+  const addMemberToGroup = async (event) => {
+    event.preventDefault();
+    const targetId = Number.parseInt(addMemberId(), 10);
+    if (!Number.isInteger(targetId) || targetId <= 0) {
+      setGroupError('Please enter a valid user id.');
+      return;
+    }
+
+    try {
+      setAddMemberBusy(true);
+      setGroupError('');
+      await coreCryptoClient.inviteToGroup(String(selectedGroup()), targetId);
+      setAddMemberId('');
+      refreshGroupMembers(selectedGroup());
+    } catch (err) {
+      setGroupError(err?.message || 'Failed to add member.');
+    } finally {
+      setAddMemberBusy(false);
+    }
+  };
+
   const changeDisappearingTimer = async (value) => {
     const ttl = Number(value);
     if (!Number.isFinite(ttl) || ttl < 0) return;
@@ -610,20 +731,65 @@ export default function MessagesPage() {
 
           <Show when={showNewConversation()}>
             <div class="new-conversation-form">
-              <form onSubmit={startConversation}>
-                <input
-                  type="text"
-                  value={targetId()}
-                  onInput={(event) => setTargetId(event.target.value)}
-                  placeholder="Start by user id"
-                  disabled={conversationBusy()}
-                  required
-                  min="1"
-                />
-                <button type="submit" class="post-action" disabled={conversationBusy()}>
-                  {conversationBusy() ? 'Opening…' : 'Open'}
+              <div class="conversation-kind-toggle">
+                <button
+                  type="button"
+                  class="post-action"
+                  classList={{ active: newConversationKind() === 'dm' }}
+                  onClick={() => setNewConversationKind('dm')}
+                >
+                  Direct
                 </button>
-              </form>
+                <button
+                  type="button"
+                  class="post-action"
+                  classList={{ active: newConversationKind() === 'group' }}
+                  onClick={() => setNewConversationKind('group')}
+                >
+                  Group
+                </button>
+              </div>
+
+              <Show when={newConversationKind() === 'dm'}>
+                <form onSubmit={startConversation}>
+                  <input
+                    type="text"
+                    value={targetId()}
+                    onInput={(event) => setTargetId(event.target.value)}
+                    placeholder="Start by user id"
+                    disabled={conversationBusy()}
+                    required
+                    min="1"
+                  />
+                  <button type="submit" class="post-action" disabled={conversationBusy()}>
+                    {conversationBusy() ? 'Opening…' : 'Open'}
+                  </button>
+                </form>
+              </Show>
+
+              <Show when={newConversationKind() === 'group'}>
+                <form class="new-group-form" onSubmit={createGroupChat}>
+                  <input
+                    type="text"
+                    value={groupName()}
+                    onInput={(event) => setGroupName(event.target.value)}
+                    placeholder="Group name"
+                    disabled={conversationBusy()}
+                    required
+                  />
+                  <input
+                    type="text"
+                    value={groupMembersInput()}
+                    onInput={(event) => setGroupMembersInput(event.target.value)}
+                    placeholder="Member user ids (comma-separated)"
+                    disabled={conversationBusy()}
+                    required
+                  />
+                  <button type="submit" class="post-action" disabled={conversationBusy()}>
+                    {conversationBusy() ? 'Creating…' : 'Create group'}
+                  </button>
+                </form>
+              </Show>
             </div>
           </Show>
 
@@ -699,7 +865,26 @@ export default function MessagesPage() {
                     })()}
                   </h3>
                   <div class="encryption-status mls-active">MLS conversation</div>
+                  <Show when={isGroupChat(selectedGroup()) && groupMembers().length > 0}>
+                    <div class="group-members">
+                      {groupMembers().map((memberId) => usernameFor(memberId)).join(', ')}
+                    </div>
+                  </Show>
                 </div>
+                <Show when={isGroupChat(selectedGroup())}>
+                  <form class="add-member-form" onSubmit={addMemberToGroup}>
+                    <input
+                      type="text"
+                      value={addMemberId()}
+                      onInput={(event) => setAddMemberId(event.target.value)}
+                      placeholder="Add member by id"
+                      disabled={addMemberBusy()}
+                    />
+                    <button type="submit" class="post-action" disabled={addMemberBusy()}>
+                      {addMemberBusy() ? 'Adding…' : 'Add'}
+                    </button>
+                  </form>
+                </Show>
                 <label class="disappearing-timer">
                   <span class="disappearing-timer-label">Disappearing</span>
                   <select
@@ -771,7 +956,7 @@ export default function MessagesPage() {
                               </Show>
                               <div class="message-meta">
                                 <span class="message-sender">
-                                  {isSent ? 'You' : `User ${senderId || 'unknown'}`}
+                                  {isSent ? 'You' : usernameFor(senderId)}
                                 </span>
                                 <span class="message-time">
                                   {formatMessageTime(message)}

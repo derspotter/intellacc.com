@@ -8429,6 +8429,41 @@ body.dark-mode .user-rank {
   padding: 0.15rem 0.3rem;
 }
 
+.conversation-kind-toggle {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+
+.conversation-kind-toggle .post-action.active {
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+.new-group-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.group-members {
+  font-size: 0.75rem;
+  color: var(--secondary-text);
+  margin-top: 0.2rem;
+}
+
+.add-member-form {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.add-member-form input {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.3rem;
+  width: 9rem;
+}
+
 .read-indicator {
   color: var(--success-color);
   font-weight: 600;
