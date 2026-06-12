@@ -1,5 +1,4 @@
 const db = require('../src/db');
-const { server, io } = require('../src/index');
 const { forceCloseTestServer } = require('./testServer');
 
 afterAll(async () => {
@@ -8,6 +7,21 @@ afterAll(async () => {
       await forceCloseTestServer();
     } catch (error) {
       console.warn('[Test Teardown] Failed to close test HTTP server:', error?.message || error);
+    }
+
+    // Resolve the app lazily, at teardown only. This setup file runs before
+    // every test file; requiring src/index at module scope would load and
+    // cache the whole application BEFORE the test file's jest.mock factories
+    // register, silently disarming them (the controller keeps real bindings).
+    // At afterAll time the require returns the instance the test itself
+    // loaded, or undefined if the test never touched the app.
+    let server;
+    let io;
+    try {
+      ({ server, io } = require('../src/index'));
+    } catch (error) {
+      server = undefined;
+      io = undefined;
     }
 
     try {

@@ -1,5 +1,4 @@
 const http = require('http');
-const { app } = require('../src/index');
 
 let serverPromise = null;
 let activeCount = 0;
@@ -10,6 +9,11 @@ const startServer = () => {
   if (server && server.listening) {
     return Promise.resolve();
   }
+
+  // Lazy: requiring src/index at module scope would cache the whole app
+  // before test files register jest.mock factories (this module is pulled
+  // in by the setupFilesAfterEnv teardown helper).
+  const { app } = require('../src/index');
 
   server = http.createServer(app);
   server.on('connection', (socket) => {

@@ -113,6 +113,10 @@ services:
       - ./test:/usr/src/app/test  # for testing
       - ./migrations:/usr/src/app/migrations  # mount migrations for auto-run
       - ./uploads:/usr/src/app/uploads
+      # Keep in-container test runs on the same jest config as CI. NOTE:
+      # single-file bind mount — edits that replace the inode are invisible
+      # to the container until it is recreated.
+      - ./jest.config.js:/usr/src/app/jest.config.js
     working_dir: /usr/src/app
     command: ["./scripts/docker-dev-entrypoint.sh"]
     depends_on:

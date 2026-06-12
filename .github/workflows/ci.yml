@@ -64,20 +64,9 @@ jobs:
 
       - name: Run backend tests
         working-directory: backend
-        # Six suites are skipped: they pass in the long-lived production
-        # container but fail in any freshly created environment because their
-        # jest.mock/env setup does not take effect there (verified identical
-        # jest/babel versions; cause not yet found). Tracked in the backlog.
         # --runInBand: suites share one database; parallel workers contend on
         # table locks (account deletion vs. the rest) and flake on timeouts.
-        run: |
-          npm test -- --runInBand --testPathIgnorePatterns \
-            "test/social_auth_mvp.test.js" \
-            "test/registration_approval.test.js" \
-            "test/atproto_mvp.test.js" \
-            "test/webauthn_prf.test.js" \
-            "test/prediction_engine_headers.test.js" \
-            "test/openRouterMatcher.integration.test.js"
+        run: npm test -- --runInBand
 
   mls-dedup-guard:
     name: MLS shared-client de-duplication guard

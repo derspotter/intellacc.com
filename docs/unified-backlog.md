@@ -116,17 +116,17 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   DB/index and feed-performance work are in place, and runtime stack was upgraded to Node 25 + Postgres 18.
   Remaining work is infra hardening, capacity testing, and CI/CD automation.
 
-- `Partial` CI test-environment sensitivity (found 2026-06-12 while building CI):
-  Six backend suites pass in the long-lived production container but fail in any freshly
-  created container (jest.mock factories/env-at-module-load do not take effect; identical
-  jest/babel/node versions verified; root cause unknown). They are skipped in the CI workflow:
-  social_auth_mvp, registration_approval, atproto_mvp, webauthn_prf, prediction_engine_headers,
-  openRouterMatcher.integration. The features themselves work (verified live). Investigate and
-  re-enable.
+- `Done` CI test-environment sensitivity (found and fixed 2026-06-12):
+  Root cause: `jest.config.js`'s setupFilesAfterEnv helper (and `test/testServer.js`) required
+  `src/index` at module scope, caching the whole app BEFORE each test file's jest.mock factories
+  registered — silently disarming mocks in six suites. The production container was accidentally
+  shielded because it predates `jest.config.js` (the backend root is not mounted), so jest ran
+  with no config there. Fixed by requiring the app lazily in both helpers; all 27 suites now pass
+  in a clean environment and the CI skip list is removed. `jest.config.js` is now mounted into
+  the backend container so production test runs match CI.
 
 ## Recommended Next Execution Order
 1. `Verification production smoke`: run Tier 2/Tier 3 staging-provider flows, especially Stripe Elements + webhook upgrade (needs staging credentials).
-2. Re-enable the six CI-skipped backend suites (see CI test-environment sensitivity item).
 
 ## Source References
 - `next-steps.md`
