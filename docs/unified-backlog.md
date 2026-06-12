@@ -67,8 +67,13 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
   username, bio, avatar upload/editing, display-name support, and profile visibility controls are implemented in backend, VanJS, Solid, and tests.
 - `Done` Passkey PRF vault unlock:
   WebAuthn/passkey management now persists PRF seed input, uses server-verified PRF output in passkey login responses, and supports local PRF unlock flow.
-- `Done` Persistent message dedup across restarts:
-  vault-backed processed-ID persistence created using IndexedDB.
+- `Partial` Persistent message dedup across restarts:
+  vault-backed processed-ID persistence was created using IndexedDB in the VanJS vaultService,
+  but the Solid `frontend-solid/src/services/mls/vaultService.js` never implemented
+  `getRecentProcessedMessages`/`markMessageProcessed`, so the now-active frontend falls back to
+  in-memory dedup only (errors are swallowed into console.warn; observed 2026-06-11 via the
+  solid-messaging E2E spec). Port the two methods from `archive/vanjs`
+  `frontend/src/services/vaultService.js`.
 - `Done` AI moderation pipeline:
   Pangram service + flagged-content admin API/UI + `AiContentBadge` integration are present.
 - `Done` OpenMLS integration surface cleanup:
@@ -86,6 +91,14 @@ This backlog was re-audited item-by-item against the repository (frontend, backe
 - `Open` Messaging UX upgrades:
   MLS message edit/delete, read receipts, and disappearing messages are not implemented in the active backend route/UI path.
   Reactions are intentionally out of scope.
+- `Open` E2EE onboarding/vault hardening follow-ups (found 2026-06-11 while building the solid-messaging E2E spec):
+  1. `vaultService.unlockWithPassword` creates the server master key as a side effect
+     (`getOrCreateMasterKey`), so any client path that attempts an unlock before first-device
+     registration permanently demotes that account out of implicit first-device trust.
+     Unlock should not create key material.
+  2. Welcome acceptance logs `Failed to broadcast confirmation tag after welcome acceptance:
+     Failed to send group message` (non-fatal, exchange still works); the joining device's
+     confirmation-tag broadcast is rejected by the relay and should be diagnosed.
 - `Partial` Advanced social features:
   follow system, repost/boost sharing, ActivityPub MVP, ATProto publishing, and ATProto/Mastodon social login exist.
   Remaining work is richer social-graph/product UX, social groups, and production federation hardening.
