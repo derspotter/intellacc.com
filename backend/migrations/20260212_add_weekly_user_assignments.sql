@@ -23,31 +23,42 @@ CREATE INDEX IF NOT EXISTS idx_weekly_user_assignments_completion
   ON weekly_user_assignments(week_year, completed, penalty_applied);
 
 -- Backfill currently assigned users into immutable weekly rows.
-INSERT INTO weekly_user_assignments (
-  user_id,
-  week_year,
-  event_id,
-  required_stake_ledger,
-  completed,
-  completed_at,
-  penalty_applied,
-  penalty_amount_ledger
-)
-SELECT
-  u.id,
-  u.weekly_assignment_week,
-  u.weekly_assigned_event_id,
-  GREATEST(COALESCE(u.rp_balance_ledger, 0) / 100, 0),
-  COALESCE(u.weekly_assignment_completed, FALSE),
-  u.weekly_assignment_completed_at,
-  EXISTS (
-    SELECT 1
-    FROM weekly_decay_log wdl
-    WHERE wdl.user_id = u.id
-      AND wdl.week_year = u.weekly_assignment_week
-  ),
-  0
-FROM users u
-WHERE u.weekly_assignment_week IS NOT NULL
-  AND u.weekly_assigned_event_id IS NOT NULL
-ON CONFLICT (user_id, week_year) DO NOTHING;
+-- Conditional: the source columns come from add_weekly_assignment_system.sql,
+-- which sorts AFTER this file alphabetically; on a fresh database those
+-- columns do not exist yet and there is nothing to backfill.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'users' AND column_name = 'weekly_assignment_week'
+  ) THEN
+    INSERT INTO weekly_user_assignments (
+      user_id,
+      week_year,
+      event_id,
+      required_stake_ledger,
+      completed,
+      completed_at,
+      penalty_applied,
+      penalty_amount_ledger
+    )
+    SELECT
+      u.id,
+      u.weekly_assignment_week,
+      u.weekly_assigned_event_id,
+      GREATEST(COALESCE(u.rp_balance_ledger, 0) / 100, 0),
+      COALESCE(u.weekly_assignment_completed, FALSE),
+      u.weekly_assignment_completed_at,
+      EXISTS (
+        SELECT 1
+        FROM weekly_decay_log wdl
+        WHERE wdl.user_id = u.id
+          AND wdl.week_year = u.weekly_assignment_week
+      ),
+      0
+    FROM users u
+    WHERE u.weekly_assignment_week IS NOT NULL
+      AND u.weekly_assigned_event_id IS NOT NULL
+    ON CONFLICT (user_id, week_year) DO NOTHING;
+  END IF;
+END $$;
