@@ -214,7 +214,10 @@ class CoreCryptoClient {
     }
 
     isNumericIdentity(identity) {
-        return typeof identity === 'string' && /^\\d+$/.test(identity);
+        // NOTE: must be /^\d+$/ — an escaped \\d here matches a literal
+        // backslash and silently rejects every numeric MLS identity, which
+        // breaks all non-DM group joins (found 2026-06-12 via the group E2E).
+        return typeof identity === 'string' && /^\d+$/.test(identity);
     }
 
     buildAadPayload(groupId, epoch, type) {
@@ -747,6 +750,46 @@ class CoreCryptoClient {
 
     isDirectMessage(groupId) {
         return groupId && groupId.startsWith('dm_');
+    }
+
+    // Create a named group chat and invite the given members. Invites are
+    // best-effort per member (a member without key packages does not abort
+    // the group); failures are reported back to the caller.
+    async startGroupChat(name, memberIds) {
+        await this.ensureReady();
+        const trimmedName = String(name || '').trim();
+        if (!trimmedName) throw new Error('Group name required');
+
+        const ownId = String(this.identityName || '');
+        const targets = [...new Set((memberIds || [])
+            .map((id) => Number(id))
+            .filter((id) => Number.isInteger(id) && id > 0 && String(id) !== ownId))];
+        if (targets.length === 0) throw new Error('At least one other member is required');
+
+        const groupData = await this.createGroup(trimmedName);
+        const groupId = groupData?.group_id || groupData?.groupId;
+        if (!groupId) throw new Error('Group creation did not return a group id');
+
+        const failed = [];
+        for (const userId of targets) {
+            try {
+                await this.inviteToGroup(groupId, userId);
+            } catch (err) {
+                console.warn(`[MLS] Failed to invite user ${userId} to group ${groupId}:`, err?.message || err);
+                failed.push({ userId, reason: err?.message || String(err) });
+            }
+        }
+
+        return { groupId, name: trimmedName, invited: targets.length - failed.length, failed };
+    }
+
+    // Named (non-DM) group chats this user has joined.
+    async listGroupChats() {
+        const groups = await this.mlsFetch('/groups', null, { method: 'GET', skipDeviceId: true });
+        return (Array.isArray(groups) ? groups : []).filter((group) => {
+            const id = group?.group_id || group?.groupId;
+            return id && !this.isDirectMessage(id);
+        });
     }
 
     getGroupEpoch(groupId) {

@@ -1551,4 +1551,14 @@ class VaultService {
     }
 }
 
-export default new VaultService();
+const vaultService = new VaultService();
+
+// Expose the app's singleton for E2E provisioning (mirrors vaultStore's
+// window.__vaultStore). A dynamic import from the test harness can resolve a
+// SECOND module instance (Vite HMR ?t= URLs), which would unlock the wrong
+// one and leave the page's instance locked.
+if (typeof window !== 'undefined') {
+    window.__vaultService = vaultService;
+}
+
+export default vaultService;
