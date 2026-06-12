@@ -143,6 +143,10 @@ export default function MessagesPage() {
   const [showNewConversation, setShowNewConversation] = createSignal(false);
   const [isInitialized, setIsInitialized] = createSignal(false);
   const [groupError, setGroupError] = createSignal('');
+  const [readReceipts, setReadReceipts] = createSignal({});
+  const [editingMessageId, setEditingMessageId] = createSignal(null);
+  const [editText, setEditText] = createSignal('');
+  const [confirmDeleteId, setConfirmDeleteId] = createSignal(null);
   let pendingPostLinkAction = null;
 
   const currentUserId = createMemo(() => {
@@ -210,9 +214,24 @@ export default function MessagesPage() {
 
     try {
       const response = await vaultService.getMessages(groupId);
-      setGroupMessages(normalizeMessageRows(response));
+      const rows = normalizeMessageRows(response);
+      setGroupMessages(rows);
+      setReadReceipts(await vaultService.getReadReceipts(groupId).catch(() => ({})));
       setError('');
       setGroupError('');
+
+      // Tell the group how far we have read (deduplicated in the client).
+      const myId = String(currentUserId() || '');
+      const lastReceivedId = rows.reduce((max, message) => {
+        const messageId = Number(message.id);
+        if (!Number.isFinite(messageId)) return max;
+        if (String(getSenderId(message) || '') === myId) return max;
+        return Math.max(max, messageId);
+      }, 0);
+      if (lastReceivedId > 0) {
+        coreCryptoClient.sendReadReceipt(groupId, lastReceivedId)
+          .catch((err) => console.warn('[MessagesPage] Failed to send read receipt:', err?.message || err));
+      }
     } catch (err) {
       if (err?.message === 'Vault locked') {
         setGroupError('Unlock your vault to load messages for this conversation.');
@@ -405,7 +424,72 @@ export default function MessagesPage() {
   const selectConversation = (groupId) => {
     const next = String(groupId || '');
     setSelectedGroup(next);
+    setEditingMessageId(null);
+    setConfirmDeleteId(null);
     void loadMessages(next);
+  };
+
+  // Highest message id another member has read; drives the Read marker.
+  const lastReadByOther = createMemo(() => {
+    const myId = String(currentUserId() || '');
+    return Object.entries(readReceipts()).reduce((max, [readerId, lastReadId]) => {
+      if (String(readerId) === myId) return max;
+      const value = Number(lastReadId);
+      return Number.isFinite(value) ? Math.max(max, value) : max;
+    }, 0);
+  });
+
+  // The single own message that shows the Read marker (latest covered one).
+  const lastReadOwnMessageId = createMemo(() => {
+    const myId = String(currentUserId() || '');
+    const limit = lastReadByOther();
+    return groupMessages().reduce((best, message) => {
+      const messageId = Number(message.id);
+      if (!Number.isFinite(messageId) || messageId > limit) return best;
+      if (String(getSenderId(message) || '') !== myId) return best;
+      return Math.max(best, messageId);
+    }, 0);
+  });
+
+  const startEditMessage = (message) => {
+    setConfirmDeleteId(null);
+    setEditingMessageId(message.id);
+    setEditText(getMessageText(message) || '');
+  };
+
+  const cancelEditMessage = () => {
+    setEditingMessageId(null);
+    setEditText('');
+  };
+
+  const saveEditMessage = async () => {
+    const targetId = editingMessageId();
+    const newText = editText().trim();
+    if (!targetId || !newText) return;
+    try {
+      setGroupError('');
+      await coreCryptoClient.editMessage(selectedGroup(), targetId, newText);
+      cancelEditMessage();
+      await refreshConversationMessages(selectedGroup());
+    } catch (err) {
+      setGroupError(err?.message || 'Failed to edit message.');
+    }
+  };
+
+  const deleteMessage = async (message) => {
+    // Two-step inline confirm (no browser dialogs).
+    if (confirmDeleteId() !== message.id) {
+      setConfirmDeleteId(message.id);
+      return;
+    }
+    try {
+      setGroupError('');
+      setConfirmDeleteId(null);
+      await coreCryptoClient.deleteMessage(selectedGroup(), message.id);
+      await refreshConversationMessages(selectedGroup());
+    } catch (err) {
+      setGroupError(err?.message || 'Failed to delete message.');
+    }
   };
 
   const handleSendMessage = async (event) => {
@@ -618,15 +702,43 @@ export default function MessagesPage() {
                         const senderId = String(getSenderId(message) || '');
                         const currentId = String(currentUserId() || '');
                         const isSent = senderId && currentId && senderId === currentId;
+                        const isDeleted = () => message.deleted === true;
+                        const isEditing = () => editingMessageId() === message.id;
 
                         return (
                           <li classList={{
                             'message-item': true,
                             sent: isSent,
-                            received: !isSent
+                            received: !isSent,
+                            deleted: isDeleted()
                           }}>
                             <div class="message-content">
-                              <div class="message-text">{getMessageText(message) || 'Message content unavailable'}</div>
+                              <Show
+                                when={!isEditing()}
+                                fallback={
+                                  <form
+                                    class="message-edit-form"
+                                    onSubmit={(event) => { event.preventDefault(); void saveEditMessage(); }}
+                                  >
+                                    <textarea
+                                      class="message-textarea"
+                                      value={editText()}
+                                      onInput={(event) => setEditText(event.target.value)}
+                                      rows="2"
+                                    />
+                                    <div class="message-edit-actions">
+                                      <button type="submit" class="post-action">Save</button>
+                                      <button type="button" class="post-action" onClick={cancelEditMessage}>Cancel</button>
+                                    </div>
+                                  </form>
+                                }
+                              >
+                                <div class="message-text">
+                                  {isDeleted()
+                                    ? 'Message deleted'
+                                    : (getMessageText(message) || 'Message content unavailable')}
+                                </div>
+                              </Show>
                               <div class="message-meta">
                                 <span class="message-sender">
                                   {isSent ? 'You' : `User ${senderId || 'unknown'}`}
@@ -634,6 +746,30 @@ export default function MessagesPage() {
                                 <span class="message-time">
                                   {formatMessageTime(message)}
                                 </span>
+                                <Show when={message.editedAt && !isDeleted()}>
+                                  <span class="message-edited">(edited)</span>
+                                </Show>
+                                <Show when={isSent && !isDeleted() && Number(message.id) === lastReadOwnMessageId()}>
+                                  <span class="message-read-indicator">Read</span>
+                                </Show>
+                                <Show when={isSent && !isDeleted() && !isEditing()}>
+                                  <span class="message-actions">
+                                    <button
+                                      type="button"
+                                      class="message-action-btn"
+                                      onClick={() => startEditMessage(message)}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      class="message-action-btn"
+                                      onClick={() => void deleteMessage(message)}
+                                    >
+                                      {confirmDeleteId() === message.id ? 'Confirm delete' : 'Delete'}
+                                    </button>
+                                  </span>
+                                </Show>
                               </div>
                             </div>
                           </li>

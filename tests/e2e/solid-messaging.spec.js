@@ -278,6 +278,41 @@ test.describe('Solid messaging E2E', () => {
         pageA.locator('.message-item.received .message-text', { hasText: messageFromBob }),
         { timeout: 90000, reopenConversation: true }
       );
+
+      // Read receipts: Bob opening the conversation sent one; Alice's sent
+      // message shows the Read marker once the receipt control message lands.
+      await waitWithSync(
+        pageA,
+        pageA.locator('.message-item.sent .message-read-indicator'),
+        { timeout: 90000, reopenConversation: true }
+      );
+
+      // Edit: Alice edits her message; both sides show new text + (edited).
+      const editedText = `edited by alice ${Date.now()}`;
+      await pageA.locator('.message-item.sent .message-action-btn', { hasText: 'Edit' }).first().click();
+      await pageA.fill('.message-edit-form .message-textarea', editedText);
+      await pageA.locator('.message-edit-form button[type="submit"]').click();
+      await expect(pageA.locator('.message-item.sent .message-text', { hasText: editedText }))
+        .toBeVisible({ timeout: 15000 });
+      await expect(pageA.locator('.message-item.sent .message-edited').first()).toBeVisible();
+      await waitWithSync(
+        pageB,
+        pageB.locator('.message-item.received .message-text', { hasText: editedText }),
+        { timeout: 90000, reopenConversation: true }
+      );
+      await expect(pageB.locator('.message-item.received .message-edited').first()).toBeVisible();
+
+      // Delete: Bob tombstones his reply (two-step inline confirm); both
+      // sides render the tombstone.
+      await pageB.locator('.message-item.sent .message-action-btn', { hasText: 'Delete' }).first().click();
+      await pageB.locator('.message-item.sent .message-action-btn', { hasText: 'Confirm delete' }).first().click();
+      await expect(pageB.locator('.message-item.sent.deleted .message-text'))
+        .toHaveText('Message deleted', { timeout: 15000 });
+      await waitWithSync(
+        pageA,
+        pageA.locator('.message-item.received.deleted .message-text'),
+        { timeout: 90000, reopenConversation: true }
+      );
     } finally {
       await contextA.close();
       await contextB.close();

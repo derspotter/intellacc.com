@@ -8358,6 +8358,58 @@ body.dark-mode .user-rank {
   font-size: 0.75rem;
 }
 
+.message-item.deleted .message-text {
+  font-style: italic;
+  opacity: 0.6;
+}
+
+.message-edited {
+  font-size: 0.7rem;
+  opacity: 0.8;
+}
+
+.message-read-indicator {
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.message-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.message-action-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  opacity: 0.8;
+}
+
+.message-action-btn:hover {
+  opacity: 1;
+}
+
+.message-edit-form {
+  padding: 0.5rem 1rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.message-edit-form .message-textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.message-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .read-indicator {
   color: var(--success-color);
   font-weight: 600;

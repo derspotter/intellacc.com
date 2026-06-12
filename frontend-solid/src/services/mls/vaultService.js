@@ -22,7 +22,8 @@ import {
 let wasmInitialized = false;
 
 const KEYSTORE_DB_NAME = 'intellacc_keystore';
-const KEYSTORE_DB_VERSION = 9; // Bump for processed_messages dedup store
+const KEYSTORE_DB_VERSION = 10; // Bump for message_receipts store
+const MESSAGE_RECEIPTS_STORE = 'message_receipts';
 const KEYSTORE_STORE_NAME = 'device_keystore';
 const MESSAGES_STORE_NAME = 'encrypted_messages';
 const MLS_GRANULAR_STORE_NAME = 'mls_granular_storage';
@@ -129,6 +130,12 @@ class VaultService {
                     const store = db.createObjectStore(PROCESSED_MESSAGES_STORE, { keyPath: 'id' });
                     store.createIndex('deviceId', 'deviceId', { unique: false });
                     store.createIndex('timestamp', 'timestamp', { unique: false });
+                }
+                // V10: Read receipts received from other group members
+                if (!db.objectStoreNames.contains(MESSAGE_RECEIPTS_STORE)) {
+                    const store = db.createObjectStore(MESSAGE_RECEIPTS_STORE, { keyPath: 'id' });
+                    store.createIndex('groupId', 'groupId', { unique: false });
+                    store.createIndex('deviceId', 'deviceId', { unique: false });
                 }
             };
         });
@@ -472,7 +479,11 @@ class VaultService {
                 const ciphertext = new Uint8Array(rec.encryptedData.ciphertext);
                 const plainBuffer = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, this.compositeKey, ciphertext);
                 const payload = JSON.parse(new TextDecoder().decode(plainBuffer));
-                return { id: rec.messageId, groupId: rec.groupId, timestamp: rec.timestamp, senderId: payload.senderId, plaintext: payload.plaintext, type: payload.type };
+                return {
+                    id: rec.messageId, groupId: rec.groupId, timestamp: rec.timestamp,
+                    senderId: payload.senderId, plaintext: payload.plaintext, type: payload.type,
+                    editedAt: payload.editedAt || null, deleted: !!payload.deleted
+                };
             } catch (e) { return null; }
         }));
         return messages.filter(m => m !== null).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
@@ -522,6 +533,141 @@ class VaultService {
                 req.onerror = () => resolve([]);
             } catch (e) {
                 resolve([]);
+            }
+        });
+    }
+
+    async _findMessageRecord(groupId, messageId) {
+        await this.initDB();
+        const records = await new Promise((resolve, reject) => {
+            const tx = this.db.transaction([MESSAGES_STORE_NAME], 'readonly');
+            const req = tx.objectStore(MESSAGES_STORE_NAME).index('groupId').getAll(groupId);
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
+        });
+        return records.find(
+            (rec) => rec.deviceId === this.deviceId && String(rec.messageId) === String(messageId)
+        ) || null;
+    }
+
+    async _decryptMessagePayload(record) {
+        const iv = new Uint8Array(record.encryptedData.iv);
+        const ciphertext = new Uint8Array(record.encryptedData.ciphertext);
+        const plainBuffer = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, this.compositeKey, ciphertext);
+        return JSON.parse(new TextDecoder().decode(plainBuffer));
+    }
+
+    async _rewriteMessagePayload(record, payload) {
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+        const encryptedBuffer = await window.crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            this.compositeKey,
+            new TextEncoder().encode(JSON.stringify(payload))
+        );
+        record.encryptedData = { iv: Array.from(iv), ciphertext: Array.from(new Uint8Array(encryptedBuffer)) };
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction([MESSAGES_STORE_NAME], 'readwrite');
+            tx.objectStore(MESSAGES_STORE_NAME).put(record);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
+    /**
+     * Apply an edit to a stored message. When requireSenderId is given, the
+     * edit only applies if the stored message was sent by that user; this is
+     * how remote edit control-messages are authorized.
+     */
+    async applyMessageEdit(groupId, messageId, newText, { requireSenderId = null } = {}) {
+        if (!this.compositeKey || !this.deviceId) return { ok: false, reason: 'locked' };
+        const record = await this._findMessageRecord(groupId, messageId);
+        if (!record) return { ok: false, reason: 'not_found' };
+        const payload = await this._decryptMessagePayload(record);
+        if (requireSenderId !== null && String(payload.senderId) !== String(requireSenderId)) {
+            return { ok: false, reason: 'sender_mismatch' };
+        }
+        if (payload.deleted) return { ok: false, reason: 'deleted' };
+        payload.plaintext = newText;
+        payload.editedAt = Date.now();
+        await this._rewriteMessagePayload(record, payload);
+        return { ok: true };
+    }
+
+    /**
+     * Tombstone a stored message (content removed, ordering preserved).
+     */
+    async markMessageDeleted(groupId, messageId, { requireSenderId = null } = {}) {
+        if (!this.compositeKey || !this.deviceId) return { ok: false, reason: 'locked' };
+        const record = await this._findMessageRecord(groupId, messageId);
+        if (!record) return { ok: false, reason: 'not_found' };
+        const payload = await this._decryptMessagePayload(record);
+        if (requireSenderId !== null && String(payload.senderId) !== String(requireSenderId)) {
+            return { ok: false, reason: 'sender_mismatch' };
+        }
+        payload.plaintext = '';
+        payload.deleted = true;
+        payload.deletedAt = Date.now();
+        await this._rewriteMessagePayload(record, payload);
+        return { ok: true };
+    }
+
+    /**
+     * Record the highest relay message ID a group member has read.
+     */
+    async saveReadReceipt(groupId, readerId, lastReadMessageId) {
+        if (!this.deviceId) return;
+        await this.initDB();
+        const id = `${this.deviceId}|${groupId}|${readerId}`;
+        const next = Number(lastReadMessageId);
+        if (!Number.isFinite(next)) return;
+        return new Promise((resolve) => {
+            try {
+                const tx = this.db.transaction([MESSAGE_RECEIPTS_STORE], 'readwrite');
+                const store = tx.objectStore(MESSAGE_RECEIPTS_STORE);
+                const getReq = store.get(id);
+                getReq.onsuccess = () => {
+                    const existing = getReq.result;
+                    if (!existing || Number(existing.lastReadMessageId) < next) {
+                        store.put({
+                            id,
+                            groupId,
+                            deviceId: this.deviceId,
+                            readerId: String(readerId),
+                            lastReadMessageId: next,
+                            timestamp: Date.now()
+                        });
+                    }
+                };
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve(); // Non-fatal
+            } catch (e) {
+                resolve();
+            }
+        });
+    }
+
+    /**
+     * Read receipts for a group: { readerId: lastReadMessageId }.
+     */
+    async getReadReceipts(groupId) {
+        if (!this.deviceId) return {};
+        await this.initDB();
+        return new Promise((resolve) => {
+            try {
+                const tx = this.db.transaction([MESSAGE_RECEIPTS_STORE], 'readonly');
+                const req = tx.objectStore(MESSAGE_RECEIPTS_STORE).index('groupId').getAll(groupId);
+                req.onsuccess = () => {
+                    const receipts = {};
+                    for (const rec of req.result || []) {
+                        if (rec.deviceId === this.deviceId) {
+                            receipts[rec.readerId] = Number(rec.lastReadMessageId);
+                        }
+                    }
+                    resolve(receipts);
+                };
+                req.onerror = () => resolve({});
+            } catch (e) {
+                resolve({});
             }
         });
     }

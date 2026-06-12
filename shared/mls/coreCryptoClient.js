@@ -1167,6 +1167,53 @@ class CoreCryptoClient {
         });
     }
 
+    // Edit one of our own messages: apply locally (validates ownership against
+    // the stored copy), then broadcast an encrypted edit control message that
+    // receiving clients authorize by sender match.
+    async editMessage(groupId, messageId, newText) {
+        const { str: groupIdValue } = this.normalizeGroupId(groupId);
+        const vault = await this.getVaultService();
+        const result = await vault.applyMessageEdit(groupIdValue, messageId, newText, {
+            requireSenderId: this.identityName
+        });
+        if (!result?.ok) throw new Error(`Cannot edit message (${result?.reason || 'unknown'})`);
+        await this.sendSystemMessage(groupIdValue, {
+            __mls_type: 'edit',
+            target_id: messageId,
+            new_text: newText
+        });
+    }
+
+    // Delete (tombstone) one of our own messages for all members.
+    async deleteMessage(groupId, messageId) {
+        const { str: groupIdValue } = this.normalizeGroupId(groupId);
+        const vault = await this.getVaultService();
+        const result = await vault.markMessageDeleted(groupIdValue, messageId, {
+            requireSenderId: this.identityName
+        });
+        if (!result?.ok) throw new Error(`Cannot delete message (${result?.reason || 'unknown'})`);
+        await this.sendSystemMessage(groupIdValue, {
+            __mls_type: 'delete',
+            target_id: messageId
+        });
+    }
+
+    // Tell the group how far we have read. Deduplicated per group so viewing
+    // a conversation does not spam receipts.
+    async sendReadReceipt(groupId, lastReadMessageId) {
+        const lastReadId = Number(lastReadMessageId);
+        if (!Number.isFinite(lastReadId)) return;
+        const { str: groupIdValue } = this.normalizeGroupId(groupId);
+        if (!this._lastSentReadReceipts) this._lastSentReadReceipts = new Map();
+        const previous = this._lastSentReadReceipts.get(groupIdValue);
+        if (previous !== undefined && previous >= lastReadId) return;
+        this._lastSentReadReceipts.set(groupIdValue, lastReadId);
+        await this.sendSystemMessage(groupIdValue, {
+            __mls_type: 'read_receipt',
+            last_read_id: lastReadId
+        });
+    }
+
     // Key rotation for Post-Compromise Security
     async selfUpdate(groupId) {
         await this.ensureReady();
@@ -1692,6 +1739,32 @@ class CoreCryptoClient {
                 } catch (e) { }
                 if (payload && payload.__mls_type === 'confirmation_tag') {
                     await this.handleConfirmationTagMessage(group_id, payload, senderUserId);
+                    return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
+                }
+                if (payload && payload.__mls_type === 'edit' && payload.target_id != null) {
+                    // Only the original sender may edit; authorized against the
+                    // stored copy's senderId. Missing originals are a no-op.
+                    const editResult = await vault.applyMessageEdit(
+                        group_id, payload.target_id, String(payload.new_text ?? ''),
+                        { requireSenderId: senderUserId }
+                    );
+                    if (!editResult?.ok && editResult?.reason === 'sender_mismatch') {
+                        console.warn('[MLS] Rejected edit from non-author:', { groupId: group_id, senderUserId });
+                    }
+                    return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
+                }
+                if (payload && payload.__mls_type === 'delete' && payload.target_id != null) {
+                    const deleteResult = await vault.markMessageDeleted(
+                        group_id, payload.target_id,
+                        { requireSenderId: senderUserId }
+                    );
+                    if (!deleteResult?.ok && deleteResult?.reason === 'sender_mismatch') {
+                        console.warn('[MLS] Rejected delete from non-author:', { groupId: group_id, senderUserId });
+                    }
+                    return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
+                }
+                if (payload && payload.__mls_type === 'read_receipt') {
+                    await vault.saveReadReceipt(group_id, senderUserId, payload.last_read_id);
                     return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
                 }
             }
