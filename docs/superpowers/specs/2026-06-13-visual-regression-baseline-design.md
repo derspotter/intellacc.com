@@ -97,6 +97,25 @@ silently.
 - Component-isolation harness (no Storybook; over-engineering for now).
 - The CSS streamlining itself — this spec only builds the net that makes it safe.
 
+## Outcome (2026-06-13)
+
+Shipped **7 reliably-stable baselines**: `home-logged-out`, `login`, `signup`,
+`onboarding-topic-picker`, `analytics`, `settings`, `notifications` — green across
+3 consecutive runs, and verified to catch a regression (re-breaking the picker's
+`white-space` failed the picker baseline at ratio 0.03 > 0.01).
+
+The "A" seeded-feed view and the `predictions`/`network` shells were **tried and
+dropped**: they never reach pixel-stability (Playwright re-screenshots until two
+consecutive frames match), because the network 3D WebGL graph animates
+continuously, the predictions market list reflows, and the home feed re-renders.
+Masking covers pixel *content* but not layout/timing drift. Reliably snapshotting
+those needs a **component-isolation harness** (render PostItem/MarketPanel with
+fixed props on a static route) — deferred to a future iteration. Net result is a
+solid B-only net; the A goal is explicitly carried forward.
+
+Also learned: update baselines with `--update-snapshots=all` (plain
+`--update-snapshots` skips rewrites that still match within `maxDiffPixelRatio`).
+
 ## Success criteria
 
 - `npx playwright test tests/e2e/visual-regression.spec.js` passes green on an
