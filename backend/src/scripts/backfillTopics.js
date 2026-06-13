@@ -14,9 +14,13 @@ const main = async () => {
   console.log('[backfill] embedding events without embeddings…');
   await backfillEmbeddings(); // existing service; logs failures per event
 
-  console.log('[backfill] classifying events…');
+  console.log('[backfill] embedding-classifying events (fallback seed)…');
   const classified = await topicService.classifyUnclassifiedEvents();
-  console.log(`[backfill] events classified: ${classified}`);
+  console.log(`[backfill] events embedding-classified: ${classified}`);
+
+  console.log('[backfill] LLM-classifying events…');
+  const llmClassified = await topicService.classifyUnclassifiedEventsLLM();
+  console.log(`[backfill] events LLM-classified: ${llmClassified}`);
 
   const stats = await db.query(
     `SELECT t.slug, COUNT(et.event_id) AS events
@@ -24,6 +28,11 @@ const main = async () => {
      WHERE t.is_user_facing GROUP BY t.slug ORDER BY events DESC`
   );
   console.table(stats.rows);
+
+  const bySource = await db.query(
+    `SELECT source, COUNT(*) AS rows FROM event_topics GROUP BY source ORDER BY rows DESC`
+  );
+  console.table(bySource.rows);
   await db.closePool();
   process.exit(0);
 };

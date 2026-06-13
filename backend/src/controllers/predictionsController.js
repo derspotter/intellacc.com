@@ -365,15 +365,25 @@ exports.createEvent = asyncHandler(async (req, res) => {
     return createdEvent;
   });
 
-  setEventEmbedding({
-    eventId: newEvent.id,
-    title: newEvent.title,
-    details: newEvent.details
-  }).then(() => {
-    return topicService.classifyEvent(newEvent.id);
-  }).catch((error) => {
-    console.error('[Event] Background embedding/classification failed for event', newEvent.id, error.message);
-  });
+  // Fire-and-forget: embed the event (used by the classification fallback and
+  // semantic search), then classify it into topics. Classification runs even if
+  // embedding fails — it is LLM-first and only the fallback needs the embedding.
+  (async () => {
+    try {
+      await setEventEmbedding({
+        eventId: newEvent.id,
+        title: newEvent.title,
+        details: newEvent.details
+      });
+    } catch (error) {
+      console.error('[Event] Background embedding failed for event', newEvent.id, error.message);
+    }
+    try {
+      await topicService.classifyEventLLM(newEvent.id);
+    } catch (error) {
+      console.error('[Event] Background classification failed for event', newEvent.id, error.message);
+    }
+  })();
   res.status(201).json(newEvent);
 });
 

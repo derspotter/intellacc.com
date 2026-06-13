@@ -9,6 +9,9 @@ import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 const SAMPLE = Number(process.argv[process.argv.indexOf('--sample') + 1]) || 100;
 const QWEN_URL = process.env.QWEN_URL || 'http://desktop:8004';
 const OPENROUTER_MODEL = process.env.VALIDATION_MODEL || 'google/gemma-4-26b-a4b-it:free';
+// Which classifier's rows to validate. Whitelisted to avoid SQL injection.
+const SOURCE_ARG = process.argv[process.argv.indexOf('--source') + 1];
+const SOURCE = ['llm', 'embedding'].includes(SOURCE_ARG) ? SOURCE_ARG : 'llm';
 
 const psql = (sql) =>
   execFileSync('docker', ['exec', 'intellacc_db', 'psql', '-U', 'intellacc_user', '-d', 'intellaccdb', '-t', '-A', '-F', '\t', '-c', sql], { encoding: 'utf8' })
@@ -21,7 +24,7 @@ const slugList = topics.map((t) => t.slug).join(', ');
 const sample = psql(`
   SELECT e.id, REPLACE(LEFT(e.title, 300), E'\t', ' '), STRING_AGG(t.slug, ',')
   FROM events e JOIN event_topics et ON et.event_id = e.id JOIN topics t ON t.id = et.topic_id
-  WHERE et.source = 'embedding'
+  WHERE et.source = '${SOURCE}'
   GROUP BY e.id ORDER BY random() LIMIT ${SAMPLE}
 `).map(([id, title, slugs]) => ({ id: Number(id), title, assigned: slugs.split(',') }));
 
@@ -83,14 +86,15 @@ const reportsDir = 'docs/superpowers/reports';
 mkdirSync(reportsDir, { recursive: true });
 const report = `# Topic classification validation — ${date}
 
+- Classifier source: ${SOURCE}
 - Judge: ${judgeName}
 - Sample judged: ${judged}/${sample.length}
 - **Top-1 agreement: ${pct(top1Pct)}%**
 - **Any-overlap agreement: ${pct(overlapPct)}%** (gate: ≥ 80%)
-- Verdict: ${overlapPct >= 80 ? 'PASS — ship embedding classification' : 'FAIL — reconsider (LLM-at-import fallback)'}
+- Verdict: ${overlapPct >= 80 ? `PASS — ship ${SOURCE} classification` : 'FAIL — reconsider classifier'}
 
 ## Disagreements (${disagreements.length})
-${disagreements.map((d) => `- [${d.id}] "${d.title}" — embedding: ${d.embedding.join(',')} | llm: ${d.llm.join(',')}`).join('\n')}
+${disagreements.map((d) => `- [${d.id}] "${d.title}" — ${SOURCE}: ${d.embedding.join(',')} | judge: ${d.llm.join(',')}`).join('\n')}
 `;
 writeFileSync(`${reportsDir}/${date}-topic-validation.md`, report);
 console.log(report);
