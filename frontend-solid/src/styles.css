@@ -1815,6 +1815,21 @@ body.dark-mode .post-action.liked:hover {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+/* Keep the "Open Analytics" label on one line (the global button rule no longer
+   forces nowrap). flex-shrink:0 on the actions keeps it from being squeezed. */
+.analytics-nav-button {
+  white-space: nowrap;
+}
+
+/* Logged-out RP area: compact inline prompt instead of a heavy stretched card. */
+.rp-login-prompt {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .predictions-header h3 {

@@ -109,8 +109,8 @@ export default function RPBalance({ horizontal = false }) {
           </div>
         )}
         {!loading() && !error() && !balance() && (
-          <div class="prediction-card">
-            <p>Unable to load balance. Please log in.</p>
+          <div class="rp-login-prompt">
+            <span>Log in to see your reputation balance.</span>
             <Button onclick={() => (window.location.hash = 'login')} variant="secondary">
               Log in
             </Button>
