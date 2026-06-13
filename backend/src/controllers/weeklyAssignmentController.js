@@ -130,7 +130,7 @@ const getUserWeeklyStatus = async (req, res) => {
       success: true,
       assignment: status,
       hasAssignment: !!status,
-      isCompleted: status ? status.completed : false
+      isCompleted: status ? !!status.weekly_assignment_completed : false
     });
   } catch (error) {
     console.error('Error getting user weekly status:', error);
