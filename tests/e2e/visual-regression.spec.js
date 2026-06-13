@@ -21,5 +21,10 @@ test.afterAll(async () => {
 
 test('home logged-out', async ({ page }) => {
   await gotoStable(page, 'home');
-  await expect(page).toHaveScreenshot('home-logged-out.png', { mask: masks(page), fullPage: true });
+  // Viewport-only + feed masked: the logged-out home renders the live public
+  // feed (dynamic). We only want the stable chrome — nav, login notice, search
+  // bar, tabs. fullPage + an unmasked feed would break on any new post.
+  await expect(page).toHaveScreenshot('home-logged-out.png', {
+    mask: [...masks(page), page.locator('.posts-list')]
+  });
 });
