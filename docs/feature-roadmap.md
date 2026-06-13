@@ -1,6 +1,6 @@
 # Feature Roadmap
 
-Updated: 2026-06-12. This is the forward plan; `unified-backlog.md` is the
+Updated: 2026-06-13. This is the forward plan; `unified-backlog.md` is the
 status ledger of what already shipped. Completed plan documents live in
 `docs/archive/`.
 
@@ -54,6 +54,19 @@ E2EE messaging for agents deliberately deferred.
 
 - **Nightly E2E job**: scheduled run of the messaging spec with test-user
   cleanup; deferred in favor of feature work.
+
+- **Discover predictor-ranking cost at scale** (`discoverController.topPredictorsFor`):
+  `GET /discover/predictors` (and `/discover/feed`) runs two full aggregations
+  over `predictions` grouped by user (in-topic + global padding) with no time
+  bound, on every request. Fine at current data size; as `predictions` grows,
+  bound by recency, cache per-user for a few minutes, or precompute per-topic
+  accuracy. Added with topic onboarding 2026-06-13.
+
+- **Topic classification source filtering**: discover/weekly queries join
+  `event_topics` without filtering `source`, so any classification counts
+  (`llm`/`embedding` in prod; transient `test` rows only in test DBs). If we
+  ever want "LLM-classified events only" to count, add an explicit
+  `source = 'llm'` filter. Currently intentional (any classification counts).
 
 ## Blocked on credentials/ops
 
