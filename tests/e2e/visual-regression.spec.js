@@ -64,6 +64,15 @@ test('onboarding topic picker', async ({ page }) => {
   await expect(page).toHaveScreenshot('onboarding-topic-picker.png', { mask: masks(page), fullPage: true });
 });
 
+// Per-page masks for dynamic regions that the global mask list doesn't cover.
+// predictions shows the GLOBAL open-markets list (drifts with imports/trades);
+// network shows a live "N users · M follows" count. analytics/notifications are
+// user-specific and deterministically empty for the fresh fixture user.
+const EXTRA_MASKS = {
+  predictions: ['.events-list-card'],
+  network: ['.network-stats']
+};
+
 for (const [hash, name] of [
   ['predictions', 'predictions'],
   ['analytics', 'analytics'],
@@ -73,6 +82,7 @@ for (const [hash, name] of [
 ]) {
   test(`${name} page`, async ({ page }) => {
     await gotoStable(page, hash, { token: onboardedUser.token });
-    await expect(page).toHaveScreenshot(`${name}.png`, { mask: masks(page) });
+    const extra = (EXTRA_MASKS[name] || []).map((sel) => page.locator(sel));
+    await expect(page).toHaveScreenshot(`${name}.png`, { mask: [...masks(page), ...extra] });
   });
 }
