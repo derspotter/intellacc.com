@@ -55,6 +55,14 @@ E2EE messaging for agents deliberately deferred.
 - **Nightly E2E job**: scheduled run of the messaging spec with test-user
   cleanup; deferred in favor of feature work.
 
+- **Visual-regression net (v1 shipped 2026-06-13)**: 7 van-skin Playwright
+  screenshot baselines (`tests/e2e/visual-regression.spec.js`) — home logged-out,
+  login, signup, onboarding picker, analytics, settings, notifications — local
+  on-demand, as the safety net for CSS streamlining. Verified to catch the
+  picker-garble class of regression. Deferred: dynamic views (feed/predictions/
+  network) need a component-isolation harness to snapshot reliably; terminal-skin
+  baselines; CI integration once baselines prove stable across the container env.
+
 - **Discover predictor-ranking cost at scale** (`discoverController.topPredictorsFor`):
   `GET /discover/predictors` (and `/discover/feed`) runs two full aggregations
   over `predictions` grouped by user (in-topic + global padding) with no time
