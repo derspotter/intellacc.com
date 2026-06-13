@@ -2,6 +2,7 @@ import { createSignal, onMount, Show } from 'solid-js';
 import { api, getFeedPage, getPostsPage, getPostsPayloadItems, getPostsPaging } from '../services/api';
 import CreatePostForm from '../components/posts/CreatePostForm';
 import PostsList from '../components/posts/PostsList';
+import WeeklyQuestionCard from '../components/predictions/WeeklyQuestionCard';
 import { isAuthenticated } from '../services/auth';
 import SearchPage from './SearchPage';
 
@@ -145,6 +146,7 @@ export default function HomePage() {
       </div>
 
       <Show when={isAuthenticated()}>
+        <WeeklyQuestionCard />
         <CreatePostForm onCreated={handlePostCreated} />
       </Show>
       <Show when={error()}>

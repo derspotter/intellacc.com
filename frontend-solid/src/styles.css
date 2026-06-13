@@ -10193,3 +10193,8 @@ body.skin-terminal * {
     width: auto;
   }
 }
+
+/* Weekly question card (home feed) */
+.weekly-question-card { margin-bottom: 1rem; padding: 0.85rem 1rem; border: 1px solid var(--primary-color); background: rgba(var(--primary-color-rgb), 0.06); }
+.weekly-question-card .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.75; }
+.weekly-question-card .weekly-question-title { margin: 0.35rem 0 0.65rem; font-weight: 600; }
