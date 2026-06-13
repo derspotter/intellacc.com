@@ -15,6 +15,13 @@ const { masks, gotoStable } = require('./helpers/visual');
 
 const created = [];
 
+let noTopicsUser;
+
+test.beforeAll(async () => {
+  noTopicsUser = await createUser('visualgate');
+  created.push(noTopicsUser);
+});
+
 test.afterAll(async () => {
   cleanupUsers(created);
 });
@@ -37,4 +44,11 @@ test('login page', async ({ page }) => {
 test('signup page', async ({ page }) => {
   await gotoStable(page, 'signup');
   await expect(page).toHaveScreenshot('signup.png', { mask: masks(page) });
+});
+
+test('onboarding topic picker', async ({ page }) => {
+  await gotoStable(page, 'home', { token: noTopicsUser.token });
+  // Gate renders the picker instead of page content.
+  await expect(page.locator('.topic-picker')).toBeVisible({ timeout: 15000 });
+  await expect(page).toHaveScreenshot('onboarding-topic-picker.png', { mask: masks(page), fullPage: true });
 });
