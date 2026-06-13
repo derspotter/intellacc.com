@@ -62,6 +62,19 @@ const main = async () => {
     { method: 'POST', headers }
   );
   console.log('[import-cron] sync-all result:', JSON.stringify(data));
+
+  // Engine-imported events bypass the backend's event-creation classification
+  // hook, so trigger a topic-classification sweep for the newly imported events.
+  try {
+    const classify = await requestJson(
+      `${API_BASE}/admin/topics/classify-unclassified`,
+      { method: 'POST', headers }
+    );
+    console.log('[import-cron] classification trigger:', JSON.stringify(classify.data));
+  } catch (err) {
+    // 409 = a sweep is already running; anything else is logged but non-fatal.
+    console.error('[import-cron] classification trigger failed:', err.response?.status || err.message);
+  }
   console.log(`[import-cron] done at ${new Date().toISOString()}`);
 };
 

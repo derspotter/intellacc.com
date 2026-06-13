@@ -223,6 +223,7 @@ router.get("/events", predictionsController.getEvents); // Temporarily no auth f
 router.get("/events/:id", predictionsController.getEventById);
 router.get("/categories", predictionsController.getCategories); // Get available categories
 router.get("/topics", topicsController.listTopics); // Get user-facing topics
+router.post("/admin/topics/classify-unclassified", authenticateJWT, requireAdmin, topicsController.classifyUnclassified); // Classify engine-imported events
 router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
 router.patch("/events/:id", authenticateJWT, requireAdmin, predictionsController.resolveEvent);
 router.put("/events/:id/outcomes", authenticateJWT, requireAdmin, predictionsController.setEventOutcomes);
