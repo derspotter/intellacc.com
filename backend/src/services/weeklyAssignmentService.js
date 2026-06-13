@@ -74,7 +74,7 @@ class WeeklyAssignmentService {
         SELECT id, username, rp_balance_ledger
         FROM users
         WHERE (weekly_assignment_week != $1 OR weekly_assignment_week IS NULL)
-        AND id IN (SELECT DISTINCT user_id FROM market_updates)  -- Only active traders
+        AND id IN (SELECT DISTINCT user_id FROM user_topics)  -- Onboarded users only
         AND deleted_at IS NULL
         ORDER BY id
       `, [currentWeek]);
@@ -85,20 +85,44 @@ class WeeklyAssignmentService {
         return { assigned: 0, message: 'All users already have weekly assignments' };
       }
 
-      // Get available events for assignment (open events with closing date > 7 days from now)
-      // Only include events that have market initialization (market_prob is not null)
+      const eligibleUserIds = usersResult.rows.map((u) => u.id);
+
+      // Get available events for assignment (open events with closing date > 7 days from now).
+      // A general pool (LIMIT 200) plus every open event that belongs to a topic the eligible
+      // users care about, so in-topic events are never starved out by the LIMIT ordering.
+      // Only include events that have market initialization (market_prob is not null).
       const eventsResult = await client.query(`
-        SELECT e.id, e.title, e.closing_date, e.market_prob, COUNT(p.id) as prediction_count
-        FROM events e
-        LEFT JOIN predictions p ON e.id = p.event_id
-        WHERE e.closing_date > NOW() + INTERVAL '7 days'
-        AND e.outcome IS NULL
-        AND e.market_prob IS NOT NULL  -- Only events with initialized markets
-        GROUP BY e.id, e.title, e.closing_date, e.market_prob
-        HAVING COUNT(p.id) < 50  -- Don't assign events with too many predictions
-        ORDER BY COUNT(p.id) ASC, e.closing_date DESC
-        LIMIT 20
-      `);
+        WITH candidate AS (
+          SELECT e.id, e.title, e.closing_date, e.market_prob,
+                 COUNT(p.id) AS prediction_count,
+                 COALESCE(ARRAY_AGG(DISTINCT et.topic_id) FILTER (WHERE et.topic_id IS NOT NULL), '{}') AS topic_ids
+          FROM events e
+          LEFT JOIN predictions p ON e.id = p.event_id
+          LEFT JOIN event_topics et ON et.event_id = e.id
+          WHERE e.closing_date > NOW() + INTERVAL '7 days'
+          AND e.outcome IS NULL
+          AND e.market_prob IS NOT NULL  -- Only events with initialized markets
+          GROUP BY e.id, e.title, e.closing_date, e.market_prob
+          HAVING COUNT(p.id) < 50  -- Don't assign events with too many predictions
+        ),
+        general_pool AS (
+          SELECT * FROM candidate
+          ORDER BY prediction_count ASC, closing_date DESC
+          LIMIT 200
+        ),
+        in_topic AS (
+          SELECT * FROM candidate
+          WHERE topic_ids && (
+            SELECT COALESCE(ARRAY_AGG(DISTINCT topic_id), '{}')
+            FROM user_topics
+            WHERE user_id = ANY($1::int[])
+          )
+        )
+        SELECT id, title, closing_date, market_prob, prediction_count, topic_ids FROM general_pool
+        UNION
+        SELECT id, title, closing_date, market_prob, prediction_count, topic_ids FROM in_topic
+        ORDER BY prediction_count ASC, closing_date DESC
+      `, [eligibleUserIds]);
 
       if (eventsResult.rows.length === 0) {
         console.log('⚠️ No suitable events available for assignment');
@@ -108,6 +132,14 @@ class WeeklyAssignmentService {
 
       const availableEvents = eventsResult.rows;
       let assignmentCount = 0;
+
+      // Load each user's chosen topics once so we can prefer in-topic events.
+      const topicsByUser = new Map();
+      const utRes = await client.query(
+        `SELECT user_id, ARRAY_AGG(topic_id) AS topic_ids FROM user_topics WHERE user_id = ANY($1::int[]) GROUP BY user_id`,
+        [eligibleUserIds]
+      );
+      for (const r of utRes.rows) topicsByUser.set(r.user_id, r.topic_ids);
 
       // Assign one random event to each user
       for (const user of usersResult.rows) {
@@ -126,7 +158,14 @@ class WeeklyAssignmentService {
           continue;
         }
 
-        const randomEvent = availableForUser[Math.floor(Math.random() * availableForUser.length)];
+        // Prefer events that belong to one of the user's chosen topics; fall back to any open event.
+        const myTopics = new Set(topicsByUser.get(user.id) || []);
+        const inTopic = availableForUser.filter((event) =>
+          (event.topic_ids || []).some((t) => myTopics.has(t))
+        );
+        const pool = inTopic.length > 0 ? inTopic : availableForUser;
+
+        const randomEvent = pool[Math.floor(Math.random() * pool.length)];
 
         // Assign the event to the user (simple approach!)
         await client.query(`
