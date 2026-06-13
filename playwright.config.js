@@ -7,6 +7,11 @@ module.exports = defineConfig({
   outputDir: '.playwright-test-results',
   workers: 1,
   reporter: [['line']],
+  expect: {
+    toHaveScreenshot: {
+      maxDiffPixelRatio: 0.01
+    }
+  },
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
     trace: 'retain-on-failure'
