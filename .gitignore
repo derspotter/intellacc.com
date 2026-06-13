@@ -1,6 +1,7 @@
 # .gitignore
 
 # Ignore backend and frontend .env files
+/.env
 /backend/.env
 /frontend/.env
 /prediction-engine/.env
