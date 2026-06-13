@@ -404,6 +404,27 @@ export const api = {
       request(`/users/${id}/following-status`)
   },
 
+  // Topic onboarding endpoints
+  topics: {
+    list: () =>
+      request('/topics'),
+
+    getMine: () =>
+      request('/users/me/topics'),
+
+    setMine: (topicIds) =>
+      request('/users/me/topics', { method: 'PUT', body: { topicIds } })
+  },
+
+  // Discovery feed / predictors
+  discover: {
+    feed: () =>
+      request('/discover/feed'),
+
+    predictors: () =>
+      request('/discover/predictors')
+  },
+
   // Posts endpoints
   posts: {
     getAll: () =>

@@ -341,6 +341,14 @@ input[type="submit"]:disabled {
   margin: 0;
 }
 
+/* Topic onboarding picker (blocking gate) */
+.topic-picker { max-width: 720px; margin: 10vh auto 0; padding: 2rem; background: var(--card-bg); box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+.topic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem; margin: 1.5rem 0; }
+.topic-option { display: grid; gap: 0.3rem; padding: 0.85rem; text-align: left; border: 1px solid var(--border-color); background: transparent; cursor: pointer; }
+.topic-option.selected { border-color: var(--primary-color); background: rgba(var(--primary-color-rgb), 0.08); }
+.topic-picker-actions { display: flex; justify-content: space-between; align-items: center; }
+.topic-picker .error { color: #c0392b; }
+
 .enable-push-btn,
 .retry-btn {
   margin-top: 0.25rem;

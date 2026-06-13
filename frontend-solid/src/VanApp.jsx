@@ -14,6 +14,9 @@ import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import SearchPage from './pages/SearchPage';
+import TopicPicker from './components/onboarding/TopicPicker';
+import { api } from './services/api';
+import { isAuthenticated } from './services/auth';
 
 const ROUTES = {
   home: 'home',
@@ -80,7 +83,25 @@ function AppBackground() {
 export default function App() {
   const [page, setPage] = createSignal(sanitizeRoute(window.location.hash || 'home'));
   const [routeParam, setRouteParam] = createSignal(null);
+  const [needsTopics, setNeedsTopics] = createSignal(false);
   const isAuthPage = () => AUTH_ROUTES.includes(page());
+
+  // Blocking gate: an authenticated user with zero topics must pick topics
+  // before seeing normal content. Fail open on any error so a topics-service
+  // outage can never lock users out.
+  const checkTopics = async () => {
+    if (!isAuthenticated()) {
+      setNeedsTopics(false);
+      return;
+    }
+    try {
+      const res = await api.topics.getMine();
+      const topicIds = res?.topicIds || [];
+      setNeedsTopics(topicIds.length === 0);
+    } catch {
+      setNeedsTopics(false);
+    }
+  };
 
   const parseRoute = (hashValue) => {
     const value = normalizeHashPath(hashValue);
@@ -165,10 +186,13 @@ export default function App() {
   };
 
   const handleHash = () => parseRoute(window.location.hash);
+  const handleAuthChange = () => checkTopics();
 
   window.addEventListener('hashchange', handleHash);
+  window.addEventListener('solid-auth-changed', handleAuthChange);
 
   onMount(() => {
+    checkTopics();
     if (!window.location.hash) {
       setPage('home');
       setRouteParam(null);
@@ -179,6 +203,7 @@ export default function App() {
 
   onCleanup(() => {
     window.removeEventListener('hashchange', handleHash);
+    window.removeEventListener('solid-auth-changed', handleAuthChange);
   });
 
   return (
@@ -188,7 +213,9 @@ export default function App() {
         when={isAuthPage()}
         fallback={
           <Layout page={page()}>
-            {renderPage()}
+            <Show when={needsTopics()} fallback={renderPage()}>
+              <TopicPicker onDone={() => setNeedsTopics(false)} />
+            </Show>
           </Layout>
         }
       >
