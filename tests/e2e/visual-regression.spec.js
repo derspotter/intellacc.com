@@ -16,10 +16,21 @@ const { masks, gotoStable } = require('./helpers/visual');
 const created = [];
 
 let noTopicsUser;
+let onboardedUser;
 
 test.beforeAll(async () => {
   noTopicsUser = await createUser('visualgate');
   created.push(noTopicsUser);
+
+  onboardedUser = await createUser('visualfeed');
+  created.push(onboardedUser);
+  const topics = (await apiFetch('/api/topics')).body.topics;
+  const topicIds = topics.slice(0, 3).map((t) => t.id);
+  await apiFetch('/api/users/me/topics', {
+    method: 'PUT',
+    token: onboardedUser.token,
+    body: JSON.stringify({ topicIds })
+  });
 });
 
 test.afterAll(async () => {
@@ -52,3 +63,16 @@ test('onboarding topic picker', async ({ page }) => {
   await expect(page.locator('.topic-picker')).toBeVisible({ timeout: 15000 });
   await expect(page).toHaveScreenshot('onboarding-topic-picker.png', { mask: masks(page), fullPage: true });
 });
+
+for (const [hash, name] of [
+  ['predictions', 'predictions'],
+  ['analytics', 'analytics'],
+  ['settings', 'settings'],
+  ['network', 'network'],
+  ['notifications', 'notifications']
+]) {
+  test(`${name} page`, async ({ page }) => {
+    await gotoStable(page, hash, { token: onboardedUser.token });
+    await expect(page).toHaveScreenshot(`${name}.png`, { mask: masks(page) });
+  });
+}
