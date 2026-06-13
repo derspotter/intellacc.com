@@ -31,6 +31,7 @@ const predictionAnalyticsController = require('../controllers/predictionAnalytic
 const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const moderationController = require('../controllers/moderationController');
 const topicsController = require('../controllers/topicsController');
+const discoverController = require('../controllers/discoverController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
 const { requireScope } = require('../middleware/scopes');
 const db = require('../db');
@@ -339,6 +340,10 @@ router.post("/push/subscribe", authenticateJWT, pushController.subscribe);
 router.delete("/push/subscribe", authenticateJWT, pushController.unsubscribe);
 router.get("/push/preferences", authenticateJWT, pushController.getPreferences);
 router.put("/push/preferences", authenticateJWT, pushController.updatePreferences);
+
+// Discover Routes
+router.get('/discover/predictors', authenticateJWT, discoverController.getPredictors);
+router.get('/discover/feed', authenticateJWT, discoverController.getFeed);
 
 // Leaderboard Routes (direct database queries for performance)
 router.get("/leaderboard/fast", leaderboardController.getFastLeaderboard); // Fast leaderboard from stored rankings

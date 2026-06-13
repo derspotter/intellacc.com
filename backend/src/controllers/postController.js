@@ -1171,3 +1171,5 @@ exports.getCommentTree = async (req, res) => {
     res.status(500).json({ message: 'Error fetching comment tree' });
   }
 };
+
+exports.buildPostVisibilityClause = buildPostVisibilityClause;
