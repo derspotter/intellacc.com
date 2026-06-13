@@ -14,7 +14,8 @@ RUN npm ci --only=production
 # Copy cron scripts
 COPY scripts/weekly_cron.js .
 COPY scripts/daily_cron.js .
-RUN chmod +x weekly_cron.js daily_cron.js
+COPY scripts/import_cron.js .
+RUN chmod +x weekly_cron.js daily_cron.js import_cron.js
 
 # Install supercronic (container-friendly cron)
 RUN set -eux; \
@@ -30,9 +31,11 @@ RUN set -eux; \
 
 # Create cron schedule
 # Weekly: Mondays 02:00 UTC
-# Daily: Every day 01:00 UTC
+# Daily:  Every day 01:00 UTC
+# Import: Every day 03:00 UTC (external prediction-market sync)
 RUN mkdir -p /etc/supercronic \
   && echo "0 2 * * 1 /usr/local/bin/node /usr/src/app/weekly_cron.js" > /etc/supercronic/cronjobs \
-  && echo "0 1 * * * /usr/local/bin/node /usr/src/app/daily_cron.js" >> /etc/supercronic/cronjobs
+  && echo "0 1 * * * /usr/local/bin/node /usr/src/app/daily_cron.js" >> /etc/supercronic/cronjobs \
+  && echo "0 3 * * * /usr/local/bin/node /usr/src/app/import_cron.js" >> /etc/supercronic/cronjobs
 
 CMD ["supercronic", "-no-reap", "/etc/supercronic/cronjobs"]
