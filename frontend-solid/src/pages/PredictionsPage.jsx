@@ -5,7 +5,6 @@ import MarketQuestionHub from '../components/predictions/MarketQuestionHub';
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
 import AdminTools from '../components/predictions/AdminTools';
 import RPBalance from '../components/predictions/RPBalance';
-import Button from '../components/common/Button';
 import { createEvent, resolveEvent } from '../services/api';
 import { isAdmin, isAuthenticated } from '../services/auth';
 
@@ -50,11 +49,6 @@ export default function PredictionsPage(props) {
 
       <div class="predictions-header">
         <RPBalance horizontal />
-        <div class="predictions-header-actions">
-          <Button type="button" variant="secondary" className="analytics-nav-button" onclick={() => (window.location.hash = 'analytics')}>
-            Open Analytics
-          </Button>
-        </div>
       </div>
 
       <div class="predictions-main">

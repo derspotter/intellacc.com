@@ -1811,32 +1811,17 @@ body.dark-mode .post-action.liked:hover {
   border-bottom: none;
 }
 
-/* Predictions page only (NOT the shared analytics header): group the stats and
-   the Open Analytics button into one toolbar — flex-start with a gap, and
-   content-width stats so the button sits right after them, not at the far edge.
-   Scoped with :not(.analytics-page) so the analytics header is untouched. */
+/* Predictions page only (NOT the shared analytics header): center the RP area
+   (logged-out login prompt or logged-in stat cards). Scoped with
+   :not(.analytics-page) so the analytics header is untouched. */
 .predictions-page:not(.analytics-page) .predictions-header {
-  justify-content: flex-start;
-  gap: 1.25rem;
+  justify-content: center;
 }
 
 .predictions-page:not(.analytics-page) .predictions-header .user-stats-horizontal {
   width: auto;
   flex: 0 1 auto;
   margin-bottom: 0;
-}
-
-.predictions-header-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-shrink: 0;
-}
-
-/* Keep the "Open Analytics" label on one line (the global button rule no longer
-   forces nowrap). flex-shrink:0 on the actions keeps it from being squeezed. */
-.analytics-nav-button {
-  white-space: nowrap;
 }
 
 /* Logged-out RP area: compact inline prompt instead of a heavy stretched card. */
