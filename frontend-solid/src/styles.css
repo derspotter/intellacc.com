@@ -197,7 +197,6 @@ input[type="submit"] {
   align-items: center;
   justify-content: center;
   text-align: center;
-  white-space: nowrap;
   box-sizing: border-box;
   transition: background-color var(--transition), color var(--transition), border-color var(--transition);
 }
