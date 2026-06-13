@@ -1,5 +1,5 @@
 import { createSignal, onMount, Show } from 'solid-js';
-import { getFeedPage, getPostsPage, getPostsPayloadItems, getPostsPaging } from '../services/api';
+import { api, getFeedPage, getPostsPage, getPostsPayloadItems, getPostsPaging } from '../services/api';
 import CreatePostForm from '../components/posts/CreatePostForm';
 import PostsList from '../components/posts/PostsList';
 import { isAuthenticated } from '../services/auth';
@@ -23,6 +23,7 @@ export default function HomePage() {
   const [hasMore, setHasMore] = createSignal(true);
   const [nextCursor, setNextCursor] = createSignal(null);
   const [usingFeed, setUsingFeed] = createSignal(isAuthenticated());
+  const [discoverMode, setDiscoverMode] = createSignal(false);
 
   const loadPosts = async ({ reset = true } = {}) => {
     if (reset) {
@@ -38,7 +39,26 @@ export default function HomePage() {
       const normalized = getPostsPaging(response);
       const nextPosts = getPostsPayloadItems(normalized.items);
 
+      // Empty following-feed on a reset load: fall back to the discover feed
+      // (top predictors in the caller's topics) so the home page is never blank.
+      if (reset && usingFeed() && nextPosts.length === 0) {
+        try {
+          const discover = await api.discover.feed();
+          const discoverItems = getPostsPayloadItems(discover?.items);
+          if (discoverItems.length > 0) {
+            setDiscoverMode(true);
+            setPosts(discoverItems);
+            setHasMore(false);
+            setNextCursor(null);
+            return;
+          }
+        } catch (discoverErr) {
+          console.error('Discover feed fallback failed:', discoverErr);
+        }
+      }
+
       if (reset) {
+        setDiscoverMode(false);
         setPosts(nextPosts);
       } else {
         setPosts((current) => appendUniqueById(current, nextPosts));
@@ -75,6 +95,11 @@ export default function HomePage() {
   const loadMore = async () => {
     if (loadingMore() || loading() || !hasMore()) return;
     await loadPosts({ reset: false });
+  };
+
+  const handleFollowed = async () => {
+    setDiscoverMode(false);
+    await loadPosts({ reset: true });
   };
 
   const handlePostCreated = (post) => {
@@ -129,6 +154,9 @@ export default function HomePage() {
         <p>Loading posts…</p>
       </Show>
       <Show when={!loading()}>
+        <Show when={discoverMode()}>
+          <p class="discover-notice">Showing top predictors in your topics — follow people to make this feed yours.</p>
+        </Show>
         <PostsList
           posts={posts}
           onPostUpdate={updatePost}
@@ -136,6 +164,8 @@ export default function HomePage() {
           loading={loading}
           loadingMore={loadingMore}
           hasMore={hasMore}
+          discoverMode={discoverMode}
+          onFollowed={handleFollowed}
         />
         <div class="form-actions">
           <Show when={hasMore() && posts().length > 0}>

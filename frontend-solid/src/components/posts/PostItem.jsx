@@ -13,7 +13,8 @@ import {
   unlikePost,
   updatePost,
   deletePost,
-  uploadPostImage
+  uploadPostImage,
+  followUser
 } from '../../services/api';
 import { getCurrentUserId, isAdmin, isAuthenticated } from '../../services/auth';
 import PostMarkets from './PostMarkets';
@@ -65,8 +66,21 @@ export default function PostItem(props) {
   const [editSubmitting, setEditSubmitting] = createSignal(false);
   const [editError, setEditError] = createSignal('');
   const [isArticleExpanded, setIsArticleExpanded] = createSignal(false);
+  const [followBusy, setFollowBusy] = createSignal(false);
 
   const autoExpand = () => !!props.autoExpand;
+
+  const handleFollow = async () => {
+    if (followBusy()) return;
+    setFollowBusy(true);
+    try {
+      await followUser(props.post.user_id);
+      props.onFollowed?.();
+    } catch (err) {
+      console.error('Follow failed:', err);
+      setFollowBusy(false);
+    }
+  };
 
   createEffect(() => {
     const current = post();
@@ -547,6 +561,11 @@ export default function PostItem(props) {
             ) : (
               <span class="username-link">{author()}</span>
             )}
+            <Show when={props.discoverMode}>
+              <button type="button" class="follow-btn" onClick={handleFollow} disabled={followBusy()}>
+                {followBusy() ? '…' : 'Follow'}
+              </button>
+            </Show>
           </div>
           <div class="post-meta post-meta-main">
             <span class="post-header-likes">{likeText()}</span>

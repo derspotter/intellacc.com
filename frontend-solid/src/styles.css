@@ -327,6 +327,24 @@ input[type="submit"]:disabled {
   text-align: center;
 }
 
+.discover-notice {
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.85rem;
+  border: 1px dashed var(--border-color);
+  color: var(--secondary-text);
+  text-align: center;
+}
+
+.follow-btn {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.6rem;
+  font-size: 0.78rem;
+  border: 1px solid var(--primary-color);
+  color: var(--primary-color);
+  background: transparent;
+  cursor: pointer;
+}
+
 /* Home: pin the empty-feed notice to the bottom middle of the center column
    without changing the column's size. It sits inside the card's 2rem bottom padding. */
 .main-content.page-home {
