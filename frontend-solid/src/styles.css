@@ -1811,6 +1811,21 @@ body.dark-mode .post-action.liked:hover {
   border-bottom: none;
 }
 
+/* Predictions page only (NOT the shared analytics header): group the stats and
+   the Open Analytics button into one toolbar — flex-start with a gap, and
+   content-width stats so the button sits right after them, not at the far edge.
+   Scoped with :not(.analytics-page) so the analytics header is untouched. */
+.predictions-page:not(.analytics-page) .predictions-header {
+  justify-content: flex-start;
+  gap: 1.25rem;
+}
+
+.predictions-page:not(.analytics-page) .predictions-header .user-stats-horizontal {
+  width: auto;
+  flex: 0 1 auto;
+  margin-bottom: 0;
+}
+
 .predictions-header-actions {
   display: flex;
   align-items: center;
