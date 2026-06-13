@@ -1,59 +1,10 @@
 const db = require('../db');
 const { embedText } = require('./openRouterMatcher/embeddingService');
-const { callLLM } = require('./openRouterMatcher/llmClient');
+const { classifyWithQwen } = require('./qwenClassifier');
 
 // A second topic is also assigned when its cosine similarity is within this
 // margin of the best topic (events often straddle two topics).
 const SECOND_TOPIC_MARGIN = 0.05;
-
-const TOPIC_CLASSIFIER_MODEL = process.env.TOPIC_CLASSIFIER_MODEL || 'google/gemma-4-26b-a4b-it:free';
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// OpenRouter free-tier models are intermittently rate-limited (429). Retry the
-// classification call a few times with backoff before giving up to the fallback.
-const RATE_LIMIT_RETRIES = 3;
-const RATE_LIMIT_BACKOFF_MS = Number(process.env.TOPIC_CLASSIFIER_RETRY_MS) || 3000;
-const isRateLimit = (message) => message.includes('429') || message.toLowerCase().includes('rate');
-
-const callClassifier = async (messages) => {
-  let lastError;
-  for (let attempt = 0; attempt <= RATE_LIMIT_RETRIES; attempt += 1) {
-    try {
-      return await callLLM({
-        model: TOPIC_CLASSIFIER_MODEL,
-        messages,
-        maxTokens: 100,
-        temperature: 0,
-        timeoutMs: 30000,
-        usageContext: { stage: 'topic_classification', operation: 'chat_completion' }
-      });
-    } catch (error) {
-      lastError = error;
-      const message = error.message || String(error);
-      if (!isRateLimit(message) || attempt === RATE_LIMIT_RETRIES) throw error;
-      await sleep(RATE_LIMIT_BACKOFF_MS * (attempt + 1));
-    }
-  }
-  throw lastError;
-};
-
-const classificationPrompt = (title, details, slugs) => `You classify prediction-market questions into topics.
-Allowed topic slugs: ${slugs.join(', ')}
-Return exactly one JSON object: {"topics": ["slug", ...]} with 1-2 slugs, best first.
-Question: ${JSON.stringify(String(title || '').slice(0, 300))}${details ? `\nDetails: ${JSON.stringify(String(details).slice(0, 500))}` : ''}`;
-
-// callLLM already parses JSON output, but be defensive in case the mocked or
-// raw content is a string (possibly wrapped in ```json fences).
-const extractTopicSlugs = (output) => {
-  let parsed = output;
-  if (typeof parsed === 'string') {
-    const cleaned = parsed.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
-    parsed = JSON.parse(cleaned);
-  }
-  if (!parsed || !Array.isArray(parsed.topics)) return [];
-  return parsed.topics.filter((slug) => typeof slug === 'string');
-};
 
 // Generate embeddings for user-facing topics that don't have one yet.
 const embedMissingTopicEmbeddings = async () => {
@@ -152,10 +103,8 @@ const classifyEventLLM = async (eventId) => {
   let slugs = [];
   let failure = null;
   try {
-    const result = await callClassifier(
-      [{ role: 'user', content: classificationPrompt(title, details, [...idBySlug.keys()]) }]
-    );
-    slugs = extractTopicSlugs(result?.output).filter((slug) => idBySlug.has(slug)).slice(0, 2);
+    const rawSlugs = await classifyWithQwen(title, details, [...idBySlug.keys()]);
+    slugs = rawSlugs.filter((s) => idBySlug.has(s)).slice(0, 2);
     if (slugs.length === 0) failure = 'no valid topic slugs in model output';
   } catch (error) {
     failure = error.message || String(error);
@@ -188,8 +137,8 @@ const classifyUnclassifiedEventsLLM = async () => {
      )
      ORDER BY e.id`
   );
-  // classifyEventLLM handles rate-limit retry/backoff and falls back to
-  // embedding internally, so it should not throw; the catch is a safety net.
+  // classifyEventLLM retries once via qwenClassifier and falls back to
+  // embedding on any failure, so it should not throw; the catch is a safety net.
   let classified = 0;
   for (const row of result.rows) {
     try {

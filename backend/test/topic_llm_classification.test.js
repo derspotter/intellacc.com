@@ -1,11 +1,11 @@
 // backend/test/topic_llm_classification.test.js
 // LLM-based topic classification with embedding fallback. The DB is real;
-// only the OpenRouter LLM client is mocked.
-process.env.TOPIC_CLASSIFIER_RETRY_MS = '1'; // keep rate-limit retry backoff near-instant in tests
-jest.mock('../src/services/openRouterMatcher/llmClient');
+// only the Qwen classifier module is mocked.
+process.env.QWEN_CLASSIFIER_RETRY_MS = '1'; // keep retry delay near-instant in tests
+jest.mock('../src/services/qwenClassifier');
 
 const db = require('../src/db');
-const { callLLM } = require('../src/services/openRouterMatcher/llmClient');
+const { classifyWithQwen } = require('../src/services/qwenClassifier');
 const topicService = require('../src/services/topicService');
 
 jest.setTimeout(30000);
@@ -25,7 +25,7 @@ describe('topicService.classifyEventLLM', () => {
   });
 
   beforeEach(() => {
-    callLLM.mockReset();
+    classifyWithQwen.mockReset();
   });
 
   const insertEvent = async (embedding = null) => {
@@ -62,13 +62,7 @@ describe('topicService.classifyEventLLM', () => {
       [eventId, seeded.rows[0].id]
     );
 
-    callLLM.mockResolvedValue({
-      output: { topics: ['science', 'ai-technology'] },
-      usage: {},
-      requestedModel: 'mock',
-      usedModel: 'mock',
-      providerResponseId: null
-    });
+    classifyWithQwen.mockResolvedValue(['science', 'ai-technology']);
 
     const assigned = await topicService.classifyEventLLM(eventId);
     expect(assigned).toHaveLength(2);
@@ -86,17 +80,11 @@ describe('topicService.classifyEventLLM', () => {
     expect(rows.rows.every((r) => r.similarity === null)).toBe(true);
   });
 
-  test('falls back to embedding classification when LLM returns only invalid slugs', async () => {
+  test('falls back to embedding classification when Qwen returns only invalid slugs', async () => {
     const topicId = await insertSyntheticTopic();
     const eventId = await insertEvent(vec(0));
 
-    callLLM.mockResolvedValue({
-      output: { topics: ['nonsense'] },
-      usage: {},
-      requestedModel: 'mock',
-      usedModel: 'mock',
-      providerResponseId: null
-    });
+    classifyWithQwen.mockResolvedValue(['nonsense']);
 
     const assigned = await topicService.classifyEventLLM(eventId);
     expect(assigned.map((r) => r.topic_id)).toContain(topicId);
@@ -106,11 +94,11 @@ describe('topicService.classifyEventLLM', () => {
     expect(rows.rows.every((r) => r.source === 'embedding')).toBe(true);
   });
 
-  test('falls back to embedding classification when the LLM call throws', async () => {
+  test('falls back to embedding classification when classifyWithQwen throws', async () => {
     const topicId = await insertSyntheticTopic();
     const eventId = await insertEvent(vec(0));
 
-    callLLM.mockRejectedValue(new Error('network down'));
+    classifyWithQwen.mockRejectedValue(new Error('qwen down'));
 
     const assigned = await topicService.classifyEventLLM(eventId);
     expect(assigned.map((r) => r.topic_id)).toContain(topicId);
@@ -120,42 +108,12 @@ describe('topicService.classifyEventLLM', () => {
     expect(rows.rows.every((r) => r.source === 'embedding')).toBe(true);
   });
 
-  test('returns [] without throwing for event with no embedding and failing LLM', async () => {
+  test('returns [] without throwing for event with no embedding and failing classifyWithQwen', async () => {
     const eventId = await insertEvent();
 
-    callLLM.mockRejectedValue(new Error('network down'));
+    classifyWithQwen.mockRejectedValue(new Error('qwen down'));
 
     const assigned = await topicService.classifyEventLLM(eventId);
     expect(assigned).toEqual([]);
-  });
-
-  test('retries on rate-limit (429) then succeeds with llm rows', async () => {
-    const eventId = await insertEvent();
-
-    callLLM
-      .mockRejectedValueOnce(new Error('OpenRouter API 429: rate-limited'))
-      .mockResolvedValueOnce({ output: { topics: ['science'] }, usage: {}, requestedModel: 'mock', usedModel: 'mock', providerResponseId: null });
-
-    const assigned = await topicService.classifyEventLLM(eventId);
-    expect(callLLM).toHaveBeenCalledTimes(2);
-    expect(assigned).toHaveLength(1);
-
-    const rows = await db.query('SELECT source FROM event_topics WHERE event_id = $1', [eventId]);
-    expect(rows.rows.every((r) => r.source === 'llm')).toBe(true);
-  });
-
-  test('falls back to embedding after exhausting rate-limit retries', async () => {
-    const topicId = await insertSyntheticTopic();
-    const eventId = await insertEvent(vec(0));
-
-    callLLM.mockRejectedValue(new Error('OpenRouter API 429: rate-limited'));
-
-    const assigned = await topicService.classifyEventLLM(eventId);
-    // 1 initial attempt + RATE_LIMIT_RETRIES (3) = 4 calls
-    expect(callLLM).toHaveBeenCalledTimes(4);
-    expect(assigned.map((r) => r.topic_id)).toContain(topicId);
-
-    const rows = await db.query('SELECT source FROM event_topics WHERE event_id = $1', [eventId]);
-    expect(rows.rows.every((r) => r.source === 'embedding')).toBe(true);
   });
 });
