@@ -30,6 +30,7 @@ const postMatchUsageController = require('../controllers/postMatchUsageControlle
 const predictionAnalyticsController = require('../controllers/predictionAnalyticsController');
 const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const moderationController = require('../controllers/moderationController');
+const topicsController = require('../controllers/topicsController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
 const { requireScope } = require('../middleware/scopes');
 const db = require('../db');
@@ -91,6 +92,8 @@ router.get('/users/:id/block', authenticateJWT, userController.getBlockStatus);
 router.get('/users/me/blocks', authenticateJWT, userController.getBlockedUsers);
 router.get('/users/me/preferences', authenticateJWT, userController.getUserUiPreferences);
 router.put('/users/me/preferences', authenticateJWT, userController.updateUserUiPreferences);
+router.get('/users/me/topics', authenticateJWT, topicsController.getMyTopics);
+router.put('/users/me/topics', authenticateJWT, topicsController.setMyTopics);
 router.get('/users/master-key', authenticateJWT, rejectAgentKeys, userController.getMasterKey);
 router.post('/users/master-key', authenticateJWT, rejectAgentKeys, userController.setMasterKey);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
@@ -218,6 +221,7 @@ router.post("/events", authenticateJWT, requirePaymentVerified, predictionsContr
 router.get("/events", predictionsController.getEvents); // Temporarily no auth for testing
 router.get("/events/:id", predictionsController.getEventById);
 router.get("/categories", predictionsController.getCategories); // Get available categories
+router.get("/topics", topicsController.listTopics); // Get user-facing topics
 router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
 router.patch("/events/:id", authenticateJWT, requireAdmin, predictionsController.resolveEvent);
 router.put("/events/:id/outcomes", authenticateJWT, requireAdmin, predictionsController.setEventOutcomes);
