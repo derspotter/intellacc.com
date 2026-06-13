@@ -10,7 +10,7 @@
 // Baselines are environment-specific (font anti-aliasing): generate & run them
 // in the same containerized dev environment.
 const { test, expect } = require('@playwright/test');
-const { createUser, apiFetch, cleanupUsers } = require('./helpers/solidMessaging');
+const { createUser, apiFetch, provisionTier, cleanupUsers } = require('./helpers/solidMessaging');
 const { masks, gotoStable } = require('./helpers/visual');
 
 const created = [];
@@ -30,6 +30,30 @@ test.beforeAll(async () => {
     method: 'PUT',
     token: onboardedUser.token,
     body: JSON.stringify({ topicIds })
+  });
+
+  // Seeded feed: onboardedUser follows posterUser, who authors fixed posts, so
+  // onboardedUser's following-feed renders those exact posts deterministically.
+  const posterUser = await createUser('visualposter');
+  created.push(posterUser);
+  // Posting requires verification tier 1 (email); fresh users start at tier 0,
+  // so the create-post API 403s without this. Without real posts the
+  // following-feed is empty and the home page falls back to discover (dynamic).
+  provisionTier(posterUser);
+  for (const content of [
+    'Visual baseline post one: markets are a discovery mechanism.',
+    'Visual baseline post two: calibration beats confidence.',
+    'Visual baseline post three: forecasting is a skill you can train.'
+  ]) {
+    await apiFetch('/api/posts', {
+      method: 'POST',
+      token: posterUser.token,
+      body: JSON.stringify({ content })
+    });
+  }
+  await apiFetch(`/api/users/${posterUser.id}/follow`, {
+    method: 'POST',
+    token: onboardedUser.token
   });
 });
 
@@ -86,3 +110,12 @@ for (const [hash, name] of [
     await expect(page).toHaveScreenshot(`${name}.png`, { mask: [...masks(page), ...extra] });
   });
 }
+
+test('home feed (seeded)', async ({ page }) => {
+  await gotoStable(page, 'home', { token: onboardedUser.token });
+  await expect(page.locator('.posts-list')).toBeVisible({ timeout: 15000 });
+  // Confirm the seeded posts actually rendered (rules out an empty/discover feed)
+  // before snapshotting, so the baseline is deterministic.
+  await expect(page.getByText('Visual baseline post one', { exact: false })).toBeVisible({ timeout: 15000 });
+  await expect(page).toHaveScreenshot('home-feed-seeded.png', { mask: masks(page) });
+});
