@@ -361,10 +361,34 @@ input[type="submit"]:disabled {
 
 /* Topic onboarding picker (blocking gate) */
 .topic-picker { max-width: 720px; margin: 10vh auto 0; padding: 2rem; background: var(--card-bg); box-shadow: 0 0 20px rgba(0,0,0,0.1); }
-.topic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem; margin: 1.5rem 0; }
-.topic-option { display: grid; gap: 0.3rem; padding: 0.85rem; text-align: left; border: 1px solid var(--border-color); background: transparent; cursor: pointer; }
+.topic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; margin: 1.5rem 0; }
+/* Override the global button rule (inline-flex/center/nowrap) so each option is a
+   left-aligned, wrapping card rather than a centered single-line button. */
+.topic-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0.25rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.85rem;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+  font-size: 0.85rem;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: inherit;
+  border-radius: 0;
+  cursor: pointer;
+  transition: border-color var(--transition), background-color var(--transition);
+}
+.topic-option strong { font-size: 0.95rem; }
+.topic-option span { color: var(--secondary-text); }
 .topic-option.selected { border-color: var(--primary-color); background: rgba(var(--primary-color-rgb), 0.08); }
-.topic-picker-actions { display: flex; justify-content: space-between; align-items: center; }
+.topic-picker-actions { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: 0.5rem; }
 .topic-picker .error { color: #c0392b; }
 
 .enable-push-btn,
