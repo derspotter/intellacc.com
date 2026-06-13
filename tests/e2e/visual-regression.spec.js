@@ -4,7 +4,10 @@
 // Run (dev stack must be up: docker compose -p solid-local -f docker-compose.solid-local.yml up -d):
 //   npx playwright test tests/e2e/visual-regression.spec.js
 // Generate / update baselines after an intentional visual change:
-//   npx playwright test tests/e2e/visual-regression.spec.js --update-snapshots
+//   npx playwright test tests/e2e/visual-regression.spec.js --update-snapshots=all
+// NOTE: use --update-snapshots=all (not plain --update-snapshots): the plain form
+// skips rewriting a baseline when the new screenshot still matches within
+// maxDiffPixelRatio (0.01), which silently leaves stale baselines on disk.
 // Keep test users for debugging: KEEP_E2E_USERS=1
 //
 // Baselines are environment-specific (font anti-aliasing): generate & run them
@@ -117,5 +120,9 @@ test('home feed (seeded)', async ({ page }) => {
   // Confirm the seeded posts actually rendered (rules out an empty/discover feed)
   // before snapshotting, so the baseline is deterministic.
   await expect(page.getByText('Visual baseline post one', { exact: false })).toBeVisible({ timeout: 15000 });
-  await expect(page).toHaveScreenshot('home-feed-seeded.png', { mask: masks(page) });
+  // The poster's username is randomly generated per run (createUser), so mask it
+  // too — otherwise the baseline drifts. The fixed post bodies stay visible.
+  await expect(page).toHaveScreenshot('home-feed-seeded.png', {
+    mask: [...masks(page), page.locator('.username-link')]
+  });
 });
