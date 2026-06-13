@@ -10,6 +10,17 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-13-visual-regression-baseline-design.md`
 
+**AMENDMENT (2026-06-13, after Task 1 eyeball):** Screenshots are **viewport-only
+by default — do NOT pass `fullPage: true`** for feed/data-bearing screens, because
+fullPage captures dynamic content below the fold and makes baselines flaky. The
+only `fullPage: true` is the **topic picker** (Task 3), whose content is the fixed
+10 seeded topics and is therefore deterministic. The **logged-out home** (Task 1)
+additionally masks `.posts-list` (live public feed). The **seeded feed** (Task 5)
+must use a **two-user follow** setup: an onboarded user who follows nobody falls
+back to the *discover* feed (dynamic), so userA must follow userB (who authors the
+fixed posts) for userA's following-feed to deterministically show them. These
+amendments are reflected in the corrected per-task text below.
+
 **Conventions (read before starting):**
 - The dev stack MUST be up first, ALWAYS with `-p solid-local`:
   `docker compose -p solid-local -f docker-compose.solid-local.yml up -d`
