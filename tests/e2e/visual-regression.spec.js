@@ -28,3 +28,13 @@ test('home logged-out', async ({ page }) => {
     mask: [...masks(page), page.locator('.posts-list')]
   });
 });
+
+test('login page', async ({ page }) => {
+  await gotoStable(page, 'login');
+  await expect(page).toHaveScreenshot('login.png', { mask: masks(page) });
+});
+
+test('signup page', async ({ page }) => {
+  await gotoStable(page, 'signup');
+  await expect(page).toHaveScreenshot('signup.png', { mask: masks(page) });
+});
