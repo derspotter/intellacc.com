@@ -45,14 +45,28 @@ E2EE messaging for agents deliberately deferred.
 
 - **Offline + background sync (PWA)**: offline app shell, queued actions,
   background sync. Currently push-only.
-- **Social graph UX — part 1/3 shipped 2026-06-14**: `#network` exploration
-  controls (max-nodes, hide-isolates, largest-cluster-only, search-to-focus,
-  reset, live stats), client-side via `lib/graphFilters.js`. Remaining:
-  follower/following list pages (part 2), repost surfacing (part 3).
-- **Social graph UX (remaining)**: follower/following list pages, repost
-  surfacing. The discovery centerpiece shipped 2026-06-12: a 3D follow-network
-  page (#network) with WebGL force graph (repurposed from the DT project),
-  node size = followers, color = forecasting accuracy, click-to-follow.
+## Done 2026-06-14: Social graph UX (all 3 parts)
+
+Shipped the full social-graph UX, decomposed into 3 independent sub-projects:
+- **Part 1 — #network exploration controls**: max-nodes, hide-isolates,
+  largest-cluster-only, search-to-focus, reset, live stats; client-side via
+  `lib/graphFilters.js` (`graphFilters.test.mjs`, `network-controls.spec.js`).
+- **Part 2 — actionable follower/following lists**: the profile Network card's
+  rows now show accuracy + follower metadata and a viewer-relative
+  Follow/Unfollow button (`getFollowers`/`getFollowing` enriched with
+  `followers`, `accuracy_percent`, `is_following`; new `NetworkUserRow`;
+  `followers_enriched.test.js`, `followers-rows.spec.js`).
+- **Part 3 — repost surfacing**: feed posts expose `repost_count` +
+  `reposted_by_user`; PostItem shows the count and an optimistic, viewer-aware
+  Repost/Reposted button (no more confirm()/alert()). `repost_surfacing.test.js`
+  + harness baseline covering Repost / Reposted / Repost(N).
+
+The discovery centerpiece shipped 2026-06-12: a 3D follow-network page
+(#network) with WebGL force graph (repurposed from the DT project), node size =
+followers, color = forecasting accuracy, click-to-follow.
+
+Follow-ups deferred: un-repost (toggle off), Twitter-style "X reposted" header
+(vs the current quote card), dedicated #followers/#following routes.
 - **Social groups/communities**: public topic/market groups with
   membership and moderation. Needs product design first.
 
