@@ -368,22 +368,28 @@ exports.createEvent = asyncHandler(async (req, res) => {
   // Fire-and-forget: embed the event (used by the classification fallback and
   // semantic search), then classify it into topics. Classification runs even if
   // embedding fails — it is LLM-first and only the fallback needs the embedding.
-  (async () => {
-    try {
-      await setEventEmbedding({
-        eventId: newEvent.id,
-        title: newEvent.title,
-        details: newEvent.details
-      });
-    } catch (error) {
-      console.error('[Event] Background embedding failed for event', newEvent.id, error.message);
-    }
-    try {
-      await topicService.classifyEventLLM(newEvent.id);
-    } catch (error) {
-      console.error('[Event] Background classification failed for event', newEvent.id, error.message);
-    }
-  })();
+  // Skipped under NODE_ENV=test: it reaches external embedding/LLM services that
+  // are unavailable in CI, and being un-awaited it logs after the triggering
+  // test tears down ("Cannot log after tests are done" → Jest exits 1). The
+  // classification logic itself is covered directly in the topic_* suites.
+  if (process.env.NODE_ENV !== 'test') {
+    (async () => {
+      try {
+        await setEventEmbedding({
+          eventId: newEvent.id,
+          title: newEvent.title,
+          details: newEvent.details
+        });
+      } catch (error) {
+        console.error('[Event] Background embedding failed for event', newEvent.id, error.message);
+      }
+      try {
+        await topicService.classifyEventLLM(newEvent.id);
+      } catch (error) {
+        console.error('[Event] Background classification failed for event', newEvent.id, error.message);
+      }
+    })();
+  }
   res.status(201).json(newEvent);
 });
 
