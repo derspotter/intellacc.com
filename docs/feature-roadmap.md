@@ -55,6 +55,14 @@ E2EE messaging for agents deliberately deferred.
 - **Nightly E2E job**: scheduled run of the messaging spec with test-user
   cleanup; deferred in favor of feature work.
 
+- **Component-isolation visual harness (v1 shipped 2026-06-14)**: dev-only
+  `#__harness` route renders PostItem with fixed fixtures; baseline in
+  `tests/e2e/visual-harness.spec.js`. Closes the feed-component coverage gap the
+  7 page-level baselines couldn't (deterministic, no masking). Stripped from prod
+  via `import.meta.env.DEV` (verified by grepping the prod `dist/`). Follow-up:
+  extend to store-driven components (MarketPanel, RPBalance) with a data-mock
+  layer if the gap still hurts.
+
 - **Visual-regression net (v1 shipped 2026-06-13)**: 7 van-skin Playwright
   screenshot baselines (`tests/e2e/visual-regression.spec.js`) — home logged-out,
   login, signup, onboarding picker, analytics, settings, notifications — local

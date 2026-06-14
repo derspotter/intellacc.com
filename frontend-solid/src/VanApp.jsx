@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { createSignal, lazy, onCleanup, onMount, Show } from 'solid-js';
 import Layout from './components/Layout';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
@@ -18,6 +18,8 @@ import TopicPicker from './components/onboarding/TopicPicker';
 import { api } from './services/api';
 import { isAuthenticated } from './services/auth';
 
+const Harness = import.meta.env.DEV ? lazy(() => import('./_harness/Harness')) : null;
+
 const ROUTES = {
   home: 'home',
   login: 'login',
@@ -33,7 +35,8 @@ const ROUTES = {
   notifications: 'notifications',
   settings: 'settings',
   'verify-email': 'verify-email',
-  search: 'search'
+  search: 'search',
+  ...(import.meta.env.DEV ? { __harness: '__harness' } : {})
 };
 
 const NOT_FOUND_ROUTE = 'notFound';
@@ -168,6 +171,10 @@ export default function App() {
       return <SearchPage />;
     }
 
+    if (import.meta.env.DEV && page() === '__harness') {
+      return <Harness />;
+    }
+
     if (page() === 'notFound' || page() === 'not-found') {
       return (
         <div class="not-found">
@@ -210,7 +217,7 @@ export default function App() {
     <>
       <AppBackground />
       <Show
-        when={isAuthPage()}
+        when={isAuthPage() || (import.meta.env.DEV && page() === '__harness')}
         fallback={
           <Layout page={page()}>
             <Show when={needsTopics()} fallback={renderPage()}>
