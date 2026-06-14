@@ -87,10 +87,6 @@ export default function MarketEventCard(props) {
   const [error, setError] = createSignal('');
   const [isVerificationError, setIsVerificationError] = createSignal(false);
   const [tradeMessage, setTradeMessage] = createSignal('');
-  const [resolveOutcome, setResolveOutcome] = createSignal('yes');
-  const [resolving, setResolving] = createSignal(false);
-  const [resolveMessage, setResolveMessage] = createSignal('');
-  const [resolveError, setResolveError] = createSignal('');
   const [stakeInputRef, setStakeInputRef] = createSignal(null);
 
   let kellyTimeout;
@@ -100,8 +96,6 @@ export default function MarketEventCard(props) {
     setError('');
     setIsVerificationError(false);
     setTradeMessage('');
-    setResolveMessage('');
-    setResolveError('');
   };
 
   const setVerificationMessage = (message, options = {}) => {
@@ -422,35 +416,6 @@ export default function MarketEventCard(props) {
     }, 300);
   };
 
-  const handleResolve = async (value) => {
-    const selectedOutcome = String(value || resolveOutcome()).toLowerCase();
-    if (!eventId()) {
-      setResolveError('Event not available.');
-      return;
-    }
-    if (event().outcome) {
-      setResolveError('This market is already resolved.');
-      return;
-    }
-    if (!props.onResolve) {
-      setResolveError('Resolve handler unavailable.');
-      return;
-    }
-
-    setResolving(true);
-    setResolveMessage('');
-    setResolveError('');
-    try {
-      await props.onResolve(eventId(), selectedOutcome);
-      setResolveMessage(`Market resolved as ${selectedOutcome.toUpperCase()}.`);
-      setError('');
-    } catch (error) {
-      setResolveError(error?.message || 'Failed to resolve market.');
-    } finally {
-      setResolving(false);
-    }
-  };
-
   const applyKelly = () => {
     const suggestion = kellyData();
     if (!suggestion || !Number.isFinite(safeNumber(suggestion.kelly_optimal))) {
@@ -733,42 +698,6 @@ export default function MarketEventCard(props) {
         </Show>
         <Show when={error()}>
           <p class="error-message">{error()}</p>
-        </Show>
-        <Show when={props.canResolve && !event().outcome}>
-          <div class="market-resolve-controls">
-            <div class="trade-direction">
-              <button
-                type="button"
-                class={`button ${resolveOutcome() === 'no' ? 'active-trade-direction' : ''}`}
-                onClick={() => setResolveOutcome('no')}
-                disabled={resolving()}
-              >
-                Resolve No
-              </button>
-              <button
-                type="button"
-                class={`button ${resolveOutcome() === 'yes' ? 'active-trade-direction' : ''}`}
-                onClick={() => setResolveOutcome('yes')}
-                disabled={resolving()}
-              >
-                Resolve Yes
-              </button>
-            </div>
-            <button
-              type="button"
-              class="button"
-              onClick={() => void handleResolve(resolveOutcome())}
-              disabled={resolving()}
-            >
-              {resolving() ? 'Resolving...' : 'Resolve market'}
-            </button>
-          </div>
-        </Show>
-        <Show when={resolveError()}>
-          <p class="error">{resolveError()}</p>
-        </Show>
-        <Show when={resolveMessage()}>
-          <p class="success">{resolveMessage()}</p>
         </Show>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import { getEvents, getUserPositions, api } from '../../services/api';
 import MarketEventCard from './MarketEventCard';
-import { isAdmin, isAuthenticated, getCurrentUserId } from '../../services/auth';
+import { isAuthenticated, getCurrentUserId } from '../../services/auth';
 
 const formatProbability = (value) => {
   const parsed = Number(value);
@@ -287,9 +287,7 @@ export default function EventsList(props) {
           <MarketEventCard
             event={selectedEvent()}
             onTrade={handleTradeRefresh}
-            onResolve={props.onResolve}
             onVerificationNotice={props.onVerificationNotice}
-            canResolve={authed() && isAdmin()}
             hideTitle={true}
             authenticated={authed()}
           />
@@ -324,9 +322,7 @@ export default function EventsList(props) {
           <MarketEventCard
             event={assignedEvent}
             onTrade={handleTradeRefresh}
-            onResolve={props.onResolve}
             onVerificationNotice={props.onVerificationNotice}
-            canResolve={authed() && isAdmin()}
             hideTitle={true}
           />
         </div>
