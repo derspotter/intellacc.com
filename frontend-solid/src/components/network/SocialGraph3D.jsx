@@ -3,7 +3,7 @@
 // repurposed from the DT project's ThreeGraph.svelte, ported to SolidJS and
 // stripped to the social-graph essentials.
 
-import { onCleanup, onMount } from 'solid-js';
+import { createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createNodeMaterial, createEdgeMaterial } from '../../lib/graphMaterials';
@@ -28,6 +28,7 @@ export default function SocialGraph3D(props) {
   let camera;
   let controls;
   let points;
+  let lines;
   let raycaster;
   let frame = 0;
   let resizeObserver;
@@ -40,6 +41,26 @@ export default function SocialGraph3D(props) {
   const pointer = new THREE.Vector2(2, 2);
   const nodes = () => props.nodes || [];
   const edges = () => props.edges || [];
+
+  const [sceneReady, setSceneReady] = createSignal(false);
+
+  const disposeGraphObjects = () => {
+    for (const obj of [points, lines]) {
+      if (!obj) continue;
+      scene.remove(obj);
+      obj.geometry?.dispose?.();
+      obj.material?.dispose?.();
+    }
+    points = null;
+    lines = null;
+    hoveredIndex = null;
+  };
+
+  const rebuildGraph = () => {
+    if (!scene) return;
+    disposeGraphObjects();
+    buildScene();
+  };
 
   const buildScene = () => {
     const nodeList = nodes();
@@ -85,7 +106,8 @@ export default function SocialGraph3D(props) {
       edgeGeometry.setAttribute('alpha', new THREE.Float32BufferAttribute(edgeAlphas, 1));
       const edgeColors = new Float32Array(edgeAlphas.length * 3).fill(0.55);
       edgeGeometry.setAttribute('color', new THREE.BufferAttribute(edgeColors, 3));
-      scene.add(new THREE.LineSegments(edgeGeometry, createEdgeMaterial(THREE)));
+      lines = new THREE.LineSegments(edgeGeometry, createEdgeMaterial(THREE));
+      scene.add(lines);
     }
   };
 
@@ -174,8 +196,6 @@ export default function SocialGraph3D(props) {
     container.addEventListener('pointermove', onPointerMove);
     container.addEventListener('click', onClick);
 
-    buildScene();
-
     const animate = () => {
       if (disposed) return;
       frame = requestAnimationFrame(animate);
@@ -190,6 +210,8 @@ export default function SocialGraph3D(props) {
       renderer.render(scene, camera);
     };
     animate();
+
+    setSceneReady(true);
   };
 
   onCleanup(() => {
@@ -205,6 +227,38 @@ export default function SocialGraph3D(props) {
       });
       renderer?.dispose();
       renderer?.domElement?.remove();
+  });
+
+  // Rebuild graph objects whenever the (filtered) node/edge props change.
+  createEffect(() => {
+    nodes();
+    edges();
+    if (!sceneReady()) return;
+    rebuildGraph();
+  });
+
+  // Focus the camera on a node when focusNodeId is set, and select it.
+  createEffect(() => {
+    const id = props.focusNodeId;
+    if (id == null || !sceneReady() || !points) return;
+    const list = nodes();
+    const idx = list.findIndex((n) => String(n.id) === String(id));
+    if (idx < 0) return;
+    const attr = points.geometry.getAttribute('position');
+    const target = new THREE.Vector3(attr.getX(idx), attr.getY(idx), attr.getZ(idx));
+    controls.target.copy(target);
+    camera.position.set(target.x, target.y + 8, target.z + 40);
+    controls.update();
+    props.onSelect?.(list[idx]);
+  });
+
+  // Reset the camera to default framing when resetSignal changes.
+  createEffect(() => {
+    props.resetSignal;
+    if (!sceneReady() || !controls) return;
+    controls.target.set(0, 0, 0);
+    camera.position.set(0, 12, 95);
+    controls.update();
   });
 
   return (
