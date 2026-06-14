@@ -46,6 +46,9 @@ export default function PostItem(props) {
   const [likeCount, setLikeCount] = createSignal(0);
   const [likedByUser, setLikedByUser] = createSignal(false);
   const [commentCount, setCommentCount] = createSignal(0);
+  const [repostCount, setRepostCount] = createSignal(0);
+  const [repostedByUser, setRepostedByUser] = createSignal(false);
+  const [repostBusy, setRepostBusy] = createSignal(false);
   const [commentText, setCommentText] = createSignal('');
   const [commentSubmitting, setCommentSubmitting] = createSignal(false);
   const [commentListVisible, setCommentListVisible] = createSignal(false);
@@ -87,6 +90,8 @@ export default function PostItem(props) {
     setLikeCount(Number(current.like_count) || 0);
     setLikedByUser(Boolean(current.liked_by_user));
     setCommentCount(Number(current.comment_count) || 0);
+    setRepostCount(Number(current.repost_count) || 0);
+    setRepostedByUser(Boolean(current.reposted_by_user));
   });
 
   createEffect(() => {
@@ -123,6 +128,10 @@ export default function PostItem(props) {
   const currentCommentCount = () => Number(post().comment_count || 0);
   const commentCountText = () => `${commentCount()} comment${commentCount() === 1 ? '' : 's'}`;
   const likeText = () => `${likeCount()} like${likeCount() === 1 ? '' : 's'}`;
+  const repostText = () => {
+    const label = repostedByUser() ? 'Reposted' : 'Repost';
+    return repostCount() > 0 ? `${label} (${repostCount()})` : label;
+  };
   const postDate = () => (post().created_at ? new Date(post().created_at).toLocaleDateString() : '');
   const isLongContent = () => {
     const content = String(post().content || '');
@@ -370,13 +379,32 @@ export default function PostItem(props) {
   const handleRepost = async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (confirm("Repost this to your followers?")) {
-      try {
-        await feedStore.createPost('', null, null, post().id);
-        alert("Successfully reposted!");
-      } catch (err) {
-        alert("Failed to repost: " + err.message);
-      }
+    clearActionError();
+    if (!isAuthenticated()) {
+      setActionError('Sign in to repost.');
+      return;
+    }
+    if (repostedByUser() || repostBusy()) {
+      return;
+    }
+
+    // Optimistic: mark reposted and bump the count immediately.
+    const nextCount = repostCount() + 1;
+    setRepostedByUser(true);
+    setRepostCount(nextCount);
+    setRepostBusy(true);
+    applyPostPatch({ ...post(), reposted_by_user: true, repost_count: nextCount });
+
+    try {
+      await feedStore.createPost('', null, null, post().id);
+    } catch (err) {
+      // Roll back on failure.
+      setRepostedByUser(false);
+      setRepostCount(Math.max(0, nextCount - 1));
+      applyPostPatch({ ...post(), reposted_by_user: false, repost_count: Math.max(0, nextCount - 1) });
+      setActionError(err?.message || 'Failed to repost.');
+    } finally {
+      setRepostBusy(false);
     }
   };
 
@@ -763,9 +791,11 @@ export default function PostItem(props) {
           <button
             type="button"
             class="post-action repost-button"
+            classList={{ reposted: repostedByUser() }}
             onClick={handleRepost}
+            disabled={repostedByUser() || repostBusy()}
           >
-            Repost
+            {repostText()}
           </button>
           <button
             type="button"

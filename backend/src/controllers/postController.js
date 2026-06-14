@@ -546,6 +546,12 @@ exports.getPosts = async (req, res) => {
                    THEN true
                    ELSE false
               END AS liked_by_user,
+              (SELECT COUNT(*)::int FROM posts rpc WHERE rpc.repost_id = p.id) AS repost_count,
+              CASE WHEN EXISTS (SELECT 1 FROM posts rpu
+                                WHERE rpu.repost_id = p.id AND rpu.user_id = $1)
+                   THEN true
+                   ELSE false
+              END AS reposted_by_user,
               ((COALESCE(u.rp_balance_ledger, 0) + COALESCE(u.rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) as user_total_reputation,
               -- Calculate visibility multiplier: higher reputation = more visibility
               -- Use GREATEST to ensure we never take LN of a negative number
@@ -634,7 +640,13 @@ exports.getPostById = async (req, res) => {
               lm.url as link_meta_url, lm.title as link_meta_title, lm.description as link_meta_description, lm.image_url as link_meta_image_url, lm.site_name as link_meta_site_name, lm.content as link_meta_content,
               ai.ai_probability,
               ai.detected_model as ai_detected_model,
-              ai.is_flagged as ai_is_flagged
+              ai.is_flagged as ai_is_flagged,
+              (SELECT COUNT(*)::int FROM posts rpc WHERE rpc.repost_id = p.id) AS repost_count,
+              CASE WHEN EXISTS (SELECT 1 FROM posts rpu
+                                WHERE rpu.repost_id = p.id AND rpu.user_id = $2)
+                   THEN true
+                   ELSE false
+              END AS reposted_by_user
        FROM posts p
        LEFT JOIN link_metadata lm ON p.link_metadata_id = lm.id
        LEFT JOIN LATERAL (
@@ -952,6 +964,12 @@ exports.getFeed = async (req, res) => {
                    THEN true
                    ELSE false
               END AS liked_by_user,
+              (SELECT COUNT(*)::int FROM posts rpc WHERE rpc.repost_id = p.id) AS repost_count,
+              CASE WHEN EXISTS (SELECT 1 FROM posts rpu
+                                WHERE rpu.repost_id = p.id AND rpu.user_id = $1)
+                   THEN true
+                   ELSE false
+              END AS reposted_by_user,
               ((COALESCE(u.rp_balance_ledger, 0) + COALESCE(u.rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) as user_total_reputation,
               -- Calculate visibility multiplier: higher reputation = more visibility
               -- Use GREATEST to ensure we never take LN of a negative number
