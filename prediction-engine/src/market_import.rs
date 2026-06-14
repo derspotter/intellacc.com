@@ -1169,7 +1169,9 @@ async fn fetch_polymarket_markets(max_markets: Option<usize>) -> Result<Vec<Impo
 async fn fetch_kalshi_markets(max_markets: Option<usize>) -> Result<Vec<ImportedMarket>> {
     let client = Client::new();
     let base = env::var("IMPORT_KALSHI_BASE_URL")
-        .unwrap_or_else(|_| "https://trading-api.kalshi.com/trade-api/v2".to_string());
+        // trading-api.kalshi.com is retired (301/401 "API has been moved");
+        // the current public host is api.elections.kalshi.com.
+        .unwrap_or_else(|_| "https://api.elections.kalshi.com/trade-api/v2".to_string());
     let page_limit = 200usize;
     let mut cursor: Option<String> = None;
     let mut output = Vec::new();
