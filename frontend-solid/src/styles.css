@@ -1753,6 +1753,17 @@ body.dark-mode .post-action.liked:hover {
   background-color: rgba(231, 76, 60, 0.18);
 }
 
+.post-action.repost-button.reposted {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
+  background-color: color-mix(in oklab, var(--primary-color) 8%, transparent);
+}
+
+.post-action.repost-button.reposted:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
 .post-action.delete:hover {
   background-color: rgba(231, 76, 60, 0.1);
   color: #e74c3c;

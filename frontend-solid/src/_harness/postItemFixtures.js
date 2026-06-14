@@ -8,6 +8,8 @@ const BASE = {
   created_at: '2026-01-01T00:00:00Z',
   like_count: 3,
   comment_count: 2,
+  repost_count: 0,
+  reposted_by_user: false,
   liked_by_user: false,
   avatar_url: null,
   image_url: null,
@@ -19,7 +21,7 @@ const BASE = {
 };
 
 export const postItemFixtures = [
-  { ...BASE, id: 1, content: 'A short baseline post.' },
+  { ...BASE, id: 1, content: 'A short baseline post, already reposted by you.', reposted_by_user: true },
   {
     ...BASE,
     id: 2,
@@ -50,5 +52,5 @@ export const postItemFixtures = [
     ai_probability: 0.92,
     ai_detected_model: 'gpt-x'
   },
-  { ...BASE, id: 5, content: 'A post with high engagement.', like_count: 1234, comment_count: 567 }
+  { ...BASE, id: 5, content: 'A post with high engagement.', like_count: 1234, comment_count: 567, repost_count: 42 }
 ];
