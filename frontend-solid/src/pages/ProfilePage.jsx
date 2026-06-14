@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, Show } from 'solid-js';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
+import NetworkUserRow from '../components/profile/NetworkUserRow';
 import {
   createDirectMessage,
   followUser,
@@ -112,6 +113,7 @@ export default function ProfilePage(props) {
   const [followers, setFollowers] = createSignal([]);
   const [following, setFollowing] = createSignal([]);
   const [followingStatus, setFollowingStatus] = createSignal(false);
+  const [togglingId, setTogglingId] = createSignal(null);
 
   const [reputation, setReputation] = createSignal(normalizeReputation({}));
   const [reputationLoading, setReputationLoading] = createSignal(false);
@@ -285,6 +287,41 @@ export default function ProfilePage(props) {
       setActionError(err?.message || 'Unable to update follow status.');
     } finally {
       setTimeout(() => setActionMessage(''), 1200);
+    }
+  };
+
+  // Reflect a follow/unfollow on a row user across both lists (a user can appear
+  // in followers and following at once).
+  const updateRowFollowing = (rowUserId, value) => {
+    const apply = (rows) =>
+      rows.map((row) =>
+        String(row.id) === String(rowUserId) ? { ...row, is_following: value } : row
+      );
+    setFollowers((current) => apply(current));
+    setFollowing((current) => apply(current));
+  };
+
+  const toggleRowFollow = async (rowUser) => {
+    if (!rowUser?.id || !isAuthenticated()) {
+      return;
+    }
+    if (String(rowUser.id) === String(getCurrentUserId() || '')) {
+      return;
+    }
+    setTogglingId(rowUser.id);
+    try {
+      setActionError('');
+      if (rowUser.is_following) {
+        await unfollowUser(rowUser.id);
+        updateRowFollowing(rowUser.id, false);
+      } else {
+        await followUser(rowUser.id);
+        updateRowFollowing(rowUser.id, true);
+      }
+    } catch (err) {
+      setActionError(err?.message || 'Unable to update follow status.');
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -599,17 +636,13 @@ export default function ProfilePage(props) {
                         </Show>
                         <For each={followers()}>
                           {(follower) => (
-                            <button
-                              type="button"
-                              class="notification-link"
-                              onClick={() => {
-                                if (follower?.id) {
-                                  window.location.hash = `#user/${follower.id}`;
-                                }
-                              }}
-                            >
-                              {follower.username || `user-${follower.id}`}
-                            </button>
+                            <NetworkUserRow
+                              user={follower}
+                              viewerId={getCurrentUserId()}
+                              canFollow={isAuthenticated()}
+                              busy={String(togglingId()) === String(follower.id)}
+                              onToggleFollow={toggleRowFollow}
+                            />
                           )}
                         </For>
                       </div>
@@ -623,17 +656,13 @@ export default function ProfilePage(props) {
                         </Show>
                         <For each={following()}>
                           {(followingUser) => (
-                            <button
-                              type="button"
-                              class="notification-link"
-                              onClick={() => {
-                                if (followingUser?.id) {
-                                  window.location.hash = `#user/${followingUser.id}`;
-                                }
-                              }}
-                            >
-                              {followingUser.username || `user-${followingUser.id}`}
-                            </button>
+                            <NetworkUserRow
+                              user={followingUser}
+                              viewerId={getCurrentUserId()}
+                              canFollow={isAuthenticated()}
+                              busy={String(togglingId()) === String(followingUser.id)}
+                              onToggleFollow={toggleRowFollow}
+                            />
                           )}
                         </For>
                       </div>
