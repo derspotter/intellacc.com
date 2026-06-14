@@ -525,14 +525,6 @@ input[type="submit"]:disabled {
   border-color: var(--primary-dark);
 }
 
-.market-resolve-controls {
-  margin-top: 0.25rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border-color);
-  display: grid;
-  gap: 0.5rem;
-}
-
 .predictions-sidebar {
   display: grid;
   gap: 0.75rem;

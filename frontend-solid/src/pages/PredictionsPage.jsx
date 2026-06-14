@@ -3,9 +3,10 @@ import EventsList from '../components/predictions/EventsList';
 import LeaderboardCard from '../components/predictions/LeaderboardCard';
 import MarketQuestionHub from '../components/predictions/MarketQuestionHub';
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
+import AdminMarketResolution from '../components/predictions/AdminMarketResolution';
 import AdminTools from '../components/predictions/AdminTools';
 import RPBalance from '../components/predictions/RPBalance';
-import { createEvent, resolveEvent } from '../services/api';
+import { createEvent } from '../services/api';
 import { isAdmin, isAuthenticated } from '../services/auth';
 
 const VERIFICATION_NOTICE_KEY = 'verificationNotice';
@@ -22,10 +23,6 @@ export default function PredictionsPage(props) {
     }
 
     return createEvent(title, details, closingDate);
-  };
-
-  const handleResolveEvent = async (eventId, outcome) => {
-    return resolveEvent(eventId, outcome);
   };
 
   const handleVerificationNotice = (message = '') => {
@@ -57,7 +54,6 @@ export default function PredictionsPage(props) {
             <EventsList
               targetedMarketId={props.marketId}
               createEvent={handleCreateEvent}
-              onResolve={handleResolveEvent}
               onVerificationNotice={handleVerificationNotice}
             />
           </div>
@@ -67,6 +63,7 @@ export default function PredictionsPage(props) {
 
         <Show when={isAdmin()}>
           <AdminTools />
+          <AdminMarketResolution />
           <AdminEventManagement />
         </Show>
 
