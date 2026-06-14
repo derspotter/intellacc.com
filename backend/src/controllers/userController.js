@@ -1049,15 +1049,37 @@ exports.getFollowers = async (req, res) => {
     return res.status(400).json({ message: "Invalid user ID format" });
   }
   
+  const viewerId = getViewerId(req);
+
   try {
     const result = await db.query(
-      `SELECT u.id, u.username 
-      FROM follows f 
-      JOIN users u ON f.follower_id = u.id 
-      WHERE f.following_id = $1`,
-      [userId]
+      `SELECT u.id,
+              u.username,
+              COALESCE(fc.followers, 0)::INT AS followers,
+              ROUND(
+                (
+                  100.0 * COUNT(p.id) FILTER (WHERE LOWER(COALESCE(p.outcome, '')) = 'correct')
+                  / NULLIF(COUNT(p.id) FILTER (WHERE p.outcome IS NOT NULL), 0)
+                )::NUMERIC, 1
+              )::DOUBLE PRECISION AS accuracy_percent,
+              EXISTS (
+                SELECT 1 FROM follows vf
+                WHERE vf.follower_id = $2 AND vf.following_id = u.id
+              ) AS is_following
+      FROM follows f
+      JOIN users u ON f.follower_id = u.id
+      LEFT JOIN (
+        SELECT following_id, COUNT(*) AS followers
+        FROM follows
+        GROUP BY following_id
+      ) fc ON fc.following_id = u.id
+      LEFT JOIN predictions p ON p.user_id = u.id
+      WHERE f.following_id = $1 AND u.deleted_at IS NULL
+      GROUP BY u.id, u.username, fc.followers
+      ORDER BY COALESCE(fc.followers, 0) DESC, u.id ASC`,
+      [userId, viewerId]
     );
-    
+
     res.status(200).json(result.rows);
   } catch (err) {
     console.error("Error getting followers:", err);
@@ -1197,16 +1219,37 @@ exports.getBlockedUsers = async (req, res) => {
 // Get users that a user is following
 exports.getFollowing = async (req, res) => {
   const userId = req.params.id;
-  
+  const viewerId = getViewerId(req);
+
   try {
     const result = await db.query(
-      `SELECT u.id, u.username 
-      FROM follows f 
-      JOIN users u ON f.following_id = u.id 
-      WHERE f.follower_id = $1`,
-      [userId]
+      `SELECT u.id,
+              u.username,
+              COALESCE(fc.followers, 0)::INT AS followers,
+              ROUND(
+                (
+                  100.0 * COUNT(p.id) FILTER (WHERE LOWER(COALESCE(p.outcome, '')) = 'correct')
+                  / NULLIF(COUNT(p.id) FILTER (WHERE p.outcome IS NOT NULL), 0)
+                )::NUMERIC, 1
+              )::DOUBLE PRECISION AS accuracy_percent,
+              EXISTS (
+                SELECT 1 FROM follows vf
+                WHERE vf.follower_id = $2 AND vf.following_id = u.id
+              ) AS is_following
+      FROM follows f
+      JOIN users u ON f.following_id = u.id
+      LEFT JOIN (
+        SELECT following_id, COUNT(*) AS followers
+        FROM follows
+        GROUP BY following_id
+      ) fc ON fc.following_id = u.id
+      LEFT JOIN predictions p ON p.user_id = u.id
+      WHERE f.follower_id = $1 AND u.deleted_at IS NULL
+      GROUP BY u.id, u.username, fc.followers
+      ORDER BY COALESCE(fc.followers, 0) DESC, u.id ASC`,
+      [userId, viewerId]
     );
-    
+
     res.status(200).json(result.rows);
   } catch (err) {
     console.error("Error getting following:", err);
