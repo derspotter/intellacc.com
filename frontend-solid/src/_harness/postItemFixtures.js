@@ -38,6 +38,7 @@ export const postItemFixtures = [
       user_id: 102,
       username: 'original_author',
       content: 'The original post being reposted.',
+      created_at: '2026-01-01T00:00:00Z',
       avatar_url: null
     }
   },
