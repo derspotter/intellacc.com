@@ -6882,6 +6882,24 @@ body.skin-terminal * {
   color: var(--secondary-text);
 }
 
+.network-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0 1rem;
+}
+.network-controls input[type="text"] { min-width: 160px; }
+.network-controls input[type="number"] { width: 5rem; margin-left: 0.35rem; }
+.network-control-num,
+.network-control-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
 @media (max-width: 800px) {
   .network-layout {
     flex-direction: column;
