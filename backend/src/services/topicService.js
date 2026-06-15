@@ -1,6 +1,6 @@
 const db = require('../db');
 const { embedText } = require('./openRouterMatcher/embeddingService');
-const { classifyWithQwen } = require('./qwenClassifier');
+const { classifyWithGemma } = require('./gemmaClassifier');
 
 // A second topic is also assigned when its cosine similarity is within this
 // margin of the best topic (events often straddle two topics).
@@ -103,7 +103,7 @@ const classifyEventLLM = async (eventId) => {
   let slugs = [];
   let failure = null;
   try {
-    const rawSlugs = await classifyWithQwen(title, details, [...idBySlug.keys()]);
+    const rawSlugs = await classifyWithGemma(title, details, [...idBySlug.keys()]);
     slugs = rawSlugs.filter((s) => idBySlug.has(s)).slice(0, 2);
     if (slugs.length === 0) failure = 'no valid topic slugs in model output';
   } catch (error) {
@@ -137,7 +137,7 @@ const classifyUnclassifiedEventsLLM = async () => {
      )
      ORDER BY e.id`
   );
-  // classifyEventLLM retries once via qwenClassifier and falls back to
+  // classifyEventLLM retries once via gemmaClassifier and falls back to
   // embedding on any failure, so it should not throw; the catch is a safety net.
   let classified = 0;
   for (const row of result.rows) {
