@@ -1,11 +1,11 @@
 // backend/test/topic_llm_classification.test.js
 // LLM-based topic classification with embedding fallback. The DB is real;
-// only the Qwen classifier module is mocked.
-process.env.QWEN_CLASSIFIER_RETRY_MS = '1'; // keep retry delay near-instant in tests
-jest.mock('../src/services/qwenClassifier');
+// only the Gemma classifier module is mocked.
+process.env.GEMMA_CLASSIFIER_RETRY_MS = '1'; // keep retry delay near-instant in tests
+jest.mock('../src/services/gemmaClassifier');
 
 const db = require('../src/db');
-const { classifyWithQwen } = require('../src/services/qwenClassifier');
+const { classifyWithGemma } = require('../src/services/gemmaClassifier');
 const topicService = require('../src/services/topicService');
 
 jest.setTimeout(30000);
@@ -25,7 +25,7 @@ describe('topicService.classifyEventLLM', () => {
   });
 
   beforeEach(() => {
-    classifyWithQwen.mockReset();
+    classifyWithGemma.mockReset();
   });
 
   const insertEvent = async (embedding = null) => {
@@ -62,7 +62,7 @@ describe('topicService.classifyEventLLM', () => {
       [eventId, seeded.rows[0].id]
     );
 
-    classifyWithQwen.mockResolvedValue(['science', 'ai-technology']);
+    classifyWithGemma.mockResolvedValue(['science', 'ai-technology']);
 
     const assigned = await topicService.classifyEventLLM(eventId);
     expect(assigned).toHaveLength(2);
@@ -80,11 +80,11 @@ describe('topicService.classifyEventLLM', () => {
     expect(rows.rows.every((r) => r.similarity === null)).toBe(true);
   });
 
-  test('falls back to embedding classification when Qwen returns only invalid slugs', async () => {
+  test('falls back to embedding classification when Gemma returns only invalid slugs', async () => {
     const topicId = await insertSyntheticTopic();
     const eventId = await insertEvent(vec(0));
 
-    classifyWithQwen.mockResolvedValue(['nonsense']);
+    classifyWithGemma.mockResolvedValue(['nonsense']);
 
     const assigned = await topicService.classifyEventLLM(eventId);
     expect(assigned.map((r) => r.topic_id)).toContain(topicId);
@@ -94,11 +94,11 @@ describe('topicService.classifyEventLLM', () => {
     expect(rows.rows.every((r) => r.source === 'embedding')).toBe(true);
   });
 
-  test('falls back to embedding classification when classifyWithQwen throws', async () => {
+  test('falls back to embedding classification when classifyWithGemma throws', async () => {
     const topicId = await insertSyntheticTopic();
     const eventId = await insertEvent(vec(0));
 
-    classifyWithQwen.mockRejectedValue(new Error('qwen down'));
+    classifyWithGemma.mockRejectedValue(new Error('gemma down'));
 
     const assigned = await topicService.classifyEventLLM(eventId);
     expect(assigned.map((r) => r.topic_id)).toContain(topicId);
@@ -108,10 +108,10 @@ describe('topicService.classifyEventLLM', () => {
     expect(rows.rows.every((r) => r.source === 'embedding')).toBe(true);
   });
 
-  test('returns [] without throwing for event with no embedding and failing classifyWithQwen', async () => {
+  test('returns [] without throwing for event with no embedding and failing classifyWithGemma', async () => {
     const eventId = await insertEvent();
 
-    classifyWithQwen.mockRejectedValue(new Error('qwen down'));
+    classifyWithGemma.mockRejectedValue(new Error('gemma down'));
 
     const assigned = await topicService.classifyEventLLM(eventId);
     expect(assigned).toEqual([]);
