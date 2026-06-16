@@ -31,6 +31,7 @@ const predictionAnalyticsController = require('../controllers/predictionAnalytic
 const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const moderationController = require('../controllers/moderationController');
 const topicsController = require('../controllers/topicsController');
+const feedWeightsController = require('../controllers/feedWeightsController');
 const discoverController = require('../controllers/discoverController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
 const { requireScope } = require('../middleware/scopes');
@@ -95,6 +96,8 @@ router.get('/users/me/preferences', authenticateJWT, userController.getUserUiPre
 router.put('/users/me/preferences', authenticateJWT, userController.updateUserUiPreferences);
 router.get('/users/me/topics', authenticateJWT, topicsController.getMyTopics);
 router.put('/users/me/topics', authenticateJWT, topicsController.setMyTopics);
+router.get('/users/me/feed-weights', authenticateJWT, feedWeightsController.getMyFeedWeights);
+router.put('/users/me/feed-weights', authenticateJWT, feedWeightsController.setMyFeedWeights);
 router.get('/users/master-key', authenticateJWT, rejectAgentKeys, userController.getMasterKey);
 router.post('/users/master-key', authenticateJWT, rejectAgentKeys, userController.setMasterKey);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
