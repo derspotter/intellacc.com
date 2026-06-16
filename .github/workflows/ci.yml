@@ -28,9 +28,9 @@ jobs:
       DATABASE_URL: postgres://intellacc_user:ci_password@localhost:5432/intellaccdb
       JWT_SECRET: ci-test-jwt-secret
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -72,15 +72,15 @@ jobs:
     name: MLS shared-client de-duplication guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: ./scripts/check-mls-dedup.sh
 
   agent-cli:
     name: Agent CLI tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: node cli/test.mjs
@@ -89,9 +89,9 @@ jobs:
     name: frontend-solid production build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
