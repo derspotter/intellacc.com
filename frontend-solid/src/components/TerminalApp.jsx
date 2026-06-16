@@ -8,7 +8,9 @@ import { LoginModal } from "./auth/LoginModal";
 import { ChatPanel } from "./ChatPanel";
 import { feedStore } from "../store/feedStore";
 import { marketStore } from "../store/marketStore";
-import { getActiveSkin } from "../services/skinProvider";
+import { getActiveSkin, setSkin } from "../services/skinProvider";
+import { updateUiPreferences } from "../services/api";
+import { isAuthenticated } from "../services/auth";
 
 function App() {
   const { connect, disconnect, state: socketState } = useSocket();
@@ -36,12 +38,23 @@ function App() {
   let paletteRef;
   let searchInputRef;
 
+  // Switch back to the Van skin. setSkin is reactive, so App.jsx immediately
+  // re-renders VanApp; the preference is persisted locally and synced to the
+  // account when signed in (best-effort, mirrors SkinPreferenceSettings).
+  const switchToVan = () => {
+    setSkin('van');
+    if (isAuthenticated()) {
+      updateUiPreferences('van').catch(() => { /* local switch already applied */ });
+    }
+  };
+
   // Actions for Command Palette
   const allActions = [
     { id: 'feed', label: 'Focus Feed', shortcut: '1', action: () => setActivePane(1) },
     { id: 'market', label: 'Focus Market', shortcut: '2', action: () => setActivePane(2) },
     { id: 'chat', label: 'Focus Chat', shortcut: '3', action: () => setActivePane(3) },
     { id: 'help', label: 'Toggle Help', shortcut: '?', action: () => setShowHelp(prev => !prev) },
+    { id: 'skin-van', label: 'Switch to Van Skin', shortcut: '', action: switchToVan },
     { id: 'logout', label: 'Logout', shortcut: '', action: () => import("../services/tokenService").then(s => s.clearToken()) }
   ];
 
@@ -353,6 +366,14 @@ function App() {
 	        {/* Left Block */}
 	        <div class="px-3 flex items-center border-r border-bb-bg/20 gap-2">
 	          <span>[INTELLACC] USER: @{userData()?.username || 'GUEST'}</span>
+	          <button
+	            type="button"
+	            onClick={switchToVan}
+	            class="hover:text-bb-accent cursor-pointer"
+	            title="Switch back to the Van skin"
+	          >
+	            [VAN]
+	          </button>
 	          <Show when={isLoggedIn()}>
 	            <button
               onClick={() => {
