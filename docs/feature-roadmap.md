@@ -67,6 +67,21 @@ followers, color = forecasting accuracy, click-to-follow.
 
 Follow-ups deferred: un-repost (toggle off), Twitter-style "X reposted" header
 (vs the current quote card), dedicated #followers/#following routes.
+
+## Done 2026-06-16: Feed Mix (configurable feed ranking)
+
+Shipped: a per-user home-feed ranking mixer. Four lock-able van-skin vertical
+sliders (accuracy / followers / likes / views) in Settings, always summing to
+100 (`lib/feedRanking.js` `redistribute` — proportional rebalance + largest-
+remainder rounding). The home feed (`HomePage`) reorders client-side via
+`rankPosts` (log1p + min–max normalize + weighted score) from saved weights;
+opt-in (no saved weights ⇒ chronological). Backend: `user_feed_weights` table +
+`GET/PUT /users/me/feed-weights`; feed payload gained `author_accuracy`,
+`author_followers`, `view_count`. Specs/plan in `docs/superpowers/{specs,plans}/
+2026-06-16-feed-mix*`. Built subagent-driven; a final review caught that `#home`
+is `HomePage` (not `SearchPage`) so the ranking was rewired before merge.
+Deferred: rank-appended-page-only (avoid the "Load more" re-sort), discover-feed
+weighting, persisting lock states.
 - **Social groups/communities**: public topic/market groups with
   membership and moderation. Needs product design first.
 
