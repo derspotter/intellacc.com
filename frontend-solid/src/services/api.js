@@ -401,7 +401,13 @@ export const api = {
       request(`/users/${id}/positions`),
 
     getFollowingStatus: (id) =>
-      request(`/users/${id}/following-status`)
+      request(`/users/${id}/following-status`),
+
+    getFeedWeights: () =>
+      request('/users/me/feed-weights'),
+
+    saveFeedWeights: (weights) =>
+      request('/users/me/feed-weights', { method: 'PUT', body: weights })
   },
 
   // Topic onboarding endpoints
@@ -1088,6 +1094,10 @@ export const unfollowUser = (userId) => api.users.unfollow(userId);
 export const getFollowers = (userId) => api.users.getFollowers(userId);
 
 export const getFollowing = (userId) => api.users.getFollowing(userId);
+
+export const getFeedWeights = () => api.users.getFeedWeights();
+
+export const saveFeedWeights = (weights) => api.users.saveFeedWeights(weights);
 
 export const getUser = (userId) => api.users.getUser(userId);
 
