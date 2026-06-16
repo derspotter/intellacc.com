@@ -1,4 +1,4 @@
-import { createSignal, onMount, For, Show } from 'solid-js';
+import { createSignal, onMount, onCleanup, For, Show } from 'solid-js';
 import Card from '../common/Card';
 import { redistribute, KEYS } from '../../lib/feedRanking';
 import { getFeedWeights, saveFeedWeights } from '../../services/api';
@@ -34,15 +34,24 @@ export default function FeedMixPanel() {
     setMessage('');
   };
 
+  let teardownDrag = null;
   const startDrag = (key, trackEl) => (e) => {
     if (locks()[key]) return;
     e.preventDefault();
     applyDrag(key, valueFromPointer(trackEl, e.clientY));
     const move = (ev) => applyDrag(key, valueFromPointer(trackEl, ev.clientY));
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      teardownDrag = null;
+    };
+    teardownDrag = up;
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   };
+
+  // Remove any in-flight drag listeners if the panel unmounts mid-drag.
+  onCleanup(() => { if (teardownDrag) teardownDrag(); });
 
   const onKey = (key) => (e) => {
     if (locks()[key]) return;

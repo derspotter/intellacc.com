@@ -552,6 +552,9 @@ exports.getPosts = async (req, res) => {
                    THEN true
                    ELSE false
               END AS reposted_by_user,
+              -- Feed Mix raw signals, computed per post as correlated subqueries.
+              -- Perf-watch: denormalize/cache author accuracy + follower counts if
+              -- the feed query slows as predictions/follows grow.
               (SELECT COUNT(*)::int FROM user_post_views upv2 WHERE upv2.post_id = p.id) AS view_count,
               (SELECT COUNT(*)::int FROM follows af WHERE af.following_id = p.user_id) AS author_followers,
               (
@@ -979,6 +982,9 @@ exports.getFeed = async (req, res) => {
                    THEN true
                    ELSE false
               END AS reposted_by_user,
+              -- Feed Mix raw signals, computed per post as correlated subqueries.
+              -- Perf-watch: denormalize/cache author accuracy + follower counts if
+              -- the feed query slows as predictions/follows grow.
               (SELECT COUNT(*)::int FROM user_post_views upv2 WHERE upv2.post_id = p.id) AS view_count,
               (SELECT COUNT(*)::int FROM follows af WHERE af.following_id = p.user_id) AS author_followers,
               (

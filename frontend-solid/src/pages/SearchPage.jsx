@@ -1,9 +1,7 @@
-import { createSignal, createEffect, createMemo, onCleanup, onMount, Show, For } from 'solid-js';
+import { createSignal, createEffect, onCleanup, Show, For } from 'solid-js';
 import PostItem from '../components/posts/PostItem';
 import api from '../services/api';
 import { isAuthenticated } from '../services/auth';
-import { rankPosts } from '../lib/feedRanking';
-import { getFeedWeights } from '../services/api';
 
 const SEARCH_DEBOUNCE_MS = 300;
 const SEARCH_PAGE_SIZE = 20;
@@ -26,19 +24,6 @@ export default function SearchPage(props) {
   const [hasSearched, setHasSearched] = createSignal(false);
   const [followError, setFollowError] = createSignal('');
   const [followBusyStates, setFollowBusyStates] = createSignal({});
-  const [feedWeights, setFeedWeights] = createSignal(null);
-
-  onMount(async () => {
-    try {
-      const res = await getFeedWeights();
-      if (res && res.weights) setFeedWeights(res.weights);
-    } catch { /* feed falls back to chronological */ }
-  });
-
-  // Apply the saved weight mix to the default feed only (not active searches).
-  const displayPosts = createMemo(() =>
-    query().trim() ? posts() : rankPosts(posts(), feedWeights())
-  );
 
   let searchTimeout = null;
 
@@ -301,7 +286,7 @@ export default function SearchPage(props) {
             <Show when={posts().length === 0 && hasSearched() && query()}>
               <p class="search-empty">No posts found.</p>
             </Show>
-            <For each={displayPosts()}>
+            <For each={posts()}>
               {(post) => (
                 <div class="search-post-result">
                   <PostItem post={post} />
