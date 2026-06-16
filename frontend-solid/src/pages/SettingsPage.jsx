@@ -5,6 +5,7 @@ import DeviceManager from '../components/settings/DeviceManager';
 import VerificationSettings from '../components/verification/VerificationSettings';
 import ApiKeysManager from '../components/settings/ApiKeysManager';
 import NotificationSettings from '../components/settings/NotificationSettings';
+import FeedMixPanel from '../components/settings/FeedMixPanel';
 import VaultSettings from '../components/settings/VaultSettings';
 import PasswordResetCancel from '../components/settings/PasswordResetCancel';
 import DangerZone from '../components/settings/DangerZone';
@@ -69,6 +70,7 @@ export default function SettingsPage() {
           </label>
         </div>
       </div>
+      <FeedMixPanel />
       <PasskeyManager />
       <DeviceManager />
       <VerificationSettings />
