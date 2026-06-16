@@ -35,7 +35,38 @@ export function redistribute(weights, locks, key, value) {
   return out;
 }
 
-// Stub placeholder for rankPosts - will be implemented in Task 5
+const SIGNAL_FIELD = { accuracy: 'author_accuracy', followers: 'author_followers', likes: 'like_count', views: 'view_count' };
+const LOG_SIGNALS = new Set(['followers', 'likes', 'views']);
+
+// Reorder the loaded posts by the weighted, normalized signal mix. Pure: never
+// mutates the input. null/absent weights => input order unchanged.
 export function rankPosts(posts, weights) {
-  return [];
+  if (!Array.isArray(posts) || posts.length === 0) return [];
+  if (!weights) return [...posts];
+
+  const raw = {};
+  for (const w of KEYS) {
+    raw[w] = posts.map((p) => {
+      let x = Number(p[SIGNAL_FIELD[w]]);
+      if (!Number.isFinite(x)) x = 0;
+      return LOG_SIGNALS.has(w) ? Math.log1p(Math.max(0, x)) : x;
+    });
+  }
+
+  const norm = {};
+  for (const w of KEYS) {
+    const arr = raw[w];
+    const min = Math.min(...arr);
+    const max = Math.max(...arr);
+    const span = max - min;
+    norm[w] = arr.map((x) => (span > 0 ? (x - min) / span : 0));
+  }
+
+  const scored = posts.map((p, i) => {
+    let s = 0;
+    for (const w of KEYS) s += ((Number(weights[w]) || 0) / 100) * norm[w][i];
+    return { p, i, s };
+  });
+  scored.sort((a, b) => (b.s - a.s) || (a.i - b.i));
+  return scored.map((o) => o.p);
 }
