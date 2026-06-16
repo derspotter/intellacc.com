@@ -40,4 +40,23 @@ describe('Feed weights', () => {
     const after = await request(app).get('/api/users/me/feed-weights').set(auth);
     expect(after.body.weights).toEqual({ accuracy: 40, followers: 25, likes: 20, views: 15 });
   });
+
+  test('feed payload exposes author_accuracy, author_followers, view_count', async () => {
+    const author = await createUser('fwauthor');
+    cleanup.userIds.push(author.id);
+    await db.query('UPDATE users SET email_verified_at = NOW(), verification_tier = GREATEST(verification_tier,1) WHERE id = $1', [author.id]);
+    const created = await request(app).post('/api/posts')
+      .set('Authorization', `Bearer ${author.token}`)
+      .send({ content: `feed signal post ${Date.now()}` });
+    expect(created.statusCode).toBe(201);
+
+    const res = await request(app).get('/api/posts').query({ limit: 5 });
+    expect(res.statusCode).toBe(200);
+    const items = Array.isArray(res.body) ? res.body : res.body.items;
+    const row = items.find((p) => p.id === created.body.id);
+    expect(row).toBeTruthy();
+    expect('author_accuracy' in row).toBe(true);
+    expect(typeof row.author_followers).toBe('number');
+    expect(typeof row.view_count).toBe('number');
+  });
 });

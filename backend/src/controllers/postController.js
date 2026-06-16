@@ -552,6 +552,15 @@ exports.getPosts = async (req, res) => {
                    THEN true
                    ELSE false
               END AS reposted_by_user,
+              (SELECT COUNT(*)::int FROM user_post_views upv2 WHERE upv2.post_id = p.id) AS view_count,
+              (SELECT COUNT(*)::int FROM follows af WHERE af.following_id = p.user_id) AS author_followers,
+              (
+                SELECT ROUND(
+                  (100.0 * COUNT(ap.id) FILTER (WHERE LOWER(COALESCE(ap.outcome, '')) = 'correct')
+                   / NULLIF(COUNT(ap.id) FILTER (WHERE ap.outcome IS NOT NULL), 0))::NUMERIC, 1
+                )::DOUBLE PRECISION
+                FROM predictions ap WHERE ap.user_id = p.user_id
+              ) AS author_accuracy,
               ((COALESCE(u.rp_balance_ledger, 0) + COALESCE(u.rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) as user_total_reputation,
               -- Calculate visibility multiplier: higher reputation = more visibility
               -- Use GREATEST to ensure we never take LN of a negative number
@@ -970,6 +979,15 @@ exports.getFeed = async (req, res) => {
                    THEN true
                    ELSE false
               END AS reposted_by_user,
+              (SELECT COUNT(*)::int FROM user_post_views upv2 WHERE upv2.post_id = p.id) AS view_count,
+              (SELECT COUNT(*)::int FROM follows af WHERE af.following_id = p.user_id) AS author_followers,
+              (
+                SELECT ROUND(
+                  (100.0 * COUNT(ap.id) FILTER (WHERE LOWER(COALESCE(ap.outcome, '')) = 'correct')
+                   / NULLIF(COUNT(ap.id) FILTER (WHERE ap.outcome IS NOT NULL), 0))::NUMERIC, 1
+                )::DOUBLE PRECISION
+                FROM predictions ap WHERE ap.user_id = p.user_id
+              ) AS author_accuracy,
               ((COALESCE(u.rp_balance_ledger, 0) + COALESCE(u.rp_staked_ledger, 0))::DOUBLE PRECISION / 1000000.0) as user_total_reputation,
               -- Calculate visibility multiplier: higher reputation = more visibility
               -- Use GREATEST to ensure we never take LN of a negative number
