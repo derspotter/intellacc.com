@@ -235,3 +235,49 @@ exports.getGroupPosts = async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+exports.getGroupMessages = async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+  try {
+    const g = await db.query('SELECT id FROM community_groups WHERE slug = $1 AND removed_at IS NULL', [req.params.slug]);
+    if (g.rows.length === 0) return res.status(404).json({ message: 'Group not found' });
+    const result = await db.query(
+      `SELECT m.id, m.user_id, u.username, m.content, m.created_at
+       FROM community_group_messages m JOIN users u ON u.id = m.user_id
+       WHERE m.group_id = $1 ORDER BY m.created_at DESC, m.id DESC LIMIT $2`,
+      [g.rows[0].id, limit]
+    );
+    res.json({ messages: result.rows.reverse() });
+  } catch (err) {
+    console.error('Error listing group messages:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+exports.postGroupMessage = async (req, res) => {
+  const viewerId = getViewerId(req);
+  const groupId = parseInt(req.params.id, 10);
+  const content = String(req.body?.content || '').trim();
+  if (!Number.isInteger(groupId)) return res.status(400).json({ message: 'Invalid group id' });
+  if (!content) return res.status(400).json({ message: 'Message cannot be empty' });
+  if (content.length > 1000) return res.status(400).json({ message: 'Message too long (max 1000)' });
+  try {
+    const g = await db.query('SELECT id FROM community_groups WHERE id = $1 AND removed_at IS NULL', [groupId]);
+    if (g.rows.length === 0) return res.status(404).json({ message: 'Group not found' });
+    const mem = await db.query('SELECT 1 FROM community_group_members WHERE group_id = $1 AND user_id = $2', [groupId, viewerId]);
+    if (mem.rows.length === 0) return res.status(403).json({ message: 'Join the group to chat' });
+    const ins = await db.query(
+      `INSERT INTO community_group_messages (group_id, user_id, content) VALUES ($1, $2, $3)
+       RETURNING id, user_id, content, created_at`,
+      [groupId, viewerId, content]
+    );
+    const u = await db.query('SELECT username FROM users WHERE id = $1', [viewerId]);
+    const message = { ...ins.rows[0], username: u.rows[0]?.username || `user-${viewerId}` };
+    const io = req.app.get('io');
+    if (io) io.to(`group-chat:${groupId}`).emit('group-message', message);
+    res.status(201).json({ message });
+  } catch (err) {
+    console.error('Error posting group message:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};

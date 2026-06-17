@@ -234,6 +234,8 @@ router.get('/groups', optionalAuth, communityGroupsController.listGroups);
 router.get('/groups/search', communityGroupsController.searchGroups);
 router.get('/groups/:slug', optionalAuth, communityGroupsController.getGroup);
 router.get('/groups/:slug/posts', optionalAuth, communityGroupsController.getGroupPosts);
+router.get('/groups/:slug/messages', optionalAuth, communityGroupsController.getGroupMessages);
+router.post('/groups/:id/messages', authenticateJWT, communityGroupsController.postGroupMessage);
 router.post('/groups', authenticateJWT, requirePhoneVerified, communityGroupsController.createGroup);
 router.post('/groups/:id/membership', authenticateJWT, communityGroupsController.joinGroup);
 router.delete('/groups/:id/membership', authenticateJWT, communityGroupsController.leaveGroup);
