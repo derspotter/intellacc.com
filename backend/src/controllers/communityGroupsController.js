@@ -161,3 +161,42 @@ exports.leaveGroup = async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+exports.searchGroups = async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) return res.json({ groups: [] });
+  const params = [`%${q}%`];
+  let where = 'g.removed_at IS NULL AND g.name ILIKE $1';
+  const topicId = parseInt(req.query.topic, 10);
+  if (Number.isInteger(topicId)) { params.push(topicId); where += ` AND g.topic_id = $${params.length}`; }
+  try {
+    const result = await db.query(
+      `SELECT g.id, g.slug, g.name, g.member_count FROM community_groups g
+       WHERE ${where} ORDER BY g.member_count DESC LIMIT 5`,
+      params
+    );
+    res.json({ groups: result.rows });
+  } catch (err) {
+    console.error('Error searching groups:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+exports.deleteGroup = async (req, res) => {
+  const viewerId = getViewerId(req);
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(groupId)) return res.status(400).json({ message: 'Invalid group id' });
+  const isAdmin = req.user?.role === 'admin';
+  try {
+    const g = await db.query('SELECT created_by FROM community_groups WHERE id = $1 AND removed_at IS NULL', [groupId]);
+    if (g.rows.length === 0) return res.status(404).json({ message: 'Group not found' });
+    if (Number(g.rows[0].created_by) !== Number(viewerId) && !isAdmin) {
+      return res.status(403).json({ message: 'Only the owner or an admin can remove this group' });
+    }
+    await db.query('UPDATE community_groups SET removed_at = NOW() WHERE id = $1', [groupId]);
+    res.json({ removed: true });
+  } catch (err) {
+    console.error('Error removing group:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
