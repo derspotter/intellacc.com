@@ -31,6 +31,8 @@ const predictionAnalyticsController = require('../controllers/predictionAnalytic
 const persuasiveAlphaService = require('../services/persuasiveAlphaService');
 const moderationController = require('../controllers/moderationController');
 const topicsController = require('../controllers/topicsController');
+const communityGroupsController = require('../controllers/communityGroupsController');
+const optionalAuth = require('../middleware/optionalAuth');
 const feedWeightsController = require('../controllers/feedWeightsController');
 const discoverController = require('../controllers/discoverController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
@@ -226,6 +228,15 @@ router.get("/events", predictionsController.getEvents); // Temporarily no auth f
 router.get("/events/:id", predictionsController.getEventById);
 router.get("/categories", predictionsController.getCategories); // Get available categories
 router.get("/topics", topicsController.listTopics); // Get user-facing topics
+
+// Community groups
+router.get('/groups', optionalAuth, communityGroupsController.listGroups);
+router.get('/groups/search', communityGroupsController.searchGroups);
+router.get('/groups/:slug', optionalAuth, communityGroupsController.getGroup);
+router.post('/groups', authenticateJWT, requirePhoneVerified, communityGroupsController.createGroup);
+router.post('/groups/:id/membership', authenticateJWT, communityGroupsController.joinGroup);
+router.delete('/groups/:id/membership', authenticateJWT, communityGroupsController.leaveGroup);
+router.delete('/groups/:id', authenticateJWT, communityGroupsController.deleteGroup);
 router.post("/admin/topics/classify-unclassified", authenticateJWT, requireAdmin, topicsController.classifyUnclassified); // Classify engine-imported events
 router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
 router.patch("/events/:id", authenticateJWT, requireAdmin, predictionsController.resolveEvent);
