@@ -346,3 +346,88 @@ exports.unpinGroupMarket = async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+exports.listGroupMembers = async (req, res) => {
+  try {
+    const g = await db.query('SELECT id FROM community_groups WHERE slug = $1 AND removed_at IS NULL', [req.params.slug]);
+    if (g.rows.length === 0) return res.status(404).json({ message: 'Group not found' });
+    const result = await db.query(
+      `SELECT m.user_id, u.username, m.role
+       FROM community_group_members m JOIN users u ON u.id = m.user_id
+       WHERE m.group_id = $1 ORDER BY (m.role = 'owner') DESC, m.joined_at ASC`,
+      [g.rows[0].id]
+    );
+    res.json({ members: result.rows });
+  } catch (err) {
+    console.error('Error listing members:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+exports.reportGroup = async (req, res) => {
+  const viewerId = getViewerId(req);
+  const groupId = parseInt(req.params.id, 10);
+  const reason = String(req.body?.reason || '').trim();
+  const details = String(req.body?.details || '').trim() || null;
+  if (!Number.isInteger(groupId)) return res.status(400).json({ message: 'Invalid group id' });
+  if (!reason) return res.status(400).json({ message: 'Report reason is required' });
+  try {
+    const g = await db.query('SELECT created_by FROM community_groups WHERE id = $1 AND removed_at IS NULL', [groupId]);
+    if (g.rows.length === 0) return res.status(404).json({ message: 'Group not found' });
+    if (Number(g.rows[0].created_by) === Number(viewerId)) return res.status(400).json({ message: "You can't report your own group" });
+    await db.query(
+      `INSERT INTO moderation_reports (reporter_id, reported_user_id, reported_content_type, reported_content_id, report_reason, details)
+       VALUES ($1, $2, 'group', $3, $4, $5)`,
+      [viewerId, g.rows[0].created_by, groupId, reason, details]
+    );
+    res.status(201).json({ reported: true });
+  } catch (err) {
+    console.error('Error reporting group:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+exports.removeGroupPost = async (req, res) => {
+  const groupId = parseInt(req.params.id, 10);
+  const postId = parseInt(req.params.postId, 10);
+  if (!Number.isInteger(groupId) || !Number.isInteger(postId)) return res.status(400).json({ message: 'Invalid id' });
+  try {
+    const can = await assertCanManage(groupId, req);
+    if (can.error) return res.status(can.error).json({ message: can.message });
+    const p = await db.query('SELECT id, community_group_id FROM posts WHERE id = $1', [postId]);
+    if (p.rows.length === 0) return res.status(404).json({ message: 'Post not found' });
+    if (Number(p.rows[0].community_group_id) !== groupId) return res.status(400).json({ message: 'Post is not in this group' });
+    await db.query('DELETE FROM posts WHERE id = $1', [postId]);
+    res.json({ removed: true });
+  } catch (err) {
+    console.error('Error removing group post:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+exports.removeMember = async (req, res) => {
+  const viewerId = getViewerId(req);
+  const groupId = parseInt(req.params.id, 10);
+  const userId = parseInt(req.params.userId, 10);
+  if (!Number.isInteger(groupId) || !Number.isInteger(userId)) return res.status(400).json({ message: 'Invalid id' });
+  try {
+    const g = await db.query('SELECT created_by FROM community_groups WHERE id = $1 AND removed_at IS NULL', [groupId]);
+    if (g.rows.length === 0) return res.status(404).json({ message: 'Group not found' });
+    if (Number(g.rows[0].created_by) !== Number(viewerId) && req.user?.role !== 'admin') {
+      return res.status(403).json({ message: 'Only the owner or an admin can remove members' });
+    }
+    if (Number(g.rows[0].created_by) === Number(userId)) return res.status(400).json({ message: "You can't remove the owner" });
+    const memberCount = await db.executeWithTransaction(async (client) => {
+      const del = await client.query('DELETE FROM community_group_members WHERE group_id = $1 AND user_id = $2', [groupId, userId]);
+      if (del.rowCount === 1) {
+        await client.query('UPDATE community_groups SET member_count = GREATEST(0, member_count - 1) WHERE id = $1', [groupId]);
+      }
+      const c = await client.query('SELECT member_count FROM community_groups WHERE id = $1', [groupId]);
+      return c.rows[0]?.member_count ?? 0;
+    });
+    res.json({ removed: true, member_count: memberCount });
+  } catch (err) {
+    console.error('Error removing member:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
