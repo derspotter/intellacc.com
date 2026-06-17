@@ -129,6 +129,9 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('join-group-chat', (groupId) => { socket.join(`group-chat:${Number(groupId)}`); });
+  socket.on('leave-group-chat', (groupId) => { socket.leave(`group-chat:${Number(groupId)}`); });
+
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.userId}`);
   });
