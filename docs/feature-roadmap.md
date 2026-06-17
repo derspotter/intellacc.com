@@ -96,10 +96,23 @@ middleware, van-skin pages + create form (403-gated + soft dup warning). Specs/p
 in `docs/superpowers/{specs,plans}/2026-06-17-community-groups*`. Built
 subagent-driven; final review APPROVED (no critical/important issues).
 
-Remaining sub-projects (each own spec→plan→build): **B** group feed (post into a
-group), **C** public group chat (plaintext over Socket.io), **D** pinned markets
-(the Markets tab), **E** moderation (reports, owner/mod tools). Deferred in A:
-editing a group, ownership transfer, hard dup-blocking, rate limits beyond tier-2.
+**All sub-projects shipped 2026-06-17** (each spec→plan→subagent-build→CI-green,
+final whole-feature review APPROVED):
+- **B — group feed:** `posts.community_group_id`; members post into a group; the
+  Feed tab reuses `PostItem`/`CreatePostForm`.
+- **C — public group chat:** `community_group_messages`; REST send + Socket.io
+  room `group-chat:<id>` broadcast (plaintext, not MLS); realtime Chat tab.
+- **D — pinned markets:** `community_group_markets`; owner pins/unpins events via
+  search; Markets tab lists them linking to `#predictions/:id`.
+- **E — moderation:** report a group (→ `moderation_reports` type 'group', new
+  relaxing migration), owner/admin remove a group post + kick members, Members
+  tab. Group page is now Feed / Chat / Markets / Members.
+
+Deferred (follow-ups): editing a group, ownership transfer, hard dup-blocking,
+rate limits beyond tier-2; admin (not just owner) seeing the remove/kick controls
+in the UI (backend already authorizes admins); soft-hide (`posts.is_hidden`)
+instead of hard-delete for removed group posts; report individual posts/messages
+(v1 reports the whole group); message scrollback/pagination in chat.
 
 - **Nightly E2E job**: scheduled run of the messaging spec with test-user
   cleanup; deferred in favor of feature work.
