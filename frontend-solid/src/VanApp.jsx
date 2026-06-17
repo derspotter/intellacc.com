@@ -9,6 +9,8 @@ import ProfilePage from './pages/ProfilePage';
 import PredictionsPage from './pages/PredictionsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import NetworkPage from './pages/NetworkPage';
+import GroupsPage from './pages/GroupsPage';
+import GroupPage from './pages/GroupPage';
 import MessagesPage from './pages/MessagesPage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
@@ -31,6 +33,8 @@ const ROUTES = {
   predictions: 'predictions',
   analytics: 'analytics',
   network: 'network',
+  groups: 'groups',
+  group: 'group',
   messages: 'messages',
   notifications: 'notifications',
   settings: 'settings',
@@ -123,6 +127,7 @@ export default function App() {
   };
 
   const profilePageId = () => routeParam();
+  const groupSlug = () => routeParam();
 
   const renderPage = () => {
     if (page() === 'home') {
@@ -148,6 +153,12 @@ export default function App() {
     }
     if (page() === 'network') {
       return <NetworkPage />;
+    }
+    if (page() === 'groups') {
+      return <GroupsPage />;
+    }
+    if (page() === 'group') {
+      return <GroupPage slug={groupSlug} />;
     }
     if (page() === 'settings') {
       return <SettingsPage />;

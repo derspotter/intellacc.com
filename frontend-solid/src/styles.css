@@ -7003,3 +7003,44 @@ body.skin-terminal * {
 }
 .feed-mix-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
 .feed-mix-msg { font-size: 0.85rem; }
+
+.groups-page { display: grid; gap: 1rem; }
+.groups-header { display: flex; align-items: center; justify-content: space-between; }
+.groups-controls { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.groups-tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.groups-tab { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 0.3rem 0.6rem; font: inherit; font-size: 0.85rem; cursor: pointer; }
+.groups-tab.on { background: var(--primary-color); color: #fff; border-color: var(--primary-color); }
+.groups-sort { border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 0.3rem 0.5rem; font: inherit; background: var(--card-bg); }
+.groups-list { display: grid; gap: 0.6rem; }
+.groups-empty { color: var(--secondary-text); }
+.group-card { border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--card-bg); padding: 0.7rem 0.85rem; cursor: pointer; }
+.group-card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.group-card-name { font-weight: 700; }
+.group-chip { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--primary-color); border: 1px solid var(--primary-color); border-radius: var(--border-radius); padding: 0.05rem 0.4rem; white-space: nowrap; }
+.group-card-desc { font-size: 0.85rem; color: var(--secondary-text); margin: 0.35rem 0; }
+.group-card-meta { display: flex; align-items: center; justify-content: space-between; }
+.group-card-members { font-size: 0.8rem; color: var(--secondary-text); }
+.group-join { border: 1px solid var(--primary-color); background: var(--primary-color); color: #fff; border-radius: var(--border-radius); font: inherit; font-size: 0.78rem; font-weight: 700; padding: 0.25rem 0.7rem; cursor: pointer; }
+.group-join.joined { background: var(--card-bg); color: var(--primary-color); }
+.group-create { border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--card-bg); padding: 0.9rem; display: grid; gap: 0.7rem; }
+.group-create-field { display: grid; gap: 0.25rem; }
+.group-create-field label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.group-create-input { width: 100%; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 0.45rem 0.5rem; font: inherit; background: #fff; }
+.group-create-warn { font-size: 0.78rem; color: #b06b00; }
+.group-create-gate { border: 1px solid var(--border-color); border-left: 4px solid var(--primary-color); background: var(--hover-bg); padding: 0.55rem 0.7rem; font-size: 0.85rem; }
+.group-create-actions { display: flex; align-items: center; gap: 0.7rem; }
+.group-page { display: grid; gap: 0.6rem; }
+.group-back { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; color: var(--primary-color); }
+.group-detail-card { border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--card-bg); }
+.group-detail-head { padding: 0.9rem; border-bottom: 1px solid var(--border-color); }
+.group-detail-titlerow { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem; }
+.group-detail-name { margin: 0; font-size: 1.4rem; }
+.group-detail-desc { color: var(--secondary-text); margin: 0.5rem 0; }
+.group-detail-actions { display: flex; align-items: center; gap: 0.8rem; }
+.group-tabs { display: flex; border-bottom: 1px solid var(--border-color); }
+.group-tab { flex: 1; border: none; border-right: 1px solid var(--border-color); background: var(--card-bg); font: inherit; font-weight: 700; text-transform: uppercase; font-size: 0.8rem; padding: 0.5rem; cursor: pointer; }
+.group-tab:last-child { border-right: none; }
+.group-tab.on { background: var(--primary-color); color: #fff; }
+.group-tab.disabled { color: var(--pending-color); cursor: default; }
+.group-tab-soon { font-size: 0.6rem; }
+.group-tab-body { padding: 1.4rem 0.9rem; text-align: center; }
