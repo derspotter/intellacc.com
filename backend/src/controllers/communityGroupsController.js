@@ -281,3 +281,68 @@ exports.postGroupMessage = async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+// Load a group's created_by and assert the viewer may manage it (owner or admin).
+const assertCanManage = async (groupId, req) => {
+  const g = await db.query('SELECT created_by FROM community_groups WHERE id = $1 AND removed_at IS NULL', [groupId]);
+  if (g.rows.length === 0) return { error: 404, message: 'Group not found' };
+  const viewerId = getViewerId(req);
+  if (Number(g.rows[0].created_by) !== Number(viewerId) && req.user?.role !== 'admin') {
+    return { error: 403, message: 'Only the owner or an admin can manage this group' };
+  }
+  return { ok: true };
+};
+
+exports.getGroupMarkets = async (req, res) => {
+  try {
+    const g = await db.query('SELECT id FROM community_groups WHERE slug = $1 AND removed_at IS NULL', [req.params.slug]);
+    if (g.rows.length === 0) return res.status(404).json({ message: 'Group not found' });
+    const result = await db.query(
+      `SELECT cgm.event_id, e.title, e.market_prob, e.closing_date, e.outcome
+       FROM community_group_markets cgm JOIN events e ON e.id = cgm.event_id
+       WHERE cgm.group_id = $1 ORDER BY cgm.pinned_at DESC`,
+      [g.rows[0].id]
+    );
+    res.json({ markets: result.rows });
+  } catch (err) {
+    console.error('Error listing group markets:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+exports.pinGroupMarket = async (req, res) => {
+  const groupId = parseInt(req.params.id, 10);
+  const eventId = parseInt(req.body?.event_id, 10);
+  if (!Number.isInteger(groupId)) return res.status(400).json({ message: 'Invalid group id' });
+  if (!Number.isInteger(eventId)) return res.status(400).json({ message: 'Invalid event id' });
+  try {
+    const can = await assertCanManage(groupId, req);
+    if (can.error) return res.status(can.error).json({ message: can.message });
+    const ev = await db.query('SELECT id FROM events WHERE id = $1', [eventId]);
+    if (ev.rows.length === 0) return res.status(404).json({ message: 'Market not found' });
+    await db.query(
+      `INSERT INTO community_group_markets (group_id, event_id, pinned_by) VALUES ($1, $2, $3)
+       ON CONFLICT (group_id, event_id) DO NOTHING`,
+      [groupId, eventId, getViewerId(req)]
+    );
+    res.json({ pinned: true });
+  } catch (err) {
+    console.error('Error pinning market:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+exports.unpinGroupMarket = async (req, res) => {
+  const groupId = parseInt(req.params.id, 10);
+  const eventId = parseInt(req.params.eventId, 10);
+  if (!Number.isInteger(groupId) || !Number.isInteger(eventId)) return res.status(400).json({ message: 'Invalid id' });
+  try {
+    const can = await assertCanManage(groupId, req);
+    if (can.error) return res.status(can.error).json({ message: can.message });
+    await db.query('DELETE FROM community_group_markets WHERE group_id = $1 AND event_id = $2', [groupId, eventId]);
+    res.json({ pinned: false });
+  } catch (err) {
+    console.error('Error unpinning market:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
