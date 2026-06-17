@@ -7046,3 +7046,10 @@ body.skin-terminal * {
 .group-tab-body { padding: 1.4rem 0.9rem; text-align: center; }
 
 .group-feed-body { text-align: left; padding: 0.9rem; display: grid; gap: 0.8rem; }
+
+.group-chat { display: grid; gap: 0.6rem; padding: 0.9rem; text-align: left; }
+.group-chat-list { max-height: 320px; overflow-y: auto; display: grid; gap: 0.35rem; border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 0.6rem; background: #fff; }
+.group-chat-msg { font-size: 0.9rem; }
+.group-chat-user { font-weight: 700; margin-right: 0.4rem; }
+.group-chat-form { display: flex; gap: 0.5rem; }
+.group-chat-input { flex: 1; border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 0.45rem 0.5rem; font: inherit; }

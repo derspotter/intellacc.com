@@ -447,7 +447,9 @@ export const api = {
     },
     create: (body) => request('/groups', { method: 'POST', body }),
     join: (id) => request(`/groups/${id}/membership`, { method: 'POST' }),
-    leave: (id) => request(`/groups/${id}/membership`, { method: 'DELETE' })
+    leave: (id) => request(`/groups/${id}/membership`, { method: 'DELETE' }),
+    messages: (slug, { limit = 50 } = {}) => request(`/groups/${slug}/messages?limit=${limit}`),
+    sendMessage: (id, content) => request(`/groups/${id}/messages`, { method: 'POST', body: { content } })
   },
 
   // Discovery feed / predictors
@@ -1154,7 +1156,11 @@ export const createDirectMessage = (targetUserId) => api.mls.createDirectMessage
 
 export const getDirectMessages = () => api.mls.getDirectMessages();
 
-export const getGroupMessages = (groupId, afterId = null) =>
+export const getGroupMessages = (slug, opts) => api.groups.messages(slug, opts);
+
+export const sendGroupMessage = (id, content) => api.groups.sendMessage(id, content);
+
+export const getMlsGroupMessages = (groupId, afterId = null) =>
   api.mls.getMessages(groupId, { before: afterId });
 
 export const getNotifications = ({ limit = DEFAULT_LIMIT, offset = 0, unreadOnly = false } = {}) =>

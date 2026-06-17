@@ -3,6 +3,7 @@ import PostItem from '../components/posts/PostItem';
 import CreatePostForm from '../components/posts/CreatePostForm';
 import { getGroup, joinGroup, leaveGroup, getGroupPosts } from '../services/api';
 import { isAuthenticated } from '../services/auth';
+import GroupChat from '../components/groups/GroupChat';
 
 export default function GroupPage(props) {
   const slug = () => (typeof props.slug === 'function' ? props.slug() : props.slug);
@@ -64,11 +65,11 @@ export default function GroupPage(props) {
           </div>
           <div class="group-tabs">
             <button type="button" class={`group-tab ${tab() === 'feed' ? 'on' : ''}`} onClick={() => setTab('feed')}>Feed</button>
-            <button type="button" class="group-tab disabled" disabled>Chat <span class="group-tab-soon">soon</span></button>
+            <button type="button" class={`group-tab ${tab() === 'chat' ? 'on' : ''}`} onClick={() => setTab('chat')}>Chat</button>
             <button type="button" class="group-tab disabled" disabled>Markets <span class="group-tab-soon">later</span></button>
           </div>
           <div class="group-tab-body" classList={{ 'group-feed-body': tab() === 'feed' }}>
-            <Show when={tab() === 'feed'} fallback={<p class="groups-empty">Coming soon.</p>}>
+            <Show when={tab() === 'feed'}>
               <Show when={group().is_member} fallback={<p class="groups-empty">Join this group to post.</p>}>
                 <CreatePostForm groupId={group().id} onCreated={onPosted} />
               </Show>
@@ -79,6 +80,8 @@ export default function GroupPage(props) {
                 <For each={posts()}>{(p) => <PostItem post={p} onPostUpdate={() => {}} onPostDelete={() => setPosts((c) => c.filter((x) => x.id !== p.id))} />}</For>
               </div>
             </Show>
+            <Show when={tab() === 'chat'}><GroupChat group={group()} /></Show>
+            <Show when={tab() === 'markets'}><p class="groups-empty">Coming soon.</p></Show>
           </div>
         </div>
       </Show>

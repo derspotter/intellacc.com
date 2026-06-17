@@ -37,6 +37,14 @@ export const registerSocketEventHandler = (eventName, handler) => {
     return () => {};
 };
 
+export const joinGroupChat = (groupId, handler) => {
+    connect();
+    if (socket) { socket.emit('join-group-chat', groupId); socket.on('group-message', handler); }
+};
+export const leaveGroupChat = (groupId, handler) => {
+    if (socket) { socket.emit('leave-group-chat', groupId); socket.off('group-message', handler); }
+};
+
 const emitToSubscribers = (subs, payload) => {
     for (const fn of subs) {
         try {
