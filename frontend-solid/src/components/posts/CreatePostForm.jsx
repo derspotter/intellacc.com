@@ -1,5 +1,5 @@
 import { createSignal, Show } from 'solid-js';
-import { createPost, uploadPostImage } from '../../services/api';
+import { createPost, postToGroup, uploadPostImage } from '../../services/api';
 
 const MAX_PREVIEW_SIZE = 4_000_000;
 
@@ -66,7 +66,9 @@ export default function CreatePostForm(props) {
         const uploaded = await uploadPostImage(attachment());
         imageAttachmentId = uploaded?.attachmentId || null;
       }
-      const post = await createPost(text, imageAttachmentId, null);
+      const post = props.groupId
+        ? await postToGroup(props.groupId, text, imageAttachmentId)
+        : await createPost(text, imageAttachmentId, null);
       setContent('');
       clearAttachment();
       props.onCreated?.(post);

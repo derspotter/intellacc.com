@@ -438,6 +438,13 @@ export const api = {
       return request(`/groups/search?${p.toString()}`);
     },
     get: (slug) => request(`/groups/${slug}`),
+    posts: (slug, { limit = 30, before = null, beforeId = null } = {}) => {
+      const p = new URLSearchParams();
+      if (limit) p.set('limit', limit);
+      if (before) { p.set('before', before); p.set('beforeId', beforeId ?? ''); }
+      const qs = p.toString();
+      return request(`/groups/${slug}/posts${qs ? `?${qs}` : ''}`);
+    },
     create: (body) => request('/groups', { method: 'POST', body }),
     join: (id) => request(`/groups/${id}/membership`, { method: 'POST' }),
     leave: (id) => request(`/groups/${id}/membership`, { method: 'DELETE' })
@@ -479,6 +486,9 @@ export const api = {
 
     create: (content, image_attachment_id, image_url = null, repost_id = null) =>
       request('/posts', { method: 'POST', body: { content, image_attachment_id, image_url, repost_id } }),
+
+    createInGroup: (groupId, content, image_attachment_id = null) =>
+      request('/posts', { method: 'POST', body: { content, image_attachment_id, community_group_id: groupId } }),
 
     update: (id, content, image_attachment_id, image_url) => {
       let body = { content };
@@ -1129,6 +1139,10 @@ export const listGroups = (opts) => api.groups.list(opts);
 export const searchGroups = (q, topic) => api.groups.search(q, topic);
 
 export const getGroup = (slug) => api.groups.get(slug);
+
+export const getGroupPosts = (slug, opts) => api.groups.posts(slug, opts);
+
+export const postToGroup = (groupId, content, imageAttachmentId) => api.posts.createInGroup(groupId, content, imageAttachmentId);
 
 export const createGroup = (body) => api.groups.create(body);
 

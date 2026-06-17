@@ -7044,3 +7044,5 @@ body.skin-terminal * {
 .group-tab.disabled { color: var(--pending-color); cursor: default; }
 .group-tab-soon { font-size: 0.6rem; }
 .group-tab-body { padding: 1.4rem 0.9rem; text-align: center; }
+
+.group-feed-body { text-align: left; padding: 0.9rem; display: grid; gap: 0.8rem; }

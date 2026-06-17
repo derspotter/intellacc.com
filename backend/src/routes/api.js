@@ -233,6 +233,7 @@ router.get("/topics", topicsController.listTopics); // Get user-facing topics
 router.get('/groups', optionalAuth, communityGroupsController.listGroups);
 router.get('/groups/search', communityGroupsController.searchGroups);
 router.get('/groups/:slug', optionalAuth, communityGroupsController.getGroup);
+router.get('/groups/:slug/posts', optionalAuth, communityGroupsController.getGroupPosts);
 router.post('/groups', authenticateJWT, requirePhoneVerified, communityGroupsController.createGroup);
 router.post('/groups/:id/membership', authenticateJWT, communityGroupsController.joinGroup);
 router.delete('/groups/:id/membership', authenticateJWT, communityGroupsController.leaveGroup);
