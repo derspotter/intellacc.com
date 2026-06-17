@@ -4,6 +4,7 @@ import CreatePostForm from '../components/posts/CreatePostForm';
 import { getGroup, joinGroup, leaveGroup, getGroupPosts } from '../services/api';
 import { isAuthenticated } from '../services/auth';
 import GroupChat from '../components/groups/GroupChat';
+import GroupMarkets from '../components/groups/GroupMarkets';
 
 export default function GroupPage(props) {
   const slug = () => (typeof props.slug === 'function' ? props.slug() : props.slug);
@@ -66,7 +67,7 @@ export default function GroupPage(props) {
           <div class="group-tabs">
             <button type="button" class={`group-tab ${tab() === 'feed' ? 'on' : ''}`} onClick={() => setTab('feed')}>Feed</button>
             <button type="button" class={`group-tab ${tab() === 'chat' ? 'on' : ''}`} onClick={() => setTab('chat')}>Chat</button>
-            <button type="button" class="group-tab disabled" disabled>Markets <span class="group-tab-soon">later</span></button>
+            <button type="button" class={`group-tab ${tab() === 'markets' ? 'on' : ''}`} onClick={() => setTab('markets')}>Markets</button>
           </div>
           <div class="group-tab-body" classList={{ 'group-feed-body': tab() === 'feed' }}>
             <Show when={tab() === 'feed'}>
@@ -81,7 +82,7 @@ export default function GroupPage(props) {
               </div>
             </Show>
             <Show when={tab() === 'chat'}><GroupChat group={group()} /></Show>
-            <Show when={tab() === 'markets'}><p class="groups-empty">Coming soon.</p></Show>
+            <Show when={tab() === 'markets'}><GroupMarkets group={group()} isOwner={group().is_owner} /></Show>
           </div>
         </div>
       </Show>

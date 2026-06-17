@@ -7053,3 +7053,14 @@ body.skin-terminal * {
 .group-chat-user { font-weight: 700; margin-right: 0.4rem; }
 .group-chat-form { display: flex; gap: 0.5rem; }
 .group-chat-input { flex: 1; border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 0.45rem 0.5rem; font: inherit; }
+
+.group-markets { display: grid; gap: 0.8rem; padding: 0.9rem; text-align: left; }
+.group-markets-pin { display: grid; gap: 0.5rem; }
+.group-markets-results { display: grid; gap: 0.3rem; }
+.group-markets-result { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 0.35rem 0.5rem; }
+.group-markets-rtitle { font-size: 0.85rem; }
+.group-markets-list { display: grid; gap: 0.5rem; }
+.group-market-card { border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 0.6rem 0.75rem; background: var(--card-bg); }
+.group-market-title { font-weight: 700; }
+.group-market-meta { display: flex; align-items: center; gap: 0.9rem; font-size: 0.82rem; color: var(--secondary-text); margin-top: 0.3rem; }
+.group-market-unpin { margin-left: auto; border: 1px solid var(--border-color); background: var(--card-bg); border-radius: var(--border-radius); font: inherit; font-size: 0.72rem; padding: 0.15rem 0.5rem; cursor: pointer; }
