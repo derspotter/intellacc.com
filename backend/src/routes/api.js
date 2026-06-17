@@ -233,6 +233,8 @@ router.get("/topics", topicsController.listTopics); // Get user-facing topics
 router.get('/groups', optionalAuth, communityGroupsController.listGroups);
 router.get('/groups/:slug', optionalAuth, communityGroupsController.getGroup);
 router.post('/groups', authenticateJWT, requirePhoneVerified, communityGroupsController.createGroup);
+router.post('/groups/:id/membership', authenticateJWT, communityGroupsController.joinGroup);
+router.delete('/groups/:id/membership', authenticateJWT, communityGroupsController.leaveGroup);
 router.post("/admin/topics/classify-unclassified", authenticateJWT, requireAdmin, topicsController.classifyUnclassified); // Classify engine-imported events
 router.patch("/predictions/:id", authenticateJWT, predictionsController.resolvePrediction);
 router.patch("/events/:id", authenticateJWT, requireAdmin, predictionsController.resolveEvent);

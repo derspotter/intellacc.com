@@ -112,3 +112,52 @@ exports.createGroup = async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+exports.joinGroup = async (req, res) => {
+  const viewerId = getViewerId(req);
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(groupId)) return res.status(400).json({ message: 'Invalid group id' });
+  try {
+    const memberCount = await db.executeWithTransaction(async (client) => {
+      const g = await client.query('SELECT id FROM community_groups WHERE id = $1 AND removed_at IS NULL', [groupId]);
+      if (g.rows.length === 0) { const e = new Error('Group not found'); e.status = 404; throw e; }
+      const ins = await client.query(
+        `INSERT INTO community_group_members (group_id, user_id, role) VALUES ($1, $2, 'member')
+         ON CONFLICT (group_id, user_id) DO NOTHING`,
+        [groupId, viewerId]
+      );
+      if (ins.rowCount === 1) {
+        await client.query('UPDATE community_groups SET member_count = member_count + 1 WHERE id = $1', [groupId]);
+      }
+      const cnt = await client.query('SELECT member_count FROM community_groups WHERE id = $1', [groupId]);
+      return cnt.rows[0].member_count;
+    });
+    res.json({ is_member: true, member_count: memberCount });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message });
+    console.error('Error joining group:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+exports.leaveGroup = async (req, res) => {
+  const viewerId = getViewerId(req);
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isInteger(groupId)) return res.status(400).json({ message: 'Invalid group id' });
+  try {
+    const memberCount = await db.executeWithTransaction(async (client) => {
+      const del = await client.query(
+        'DELETE FROM community_group_members WHERE group_id = $1 AND user_id = $2', [groupId, viewerId]
+      );
+      if (del.rowCount === 1) {
+        await client.query('UPDATE community_groups SET member_count = GREATEST(0, member_count - 1) WHERE id = $1', [groupId]);
+      }
+      const cnt = await client.query('SELECT member_count FROM community_groups WHERE id = $1', [groupId]);
+      return cnt.rows[0]?.member_count ?? 0;
+    });
+    res.json({ is_member: false, member_count: memberCount });
+  } catch (err) {
+    console.error('Error leaving group:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
