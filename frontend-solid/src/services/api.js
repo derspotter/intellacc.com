@@ -449,7 +449,10 @@ export const api = {
     join: (id) => request(`/groups/${id}/membership`, { method: 'POST' }),
     leave: (id) => request(`/groups/${id}/membership`, { method: 'DELETE' }),
     messages: (slug, { limit = 50 } = {}) => request(`/groups/${slug}/messages?limit=${limit}`),
-    sendMessage: (id, content) => request(`/groups/${id}/messages`, { method: 'POST', body: { content } })
+    sendMessage: (id, content) => request(`/groups/${id}/messages`, { method: 'POST', body: { content } }),
+    markets: (slug) => request(`/groups/${slug}/markets`),
+    pinMarket: (id, eventId) => request(`/groups/${id}/markets`, { method: 'POST', body: { event_id: eventId } }),
+    unpinMarket: (id, eventId) => request(`/groups/${id}/markets/${eventId}`, { method: 'DELETE' })
   },
 
   // Discovery feed / predictors
@@ -1159,6 +1162,12 @@ export const getDirectMessages = () => api.mls.getDirectMessages();
 export const getGroupMessages = (slug, opts) => api.groups.messages(slug, opts);
 
 export const sendGroupMessage = (id, content) => api.groups.sendMessage(id, content);
+
+export const getGroupMarkets = (slug) => api.groups.markets(slug);
+
+export const pinGroupMarket = (id, e) => api.groups.pinMarket(id, e);
+
+export const unpinGroupMarket = (id, e) => api.groups.unpinMarket(id, e);
 
 export const getMlsGroupMessages = (groupId, afterId = null) =>
   api.mls.getMessages(groupId, { before: afterId });
