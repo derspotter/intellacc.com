@@ -1,5 +1,7 @@
-import { createSignal, createEffect, Show } from 'solid-js';
-import { getGroup, joinGroup, leaveGroup } from '../services/api';
+import { createSignal, createEffect, Show, For } from 'solid-js';
+import PostItem from '../components/posts/PostItem';
+import CreatePostForm from '../components/posts/CreatePostForm';
+import { getGroup, joinGroup, leaveGroup, getGroupPosts } from '../services/api';
 import { isAuthenticated } from '../services/auth';
 
 export default function GroupPage(props) {
@@ -9,6 +11,15 @@ export default function GroupPage(props) {
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal('');
   const [busy, setBusy] = createSignal(false);
+  const [posts, setPosts] = createSignal([]);
+  const [feedLoaded, setFeedLoaded] = createSignal(false);
+  const loadFeed = async () => {
+    const g = group(); if (!g) return;
+    try { const r = await getGroupPosts(g.slug, { limit: 30 }); setPosts(r.posts || []); setFeedLoaded(true); }
+    catch { setPosts([]); setFeedLoaded(true); }
+  };
+  createEffect(() => { if (group() && tab() === 'feed' && !feedLoaded()) loadFeed(); });
+  const onPosted = (post) => setPosts((cur) => [post, ...cur]);
 
   createEffect(async () => {
     const s = slug();
@@ -56,8 +67,18 @@ export default function GroupPage(props) {
             <button type="button" class="group-tab disabled" disabled>Chat <span class="group-tab-soon">soon</span></button>
             <button type="button" class="group-tab disabled" disabled>Markets <span class="group-tab-soon">later</span></button>
           </div>
-          <div class="group-tab-body">
-            <p class="groups-empty">No posts yet — be the first to post in this group.</p>
+          <div class="group-tab-body" classList={{ 'group-feed-body': tab() === 'feed' }}>
+            <Show when={tab() === 'feed'} fallback={<p class="groups-empty">Coming soon.</p>}>
+              <Show when={group().is_member} fallback={<p class="groups-empty">Join this group to post.</p>}>
+                <CreatePostForm groupId={group().id} onCreated={onPosted} />
+              </Show>
+              <Show when={feedLoaded() && posts().length === 0}>
+                <p class="groups-empty">No posts yet — be the first to post in this group.</p>
+              </Show>
+              <div class="posts-list">
+                <For each={posts()}>{(p) => <PostItem post={p} onPostUpdate={() => {}} onPostDelete={() => setPosts((c) => c.filter((x) => x.id !== p.id))} />}</For>
+              </div>
+            </Show>
           </div>
         </div>
       </Show>
