@@ -252,7 +252,7 @@ const removeAttachmentFile = (storagePath) => {
 // Create a new post or comment
 exports.createPost = async (req, res) => {
   try {
-    let { content, image_url, image_attachment_id, parent_id, repost_id } = req.body;
+    let { content, image_url, image_attachment_id, parent_id, repost_id, community_group_id } = req.body;
 
     // Input validation
     if ((!content || content.trim() === '') && !repost_id) {
@@ -352,10 +352,22 @@ exports.createPost = async (req, res) => {
       }
     }
 
+    let communityGroupId = null;
+    if (community_group_id !== undefined && community_group_id !== null) {
+      if (parent_id) return res.status(400).json({ message: 'Cannot post a comment into a group' });
+      const gid = parseInt(community_group_id, 10);
+      if (!Number.isInteger(gid)) return res.status(400).json({ message: 'Invalid group id' });
+      const grp = await db.query('SELECT id FROM community_groups WHERE id = $1 AND removed_at IS NULL', [gid]);
+      if (grp.rows.length === 0) return res.status(404).json({ message: 'Group not found' });
+      const mem = await db.query('SELECT 1 FROM community_group_members WHERE group_id = $1 AND user_id = $2', [gid, userId]);
+      if (mem.rows.length === 0) return res.status(403).json({ message: 'Join the group to post in it' });
+      communityGroupId = gid;
+    }
+
     // Insert the post or comment
     const result = await db.query(
-      'INSERT INTO posts (user_id, content, image_url, image_attachment_id, parent_id, depth, is_comment, is_bot, link_url, link_metadata_id, repost_id, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW()) RETURNING *',
-      [userId, content || '', image_url || null, image_attachment_id || null, parentId, depth, isComment, isBot, linkUrl || null, linkMetadataId || null, repost_id || null]
+      'INSERT INTO posts (user_id, content, image_url, image_attachment_id, parent_id, depth, is_comment, is_bot, link_url, link_metadata_id, repost_id, community_group_id, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()) RETURNING *',
+      [userId, content || '', image_url || null, image_attachment_id || null, parentId, depth, isComment, isBot, linkUrl || null, linkMetadataId || null, repost_id || null, communityGroupId]
     );
 
     const newPost = result.rows[0];

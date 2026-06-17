@@ -200,3 +200,38 @@ exports.deleteGroup = async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+exports.getGroupPosts = async (req, res) => {
+  const viewerId = getViewerId(req);
+  const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+  try {
+    const g = await db.query('SELECT id FROM community_groups WHERE slug = $1 AND removed_at IS NULL', [req.params.slug]);
+    if (g.rows.length === 0) return res.status(404).json({ message: 'Group not found' });
+    const groupId = g.rows[0].id;
+    const params = [groupId, viewerId];
+    let cursor = '';
+    if (req.query.before) {
+      params.push(req.query.before, parseInt(req.query.beforeId, 10) || 0);
+      cursor = ` AND (p.created_at, p.id) < ($${params.length - 1}, $${params.length})`;
+    }
+    params.push(limit + 1);
+    const result = await db.query(
+      `SELECT p.id, p.user_id, u.username, u.avatar_url, p.content, p.image_url, p.created_at,
+              p.like_count, p.comment_count,
+              CASE WHEN EXISTS (SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $2) THEN true ELSE false END AS liked_by_user,
+              (SELECT COUNT(*)::int FROM posts rpc WHERE rpc.repost_id = p.id) AS repost_count,
+              CASE WHEN EXISTS (SELECT 1 FROM posts rpu WHERE rpu.repost_id = p.id AND rpu.user_id = $2) THEN true ELSE false END AS reposted_by_user
+       FROM posts p JOIN users u ON u.id = p.user_id
+       WHERE p.community_group_id = $1${cursor}
+       ORDER BY p.created_at DESC, p.id DESC
+       LIMIT $${params.length}`,
+      params
+    );
+    const rows = result.rows;
+    const hasMore = rows.length > limit;
+    res.json({ posts: hasMore ? rows.slice(0, limit) : rows, hasMore });
+  } catch (err) {
+    console.error('Error listing group posts:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
