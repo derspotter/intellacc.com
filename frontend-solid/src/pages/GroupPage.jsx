@@ -1,10 +1,11 @@
 import { createSignal, createEffect, Show, For } from 'solid-js';
 import PostItem from '../components/posts/PostItem';
 import CreatePostForm from '../components/posts/CreatePostForm';
-import { getGroup, joinGroup, leaveGroup, getGroupPosts } from '../services/api';
+import { getGroup, joinGroup, leaveGroup, getGroupPosts, reportGroup, removeGroupPost } from '../services/api';
 import { isAuthenticated } from '../services/auth';
 import GroupChat from '../components/groups/GroupChat';
 import GroupMarkets from '../components/groups/GroupMarkets';
+import GroupMembers from '../components/groups/GroupMembers';
 
 export default function GroupPage(props) {
   const slug = () => (typeof props.slug === 'function' ? props.slug() : props.slug);
@@ -15,6 +16,8 @@ export default function GroupPage(props) {
   const [busy, setBusy] = createSignal(false);
   const [posts, setPosts] = createSignal([]);
   const [feedLoaded, setFeedLoaded] = createSignal(false);
+  const [reporting, setReporting] = createSignal(false);
+  const [reportMsg, setReportMsg] = createSignal('');
   const loadFeed = async () => {
     const g = group(); if (!g) return;
     try { const r = await getGroupPosts(g.slug, { limit: 30 }); setPosts(r.posts || []); setFeedLoaded(true); }
@@ -62,12 +65,23 @@ export default function GroupPage(props) {
                   {group().is_member ? 'Joined ✓' : 'Join'}
                 </button>
               </Show>
+              <Show when={isAuthenticated() && !group().is_owner}>
+                <button type="button" class="group-report" onClick={() => setReporting((v) => !v)}>Report</button>
+              </Show>
             </div>
+            <Show when={reporting()}>
+              <form class="group-report-form" onSubmit={async (e) => { e.preventDefault(); const r = e.currentTarget.reason.value.trim(); if (!r) return; try { await reportGroup(group().id, r); setReportMsg('Reported — thanks.'); } catch { setReportMsg('Could not report.'); } setReporting(false); }}>
+                <input name="reason" class="group-create-input" placeholder="Why are you reporting this group?" />
+                <button type="submit" class="button">Submit report</button>
+              </form>
+            </Show>
+            <Show when={reportMsg()}><p class="groups-empty">{reportMsg()}</p></Show>
           </div>
           <div class="group-tabs">
             <button type="button" class={`group-tab ${tab() === 'feed' ? 'on' : ''}`} onClick={() => setTab('feed')}>Feed</button>
             <button type="button" class={`group-tab ${tab() === 'chat' ? 'on' : ''}`} onClick={() => setTab('chat')}>Chat</button>
             <button type="button" class={`group-tab ${tab() === 'markets' ? 'on' : ''}`} onClick={() => setTab('markets')}>Markets</button>
+            <button type="button" class={`group-tab ${tab() === 'members' ? 'on' : ''}`} onClick={() => setTab('members')}>Members</button>
           </div>
           <div class="group-tab-body" classList={{ 'group-feed-body': tab() === 'feed' }}>
             <Show when={tab() === 'feed'}>
@@ -78,11 +92,19 @@ export default function GroupPage(props) {
                 <p class="groups-empty">No posts yet — be the first to post in this group.</p>
               </Show>
               <div class="posts-list">
-                <For each={posts()}>{(p) => <PostItem post={p} onPostUpdate={() => {}} onPostDelete={() => setPosts((c) => c.filter((x) => x.id !== p.id))} />}</For>
+                <For each={posts()}>{(p) => (
+                  <div class="group-feed-item">
+                    <Show when={group().is_owner}>
+                      <button type="button" class="group-post-remove" onClick={async () => { try { await removeGroupPost(group().id, p.id); setPosts((c) => c.filter((x) => x.id !== p.id)); } catch {} }}>Remove</button>
+                    </Show>
+                    <PostItem post={p} onPostUpdate={() => {}} onPostDelete={() => setPosts((c) => c.filter((x) => x.id !== p.id))} />
+                  </div>
+                )}</For>
               </div>
             </Show>
             <Show when={tab() === 'chat'}><GroupChat group={group()} /></Show>
             <Show when={tab() === 'markets'}><GroupMarkets group={group()} isOwner={group().is_owner} /></Show>
+            <Show when={tab() === 'members'}><GroupMembers group={group()} isOwner={group().is_owner} onMemberRemoved={(c) => setGroup({ ...group(), member_count: c })} /></Show>
           </div>
         </div>
       </Show>
