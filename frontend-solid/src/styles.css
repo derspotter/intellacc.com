@@ -7064,3 +7064,10 @@ body.skin-terminal * {
 .group-market-title { font-weight: 700; }
 .group-market-meta { display: flex; align-items: center; gap: 0.9rem; font-size: 0.82rem; color: var(--secondary-text); margin-top: 0.3rem; }
 .group-market-unpin { margin-left: auto; border: 1px solid var(--border-color); background: var(--card-bg); border-radius: var(--border-radius); font: inherit; font-size: 0.72rem; padding: 0.15rem 0.5rem; cursor: pointer; }
+.group-report { border: 1px solid var(--border-color); background: var(--card-bg); border-radius: var(--border-radius); font: inherit; font-size: 0.72rem; padding: 0.2rem 0.55rem; cursor: pointer; }
+.group-report-form { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.group-members { display: grid; gap: 0.4rem; padding: 0.9rem; text-align: left; }
+.group-member-row { display: flex; align-items: center; gap: 0.6rem; }
+.group-member-name { font-weight: 700; }
+.group-feed-item { position: relative; }
+.group-post-remove { font-size: 0.7rem; border: 1px solid var(--border-color); background: var(--card-bg); border-radius: var(--border-radius); padding: 0.1rem 0.45rem; cursor: pointer; margin-bottom: 0.2rem; }

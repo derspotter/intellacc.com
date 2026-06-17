@@ -452,7 +452,11 @@ export const api = {
     sendMessage: (id, content) => request(`/groups/${id}/messages`, { method: 'POST', body: { content } }),
     markets: (slug) => request(`/groups/${slug}/markets`),
     pinMarket: (id, eventId) => request(`/groups/${id}/markets`, { method: 'POST', body: { event_id: eventId } }),
-    unpinMarket: (id, eventId) => request(`/groups/${id}/markets/${eventId}`, { method: 'DELETE' })
+    unpinMarket: (id, eventId) => request(`/groups/${id}/markets/${eventId}`, { method: 'DELETE' }),
+    members: (slug) => request(`/groups/${slug}/members`),
+    report: (id, reason, details = '') => request(`/groups/${id}/report`, { method: 'POST', body: { reason, details } }),
+    removePost: (id, postId) => request(`/groups/${id}/posts/${postId}`, { method: 'DELETE' }),
+    removeMember: (id, userId) => request(`/groups/${id}/members/${userId}`, { method: 'DELETE' })
   },
 
   // Discovery feed / predictors
@@ -1168,6 +1172,14 @@ export const getGroupMarkets = (slug) => api.groups.markets(slug);
 export const pinGroupMarket = (id, e) => api.groups.pinMarket(id, e);
 
 export const unpinGroupMarket = (id, e) => api.groups.unpinMarket(id, e);
+
+export const getGroupMembers = (slug) => api.groups.members(slug);
+
+export const reportGroup = (id, reason, details) => api.groups.report(id, reason, details);
+
+export const removeGroupPost = (id, postId) => api.groups.removePost(id, postId);
+
+export const removeGroupMember = (id, userId) => api.groups.removeMember(id, userId);
 
 export const getMlsGroupMessages = (groupId, afterId = null) =>
   api.mls.getMessages(groupId, { before: afterId });

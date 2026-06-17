@@ -239,6 +239,10 @@ router.post('/groups/:id/messages', authenticateJWT, communityGroupsController.p
 router.get('/groups/:slug/markets', optionalAuth, communityGroupsController.getGroupMarkets);
 router.post('/groups/:id/markets', authenticateJWT, communityGroupsController.pinGroupMarket);
 router.delete('/groups/:id/markets/:eventId', authenticateJWT, communityGroupsController.unpinGroupMarket);
+router.get('/groups/:slug/members', optionalAuth, communityGroupsController.listGroupMembers);
+router.post('/groups/:id/report', authenticateJWT, communityGroupsController.reportGroup);
+router.delete('/groups/:id/posts/:postId', authenticateJWT, communityGroupsController.removeGroupPost);
+router.delete('/groups/:id/members/:userId', authenticateJWT, communityGroupsController.removeMember);
 router.post('/groups', authenticateJWT, requirePhoneVerified, communityGroupsController.createGroup);
 router.post('/groups/:id/membership', authenticateJWT, communityGroupsController.joinGroup);
 router.delete('/groups/:id/membership', authenticateJWT, communityGroupsController.leaveGroup);
