@@ -82,8 +82,24 @@ opt-in (no saved weights ⇒ chronological). Backend: `user_feed_weights` table 
 is `HomePage` (not `SearchPage`) so the ranking was rewired before merge.
 Deferred: rank-appended-page-only (avoid the "Load more" re-sort), discover-feed
 weighting, persisting lock states.
-- **Social groups/communities**: public topic/market groups with
-  membership and moderation. Needs product design first.
+## Done 2026-06-17: Community Groups — core (sub-project A)
+
+Shipped the foundation of community groups: a **group** is a user-created narrow
+theme (name + description) under one of the 10 parent topics, public, distinct
+from MLS chat groups. Tier≥2 (phone/payment-verified) users create them (creator
+= owner + first member); anyone browses (sortable list + topic-filter tabs at
+`#groups`) and joins/leaves; the group page (`#group/:slug`) shows the header +
+a Feed/Chat/Markets tab scaffold (Feed empty placeholder; Chat/Markets disabled).
+New `community_groups`/`community_group_members` tables, `communityGroupsController`
+(`/api/groups*`, soft-delete by owner/admin), a new read-only `optionalAuth`
+middleware, van-skin pages + create form (403-gated + soft dup warning). Specs/plan
+in `docs/superpowers/{specs,plans}/2026-06-17-community-groups*`. Built
+subagent-driven; final review APPROVED (no critical/important issues).
+
+Remaining sub-projects (each own spec→plan→build): **B** group feed (post into a
+group), **C** public group chat (plaintext over Socket.io), **D** pinned markets
+(the Markets tab), **E** moderation (reports, owner/mod tools). Deferred in A:
+editing a group, ownership transfer, hard dup-blocking, rate limits beyond tier-2.
 
 - **Nightly E2E job**: scheduled run of the messaging spec with test-user
   cleanup; deferred in favor of feature work.
