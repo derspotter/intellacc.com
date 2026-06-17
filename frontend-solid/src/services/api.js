@@ -422,6 +422,27 @@ export const api = {
       request('/users/me/topics', { method: 'PUT', body: { topicIds } })
   },
 
+  // Community groups endpoints
+  groups: {
+    list: ({ topic = null, sort = 'members', limit = 50 } = {}) => {
+      const p = new URLSearchParams();
+      if (topic != null) p.set('topic', topic);
+      if (sort) p.set('sort', sort);
+      if (limit) p.set('limit', limit);
+      const qs = p.toString();
+      return request(`/groups${qs ? `?${qs}` : ''}`);
+    },
+    search: (q, topic = null) => {
+      const p = new URLSearchParams({ q });
+      if (topic != null) p.set('topic', topic);
+      return request(`/groups/search?${p.toString()}`);
+    },
+    get: (slug) => request(`/groups/${slug}`),
+    create: (body) => request('/groups', { method: 'POST', body }),
+    join: (id) => request(`/groups/${id}/membership`, { method: 'POST' }),
+    leave: (id) => request(`/groups/${id}/membership`, { method: 'DELETE' })
+  },
+
   // Discovery feed / predictors
   discover: {
     feed: () =>
@@ -1102,6 +1123,18 @@ export const saveFeedWeights = (weights) => api.users.saveFeedWeights(weights);
 export const getUser = (userId) => api.users.getUser(userId);
 
 export const getUserByUsername = (username) => api.users.getUserByUsername(username);
+
+export const listGroups = (opts) => api.groups.list(opts);
+
+export const searchGroups = (q, topic) => api.groups.search(q, topic);
+
+export const getGroup = (slug) => api.groups.get(slug);
+
+export const createGroup = (body) => api.groups.create(body);
+
+export const joinGroup = (id) => api.groups.join(id);
+
+export const leaveGroup = (id) => api.groups.leave(id);
 
 export const createDirectMessage = (targetUserId) => api.mls.createDirectMessage(targetUserId);
 
