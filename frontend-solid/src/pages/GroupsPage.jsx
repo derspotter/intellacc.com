@@ -33,8 +33,15 @@ export default function GroupsPage() {
       <div class="groups-header">
         <h1>Groups</h1>
         <Show when={isAuthenticated()}>
-          <button type="button" class="button primary" onClick={() => setShowCreate((v) => !v)}>
-            {showCreate() ? 'Close' : '+ New group'}
+          <button type="button" class="button primary new-group-btn" onClick={() => setShowCreate((v) => !v)}>
+            <Show when={showCreate()} fallback={
+              <span class="new-group-label">
+                <svg class="plus-icon" width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="M6 1.5V10.5M1.5 6H10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                </svg>
+                New group
+              </span>
+            }>Close</Show>
           </button>
         </Show>
       </div>

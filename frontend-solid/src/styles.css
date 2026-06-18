@@ -7013,6 +7013,8 @@ body.skin-terminal * {
 .groups-sort { border: 1px solid var(--border-color); border-radius: var(--border-radius); padding: 0.3rem 0.5rem; font: inherit; background: var(--card-bg); }
 .groups-list { display: grid; gap: 0.6rem; }
 .groups-empty { color: var(--secondary-text); }
+.new-group-label { display: inline-flex; align-items: center; gap: 0.4em; }
+.plus-icon { display: block; flex: 0 0 auto; }
 .group-card { border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--card-bg); padding: 0.7rem 0.85rem; cursor: pointer; }
 .group-card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
 .group-card-name { font-weight: 700; }
