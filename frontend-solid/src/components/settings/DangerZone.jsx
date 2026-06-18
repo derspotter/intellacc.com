@@ -36,7 +36,7 @@ export default function DangerZone() {
   return (
     <section class="settings-section danger-zone">
       <h3 class="settings-section-title">
-        <span class="section-icon">☠️</span>
+        <span class="section-icon"></span>
         Danger Zone
       </h3>
       <p>Delete your account. This cannot be undone. Your profile will be anonymized immediately.</p>

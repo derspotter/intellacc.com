@@ -488,7 +488,7 @@ export default function MarketEventCard(props) {
             <h3 class="event-title">{event().title || 'Untitled market'}</h3>
             <div class="event-meta">
               <span class="event-category">{event().category || 'General'}</span>
-              <span class="event-closing">{`📅 Closes: ${formatDate(event().closing_date)}`}</span>
+              <span class="event-closing">{`Closes: ${formatDate(event().closing_date)}`}</span>
             </div>
           </div>
         </Show>

@@ -48,11 +48,11 @@ export default function EmailVerification({ onSuccess, userEmail }) {
 
   return (
     <section class="email-verification" style="text-align: left; padding: 1rem 0;">
-      <div class="verification-icon" style="font-size: 2rem; margin-bottom: 0.5rem;">📧</div>
+      <div class="verification-icon" style="font-size: 2rem; margin-bottom: 0.5rem;"></div>
       <h3 style="margin-top: 0; margin-bottom: 0.5rem;">Verify your email</h3>
       <Show when={status() === 'sent'}>
         <div class="success-state" style="text-align: left; padding: 1rem 0;">
-          <div class="success-icon" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: var(--success-color); color: white; border-radius: 50%; margin-bottom: 0.5rem;">✓</div>
+          <div class="success-icon" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: var(--success-color); color: white; border-radius: 50%; margin-bottom: 0.5rem;"></div>
           <p class="success-message" style="margin-bottom: 0.5rem;">
             Verification email sent to {userEmail || 'your email'}.
           </p>

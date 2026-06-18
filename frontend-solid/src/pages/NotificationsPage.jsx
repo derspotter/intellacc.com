@@ -335,7 +335,7 @@ export default function NotificationsPage() {
 
         <Show when={!loading() && !notifications().length}>
           <div class="empty-state">
-            <div class="empty-icon">🔔</div>
+            <div class="empty-icon"></div>
             <div class="empty-title">
               {unreadOnly() ? 'No unread notifications' : 'No notifications yet'}
             </div>

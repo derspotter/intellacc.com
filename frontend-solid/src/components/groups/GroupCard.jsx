@@ -34,7 +34,7 @@ export default function GroupCard(props) {
         <span class="group-card-members">{count()} member{count() === 1 ? '' : 's'}</span>
         <Show when={isAuthenticated()}>
           <button type="button" class={`group-join ${member() ? 'joined' : ''}`} onClick={toggle} disabled={busy()}>
-            {member() ? 'Joined ✓' : 'Join'}
+            {member() ? 'Joined' : 'Join'}
           </button>
         </Show>
       </div>

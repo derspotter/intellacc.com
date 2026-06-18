@@ -24,7 +24,7 @@ export default function PasswordResetCancel() {
   return (
     <section class="settings-section password-reset-cancel">
       <h3 class="settings-section-title">
-        <span class="section-icon">🔐</span>
+        <span class="section-icon"></span>
         Password Reset
       </h3>
       <p>Cancel an in-progress password reset request if you still have access to this device.</p>

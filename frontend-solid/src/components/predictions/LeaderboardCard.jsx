@@ -152,7 +152,7 @@ export default function LeaderboardCard() {
           onClick={() => void fetchRows()}
           disabled={loading()}
         >
-          {loading() ? 'Refreshing…' : '🔄'}
+          {loading() ? 'Refreshing…' : ''}
         </button>
       </div>
 

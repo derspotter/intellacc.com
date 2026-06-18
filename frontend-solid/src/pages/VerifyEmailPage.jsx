@@ -55,7 +55,7 @@ export default function VerifyEmailPage() {
 
         <Show when={status() === 'success'}>
           <div class="success-state">
-            <div class="success-icon large">✓</div>
+            <div class="success-icon large"></div>
             <h1>Email Verified!</h1>
             <p class="success-message">{message()}</p>
             <div class="actions">
@@ -71,7 +71,7 @@ export default function VerifyEmailPage() {
 
         <Show when={status() === 'error'}>
           <div class="error-state">
-            <div class="error-icon large">✗</div>
+            <div class="error-icon large">×</div>
             <h1>Verification Failed</h1>
             <p class="error-message">{message() || 'No verification token found. Please use the link from your email.'}</p>
             <div class="error-help">

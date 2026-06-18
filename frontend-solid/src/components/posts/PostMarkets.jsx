@@ -82,7 +82,7 @@ export default function PostMarkets(props) {
         </div>
         <Show when={movedMarkets()}>
           <div class="post-signal-badge" title="Readers traded on linked markets via this post and the market moved meaningfully">
-            📈 {moveLabel()}
+            {moveLabel()}
           </div>
         </Show>
       </div>

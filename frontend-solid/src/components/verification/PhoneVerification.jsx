@@ -70,7 +70,7 @@ export default function PhoneVerification({ onSuccess } = {}) {
 
   return (
     <section class="phone-verification" style="text-align: left; padding: 1rem 0;">
-      <div class="verification-icon" style="font-size: 2rem; margin-bottom: 0.5rem;">📱</div>
+      <div class="verification-icon" style="font-size: 2rem; margin-bottom: 0.5rem;"></div>
       <h3 style="margin-top: 0; margin-bottom: 0.5rem;">Verify your phone</h3>
       <Show when={stage() === 'sending'}>
         <div class="loading-state" style="text-align: left;">
@@ -86,7 +86,7 @@ export default function PhoneVerification({ onSuccess } = {}) {
       </Show>
       <Show when={stage() === 'success'}>
         <div class="success-state" style="text-align: left; padding: 1rem 0;">
-          <div class="success-icon" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: var(--success-color); color: white; border-radius: 50%; margin-bottom: 0.5rem;">✓</div>
+          <div class="success-icon" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: var(--success-color); color: white; border-radius: 50%; margin-bottom: 0.5rem;"></div>
           <p class="success-message" style="margin-bottom: 0.5rem;">Phone verified.</p>
         </div>
       </Show>

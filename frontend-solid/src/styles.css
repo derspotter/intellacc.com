@@ -4260,7 +4260,7 @@ body.dark-mode .belief-slider::-moz-range-thumb {
 
 .event-card-section h2 {
   line-height: 1.2;
-  text-align: center;
+  text-align: left;
 }
 
 .event-card-placeholder-title {

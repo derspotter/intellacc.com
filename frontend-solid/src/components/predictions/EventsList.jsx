@@ -313,11 +313,11 @@ export default function EventsList(props) {
           <div class="event-card-header">
             <h2>{assignedEvent.title || 'Weekly Assignment'}</h2>
             <span class="assignment-status">
-              {weeklyAssignment()?.weekly_assignment_completed ? '✅ Completed' : '⏳ Pending'}
+              {weeklyAssignment()?.weekly_assignment_completed ? 'Completed' : 'Pending'}
             </span>
           </div>
           <div class="weekly-assignment-subheader">
-            <h3>📅 Your Weekly Assignment</h3>
+            <h3>Your Weekly Assignment</h3>
           </div>
           <MarketEventCard
             event={assignedEvent}
@@ -424,7 +424,7 @@ export default function EventsList(props) {
 
           <Show when={error()}>
             <div class="events-error">
-              <h3>⚠️ Error Loading Events</h3>
+              <h3>Error Loading Events</h3>
               <p>{`Error: ${error()}`}</p>
               <button type="button" onClick={() => void loadEvents()}>
                 Retry
@@ -435,7 +435,7 @@ export default function EventsList(props) {
           <Show when={!loading() && !error()}>
             <Show when={filteredEvents().length === 0} fallback={null}>
               <div class="no-events">
-                <h3>📭 No Events Found</h3>
+                <h3>No Events Found</h3>
                 <p>
                   {searchQuery().trim()
                     ? 'No events match your search criteria.'
@@ -466,7 +466,7 @@ export default function EventsList(props) {
                         <div class="event-list-item-meta">
                           <span class="event-category">{marketItem.category || 'General'}</span>
                           <span class="event-date">{`Closes: ${formatDate(marketItem.closing_date)}`}</span>
-                          {marketItem.outcome ? <span class="event-resolved">✓ Resolved</span> : null}
+                          {marketItem.outcome ? <span class="event-resolved">Resolved</span> : null}
                         </div>
                       </li>
                     );
@@ -484,7 +484,7 @@ export default function EventsList(props) {
             onClick={() => void loadEvents()}
             disabled={loading()}
           >
-            {loading() ? 'Loading...' : '🔄 Refresh Markets'}
+            {loading() ? 'Loading...' : 'Refresh Markets'}
           </button>
         </div>
       </div>

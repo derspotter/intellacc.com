@@ -146,7 +146,7 @@ export default function RPBalance({ horizontal = false }) {
 
   return (
     <section class="rp-balance-card">
-      <h3 class="rp-balance-title">💰 Your Reputation</h3>
+      <h3 class="rp-balance-title">Your Reputation</h3>
       {loading() && <p class="rp-balance-loading">Loading your balance…</p>}
       {error() && <p class="rp-balance-error">{error()}</p>}
       {!loading() && !error() && balance() && (
@@ -165,10 +165,10 @@ export default function RPBalance({ horizontal = false }) {
           </div>
           <div class="balance-actions">
             <Button onclick={() => (window.location.hash = 'profile')} variant="secondary">
-              📊 View Profile
+              View Profile
             </Button>
             <Button onclick={refresh} variant="secondary">
-              🔄 Refresh
+              Refresh
             </Button>
           </div>
         </div>

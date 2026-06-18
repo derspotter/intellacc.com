@@ -64,7 +64,7 @@ export default function VerificationSettings() {
     if (current >= 3) {
       return (
         <div class="success-state">
-          <div class="success-icon">✓</div>
+          <div class="success-icon"></div>
           <p class="success-message">All verification tiers complete.</p>
         </div>
       );
@@ -79,7 +79,7 @@ export default function VerificationSettings() {
       if (phoneAvailability && phoneAvailability.available === false) {
         return (
           <div class="verification-blocked">
-            <div class="blocked-icon">⚠️</div>
+            <div class="blocked-icon"></div>
             <p class="error-message">Phone verification is currently unavailable.</p>
             <p class="blocked-message">
               {phoneAvailability.reason || 'Check back later or contact support.'}
@@ -96,7 +96,7 @@ export default function VerificationSettings() {
       if (paymentAvailability && paymentAvailability.available === false) {
         return (
           <div class="verification-blocked">
-            <div class="blocked-icon">⚠️</div>
+            <div class="blocked-icon"></div>
             <p class="error-message">Payment verification is currently unavailable.</p>
             <p class="blocked-message">
               {paymentAvailability.reason || 'Check back later or contact support.'}

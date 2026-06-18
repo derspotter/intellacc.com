@@ -62,7 +62,7 @@ export default function GroupPage(props) {
               <span class="group-card-members">{group().member_count} member{group().member_count === 1 ? '' : 's'}</span>
               <Show when={isAuthenticated()}>
                 <button type="button" class={`group-join ${group().is_member ? 'joined' : ''}`} onClick={toggle} disabled={busy()}>
-                  {group().is_member ? 'Joined ✓' : 'Join'}
+                  {group().is_member ? 'Joined' : 'Join'}
                 </button>
               </Show>
               <Show when={isAuthenticated() && !group().is_owner}>

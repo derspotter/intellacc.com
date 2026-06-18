@@ -83,7 +83,7 @@ export default function ApiKeysManager() {
   return (
     <div class="settings-section">
       <h3 class="settings-section-title">
-        <span class="section-icon">🔑</span>
+        <span class="section-icon"></span>
         Agent API Keys
       </h3>
       <p style="font-size: 0.85rem; color: var(--secondary-text); margin-bottom: 1rem;">
@@ -105,7 +105,7 @@ export default function ApiKeysManager() {
           when={error() !== 'You must complete Email and Phone verification before generating API keys.'}
           fallback={
             <div class="verification-blocked" style="margin-bottom: 1rem; background: rgba(255, 0, 0, 0.05); border: 1px solid rgba(255, 0, 0, 0.2); padding: 1rem; border-radius: 4px; text-align: center;">
-              <div class="blocked-icon" style="font-size: 2rem; margin-bottom: 0.5rem;">⚠️</div>
+              <div class="blocked-icon" style="font-size: 2rem; margin-bottom: 0.5rem;"></div>
               <p class="error-message" style="color: var(--error-color); font-weight: bold; margin-bottom: 0.5rem;">Verification Required</p>
               <p class="blocked-message" style="color: var(--secondary-text); font-size: 0.9rem;">You must complete Email and Phone verification before generating API keys.</p>
             </div>
@@ -133,7 +133,7 @@ export default function ApiKeysManager() {
                   onChange={(e) => setIsBot(e.target.checked)}
                   style="width: 1rem; height: 1rem; margin: 0;"
                 />
-                <span style="font-size: 0.9rem;">This is an AI/Bot (Appends ✨ tag)</span>
+                <span style="font-size: 0.9rem;">This is an AI/Bot (Appends tag)</span>
               </label>
             </div>
             
@@ -151,7 +151,7 @@ export default function ApiKeysManager() {
               <div style="display: flex; align-items: center; justify-content: space-between; background: var(--black-bg); color: #fff; padding: 0.5rem; border-radius: 4px;">
                 <code style="word-break: break-all; font-size: 0.85rem; color: #a3e635;">{newKeyDisplay()}</code>
                 <button type="button" onClick={copyToClipboard} style="background: transparent; border: 1px solid #555; color: #fff; border-radius: 4px; padding: 0.25rem 0.5rem; cursor: pointer; margin-left: 1rem; white-space: nowrap;">
-                  📋 Copy
+                  Copy
                 </button>
               </div>
             </div>

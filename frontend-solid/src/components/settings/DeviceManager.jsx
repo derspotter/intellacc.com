@@ -195,7 +195,7 @@ export default function DeviceManager() {
   return (
     <section class="settings-section device-manager">
       <h3 class="settings-section-title">
-        <span class="section-icon">📱</span>
+        <span class="section-icon"></span>
         Linked Devices
       </h3>
 

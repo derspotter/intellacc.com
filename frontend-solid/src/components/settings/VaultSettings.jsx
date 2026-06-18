@@ -128,7 +128,7 @@ export default function VaultSettings() {
   return (
     <section class="settings-section vault-settings">
       <h3 class="settings-section-title">
-        <span class="section-icon">🔐</span>
+        <span class="section-icon"></span>
         Encryption Vault &amp; Security
       </h3>
 

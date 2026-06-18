@@ -48,7 +48,7 @@ export default function CreateGroupForm(props) {
         <input class="group-create-input" value={name()} maxlength="80"
           onInput={(e) => setName(e.currentTarget.value)} onBlur={checkDupes} placeholder="e.g. BTC $200k in 2026?" />
         <Show when={dupes().length > 0}>
-          <div class="group-create-warn">⚠ Similar group{dupes().length > 1 ? 's' : ''} exist:
+          <div class="group-create-warn">Similar group{dupes().length > 1 ? 's' : ''} exist:
             <For each={dupes()}>{(d) => <span> “{d.name}”</span>}</For>. Consider joining instead.
           </div>
         </Show>

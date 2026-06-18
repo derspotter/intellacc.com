@@ -2,10 +2,10 @@ import { createSignal, Show } from 'solid-js';
 import { api } from '../../services/api';
 
 const TIER_INFO = [
-  { level: 0, name: 'Unverified', description: 'Basic access', icon: '👤' },
-  { level: 1, name: 'Email Verified', description: 'Post, comment, message', icon: '📧' },
-  { level: 2, name: 'Phone Verified', description: 'Predictions and markets', icon: '📱' },
-  { level: 3, name: 'Payment Verified', description: 'Governance and advanced', icon: '💳' }
+  { level: 0, name: 'Unverified', description: 'Basic access', icon: '' },
+  { level: 1, name: 'Email Verified', description: 'Post, comment, message', icon: '' },
+  { level: 2, name: 'Phone Verified', description: 'Predictions and markets', icon: '' },
+  { level: 3, name: 'Payment Verified', description: 'Governance and advanced', icon: '' }
 ];
 
 export default function VerificationStatus({ onUpgrade }) {
@@ -58,7 +58,7 @@ export default function VerificationStatus({ onUpgrade }) {
                     <span class="tier-icon">{tier.icon}</span>
                     <span class="tier-name">{tier.name}</span>
                     <span class={`tier-badge ${current >= tier.level ? 'verified' : 'pending'}`}>
-                      {current >= tier.level ? '✓' : '○'}
+                      {current >= tier.level ? '' : '○'}
                     </span>
                   </div>
                   <div class="tier-details">

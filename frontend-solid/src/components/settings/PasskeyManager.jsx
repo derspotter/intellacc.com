@@ -106,7 +106,7 @@ export default function PasskeyManager() {
   return (
     <section class="settings-section passkey-manager">
       <h3 class="settings-section-title">
-        <span class="section-icon">🔑</span>
+        <span class="section-icon"></span>
         Passkeys
       </h3>
 

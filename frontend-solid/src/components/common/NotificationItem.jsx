@@ -4,17 +4,17 @@ import { api } from '../../services/api';
 const getNotificationIcon = (type) => {
   switch (type) {
     case 'like':
-      return '❤️';
+      return '';
     case 'comment':
-      return '💬';
+      return '';
     case 'reply':
-      return '↩️';
+      return '';
     case 'follow':
-      return '👤';
+      return '';
     case 'mention':
       return '@';
     default:
-      return '🔔';
+      return '';
   }
 };
 
@@ -157,7 +157,7 @@ export default function NotificationItem(props) {
               void handleMarkAsRead();
             }}
           >
-            ✓
+           
           </button>
         ) : null}
         <button

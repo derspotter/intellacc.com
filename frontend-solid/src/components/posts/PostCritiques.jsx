@@ -136,7 +136,7 @@ export default function PostCritiques(props) {
                     onClick={() => handleConfirm('confirm')}
                     disabled={isConfirming()}
                   >
-                    ✓
+                   
                   </button>
                   <button 
                     title="Reject this match"
@@ -144,7 +144,7 @@ export default function PostCritiques(props) {
                     onClick={() => handleConfirm('override')}
                     disabled={isConfirming()}
                   >
-                    ✕
+                    ×
                   </button>
                 </div>
               </Show>
