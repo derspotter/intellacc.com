@@ -3260,12 +3260,7 @@ body.dark-mode .weekly-assignment-badge.pending {
 .event-header h3.event-title {
   color: var(--text-color);
   font-size: 1.3rem;
-  line-height: 1.1;
-  height: 2.2rem;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  line-height: 1.2;
 }
 
 .event-meta {
@@ -4264,12 +4259,8 @@ body.dark-mode .belief-slider::-moz-range-thumb {
 }
 
 .event-card-section h2 {
-  height: 2.2rem;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  line-height: 1.1;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .event-card-placeholder-title {
