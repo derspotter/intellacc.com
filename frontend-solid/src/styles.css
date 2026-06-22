@@ -1835,7 +1835,6 @@ body.dark-mode .post-action.liked:hover {
 
 .predictions-page .events-list-card,
 .predictions-page .events-simple-list,
-.predictions-page .selected-event-container,
 .predictions-page .event-card,
 .predictions-page .weekly-assignment-card,
 .predictions-page .market-stakes-card,
@@ -2249,8 +2248,7 @@ body.dark-mode .post-action.liked:hover {
     height: auto;
   }
 
-  .events-simple-list,
-  .selected-event-container {
+  .events-simple-list {
     height: auto;
   }
 }
@@ -2267,8 +2265,7 @@ body.dark-mode .post-action.liked:hover {
     height: auto;
   }
 
-  .events-simple-list,
-  .selected-event-container {
+  .events-simple-list {
     height: auto;
   }
 }
@@ -4295,20 +4292,6 @@ body.dark-mode .belief-slider::-moz-range-thumb {
   padding: 0.75rem;
 }
 
-/* Selected Event Container */
-.selected-event-container {
-  display: flex;
-  height: 780px;
-  flex-direction: column;
-  width: 100%;
-  min-width: 0;
-  background: transparent;
-  border: none;
-  border-radius: var(--border-radius);
-  box-shadow: var(--box-shadow);
-  padding: 1rem;
-}
-
 .back-button {
   align-self: flex-start;
 }
@@ -4849,17 +4832,12 @@ select {
     gap: 1rem;
   }
 
-  .events-list-card,
-  .selected-event-container {
+  .events-list-card {
     height: auto;
     min-height: 0;
   }
 
   .events-list-card {
-    padding: 0.75rem;
-  }
-
-  .selected-event-container {
     padding: 0.75rem;
   }
 
@@ -4944,8 +4922,7 @@ select {
     font-size: 0.75rem;
   }
 
-  .events-list-card,
-  .selected-event-container {
+  .events-list-card {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     box-shadow: none;
