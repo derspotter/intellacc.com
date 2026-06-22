@@ -1908,6 +1908,34 @@ body.dark-mode .post-action.liked:hover {
   margin-top: 1rem;
 }
 
+/* Predictions tab bar (Bauhaus) */
+.predictions-tabs {
+  display: flex;
+  gap: 0;
+  margin: 1rem 0 1.5rem;
+  border: 1px solid #000;
+  border-radius: 2px;
+  overflow: hidden;
+  width: fit-content;
+}
+.predictions-tab {
+  appearance: none;
+  background: #fff;
+  color: #000;
+  border: none;
+  border-right: 1px solid #000;
+  padding: 0.5rem 1.25rem;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.predictions-tab:last-child { border-right: none; }
+.predictions-tab.on { background: #0000ff; color: #000; }
+.predictions-tab:not(.on):hover { background: #f0f0f0; }
+
 .predictions-top-grid {
   display: grid;
   grid-template-columns: 1fr;

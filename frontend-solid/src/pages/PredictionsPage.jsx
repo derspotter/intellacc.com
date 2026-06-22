@@ -1,4 +1,4 @@
-import { Show, createSignal } from 'solid-js';
+import { Show, createSignal, createMemo } from 'solid-js';
 import EventsList from '../components/predictions/EventsList';
 import LeaderboardCard from '../components/predictions/LeaderboardCard';
 import MarketQuestionHub from '../components/predictions/MarketQuestionHub';
@@ -36,6 +36,25 @@ export default function PredictionsPage(props) {
     setVerificationNotice(normalized);
   };
 
+  // The hash segment after `predictions/` is either a reserved tab keyword,
+  // a numeric market id (deep-link to expand on the Markets tab), or empty.
+  const activeTab = createMemo(() => {
+    const param = String(props.marketId || '').trim().toLowerCase();
+    if (param === 'submit') return 'submit';
+    if (param === 'leaderboard') return 'leaderboard';
+    if (param === 'admin' && isAdmin()) return 'admin';
+    return 'markets';
+  });
+
+  const targetedMarketId = createMemo(() => {
+    const param = String(props.marketId || '').trim();
+    return /^\d+$/.test(param) ? param : null;
+  });
+
+  const goToTab = (tab) => {
+    window.location.hash = tab === 'markets' ? 'predictions' : `predictions/${tab}`;
+  };
+
   return (
     <section class="predictions-page">
       <h1>Predictions & Betting</h1>
@@ -48,28 +67,43 @@ export default function PredictionsPage(props) {
         <RPBalance horizontal />
       </div>
 
-      <div class="predictions-main">
-        <div class="predictions-top-grid">
-          <div class="events-list-column">
-            <EventsList
-              targetedMarketId={props.marketId}
-              createEvent={handleCreateEvent}
-              onVerificationNotice={handleVerificationNotice}
-            />
-          </div>
-        </div>
-
-        <MarketQuestionHub />
-
+      <nav class="predictions-tabs" role="tablist">
+        <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'markets' ? 'on' : ''}`} aria-selected={activeTab() === 'markets'} onClick={() => goToTab('markets')}>Markets</button>
+        <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'submit' ? 'on' : ''}`} aria-selected={activeTab() === 'submit'} onClick={() => goToTab('submit')}>Submit</button>
+        <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'leaderboard' ? 'on' : ''}`} aria-selected={activeTab() === 'leaderboard'} onClick={() => goToTab('leaderboard')}>Leaderboard</button>
         <Show when={isAdmin()}>
+          <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'admin' ? 'on' : ''}`} aria-selected={activeTab() === 'admin'} onClick={() => goToTab('admin')}>Admin</button>
+        </Show>
+      </nav>
+
+      <div class="predictions-main">
+        <Show when={activeTab() === 'markets'}>
+          <div class="predictions-top-grid">
+            <div class="events-list-column">
+              <EventsList
+                targetedMarketId={targetedMarketId()}
+                createEvent={handleCreateEvent}
+                onVerificationNotice={handleVerificationNotice}
+              />
+            </div>
+          </div>
+        </Show>
+
+        <Show when={activeTab() === 'submit'}>
+          <MarketQuestionHub />
+        </Show>
+
+        <Show when={activeTab() === 'leaderboard'}>
+          <div class="predictions-bottom-leaderboard">
+            <LeaderboardCard />
+          </div>
+        </Show>
+
+        <Show when={activeTab() === 'admin' && isAdmin()}>
           <AdminTools />
           <AdminMarketResolution />
           <AdminEventManagement />
         </Show>
-
-        <div class="predictions-bottom-leaderboard">
-          <LeaderboardCard />
-        </div>
       </div>
     </section>
   );
