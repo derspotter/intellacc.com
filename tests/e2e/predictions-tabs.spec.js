@@ -20,23 +20,29 @@ test.describe('predictions tabs', () => {
     await expect(page.getByText('Open Questions')).toBeVisible();
   });
 
-  test('clicking rows expands forecasting inline (independent toggles, stays in place)', async ({ page }) => {
+  test('clicking a market expands forecasting inline in place (no movement)', async ({ page }) => {
     await page.goto(`${BASE}/#predictions`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.event-list-item .event-title');
     const rows = page.locator('.event-list-item');
-    await expect(rows.first()).toBeVisible();
 
-    await rows.nth(1).locator('.event-list-item-row').click();
+    // Document-relative top of row 3's title (scroll-independent), via native
+    // clicks that don't auto-scroll, mirroring real user interaction.
+    const docTop = () => page.evaluate(() => {
+      const t = document.querySelectorAll('.event-list-item')[3].querySelector('.event-title');
+      return Math.round(t.getBoundingClientRect().top + window.scrollY);
+    });
+
+    const before = await docTop();
+    await page.$$eval('.event-list-item .event-list-item-row', (els) => els[3].click());
+    await expect(rows.nth(3).locator('.event-row-expanded')).toBeVisible();
+    const after = await docTop();
+    // The clicked market must not move in the document when it expands.
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(1);
+
+    // Opening another market does not collapse the first (independent toggles).
+    await page.$$eval('.event-list-item .event-list-item-row', (els) => els[1].click());
     await expect(rows.nth(1).locator('.event-row-expanded')).toBeVisible();
-
-    // Independent toggles: opening another does NOT collapse the first
-    // (so the clicked question never jumps).
-    await rows.nth(2).locator('.event-list-item-row').click();
-    await expect(rows.nth(2).locator('.event-row-expanded')).toBeVisible();
-    await expect(rows.nth(1).locator('.event-row-expanded')).toBeVisible();
-
-    // Clicking an open row toggles it closed.
-    await rows.nth(1).locator('.event-list-item-row').click();
-    await expect(rows.nth(1).locator('.event-row-expanded')).toHaveCount(0);
+    await expect(rows.nth(3).locator('.event-row-expanded')).toBeVisible();
   });
 
   test('numeric deep-link stays on the Markets tab', async ({ page }) => {

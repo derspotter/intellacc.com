@@ -248,8 +248,11 @@ export default function EventsList(props) {
     void loadEvents('');
   };
 
-  // Independent toggles: expanding a row never collapses another, so the
-  // clicked question stays put (controls fold in below it, in place).
+  // Independent toggles (multiple rows may be open). Expanding a row never
+  // collapses another, so the clicked question never moves — controls fold in
+  // below it, strictly in place. This is the only behaviour that guarantees no
+  // movement; one-at-a-time would slam the clicked row up by the closing
+  // card's height when that card is above it near the top of the page.
   const handleEventClick = (eventItem) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
