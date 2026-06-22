@@ -41,9 +41,9 @@ export default function EventsList(props) {
 
   const [searchQuery, setSearchQuery] = createSignal('');
   const [filter, setFilter] = createSignal('open');
-  const [expandedEventId, setExpandedEventId] = createSignal(null);
+  const [expandedIds, setExpandedIds] = createSignal(new Set());
 
-  const isExpanded = (id) => String(expandedEventId() || '') === String(id);
+  const isExpanded = (id) => expandedIds().has(String(id));
 
   const [userPositions, setUserPositions] = createSignal([]);
   const [positionsLoading, setPositionsLoading] = createSignal(false);
@@ -101,7 +101,11 @@ export default function EventsList(props) {
     const targetEvent = events().find((eventItem) => String(eventItem.id) === marketId);
     if (!targetEvent) return false;
 
-    setExpandedEventId(targetEvent.id);
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.add(String(targetEvent.id));
+      return next;
+    });
     lastTargetedSelectionFetchKey = '';
     return true;
   };
@@ -244,10 +248,16 @@ export default function EventsList(props) {
     void loadEvents('');
   };
 
+  // Independent toggles: expanding a row never collapses another, so the
+  // clicked question stays put (controls fold in below it, in place).
   const handleEventClick = (eventItem) => {
-    setExpandedEventId((prev) =>
-      String(prev || '') === String(eventItem.id) ? null : eventItem.id
-    );
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      const key = String(eventItem.id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
   // Auto-expand the weekly assignment once it loads, unless something is
@@ -255,8 +265,8 @@ export default function EventsList(props) {
   createEffect(() => {
     const assignment = weeklyAssignment();
     const assignedId = assignment?.event?.id;
-    if (assignedId && expandedEventId() == null && !props.targetedMarketId) {
-      setExpandedEventId(assignedId);
+    if (assignedId && expandedIds().size === 0 && !props.targetedMarketId) {
+      setExpandedIds(new Set([String(assignedId)]));
     }
   });
 
