@@ -57,8 +57,6 @@ export default function PredictionsPage(props) {
 
   return (
     <section class="predictions-page">
-      <h1>Predictions & Betting</h1>
-
       <Show when={verificationNotice()}>
         <div class="predictions-phone-banner">{verificationNotice()}</div>
       </Show>

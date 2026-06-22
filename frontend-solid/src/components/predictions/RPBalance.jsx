@@ -128,15 +128,15 @@ export default function RPBalance({ horizontal = false }) {
             </div>
             <div class="stat-item">
               <span class="stat-main">{formatRP(balance().total_reputation)}</span>
-              <span class="stat-sub">Total Reputation</span>
+              <span class="stat-sub">Reputation</span>
             </div>
             <div class="stat-item">
               <span class="stat-main">#{balance().rank || 'Unranked'}</span>
-              <span class="stat-sub">Global Rank</span>
+              <span class="stat-sub">Rank</span>
             </div>
             <div class="stat-item">
               <span class="stat-main">{Number(balance().total_predictions || 0)}</span>
-              <span class="stat-sub">Total Predictions</span>
+              <span class="stat-sub">Predictions</span>
             </div>
           </>
         ) : null}
