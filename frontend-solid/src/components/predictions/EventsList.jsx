@@ -41,7 +41,9 @@ export default function EventsList(props) {
 
   const [searchQuery, setSearchQuery] = createSignal('');
   const [filter, setFilter] = createSignal('open');
-  const [selectedEvent, setSelectedEvent] = createSignal(null);
+  const [expandedEventId, setExpandedEventId] = createSignal(null);
+
+  const isExpanded = (id) => String(expandedEventId() || '') === String(id);
 
   const [userPositions, setUserPositions] = createSignal([]);
   const [positionsLoading, setPositionsLoading] = createSignal(false);
@@ -67,11 +69,6 @@ export default function EventsList(props) {
       const response = await getEvents(search);
       const loaded = normalizeRows(response);
       setEvents(loaded);
-      const current = selectedEvent();
-      if (current) {
-        const refreshedSelected = loaded.find((item) => String(item.id) === String(current.id));
-        setSelectedEvent(refreshedSelected || null);
-      }
 
       const assignment = weeklyAssignment();
       if (assignment?.event_id || assignment?.event?.id) {
@@ -104,7 +101,7 @@ export default function EventsList(props) {
     const targetEvent = events().find((eventItem) => String(eventItem.id) === marketId);
     if (!targetEvent) return false;
 
-    setSelectedEvent(targetEvent);
+    setExpandedEventId(targetEvent.id);
     lastTargetedSelectionFetchKey = '';
     return true;
   };
@@ -248,15 +245,20 @@ export default function EventsList(props) {
   };
 
   const handleEventClick = (eventItem) => {
-    setSelectedEvent(eventItem);
+    setExpandedEventId((prev) =>
+      String(prev || '') === String(eventItem.id) ? null : eventItem.id
+    );
   };
 
-  const handleStakeUpdate = () => {
-    void loadEvents(searchQuery().trim());
-    if (authed()) {
-      void loadUserPositions();
+  // Auto-expand the weekly assignment once it loads, unless something is
+  // already expanded or a deep-link is targeting a specific market.
+  createEffect(() => {
+    const assignment = weeklyAssignment();
+    const assignedId = assignment?.event?.id;
+    if (assignedId && expandedEventId() == null && !props.targetedMarketId) {
+      setExpandedEventId(assignedId);
     }
-  };
+  });
 
   const refreshSelected = async () => {
     await loadEvents(searchQuery());
@@ -279,66 +281,18 @@ export default function EventsList(props) {
     }, 500);
   };
 
-  const renderSelectedEvent = () => {
-    if (selectedEvent()) {
-      return (
-        <div class="event-card-section">
-          <h2>{selectedEvent().title || 'Selected market'}</h2>
-          <MarketEventCard
-            event={selectedEvent()}
-            onTrade={handleTradeRefresh}
-            onVerificationNotice={props.onVerificationNotice}
-            hideTitle={true}
-            authenticated={authed()}
-          />
-        </div>
-      );
-    }
+  // Weekly-assignment event pinned first (deduped), then the filtered list.
+  const orderedRows = createMemo(() => {
+    const rows = filteredEvents();
+    const weekly = weeklyAssignment()?.event;
+    if (!weekly) return rows;
+    const rest = rows.filter((e) => String(e.id) !== String(weekly.id));
+    return [weekly, ...rest];
+  });
 
-    if (authed() && weeklyLoading()) {
-      return (
-        <div class="event-card-section">
-          <h2 class="event-card-placeholder-title">Select an Event</h2>
-          <div class="selection-prompt">
-            <p>Loading your weekly assignment...</p>
-          </div>
-        </div>
-      );
-    }
-
-    if (authed() && weeklyAssignment() && weeklyAssignment().event) {
-      const assignedEvent = weeklyAssignment().event;
-      return (
-        <div class="event-card-section weekly-assignment-active">
-          <div class="event-card-header">
-            <h2>{assignedEvent.title || 'Weekly Assignment'}</h2>
-            <span class="assignment-status">
-              {weeklyAssignment()?.weekly_assignment_completed ? 'Completed' : 'Pending'}
-            </span>
-          </div>
-          <div class="weekly-assignment-subheader">
-            <h3>Your Weekly Assignment</h3>
-          </div>
-          <MarketEventCard
-            event={assignedEvent}
-            onTrade={handleTradeRefresh}
-            onVerificationNotice={props.onVerificationNotice}
-            hideTitle={true}
-          />
-        </div>
-      );
-    }
-
-    return (
-      <div class="event-card-section">
-        <h2 class="event-card-placeholder-title">Select an Event</h2>
-        <div class="selection-prompt">
-          <p>Choose an event from the list above to view details, make predictions, and place bets.</p>
-          {authed() ? <p>No weekly assignment available.</p> : null}
-        </div>
-      </div>
-    );
-  };
+  const positionEventIds = createMemo(
+    () => new Set((userPositions() || []).map((p) => String(p.event_id)))
+  );
 
   createEffect(() => {
     if (!hasLoadedEvents()) {
@@ -451,23 +405,46 @@ export default function EventsList(props) {
 
             <Show when={filteredEvents().length > 0}>
               <ul class="events-simple-list">
-                <For each={filteredEvents()}>
+                <For each={orderedRows()}>
                   {(marketItem) => {
-                    const cacheKey = `market-${marketItem.id}`;
+                    const weeklyId = () => weeklyAssignment()?.event?.id;
+                    const isWeekly = () => String(weeklyId() || '') === String(marketItem.id);
+                    const prob = () => Number(marketItem.market_prob ?? 0.5);
                     return (
                       <li
-                        class={`event-list-item ${selectedEvent() && String(selectedEvent().id) === String(marketItem.id) ? 'selected' : ''} ${marketItem.outcome ? 'resolved' : ''}`}
-                        onClick={() => handleEventClick(marketItem)}
+                        class={`event-list-item ${isExpanded(marketItem.id) ? 'expanded' : ''} ${marketItem.outcome ? 'resolved' : ''} ${isWeekly() ? 'weekly' : ''}`}
                       >
-                        <div class="event-list-item-header">
-                          <span class="event-title">{marketItem.title}</span>
-                          <span class="event-prob">{formatProbability(marketItem.market_prob || 0.5)}</span>
+                        <div class="event-list-item-row" onClick={() => handleEventClick(marketItem)}>
+                          <div class="event-list-item-header">
+                            <span class="event-title">{marketItem.title}</span>
+                            <span class="event-prob">{formatProbability(marketItem.market_prob || 0.5)}</span>
+                          </div>
+                          <div class="event-prob-bar" aria-hidden="true">
+                            <div class="event-prob-bar-fill" style={{ width: `${Math.round(prob() * 100)}%` }} />
+                          </div>
+                          <div class="event-list-item-meta">
+                            <Show when={isWeekly()}>
+                              <span class="event-weekly-tag">{`Weekly · ${weeklyAssignment()?.weekly_assignment_completed ? 'Completed' : 'Pending'}`}</span>
+                            </Show>
+                            <span class="event-category">{marketItem.category || 'General'}</span>
+                            <span class="event-date">{`Closes: ${formatDate(marketItem.closing_date)}`}</span>
+                            <Show when={positionEventIds().has(String(marketItem.id))}>
+                              <span class="event-position-tag">Position</span>
+                            </Show>
+                            {marketItem.outcome ? <span class="event-resolved">Resolved</span> : null}
+                          </div>
                         </div>
-                        <div class="event-list-item-meta">
-                          <span class="event-category">{marketItem.category || 'General'}</span>
-                          <span class="event-date">{`Closes: ${formatDate(marketItem.closing_date)}`}</span>
-                          {marketItem.outcome ? <span class="event-resolved">Resolved</span> : null}
-                        </div>
+                        <Show when={isExpanded(marketItem.id)}>
+                          <div class="event-row-expanded">
+                            <MarketEventCard
+                              event={marketItem}
+                              onTrade={handleTradeRefresh}
+                              onVerificationNotice={props.onVerificationNotice}
+                              hideTitle={true}
+                              authenticated={authed()}
+                            />
+                          </div>
+                        </Show>
                       </li>
                     );
                   }}
@@ -487,10 +464,6 @@ export default function EventsList(props) {
             {loading() ? 'Loading...' : 'Refresh Markets'}
           </button>
         </div>
-      </div>
-
-      <div class="selected-event-container">
-        {renderSelectedEvent()}
       </div>
     </section>
   );
