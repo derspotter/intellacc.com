@@ -165,7 +165,13 @@ export default function MarketEventCard(props) {
       emitSuccess('');
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
-        setVerificationMessage(err.message, { requiredTier: err.data?.required_tier });
+        // Passively reading the position (on expand) can 403 for unverified
+        // users. Show the verification hint INLINE in this card — do NOT bubble
+        // it to the global page-top banner, which would shift the whole page
+        // down and move the market the user just clicked. The banner is still
+        // raised on an actual trade attempt (see the stake handlers).
+        setError(err?.message || '');
+        setIsVerificationError(true);
       } else {
         setError(err?.message || 'Failed to load your position.');
       }
@@ -195,9 +201,10 @@ export default function MarketEventCard(props) {
       });
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
-        setVerificationMessage(err.data?.message || 'Verification required to load Kelly suggestion.', {
-          requiredTier: err.data?.required_tier
-        });
+        // Kelly is an optional helper loaded automatically on expand. A 403
+        // (unverified) must NOT bubble the global page-top verification banner
+        // — that shifts the whole page and moves the market the user clicked.
+        // Just hide the suggestion; verification surfaces on an actual trade.
         setKellyData(null);
         return;
       }
