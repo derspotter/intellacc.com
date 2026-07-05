@@ -11,6 +11,9 @@ import { marketStore } from "../store/marketStore";
 import { getActiveSkin, setSkin } from "../services/skinProvider";
 import { updateUiPreferences } from "../services/api";
 import { isAuthenticated } from "../services/auth";
+import { normalizeHashPath } from "../services/routes";
+import { TerminalViewHost, closeTerminalView } from "./terminal/TerminalViewHost";
+import { TERMINAL_VIEWS } from "./terminal/views/registry";
 
 function App() {
   const { connect, disconnect, state: socketState } = useSocket();
@@ -19,6 +22,29 @@ function App() {
   // Navigation State
   // 1: Left (Feed), 2: Center (Market), 3: Right (Chat)
   const [activePane, setActivePane] = createSignal(2);
+  // Hash-driven navigation. Pane routes focus a pane; registry routes open a
+  // full-screen view; anything else leaves the panes as-is.
+  const PANE_ROUTES = { home: 1, predictions: 2, messages: 3 };
+  const [activeView, setActiveView] = createSignal(null); // { key, param } | null
+
+  const applyRoute = () => {
+    const value = normalizeHashPath(window.location.hash);
+    const [route, param] = value.split('/');
+    if (PANE_ROUTES[route]) {
+      setActivePane(PANE_ROUTES[route]);
+      setActiveView(null);
+    } else if (TERMINAL_VIEWS[route]) {
+      setActiveView({ key: route, param: param || null });
+    }
+  };
+
+  // Focus a pane immediately AND sync the hash. Setting only the hash would
+  // no-op when it already equals the target (no hashchange event fires).
+  const goPane = (route) => {
+    setActivePane(PANE_ROUTES[route]);
+    setActiveView(null);
+    window.location.hash = `#${route}`;
+  };
   const [showHelp, setShowHelp] = createSignal(false);
   const [showNotifications, setShowNotifications] = createSignal(false);
   const [showPalette, setShowPalette] = createSignal(false);
@@ -50,9 +76,15 @@ function App() {
 
   // Actions for Command Palette
   const allActions = [
-    { id: 'feed', label: 'Focus Feed', shortcut: '1', action: () => setActivePane(1) },
-    { id: 'market', label: 'Focus Market', shortcut: '2', action: () => setActivePane(2) },
-    { id: 'chat', label: 'Focus Chat', shortcut: '3', action: () => setActivePane(3) },
+    { id: 'feed', label: 'Focus Feed', shortcut: '1', action: () => goPane('home') },
+    { id: 'market', label: 'Focus Market', shortcut: '2', action: () => goPane('predictions') },
+    { id: 'chat', label: 'Focus Chat', shortcut: '3', action: () => goPane('messages') },
+    ...Object.entries(TERMINAL_VIEWS).map(([key, view]) => ({
+      id: `view-${key}`,
+      label: `Open ${view.title.charAt(0) + view.title.slice(1).toLowerCase()}`,
+      shortcut: '',
+      action: () => { window.location.hash = `#${key}`; }
+    })),
     { id: 'help', label: 'Toggle Help', shortcut: '?', action: () => setShowHelp(prev => !prev) },
     { id: 'skin-van', label: 'Switch to Van Skin', shortcut: '', action: switchToVan },
     { id: 'logout', label: 'Logout', shortcut: '', action: () => import("../services/tokenService").then(s => s.clearToken()) }
@@ -117,6 +149,10 @@ function App() {
   });
 
   onMount(() => {
+    applyRoute();
+    window.addEventListener('hashchange', applyRoute);
+    onCleanup(() => window.removeEventListener('hashchange', applyRoute));
+
     const handleKeydown = (e) => {
         // Ignore if user is typing in an input/textarea
         const isInput = ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
@@ -145,6 +181,10 @@ function App() {
 	                setShowHelp(false);
 	                return;
 	            }
+	            if (activeView()) {
+	                closeTerminalView();
+	                return;
+	            }
 	            if (isInput) {
                 e.target.blur();
                 return;
@@ -166,9 +206,9 @@ function App() {
 	        }
 
         if (!isInput) {
-            if (e.key === '1') setActivePane(1);
-            if (e.key === '2') setActivePane(2);
-            if (e.key === '3') setActivePane(3);
+            if (e.key === '1') goPane('home');
+            if (e.key === '2') goPane('predictions');
+            if (e.key === '3') goPane('messages');
             if (e.key === '?') setShowHelp(prev => !prev);
         }
     };
@@ -323,6 +363,9 @@ function App() {
           center={<MarketPanel isActive={activePane() === 2} />}
           right={<ChatPanel isActive={activePane() === 3} />}
         />
+        <Show when={activeView()}>
+          <TerminalViewHost viewKey={activeView().key} param={activeView().param} />
+        </Show>
       </div>
 
       {/* Mobile Bottom Tabs (< md) */}
