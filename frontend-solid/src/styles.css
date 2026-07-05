@@ -65,8 +65,11 @@
   --focus-ring: rgba(0, 0, 255, 0.28);
 }
 
-/* Dark Mode */
-body.dark-mode {
+/* Dark Mode. The skin blocks (body.skin-van etc.) re-declare the palette
+   variables later in this file with equal specificity, so the dark theme
+   needs the double-class selector to win when a skin class is present. */
+body.dark-mode,
+body.skin-van.dark-mode {
   --blue-bg: #121212;
   --black-bg: #1e1e1e;
   --text-color: #e0e0e0;
@@ -833,6 +836,13 @@ body.dark-mode .reset-warning {
 body.dark-mode .register-link a,
 body.dark-mode .auth-links a,
 body.dark-mode .login-link a {
+  color: #7dd3fc;
+}
+
+/* Signature blue (#00f) text is unreadable on dark surfaces — use the same
+   sky blue as dark-mode links for probability figures. */
+body.dark-mode .event-prob,
+body.dark-mode .belief-percentage {
   color: #7dd3fc;
 }
 

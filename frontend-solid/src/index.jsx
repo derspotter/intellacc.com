@@ -7,6 +7,14 @@ import App from './App.jsx'
 
 const root = document.getElementById('root')
 
+// Apply the saved theme before first paint — SettingsPage only handles the
+// toggle; without this, dark mode drops on every fresh page load.
+try {
+  if (localStorage.getItem('darkMode') === 'true') {
+    document.body.classList.add('dark-mode');
+  }
+} catch {}
+
 const RUNTIME_RESET_KEY = 'solid_runtime_reset_v1';
 
 const waitForWindowLoad = async () => {
