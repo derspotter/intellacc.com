@@ -42,6 +42,12 @@ impl MultiMarket {
         Ok((dq, stake))
     }
 
+    pub fn sell_outcome(&mut self, outcome_idx: usize, amount: f64) -> Result<f64> {
+        let payout = sell_payout(outcome_idx, &self.q, self.b, amount)?;
+        self.q[outcome_idx] -= amount;
+        Ok(payout)
+    }
+
 }
 
 pub fn cost(q: &[f64], b: f64) -> f64 {
@@ -110,4 +116,73 @@ pub fn delta_q_for_stake(outcome_idx: usize, q: &[f64], b: f64, stake: f64) -> R
         return Err(anyhow!("failed to solve delta_q for stake"));
     }
     Ok(dq)
+}
+
+/// Payout for selling `amount` shares of one outcome: C(q) - C(q - amount*e_idx).
+/// Holdings checks live at the API layer; this is pure market math.
+pub fn sell_payout(outcome_idx: usize, q: &[f64], b: f64, amount: f64) -> Result<f64> {
+    if outcome_idx >= q.len() {
+        return Err(anyhow!("invalid outcome index"));
+    }
+    if !amount.is_finite() || amount <= 0.0 {
+        return Err(anyhow!("amount must be positive and finite"));
+    }
+    if q.iter().any(|v| !v.is_finite()) {
+        return Err(anyhow!("all q values must be finite"));
+    }
+    if !b.is_finite() || b <= 0.0 {
+        return Err(anyhow!("b must be positive and finite"));
+    }
+
+    let before = cost(q, b);
+    let mut q_after = q.to_vec();
+    q_after[outcome_idx] -= amount;
+    let payout = before - cost(&q_after, b);
+    if !payout.is_finite() || payout < 0.0 {
+        return Err(anyhow!("failed to compute sell payout"));
+    }
+    Ok(payout)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn buy_then_sell_round_trip_returns_stake_no_free_money() {
+        let mut market = MultiMarket::new(vec![0.0; 4], 5000.0).unwrap();
+        let stake = 100.0;
+        let (shares, cost_paid) = market.buy_outcome(2, stake).unwrap();
+        assert!(shares > 0.0);
+        let payout = market.sell_outcome(2, shares).unwrap();
+        // LMSR is path-independent: selling the exact shares bought must return
+        // (within bisection tolerance) exactly the stake — and never more.
+        assert!(
+            (payout - cost_paid).abs() < 1e-6,
+            "round trip mismatch: paid {cost_paid}, got back {payout}"
+        );
+    }
+
+    #[test]
+    fn partial_sell_moves_prob_down_and_probs_renormalize() {
+        let mut market = MultiMarket::new(vec![0.0; 3], 5000.0).unwrap();
+        let (shares, _) = market.buy_outcome(0, 500.0).unwrap();
+        let prob_before = market.probs()[0];
+        let payout = market.sell_outcome(0, shares / 2.0).unwrap();
+        assert!(payout > 0.0);
+        let probs = market.probs();
+        assert!(probs[0] < prob_before, "selling must lower the sold outcome's prob");
+        let sum: f64 = probs.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-9, "probs must renormalize, got {sum}");
+    }
+
+    #[test]
+    fn sell_payout_rejects_invalid_inputs() {
+        let q = vec![0.0, 0.0];
+        assert!(sell_payout(5, &q, 5000.0, 1.0).is_err(), "bad index");
+        assert!(sell_payout(0, &q, 5000.0, 0.0).is_err(), "zero amount");
+        assert!(sell_payout(0, &q, 5000.0, -1.0).is_err(), "negative amount");
+        assert!(sell_payout(0, &q, 5000.0, f64::NAN).is_err(), "NaN amount");
+        assert!(sell_payout(0, &q, 0.0, 1.0).is_err(), "bad liquidity");
+    }
 }
