@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import { getEvents, getUserPositions, api } from '../../services/api';
 import MarketEventCard from './MarketEventCard';
+import OutcomeMarketCard from './OutcomeMarketCard';
 import { isAuthenticated, getCurrentUserId } from '../../services/auth';
 
 const formatProbability = (value) => {
@@ -33,6 +34,9 @@ const normalizeRows = (payload) => {
 };
 
 const nowCloseWindow = (hours = 24) => new Date(Date.now() + hours * 60 * 60 * 1000);
+
+const isMultiOutcome = (eventItem) =>
+  ['multiple_choice', 'numeric'].includes(eventItem?.event_type);
 
 export default function EventsList(props) {
   const [events, setEvents] = createSignal([]);
@@ -284,13 +288,25 @@ export default function EventsList(props) {
       return (
         <div class="event-card-section">
           <h2>{selectedEvent().title || 'Selected market'}</h2>
-          <MarketEventCard
-            event={selectedEvent()}
-            onTrade={handleTradeRefresh}
-            onVerificationNotice={props.onVerificationNotice}
-            hideTitle={true}
-            authenticated={authed()}
-          />
+          <Show
+            when={isMultiOutcome(selectedEvent())}
+            fallback={
+              <MarketEventCard
+                event={selectedEvent()}
+                onTrade={handleTradeRefresh}
+                onVerificationNotice={props.onVerificationNotice}
+                hideTitle={true}
+                authenticated={authed()}
+              />
+            }
+          >
+            <OutcomeMarketCard
+              event={selectedEvent()}
+              onTrade={handleTradeRefresh}
+              onVerificationNotice={props.onVerificationNotice}
+              hideTitle={true}
+            />
+          </Show>
         </div>
       );
     }
@@ -319,12 +335,24 @@ export default function EventsList(props) {
           <div class="weekly-assignment-subheader">
             <h3>Your Weekly Assignment</h3>
           </div>
-          <MarketEventCard
-            event={assignedEvent}
-            onTrade={handleTradeRefresh}
-            onVerificationNotice={props.onVerificationNotice}
-            hideTitle={true}
-          />
+          <Show
+            when={isMultiOutcome(assignedEvent)}
+            fallback={
+              <MarketEventCard
+                event={assignedEvent}
+                onTrade={handleTradeRefresh}
+                onVerificationNotice={props.onVerificationNotice}
+                hideTitle={true}
+              />
+            }
+          >
+            <OutcomeMarketCard
+              event={assignedEvent}
+              onTrade={handleTradeRefresh}
+              onVerificationNotice={props.onVerificationNotice}
+              hideTitle={true}
+            />
+          </Show>
         </div>
       );
     }
