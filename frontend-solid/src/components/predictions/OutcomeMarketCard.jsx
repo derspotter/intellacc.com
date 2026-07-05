@@ -277,7 +277,18 @@ export default function OutcomeMarketCard(props) {
             </div>
             <div class="stat">
               <span class="stat-label">Total RP Staked:</span>
-              <span class="stat-value">{formatCurrency(Math.max(0, safeNumber(event().cumulative_stake)), { includeSymbol: false })}</span>
+              <span class="stat-value">
+                {outcomes().length >= 2
+                  ? formatCurrency(
+                      Math.max(
+                        0,
+                        safeNumber(event().cumulative_stake) -
+                          safeNumber(event().liquidity_b, 5000) * Math.log(outcomes().length)
+                      ),
+                      { includeSymbol: false }
+                    )
+                  : '--'}
+              </span>
             </div>
           </div>
         </div>

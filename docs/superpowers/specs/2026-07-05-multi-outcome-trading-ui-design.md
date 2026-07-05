@@ -137,9 +137,11 @@ Data flow:
   `lower_bound`/`upper_bound`). Lazy per card, no list-level fan-out.
 - Positions from the same `getUserPositions` call the binary card uses (now including
   `outcome_shares` rows).
-- After each buy/sell, the response's refreshed `outcomes` array repaints prices;
-  socket `marketUpdate` with `stake-outcome`/`sell-outcome` refreshes other users'
-  open cards via the existing `onStakeUpdate` path.
+- After each buy/sell, the response's refreshed `outcomes` array repaints the
+  trading user's card. Other clients' open cards do NOT live-update (parity
+  with the binary card — the socket `marketUpdate` broadcasts only feed the
+  terminal-skin market list via marketStore); realtime repaint is a possible
+  follow-up.
 
 UI (approved select-then-trade shape):
 - Radio list of outcomes: label (numeric buckets formatted as bound range, e.g.

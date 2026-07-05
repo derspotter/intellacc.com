@@ -42,7 +42,7 @@ test.describe('multi-outcome trading', () => {
     await page.goto('http://localhost:4174/#login');
     await page.getByLabel(/email/i).fill('user1@example.com');
     await page.getByLabel(/password/i).fill('password123');
-    await page.getByRole('button', { name: /log in/i }).click();
+    await page.getByRole('button', { name: /sign in/i }).click();
     await page.waitForURL(/#(home|feed)/, { timeout: 15000 });
 
     await page.goto('http://localhost:4174/#predictions');
@@ -66,6 +66,9 @@ test.describe('multi-outcome trading', () => {
     await expect(card.locator('.user-position')).toBeVisible();
 
     // Sell it all back.
+    // NOTE: immediate sell-after-buy relies on the deployed engine running
+    // MARKET_ENABLE_HOLD_PERIOD=false; with hold periods on, this step fails
+    // with "Hold period not expired".
     page.on('dialog', (dialog) => dialog.accept());
     await card.getByRole('button', { name: /sell \(/i }).click();
     await expect(card.locator('.success')).toContainText(/sold/i, { timeout: 10000 });
