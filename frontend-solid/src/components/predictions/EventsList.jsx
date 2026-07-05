@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
-import { getEvents, getUserPositions, api } from '../../services/api';
+import { getUserPositions, api } from '../../services/api';
 import MarketEventCard from './MarketEventCard';
 import { isAuthenticated, getCurrentUserId } from '../../services/auth';
 
@@ -34,8 +34,18 @@ const normalizeRows = (payload) => {
 
 const nowCloseWindow = (hours = 24) => new Date(Date.now() + hours * 60 * 60 * 1000);
 
+const PAGE_SIZE = 100;
+
+const appendUniqueById = (current, next) => {
+  const seen = new Set(current.map((item) => String(item.id)));
+  return [...current, ...next.filter((item) => !seen.has(String(item.id)))];
+};
+
 export default function EventsList(props) {
   const [events, setEvents] = createSignal([]);
+  const [total, setTotal] = createSignal(0);
+  const [hasMore, setHasMore] = createSignal(false);
+  const [loadingMore, setLoadingMore] = createSignal(false);
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal(null);
 
@@ -61,37 +71,72 @@ export default function EventsList(props) {
 
   const authed = () => isAuthenticated();
 
-  const loadEvents = async (search = '') => {
+  // Server-side filtered, paged like the post feed: append pages, never
+  // download the full event table. `windowLimit` refreshes the whole loaded
+  // window in one request (used after trades).
+  const loadEvents = async ({ reset = true, windowLimit = null } = {}) => {
     try {
-      setLoading(true);
+      if (reset) {
+        setLoading(true);
+      } else {
+        setLoadingMore(true);
+      }
       setError(null);
 
-      const response = await getEvents(search);
+      const params = {
+        search: searchQuery().trim(),
+        limit: windowLimit ? Math.min(windowLimit, 500) : PAGE_SIZE,
+        offset: reset ? 0 : events().length
+      };
+
+      if (filter() === 'my-positions') {
+        const ids = [...new Set((userPositions() || []).map((p) => Number(p.event_id)))];
+        if (ids.length === 0) {
+          setEvents([]);
+          setTotal(0);
+          setHasMore(false);
+          return;
+        }
+        params.ids = ids;
+        params.filter = 'all';
+        params.limit = 500;
+      } else {
+        params.filter = filter();
+      }
+
+      const response = await api.events.getPage(params);
       const loaded = normalizeRows(response);
-      setEvents(loaded);
+      setEvents((current) => (reset ? loaded : appendUniqueById(current, loaded)));
+      setTotal(Number(response?.total ?? loaded.length));
+      setHasMore(Boolean(response?.hasMore));
 
       const assignment = weeklyAssignment();
       if (assignment?.event_id || assignment?.event?.id) {
         const assignmentEventId = String(assignment.event_id || assignment.event?.id || '');
-        const refreshedAssignmentEvent = loaded.find((item) => String(item.id) === assignmentEventId);
+        const refreshedAssignmentEvent = events().find((item) => String(item.id) === assignmentEventId);
         if (refreshedAssignmentEvent) {
           setWeeklyAssignment({
             ...assignment,
             event: refreshedAssignmentEvent
           });
-        } else if (assignment?.event) {
-          setWeeklyAssignment({
-            ...assignment,
-            event: null
-          });
         }
       }
     } catch (errorMessage) {
       setError(errorMessage?.message || 'Failed to load prediction markets.');
-      setEvents([]);
+      if (reset) {
+        setEvents([]);
+        setTotal(0);
+      }
+      setHasMore(false);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
+  };
+
+  const loadMore = async () => {
+    if (loading() || loadingMore() || !hasMore()) return;
+    await loadEvents({ reset: false });
   };
 
   const applyTargetedSelection = () => {
@@ -128,13 +173,22 @@ export default function EventsList(props) {
       return;
     }
 
-    const fetchKey = `${marketId}:${searchQuery().trim()}`;
+    const fetchKey = marketId;
     if (lastTargetedSelectionFetchKey === fetchKey) {
       return;
     }
 
+    // Deep-linked market may be outside the loaded page window — fetch it
+    // directly and add it to the list.
     lastTargetedSelectionFetchKey = fetchKey;
-    void loadEvents(searchQuery().trim());
+    void api.events
+      .getById(marketId)
+      .then((eventRow) => {
+        if (!eventRow?.id) return;
+        setEvents((current) => appendUniqueById(current, [eventRow]));
+        applyTargetedSelection();
+      })
+      .catch(() => {});
   });
 
   const loadUserPositions = async () => {
@@ -192,7 +246,16 @@ export default function EventsList(props) {
         if (foundEvent) {
           setWeeklyAssignment({ ...assignment, event: foundEvent });
         } else {
+          // Assigned event may be outside the loaded page window.
           setWeeklyAssignment(assignment);
+          try {
+            const eventRow = await api.events.getById(assignment.event_id);
+            if (eventRow?.id) {
+              setWeeklyAssignment({ ...assignment, event: eventRow });
+            }
+          } catch {
+            /* keep assignment without pinned event */
+          }
         }
       } else {
         setWeeklyAssignment(assignment);
@@ -205,47 +268,14 @@ export default function EventsList(props) {
     }
   };
 
-  const filteredEvents = createMemo(() => {
-    const now = new Date();
-    const closingWindow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const positionEventIds = new Set(
-      (userPositions() || []).map((position) => String(position.event_id))
-    );
-
-    return events().filter((eventItem) => {
-      if (filter() === 'all') {
-        return true;
-      }
-
-      if (filter() === 'open') {
-        return !eventItem.outcome && new Date(eventItem.closing_date) > now;
-      }
-
-      if (filter() === 'closing-soon') {
-        const closingDate = new Date(eventItem.closing_date);
-        return (
-          !eventItem.outcome &&
-          closingDate > now &&
-          closingDate <= closingWindow
-        );
-      }
-
-      if (filter() === 'my-positions') {
-        return positionEventIds.has(String(eventItem.id));
-      }
-
-      return true;
-    }).sort((a, b) => {
-      if (a.outcome && !b.outcome) return 1;
-      if (!a.outcome && b.outcome) return -1;
-      return new Date(a.closing_date) - new Date(b.closing_date);
-    });
-  });
+  // Filtering and sorting happen server-side now (the list is paginated);
+  // loaded rows are already in display order.
+  const filteredEvents = createMemo(() => events());
 
   const clearSearch = () => {
     setSearchQuery('');
     setFilter('open');
-    void loadEvents('');
+    void loadEvents({ reset: true });
   };
 
   // Independent toggles (multiple rows may be open). Expanding a row never
@@ -274,7 +304,8 @@ export default function EventsList(props) {
   });
 
   const refreshSelected = async () => {
-    await loadEvents(searchQuery());
+    // Refresh everything the user has loaded so far in one request.
+    await loadEvents({ reset: true, windowLimit: Math.max(events().length, PAGE_SIZE) });
     if (authed()) {
       await loadUserPositions();
     }
@@ -290,7 +321,7 @@ export default function EventsList(props) {
     }
 
     searchTimeout = setTimeout(() => {
-      loadEvents(value);
+      void loadEvents({ reset: true });
     }, 500);
   };
 
@@ -307,10 +338,18 @@ export default function EventsList(props) {
     () => new Set((userPositions() || []).map((p) => String(p.event_id)))
   );
 
+  const handleFilterChange = async (value) => {
+    setFilter(value);
+    if (value === 'my-positions' && authed() && (userPositions() || []).length === 0) {
+      await loadUserPositions();
+    }
+    void loadEvents({ reset: true });
+  };
+
   createEffect(() => {
     if (!hasLoadedEvents()) {
       setHasLoadedEvents(true);
-      void loadEvents('');
+      void loadEvents({ reset: true });
       return;
     }
 
@@ -356,7 +395,7 @@ export default function EventsList(props) {
               }}
             />
 
-            <select value={filter()} onChange={(eventTarget) => setFilter(eventTarget.currentTarget.value)}>
+            <select value={filter()} onChange={(eventTarget) => void handleFilterChange(eventTarget.currentTarget.value)}>
               <option value="all">All Events</option>
               <option value="open">Open Markets</option>
               <option value="closing-soon">Closing Soon (24h)</option>
@@ -370,13 +409,7 @@ export default function EventsList(props) {
               {loading() ? (
                 <p>Loading events...</p>
               ) : (
-                <p>
-                  {`Showing ${filteredEvents().length} of ${events().length} events`}
-                  {(() => {
-                    const openMarkets = filteredEvents().filter((eventItem) => !eventItem.outcome).length;
-                    return openMarkets > 0 ? ` (${openMarkets} open markets)` : '';
-                  })()}
-                </p>
+                <p>{`Showing ${events().length} of ${total()} events`}</p>
               )}
             </div>
           </div>
@@ -468,10 +501,20 @@ export default function EventsList(props) {
         </div>
 
         <div class="events-actions">
+          <Show when={hasMore() && !loading() && !error()}>
+            <button
+              type="button"
+              class="secondary"
+              onClick={() => void loadMore()}
+              disabled={loadingMore()}
+            >
+              {loadingMore() ? 'Loading…' : 'Load More'}
+            </button>
+          </Show>
           <button
             type="button"
             class="secondary"
-            onClick={() => void loadEvents()}
+            onClick={() => void refreshSelected()}
             disabled={loading()}
           >
             {loading() ? 'Loading...' : 'Refresh Markets'}

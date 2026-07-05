@@ -657,6 +657,20 @@ export const api = {
       return request(url);
     },
 
+    // Server-side filtered + paginated list: returns { items, total, hasMore }.
+    getPage: ({ search = '', filter = '', ids = [], limit = 100, offset = 0 } = {}) => {
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      if (filter) params.set('filter', filter);
+      if (ids.length) params.set('ids', ids.join(','));
+      params.set('limit', String(limit));
+      params.set('offset', String(offset));
+      return request(`/events?${params.toString()}`);
+    },
+
+    getById: (eventId) =>
+      request(`/events/${eventId}`),
+
     create: (eventData) =>
       request('/events', { method: 'POST', body: eventData }),
 

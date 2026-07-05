@@ -462,19 +462,25 @@ exports.setEventOutcomes = asyncHandler(async (req, res) => {
 
 // Get all available events with optional search
 exports.getEvents = asyncHandler(async (req, res) => {
-  console.log('getEvents called');
-  console.log('User ID:', req.user ? req.user.userId : 'No auth required');
-
-  // Get search parameter if provided
   const search = req.query.search;
+  const filter = String(req.query.filter || '').toLowerCase();
+  const idsParam = String(req.query.ids || '').trim();
+  // Pagination-aware requests get { items, total, hasMore }; requests without
+  // any of these params keep the legacy full-array response (admin tools,
+  // group market search).
+  const paginated =
+    req.query.limit !== undefined || req.query.offset !== undefined || filter || idsParam;
+  const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 500);
+  const offset = Math.max(Number.parseInt(req.query.offset, 10) || 0, 0);
+
   // Keep response lean for UI. Exclude heavyweight internal search fields
-  // (embedding/search_vector) which are not needed on predictions pages.
-  let query = `
-    SELECT
+  // (embedding/search_vector); paginated list views also drop `details` —
+  // the expanded card fetches nothing that needs it.
+  const columns = `
       id,
       topic_id,
       title,
-      details,
+      ${paginated ? '' : 'details,'}
       closing_date,
       outcome,
       created_at,
@@ -488,24 +494,63 @@ exports.getEvents = asyncHandler(async (req, res) => {
       q_yes,
       q_no,
       domain
-    FROM events
-    WHERE 1=1
   `;
-  let params = [];
 
-  // Add search functionality
+  const where = [];
+  const params = [];
+
   if (search && search.trim()) {
-    query += " AND title ILIKE $1";
     params.push(`%${search.trim()}%`);
+    where.push(`title ILIKE $${params.length}`);
   }
 
-  // Order by closing date, but show events even if closing date has passed (for Metaculus questions)
-  query += " ORDER BY closing_date ASC NULLS LAST";
+  if (filter === 'open') {
+    where.push('outcome IS NULL AND closing_date > NOW()');
+  } else if (filter === 'closing-soon') {
+    where.push("outcome IS NULL AND closing_date > NOW() AND closing_date <= NOW() + INTERVAL '24 hours'");
+  }
 
-  const result = await db.query(query, params);
-  console.log('Events result:', result.rows.length, 'events found');
+  if (idsParam) {
+    const ids = idsParam
+      .split(',')
+      .map((value) => Number.parseInt(value, 10))
+      .filter((value) => Number.isInteger(value) && value > 0);
+    if (ids.length === 0) {
+      return res.status(200).json({ items: [], total: 0, hasMore: false, limit, offset });
+    }
+    params.push(ids);
+    where.push(`id = ANY($${params.length})`);
+  }
 
-  res.status(200).json(result.rows);
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  // Unresolved markets first, soonest close first — matches the list UI.
+  const orderSql = 'ORDER BY (outcome IS NOT NULL) ASC, closing_date ASC NULLS LAST';
+
+  if (!paginated) {
+    const result = await db.query(
+      `SELECT ${columns} FROM events ${whereSql} ${orderSql}`,
+      params
+    );
+    return res.status(200).json(result.rows);
+  }
+
+  const result = await db.query(
+    `SELECT ${columns}, COUNT(*) OVER() AS total_count
+     FROM events ${whereSql} ${orderSql}
+     LIMIT ${limit} OFFSET ${offset}`,
+    params
+  );
+
+  const total = result.rows.length > 0 ? Number(result.rows[0].total_count) : 0;
+  const items = result.rows.map(({ total_count, ...row }) => row);
+
+  res.status(200).json({
+    items,
+    total,
+    hasMore: offset + items.length < total,
+    limit,
+    offset
+  });
 });
 
 exports.getEventById = asyncHandler(async (req, res) => {
