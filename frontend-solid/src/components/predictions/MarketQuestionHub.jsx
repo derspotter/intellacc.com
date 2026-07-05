@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, Show } from 'solid-js';
+import { createEffect, createSignal, For, Index, Show } from 'solid-js';
 import { isAuthenticated, isAdmin } from '../../services/auth';
 import {
   createMarketQuestion,
@@ -181,20 +181,25 @@ export default function MarketQuestionHub() {
       payloadExtras.event_type = 'multiple_choice';
       payloadExtras.outcomes = labels;
     } else if (eventType() === 'numeric') {
-      const bounds = String(bucketBoundaries())
+      const tokens = String(bucketBoundaries())
         .split(',')
-        .map((s) => Number(s.trim()))
-        .filter((n) => Number.isFinite(n));
-      const sorted = [...bounds].sort((a, b) => a - b);
-      const strictlyIncreasing = sorted.every((v, i) => i === 0 || v > sorted[i - 1]);
+        .map((s) => s.trim())
+        .filter((s) => s !== '');
+      const bounds = tokens.map(Number);
+      const badToken = tokens.find((t, i) => !Number.isFinite(bounds[i]));
+      if (badToken !== undefined) {
+        setErrors(`"${badToken}" is not a number — boundaries must be comma-separated numbers.`);
+        return;
+      }
+      const strictlyIncreasing = bounds.every((v, i) => i === 0 || v > bounds[i - 1]);
       if (bounds.length < 3 || !strictlyIncreasing) {
-        setErrors('Enter at least 3 strictly increasing boundaries (e.g. "0, 10, 20") — they define the buckets.');
+        setErrors('Enter at least 3 strictly increasing boundaries in order (e.g. "0, 10, 20") — they define the buckets.');
         return;
       }
       payloadExtras.event_type = 'numeric';
-      payloadExtras.numeric_buckets = sorted.slice(0, -1).map((lower, i) => ({
+      payloadExtras.numeric_buckets = bounds.slice(0, -1).map((lower, i) => ({
         lower_bound: lower,
-        upper_bound: sorted[i + 1]
+        upper_bound: bounds[i + 1]
       }));
     }
 
@@ -345,16 +350,16 @@ export default function MarketQuestionHub() {
 
         <Show when={eventType() === 'multiple_choice'}>
           <label>Outcomes (2–10)</label>
-          <For each={outcomeLabels()}>
+          <Index each={outcomeLabels()}>
             {(label, index) => (
               <div class="mq-outcome-row">
                 <input
                   type="text"
-                  value={label}
-                  placeholder={`Outcome ${index() + 1}`}
+                  value={label()}
+                  placeholder={`Outcome ${index + 1}`}
                   onInput={(e) => {
                     const next = [...outcomeLabels()];
-                    next[index()] = e.target.value;
+                    next[index] = e.target.value;
                     setOutcomeLabels(next);
                   }}
                 />
@@ -362,14 +367,14 @@ export default function MarketQuestionHub() {
                   <button
                     type="button"
                     class="button"
-                    onClick={() => setOutcomeLabels(outcomeLabels().filter((_, i) => i !== index()))}
+                    onClick={() => setOutcomeLabels(outcomeLabels().filter((_, i) => i !== index))}
                   >
                     Remove
                   </button>
                 </Show>
               </div>
             )}
-          </For>
+          </Index>
           <Show when={outcomeLabels().length < 10}>
             <button
               type="button"
