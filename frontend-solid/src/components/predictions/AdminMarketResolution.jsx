@@ -53,11 +53,21 @@ export default function AdminMarketResolution() {
     setNumericValue('');
     setMarketOutcomes([]);
     if (current && current.event_type === 'multiple_choice') {
+      const requestedId = current.id;
       setOutcomesLoading(true);
-      getMarketState(current.id)
-        .then((state) => setMarketOutcomes(Array.isArray(state?.outcomes) ? state.outcomes : []))
-        .catch(() => setMarketOutcomes([]))
-        .finally(() => setOutcomesLoading(false));
+      getMarketState(requestedId)
+        .then((state) => {
+          if (selectedEvent()?.id !== requestedId) return;
+          setMarketOutcomes(Array.isArray(state?.outcomes) ? state.outcomes : []);
+        })
+        .catch(() => {
+          if (selectedEvent()?.id !== requestedId) return;
+          setMarketOutcomes([]);
+        })
+        .finally(() => {
+          if (selectedEvent()?.id !== requestedId) return;
+          setOutcomesLoading(false);
+        });
     }
   });
 
@@ -81,8 +91,9 @@ export default function AdminMarketResolution() {
         await resolveEvent(selectedEventId(), { outcome_id: Number(selectedOutcomeId()) });
         setMessage('Market resolved to the selected outcome.');
       } else if (isNumeric()) {
-        const value = Number(numericValue());
-        if (!Number.isFinite(value)) {
+        const raw = String(numericValue()).trim();
+        const value = Number(raw);
+        if (raw === '' || !Number.isFinite(value)) {
           setError('Enter the resolved numeric value.');
           setResolving(false);
           return;
