@@ -126,7 +126,7 @@ const PostItem = (props) => {
     };
 
     return (
-        <div class="p-2 border-b border-bb-border/30 hover:bg-white/5 text-sm transition-colors">
+        <div data-testid="feed-post" class="p-2 border-b border-bb-border/30 hover:bg-white/5 text-sm transition-colors">
             <div class="flex justify-between items-baseline mb-1">
                 <span class="font-bold text-bb-accent text-xs">@{props.post.username}</span>
                 <span class="text-xxs text-bb-muted font-mono">{new Date(props.post.created_at).toLocaleTimeString()}</span>
@@ -163,6 +163,17 @@ export const FeedPanel = () => {
                             {(post) => <PostItem post={post} />}
                         </For>
                     </div>
+                    <Show when={feedStore.state.hasMore}>
+                        <button
+                            type="button"
+                            data-testid="feed-load-more"
+                            class="w-full py-2 text-center text-bb-accent hover:bg-bb-accent/10 uppercase font-bold font-mono text-xs disabled:opacity-50"
+                            disabled={feedStore.state.loadingMore}
+                            onClick={() => feedStore.loadMore()}
+                        >
+                            {feedStore.state.loadingMore ? 'LOADING...' : 'LOAD MORE'}
+                        </button>
+                    </Show>
                 </Show>
             </div>
         </Panel>

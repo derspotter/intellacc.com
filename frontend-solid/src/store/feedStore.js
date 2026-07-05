@@ -1,27 +1,56 @@
 import { createStore } from "solid-js/store";
-import { api } from "../services/api";
+import { api, getPostsPaging } from "../services/api";
 import { getToken } from "../services/tokenService";
+
+const PAGE_LIMIT = 20;
 
 const [state, setState] = createStore({
     posts: [],
+    hasMore: false,
+    nextCursor: null,
     loading: false,
+    loadingMore: false,
     error: null
 });
 
-const loadPosts = async () => {
-    // Skip fetch if not authenticated
+let fetchEpoch = 0;
+
+const appendUnique = (current, next) => {
+    const seen = new Set(current.map(p => String(p.id)));
+    return [...current, ...next.filter(p => !seen.has(String(p.id)))];
+};
+
+const fetchPage = async ({ reset }) => {
     if (!getToken()) {
-        setState({ posts: [], loading: false, error: null });
+        setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null });
         return;
     }
-    setState({ loading: true, error: null });
+    const epoch = ++fetchEpoch;
+    setState(reset ? { loading: true, error: null } : { loadingMore: true, error: null });
     try {
-        const posts = await api.posts.getAll();
-        setState({ posts: Array.isArray(posts) ? posts : [], loading: false });
+        const cursor = reset ? null : state.nextCursor;
+        const response = await api.posts.getPage({ cursor, limit: PAGE_LIMIT });
+        if (epoch !== fetchEpoch) return; // superseded by a newer request
+        const paging = getPostsPaging(response);
+        setState({
+            posts: reset ? paging.items : appendUnique(state.posts, paging.items),
+            hasMore: paging.hasMore,
+            nextCursor: paging.nextCursor,
+            loading: false,
+            loadingMore: false
+        });
     } catch (err) {
+        if (epoch !== fetchEpoch) return;
         console.error("Failed to load posts", err);
-        setState({ error: err.message, loading: false });
+        setState({ error: err.message, loading: false, loadingMore: false });
     }
+};
+
+const loadPosts = () => fetchPage({ reset: true });
+
+const loadMore = () => {
+    if (state.loading || state.loadingMore || !state.hasMore) return;
+    return fetchPage({ reset: false });
 };
 
 const addPost = (post) => {
@@ -89,12 +118,13 @@ const unlikePost = (postId) => {
 };
 
 const clear = () => {
-    setState({ posts: [], loading: false, error: null });
+    setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null });
 };
 
 export const feedStore = {
     state,
     loadPosts,
+    loadMore,
     addPost,
     updatePost,
     addComment,
