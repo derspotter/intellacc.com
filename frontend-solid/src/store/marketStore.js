@@ -2,31 +2,53 @@ import { createStore } from "solid-js/store";
 import { api } from "../services/api";
 import { getToken } from "../services/tokenService";
 
+const PAGE_SIZE = 100;
+
 const [state, setState] = createStore({
     markets: [],
+    total: 0,
+    hasMore: false,
+    search: '',
     loading: false,
+    loadingMore: false,
     error: null,
     selectedMarketId: null
 });
 
-const loadMarkets = async () => {
-    // Skip fetch if not authenticated (consistent with other panels)
+const fetchPage = async ({ reset }) => {
     if (!getToken()) {
-        setState({ markets: [], loading: false, error: null });
+        setState({ markets: [], total: 0, hasMore: false, loading: false, loadingMore: false, error: null });
         return;
     }
-    setState({ loading: true, error: null });
+    const offset = reset ? 0 : state.markets.length;
+    setState(reset ? { loading: true, error: null } : { loadingMore: true, error: null });
     try {
-        // "Markets" are events with attached market fields (market_prob, cumulative_stake, etc).
-        const markets = await api.events.getAll();
+        const res = await api.events.getPage({ search: state.search, limit: PAGE_SIZE, offset });
+        const items = Array.isArray(res?.items) ? res.items : [];
         setState({
-            markets: Array.isArray(markets) ? markets : [],
-            loading: false
+            markets: reset ? items : [...state.markets, ...items],
+            total: Number(res?.total) || items.length,
+            hasMore: Boolean(res?.hasMore),
+            loading: false,
+            loadingMore: false
         });
     } catch (err) {
         console.error("Failed to load markets", err);
-        setState({ error: err.message, loading: false });
+        setState({ error: err.message, loading: false, loadingMore: false });
     }
+};
+
+// "Markets" are events with attached market fields (market_prob, cumulative_stake, etc).
+const loadMarkets = () => fetchPage({ reset: true });
+
+const loadMore = () => {
+    if (state.loadingMore || state.loading || !state.hasMore) return;
+    return fetchPage({ reset: false });
+};
+
+const setSearch = (query) => {
+    setState('search', query);
+    return fetchPage({ reset: true });
 };
 
 const selectMarket = (id) => {
@@ -49,7 +71,7 @@ const applyMarketUpdate = (update) => {
 
             // Prepare updates
             const updates = {};
-            
+
             if (marketProb != null) {
                 updates.market_prob = marketProb;
                 // Track previous probability if it existed
@@ -57,7 +79,7 @@ const applyMarketUpdate = (update) => {
                     updates.prev_market_prob = m.market_prob;
                 }
             }
-            
+
             if (cumulativeStake != null) {
                 updates.cumulative_stake = cumulativeStake;
                 // Track previous stake if it existed
@@ -75,12 +97,14 @@ const applyMarketUpdate = (update) => {
 };
 
 const clear = () => {
-    setState({ markets: [], loading: false, error: null, selectedMarketId: null });
+    setState({ markets: [], total: 0, hasMore: false, search: '', loading: false, loadingMore: false, error: null, selectedMarketId: null });
 };
 
 export const marketStore = {
     state,
     loadMarkets,
+    loadMore,
+    setSearch,
     selectMarket,
     getSelectedMarket,
     applyMarketUpdate,
