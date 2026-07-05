@@ -3611,8 +3611,9 @@ body.dark-mode .weekly-assignment-badge.pending {
   border: none;
   margin: 1rem 0 0 0;
   display: grid;
-  /* Give the text search more room than the dropdown, especially on laptops. */
-  grid-template-columns: 2fr 1fr;
+  /* Give the text search more room than the two dropdowns (category, status),
+     especially on laptops. */
+  grid-template-columns: 2fr 1fr 1fr;
   gap: 0.25rem 1rem;
   align-items: start;
 }

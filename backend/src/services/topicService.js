@@ -84,9 +84,12 @@ const classifyUnclassifiedEvents = async () => {
   return classified;
 };
 
-// Classify one event into 1-2 user-facing topics via a (free-tier) LLM.
-// On success it replaces ALL existing event_topics rows for the event with
-// 'llm'-sourced ones; on any failure it falls back to embedding similarity.
+// Classify one event into 1-2 user-facing topics via the local LLM. The same
+// call returns a junk verdict (unserious / match-betting markets) used to hide
+// the event. On success it replaces ALL existing event_topics rows for the
+// event with 'llm'-sourced ones; on any failure it falls back to embedding
+// similarity. llm_checked_at is only stamped when BOTH topics and the junk
+// verdict came back valid, so a partial answer is retried by the next sweep.
 const classifyEventLLM = async (eventId) => {
   const id = Number(eventId);
   if (!Number.isInteger(id)) throw new Error('Invalid event id');
@@ -101,10 +104,14 @@ const classifyEventLLM = async (eventId) => {
   const idBySlug = new Map(topicsResult.rows.map((t) => [t.slug, t.id]));
 
   let slugs = [];
+  let junk = null;
+  let junkReason = null;
   let failure = null;
   try {
-    const rawSlugs = await classifyWithGemma(title, details, [...idBySlug.keys()]);
-    slugs = rawSlugs.filter((s) => idBySlug.has(s)).slice(0, 2);
+    const verdict = await classifyWithGemma(title, details, [...idBySlug.keys()]);
+    slugs = (verdict.topics || []).filter((s) => idBySlug.has(s)).slice(0, 2);
+    junk = verdict.junk;
+    junkReason = verdict.junkReason;
     if (slugs.length === 0) failure = 'no valid topic slugs in model output';
   } catch (error) {
     failure = error.message || String(error);
@@ -124,17 +131,42 @@ const classifyEventLLM = async (eventId) => {
        RETURNING topic_id`,
       [id, topicIds]
     );
+
+    if (junk === true) {
+      await client.query(
+        `UPDATE events
+         SET hidden_at = NOW(),
+             hidden_reason = $2,
+             llm_checked_at = NOW()
+         WHERE id = $1`,
+        [id, `llm: ${junkReason || 'junk market'}`]
+      );
+    } else if (junk === false) {
+      // Clear only model-sourced hides; a manual hide (any other reason) stays.
+      await client.query(
+        `UPDATE events
+         SET hidden_at = CASE WHEN hidden_reason LIKE 'llm:%' THEN NULL ELSE hidden_at END,
+             hidden_reason = CASE WHEN hidden_reason LIKE 'llm:%' THEN NULL ELSE hidden_reason END,
+             llm_checked_at = NOW()
+         WHERE id = $1`,
+        [id]
+      );
+    }
+    // junk === null: model gave no usable verdict; leave llm_checked_at NULL
+    // so the sweep retries this event.
+
     return inserted.rows;
   });
 };
 
-// LLM-classify all events that don't have an 'llm'-sourced topic yet.
+// LLM-classify (and junk-check) all events without a completed combined
+// verdict yet. Covers events that were topic-classified before junk screening
+// existed — every event needs one call for its verdict anyway, and topics are
+// refreshed in the same call at no extra cost.
 const classifyUnclassifiedEventsLLM = async () => {
   const result = await db.query(
     `SELECT e.id FROM events e
-     WHERE NOT EXISTS (
-       SELECT 1 FROM event_topics et WHERE et.event_id = e.id AND et.source = 'llm'
-     )
+     WHERE e.llm_checked_at IS NULL
      ORDER BY e.id`
   );
   // classifyEventLLM retries once via gemmaClassifier and falls back to

@@ -49,4 +49,56 @@ test.describe('predictions tabs', () => {
     await page.goto(`${BASE}/#predictions/999999999`, { waitUntil: 'domcontentloaded' });
     await expect(page.getByText('Open Questions')).toBeVisible();
   });
+
+  test('category dropdown filters the list and All categories resets it', async ({ page }) => {
+    await page.goto(`${BASE}/#predictions`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.event-list-item .event-title');
+
+    const dropdown = page.locator('.events-category-filter');
+    await expect(dropdown).toBeVisible();
+    // "All categories" plus at least one real topic option labeled "Name (count)".
+    const optionLabels = await dropdown.locator('option').allTextContents();
+    expect(optionLabels[0]).toBe('All categories');
+    expect(optionLabels.length).toBeGreaterThan(1);
+    expect(optionLabels[1]).toMatch(/^.+ \(\d+\)$/);
+
+    const topicName = optionLabels[1].replace(/ \(\d+\)$/, '');
+    const totalBefore = await page.locator('.event-list-item').count();
+    await dropdown.selectOption(topicName);
+
+    // Selection triggers a server-side reload; poll until the filtered list
+    // is in: every visible row's category chip mentions the selected topic.
+    await expect(async () => {
+      const chips = await page.locator('.event-list-item .event-category').allTextContents();
+      expect(chips.length).toBeGreaterThan(0);
+      for (const chip of chips) {
+        expect(chip).toContain(topicName);
+      }
+    }).toPass({ timeout: 10000 });
+    await expect(dropdown).toHaveValue(topicName);
+
+    // Back to "All categories" restores the unfiltered first page.
+    await dropdown.selectOption('');
+    await expect(page.locator('.event-list-item')).toHaveCount(totalBefore, { timeout: 10000 });
+  });
+
+  test('title search narrows results and works together with the dropdown', async ({ page }) => {
+    await page.goto(`${BASE}/#predictions`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.event-list-item .event-title');
+
+    const search = page.locator('.events-filters input[type="text"]');
+    await expect(search).toHaveAttribute('placeholder', 'Search titles...');
+
+    const firstTitle = await page.locator('.event-list-item .event-title').first().textContent();
+    const needle = firstTitle.trim().split(/\s+/).slice(0, 3).join(' ');
+    await search.fill(needle);
+    // Debounced server reload (500ms) plus round-trip.
+    await expect(async () => {
+      const titles = await page.locator('.event-list-item .event-title').allTextContents();
+      expect(titles.length).toBeGreaterThan(0);
+      for (const title of titles) {
+        expect(title.toLowerCase()).toContain(needle.toLowerCase());
+      }
+    }).toPass({ timeout: 10000 });
+  });
 });

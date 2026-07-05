@@ -476,6 +476,7 @@ exports.getEvents = asyncHandler(async (req, res) => {
   // Keep response lean for UI. Exclude heavyweight internal search fields
   // (embedding/search_vector); paginated list views also drop `details` —
   // the expanded card fetches nothing that needs it.
+  // `topics` carries the classified topic names for the category filter.
   const columns = `
       id,
       topic_id,
@@ -493,15 +494,35 @@ exports.getEvents = asyncHandler(async (req, res) => {
       cumulative_stake,
       q_yes,
       q_no,
-      domain
+      domain,
+      COALESCE(
+        (SELECT array_agg(t.name ORDER BY t.name)
+         FROM event_topics et
+         JOIN topics t ON t.id = et.topic_id
+         WHERE et.event_id = events.id AND t.is_user_facing = TRUE),
+        '{}'
+      ) AS topics
   `;
 
   const where = [];
   const params = [];
 
+  // Junk-flagged events never appear in listings (still reachable by id).
+  where.push('hidden_at IS NULL');
+
   if (search && search.trim()) {
     params.push(`%${search.trim()}%`);
     where.push(`title ILIKE $${params.length}`);
+  }
+
+  const topicParam = String(req.query.topic || '').trim();
+  if (topicParam) {
+    params.push(topicParam);
+    where.push(
+      `EXISTS (SELECT 1 FROM event_topics et
+               JOIN topics t ON t.id = et.topic_id
+               WHERE et.event_id = events.id AND t.is_user_facing = TRUE AND t.name = $${params.length})`
+    );
   }
 
   if (filter === 'open') {

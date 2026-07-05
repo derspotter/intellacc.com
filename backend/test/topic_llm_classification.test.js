@@ -62,7 +62,7 @@ describe('topicService.classifyEventLLM', () => {
       [eventId, seeded.rows[0].id]
     );
 
-    classifyWithGemma.mockResolvedValue(['science', 'ai-technology']);
+    classifyWithGemma.mockResolvedValue({ topics: ['science', 'ai-technology'], junk: false, junkReason: null });
 
     const assigned = await topicService.classifyEventLLM(eventId);
     expect(assigned).toHaveLength(2);
@@ -84,7 +84,7 @@ describe('topicService.classifyEventLLM', () => {
     const topicId = await insertSyntheticTopic();
     const eventId = await insertEvent(vec(0));
 
-    classifyWithGemma.mockResolvedValue(['nonsense']);
+    classifyWithGemma.mockResolvedValue({ topics: ['nonsense'], junk: false, junkReason: null });
 
     const assigned = await topicService.classifyEventLLM(eventId);
     expect(assigned.map((r) => r.topic_id)).toContain(topicId);
@@ -115,5 +115,69 @@ describe('topicService.classifyEventLLM', () => {
 
     const assigned = await topicService.classifyEventLLM(eventId);
     expect(assigned).toEqual([]);
+  });
+
+  const getModeration = async (eventId) => {
+    const result = await db.query(
+      'SELECT hidden_at, hidden_reason, llm_checked_at FROM events WHERE id = $1',
+      [eventId]
+    );
+    return result.rows[0];
+  };
+
+  test('junk verdict hides the event and stamps llm_checked_at', async () => {
+    const eventId = await insertEvent();
+    classifyWithGemma.mockResolvedValue({ topics: ['sports'], junk: true, junkReason: 'single match betting' });
+
+    await topicService.classifyEventLLM(eventId);
+
+    const row = await getModeration(eventId);
+    expect(row.hidden_at).not.toBeNull();
+    expect(row.hidden_reason).toBe('llm: single match betting');
+    expect(row.llm_checked_at).not.toBeNull();
+  });
+
+  test('not-junk verdict clears a previous llm hide', async () => {
+    const eventId = await insertEvent();
+    await db.query(
+      `UPDATE events SET hidden_at = NOW(), hidden_reason = 'llm: old verdict' WHERE id = $1`,
+      [eventId]
+    );
+
+    classifyWithGemma.mockResolvedValue({ topics: ['science'], junk: false, junkReason: null });
+    await topicService.classifyEventLLM(eventId);
+
+    const row = await getModeration(eventId);
+    expect(row.hidden_at).toBeNull();
+    expect(row.hidden_reason).toBeNull();
+    expect(row.llm_checked_at).not.toBeNull();
+  });
+
+  test('not-junk verdict preserves a manual hide', async () => {
+    const eventId = await insertEvent();
+    await db.query(
+      `UPDATE events SET hidden_at = NOW(), hidden_reason = 'manual: admin decision' WHERE id = $1`,
+      [eventId]
+    );
+
+    classifyWithGemma.mockResolvedValue({ topics: ['science'], junk: false, junkReason: null });
+    await topicService.classifyEventLLM(eventId);
+
+    const row = await getModeration(eventId);
+    expect(row.hidden_at).not.toBeNull();
+    expect(row.hidden_reason).toBe('manual: admin decision');
+    expect(row.llm_checked_at).not.toBeNull();
+  });
+
+  test('missing junk verdict writes topics but leaves llm_checked_at NULL for retry', async () => {
+    const eventId = await insertEvent();
+    classifyWithGemma.mockResolvedValue({ topics: ['science'], junk: null, junkReason: null });
+
+    const assigned = await topicService.classifyEventLLM(eventId);
+    expect(assigned).toHaveLength(1);
+
+    const row = await getModeration(eventId);
+    expect(row.hidden_at).toBeNull();
+    expect(row.llm_checked_at).toBeNull();
   });
 });

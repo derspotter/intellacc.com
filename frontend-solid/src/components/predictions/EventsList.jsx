@@ -51,6 +51,7 @@ export default function EventsList(props) {
 
   const [searchQuery, setSearchQuery] = createSignal('');
   const [filter, setFilter] = createSignal('open');
+  const [categoryFilter, setCategoryFilter] = createSignal('');
   const [expandedIds, setExpandedIds] = createSignal(new Set());
 
   const isExpanded = (id) => expandedIds().has(String(id));
@@ -85,6 +86,7 @@ export default function EventsList(props) {
 
       const params = {
         search: searchQuery().trim(),
+        topic: categoryFilter(),
         limit: windowLimit ? Math.min(windowLimit, 500) : PAGE_SIZE,
         offset: reset ? 0 : events().length
       };
@@ -275,6 +277,28 @@ export default function EventsList(props) {
   const clearSearch = () => {
     setSearchQuery('');
     setFilter('open');
+    setCategoryFilter('');
+    void loadEvents({ reset: true });
+  };
+
+  // Most common categories for the dropdown: topics with at least one visible
+  // event, ordered by event count. Server-counted, since the list itself is
+  // paginated and never fully loaded client-side.
+  const [topicOptions, setTopicOptions] = createSignal([]);
+  const loadTopicOptions = async () => {
+    try {
+      const response = await api.topics.list();
+      const rows = (response?.topics || [])
+        .filter((topic) => Number(topic.event_count) > 0)
+        .sort((a, b) => b.event_count - a.event_count || a.name.localeCompare(b.name));
+      setTopicOptions(rows);
+    } catch {
+      setTopicOptions([]);
+    }
+  };
+
+  const handleCategoryChange = (value) => {
+    setCategoryFilter(value);
     void loadEvents({ reset: true });
   };
 
@@ -350,6 +374,7 @@ export default function EventsList(props) {
     if (!hasLoadedEvents()) {
       setHasLoadedEvents(true);
       void loadEvents({ reset: true });
+      void loadTopicOptions();
       return;
     }
 
@@ -386,7 +411,7 @@ export default function EventsList(props) {
           <div class="events-filters">
             <input
               type="text"
-              placeholder="Search by title or category..."
+              placeholder="Search titles..."
               value={searchQuery()}
               onInput={(eventTarget) => {
                 const nextValue = eventTarget.currentTarget.value;
@@ -394,6 +419,17 @@ export default function EventsList(props) {
                 handleSearchInput(nextValue.trim());
               }}
             />
+
+            <select
+              class="events-category-filter"
+              value={categoryFilter()}
+              onChange={(eventTarget) => handleCategoryChange(eventTarget.currentTarget.value)}
+            >
+              <option value="">All categories</option>
+              <For each={topicOptions()}>
+                {(topic) => <option value={topic.name}>{`${topic.name} (${topic.event_count})`}</option>}
+              </For>
+            </select>
 
             <select value={filter()} onChange={(eventTarget) => void handleFilterChange(eventTarget.currentTarget.value)}>
               <option value="all">All Events</option>
@@ -437,11 +473,11 @@ export default function EventsList(props) {
               <div class="no-events">
                 <h3>No Events Found</h3>
                 <p>
-                  {searchQuery().trim()
+                  {searchQuery().trim() || categoryFilter()
                     ? 'No events match your search criteria.'
                     : 'No events available. Check back later for new prediction markets!'}
                 </p>
-                {searchQuery().trim() ? (
+                {searchQuery().trim() || categoryFilter() ? (
                   <button type="button" onClick={clearSearch}>
                     Clear Filters
                   </button>
@@ -472,7 +508,11 @@ export default function EventsList(props) {
                             <Show when={isWeekly()}>
                               <span class="event-weekly-tag">{`Weekly · ${weeklyAssignment()?.weekly_assignment_completed ? 'Completed' : 'Pending'}`}</span>
                             </Show>
-                            <span class="event-category">{marketItem.category || 'General'}</span>
+                            <span class="event-category">
+                              {(marketItem.topics || []).length > 0
+                                ? marketItem.topics.join(' · ')
+                                : (marketItem.category || 'General')}
+                            </span>
                             <span class="event-date">{`Closes: ${formatDate(marketItem.closing_date)}`}</span>
                             <Show when={positionEventIds().has(String(marketItem.id))}>
                               <span class="event-position-tag">Position</span>

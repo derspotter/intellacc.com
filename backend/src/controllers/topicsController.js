@@ -9,10 +9,17 @@ let classificationInProgress = false;
 
 exports.listTopics = async (req, res) => {
   try {
+    // event_count = visible (non-hidden) events per topic, for the predictions
+    // page category dropdown.
     const result = await db.query(
-      `SELECT id, slug, name, description, display_order
-       FROM topics WHERE is_user_facing = TRUE
-       ORDER BY display_order NULLS LAST, id`
+      `SELECT t.id, t.slug, t.name, t.description, t.display_order,
+              COUNT(e.id)::int AS event_count
+       FROM topics t
+       LEFT JOIN event_topics et ON et.topic_id = t.id
+       LEFT JOIN events e ON e.id = et.event_id AND e.hidden_at IS NULL
+       WHERE t.is_user_facing = TRUE
+       GROUP BY t.id, t.slug, t.name, t.description, t.display_order
+       ORDER BY t.display_order NULLS LAST, t.id`
     );
     res.json({ topics: result.rows });
   } catch (err) {
@@ -80,8 +87,7 @@ exports.classifyUnclassified = async (req, res) => {
   }
 
   const pending = await db.query(
-    `SELECT COUNT(*)::int AS n FROM events e
-     WHERE NOT EXISTS (SELECT 1 FROM event_topics et WHERE et.event_id = e.id AND et.source = 'llm')`
+    `SELECT COUNT(*)::int AS n FROM events e WHERE e.llm_checked_at IS NULL`
   ).catch(() => null);
 
   classificationInProgress = true;

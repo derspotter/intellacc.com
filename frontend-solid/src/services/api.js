@@ -658,9 +658,10 @@ export const api = {
     },
 
     // Server-side filtered + paginated list: returns { items, total, hasMore }.
-    getPage: ({ search = '', filter = '', ids = [], limit = 100, offset = 0 } = {}) => {
+    getPage: ({ search = '', topic = '', filter = '', ids = [], limit = 100, offset = 0 } = {}) => {
       const params = new URLSearchParams();
       if (search) params.set('search', search);
+      if (topic) params.set('topic', topic);
       if (filter) params.set('filter', filter);
       if (ids.length) params.set('ids', ids.join(','));
       params.set('limit', String(limit));
