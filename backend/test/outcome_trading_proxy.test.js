@@ -174,4 +174,42 @@ describe('Outcome trading proxy routes', () => {
       outcome_id: Number(outcomeIds[1])
     });
   });
+
+  test('sell-outcome passthrough engine errors (400)', async () => {
+    const user = await makeUser('sellout_error_400');
+    const { eventId, outcomeIds } = await createMultiEvent();
+    cleanup.users.add(user.id);
+    cleanup.events.add(eventId);
+
+    global.fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'Insufficient shares in selected outcome' })
+    });
+
+    const res = await request(app)
+      .post(`/api/events/${eventId}/sell-outcome`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ outcome_id: outcomeIds[0], amount: 1 });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Insufficient shares in selected outcome');
+  });
+
+  test('sell-outcome returns 500 when engine is unreachable', async () => {
+    const user = await makeUser('sellout_error_500');
+    const { eventId, outcomeIds } = await createMultiEvent();
+    cleanup.users.add(user.id);
+    cleanup.events.add(eventId);
+
+    global.fetch.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+
+    const res = await request(app)
+      .post(`/api/events/${eventId}/sell-outcome`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ outcome_id: outcomeIds[0], amount: 1 });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toHaveProperty('error', 'Failed to sell outcome shares');
+  });
 });
