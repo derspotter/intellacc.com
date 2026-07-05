@@ -129,7 +129,7 @@ export default function App() {
       return <Harness />;
     }
 
-    if (page() === 'notFound' || page() === 'not-found') {
+    if (page() === NOT_FOUND_ROUTE || page() === 'not-found') {
       return (
         <div class="not-found">
           <h1>404</h1>

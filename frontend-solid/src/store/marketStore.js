@@ -102,6 +102,7 @@ const applyMarketUpdate = (update) => {
 };
 
 const clear = () => {
+    fetchEpoch++; // invalidate any in-flight fetch so it can't repopulate cleared state
     setState({ markets: [], total: 0, hasMore: false, search: '', loading: false, loadingMore: false, error: null, selectedMarketId: null });
 };
 

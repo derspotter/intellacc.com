@@ -374,7 +374,7 @@ function App() {
         <nav class="md:hidden shrink-0 h-12 bg-bb-panel border-t border-bb-border flex font-mono text-xs select-none">
           <button
             type="button"
-            onClick={() => setActivePane(1)}
+            onClick={() => goPane('home')}
             class={`flex-1 flex items-center justify-center gap-2 border-r border-bb-border ${
               activePane() === 1 ? "bg-bb-accent/15 text-bb-accent font-bold" : "text-bb-muted hover:text-bb-text hover:bg-white/5"
             }`}
@@ -384,7 +384,7 @@ function App() {
           </button>
           <button
             type="button"
-            onClick={() => setActivePane(2)}
+            onClick={() => goPane('predictions')}
             class={`flex-1 flex items-center justify-center gap-2 border-r border-bb-border ${
               activePane() === 2 ? "bg-bb-accent/15 text-bb-accent font-bold" : "text-bb-muted hover:text-bb-text hover:bg-white/5"
             }`}
@@ -394,7 +394,7 @@ function App() {
           </button>
           <button
             type="button"
-            onClick={() => setActivePane(3)}
+            onClick={() => goPane('messages')}
             class={`flex-1 flex items-center justify-center gap-2 ${
               activePane() === 3 ? "bg-bb-accent/15 text-bb-accent font-bold" : "text-bb-muted hover:text-bb-text hover:bg-white/5"
             }`}

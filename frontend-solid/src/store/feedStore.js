@@ -118,6 +118,7 @@ const unlikePost = (postId) => {
 };
 
 const clear = () => {
+    fetchEpoch++; // invalidate any in-flight fetch so it can't repopulate cleared state
     setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null });
 };
 
