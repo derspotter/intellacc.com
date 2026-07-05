@@ -1,4 +1,10 @@
 const db = require('../db');
+const {
+  normalizeEventType,
+  normalizeOutcomeRows,
+  validateNumericBuckets,
+  seedEventOutcomes
+} = require('../utils/eventOutcomes');
 
 const LEDGER_SCALE = 1_000_000n;
 
@@ -252,7 +258,15 @@ exports.getConfig = async (_req, res) => {
 
 exports.createSubmission = async (req, res) => {
   const creatorUserId = req.user.id;
-  const { title, details, category = null, closing_date: closingDate } = req.body || {};
+  const {
+    title,
+    details,
+    category = null,
+    closing_date: closingDate,
+    event_type: rawEventType,
+    outcomes,
+    numeric_buckets: numericBuckets
+  } = req.body || {};
 
   if (!title || !String(title).trim()) {
     return res.status(400).json({ message: 'title is required' });
@@ -262,6 +276,24 @@ exports.createSubmission = async (req, res) => {
   }
   if (!closingDate) {
     return res.status(400).json({ message: 'closing_date is required' });
+  }
+
+  const eventType = normalizeEventType(rawEventType);
+  if (!['binary', 'multiple_choice', 'numeric'].includes(eventType)) {
+    return res.status(400).json({ message: 'event_type must be binary, multiple_choice or numeric' });
+  }
+  let outcomeRows = null;
+  if (eventType !== 'binary') {
+    outcomeRows = normalizeOutcomeRows(eventType, outcomes, numericBuckets);
+    if (outcomeRows.length < 2) {
+      return res.status(400).json({ message: `${eventType} questions require at least two outcomes/buckets` });
+    }
+    if (outcomeRows.length > 10) {
+      return res.status(400).json({ message: 'At most 10 outcomes/buckets allowed' });
+    }
+    if (eventType === 'numeric' && !validateNumericBuckets(outcomeRows)) {
+      return res.status(400).json({ message: 'numeric buckets overlap or are invalid' });
+    }
   }
 
   const parsedClosingDate = new Date(closingDate);
@@ -299,8 +331,8 @@ exports.createSubmission = async (req, res) => {
 
     const insertRes = await client.query(
       `INSERT INTO market_question_submissions
-        (creator_user_id, title, details, category, closing_date, creator_bond_ledger, required_validators, required_approvals)
-       VALUES ($1, $2, $3, $4, $5, $6::bigint, $7, $8)
+        (creator_user_id, title, details, category, closing_date, creator_bond_ledger, required_validators, required_approvals, event_type, outcome_rows)
+       VALUES ($1, $2, $3, $4, $5, $6::bigint, $7, $8, $9, $10::jsonb)
        RETURNING *`,
       [
         creatorUserId,
@@ -310,7 +342,9 @@ exports.createSubmission = async (req, res) => {
         parsedClosingDate,
         bondLedger,
         REQUIRED_VALIDATORS,
-        REQUIRED_APPROVALS
+        REQUIRED_APPROVALS,
+        eventType,
+        outcomeRows ? JSON.stringify(outcomeRows) : null
       ]
     );
 
@@ -518,13 +552,18 @@ exports.submitReview = async (req, res) => {
     let approvedEventId = null;
 
     if (approved) {
+      const submissionEventType = submission.event_type || 'binary';
       const eventRes = await client.query(
-        `INSERT INTO events (title, details, closing_date, category)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO events (title, details, closing_date, category, event_type)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING id`,
-        [submission.title, submission.details, submission.closing_date, submission.category]
+        [submission.title, submission.details, submission.closing_date, submission.category, submissionEventType]
       );
       approvedEventId = eventRes.rows[0].id;
+
+      if (submissionEventType !== 'binary' && Array.isArray(submission.outcome_rows)) {
+        await seedEventOutcomes(client, approvedEventId, submissionEventType, submission.outcome_rows);
+      }
 
       const creatorApprovalPayoutLedger = (
         BigInt(submission.creator_bond_ledger || 0) + toLedger(CREATOR_APPROVAL_REWARD_RP)
