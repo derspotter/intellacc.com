@@ -846,6 +846,18 @@ body.dark-mode .belief-percentage {
   color: #7dd3fc;
 }
 
+/* Hardcoded-white surfaces on the predictions page */
+body.dark-mode .predictions-tab {
+  background: var(--card-bg);
+  color: var(--text-color);
+  border-right-color: var(--border-color);
+}
+
+body.dark-mode .event-prob-bar {
+  background: #333;
+  border-color: var(--border-color);
+}
+
 /* Settings layout */
 .settings-page {
   display: flex;
