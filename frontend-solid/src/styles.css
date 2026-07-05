@@ -4587,14 +4587,6 @@ select {
 /* Mobile View (< 768px) */
 @media (max-width: 768px) {
 
-  /* Show mobile navigation */
-
-  /* Adjust wrapper for mobile header */
-  .wrapper {
-    padding-top: calc(56px + env(safe-area-inset-top));
-    /* Account for fixed mobile header */
-  }
-
   /* Mobile sidebar styles */
   .sidebar {
     position: fixed;
@@ -6357,12 +6349,11 @@ body.dark-mode .user-rank {
   font-style: italic;
 }
 
-/* Error Messages */
+/* Error Messages — in normal flow; fixed positioning stacked
+   concurrent errors on top of each other (top-right pileup) */
 .error-message {
-  position: fixed;
-  top: 1rem;
-  right: 1rem;
-  z-index: 1000;
+  color: var(--error-color);
+  margin: 0.5rem 0;
 }
 
 .alert {
@@ -7105,3 +7096,78 @@ body.skin-terminal * {
 .group-member-name { font-weight: 700; }
 .group-feed-item { position: relative; }
 .group-post-remove { font-size: 0.7rem; border: 1px solid var(--border-color); background: var(--card-bg); border-radius: var(--border-radius); padding: 0.1rem 0.45rem; cursor: pointer; margin-bottom: 0.2rem; }
+
+/* =============================================
+   Mobile bottom tab bar + sidebar drawer
+   Sidebar is off-canvas at <=1024px; the tab bar is the
+   primary nav there. Sharp geometry only: no border-radius.
+   ============================================= */
+.mobile-tab-bar {
+  display: none;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  /* Desktop's 10vh centered-column offset is dead space on small screens. */
+  .wrapper {
+    padding-top: 1rem;
+  }
+
+  .mobile-tab-bar {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(56px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    background-color: var(--black-bg);
+    border-top: 2px solid var(--primary-color);
+    z-index: 998;
+  }
+
+  .mobile-tab-item {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    color: white;
+    font-family: inherit;
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .mobile-tab-item.active {
+    color: var(--primary-color);
+    background-color: white;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+  }
+
+  /* Sidebar drawer slides over the backdrop (z-index 1000 set
+     in the tablet/mobile sidebar blocks above). */
+
+  /* Keep content clear of the fixed tab bar. */
+  .main-content {
+    margin-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+}

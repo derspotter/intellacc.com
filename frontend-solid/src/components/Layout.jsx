@@ -6,6 +6,7 @@ import {
 } from 'solid-js';
 import { isAuthenticated, logout } from '../services/auth';
 import { setSkin, skinState } from '../services/skinProvider';
+import MobileTabBar from './MobileTabBar';
 
 const refreshAuth = () => isAuthenticated();
 
@@ -31,9 +32,15 @@ function TerminalSkinToggle() {
   );
 }
 
-function VanSidebar() {
+function VanSidebar(props) {
   return (
-    <aside class="sidebar">
+    <aside
+      class="sidebar"
+      classList={{ open: props.open }}
+      onClick={(e) => {
+        if (e.target.closest('a, button')) props.onClose();
+      }}
+    >
       <div class="sidebar-logo">INTELLACC</div>
       <div class="sidebar-content">
         <div class="sidebar-item">
@@ -86,14 +93,24 @@ function VanSidebar() {
 }
 
 function VanLayout(props) {
+  const [drawerOpen, setDrawerOpen] = createSignal(false);
+  const closeDrawer = () => setDrawerOpen(false);
+
+  onMount(() => window.addEventListener('hashchange', closeDrawer));
+  onCleanup(() => window.removeEventListener('hashchange', closeDrawer));
+
   return (
     <div class="app-container">
       <div class="wrapper">
         <div class="content-container">
-          <VanSidebar />
+          <VanSidebar open={drawerOpen()} onClose={closeDrawer} />
+          <Show when={drawerOpen()}>
+            <div class="sidebar-backdrop" onClick={closeDrawer} />
+          </Show>
           <main class={`main-content page-${props.page || 'home'}`}>{props.children}</main>
         </div>
       </div>
+      <MobileTabBar moreOpen={drawerOpen()} onMoreToggle={() => setDrawerOpen((v) => !v)} />
     </div>
   );
 }
