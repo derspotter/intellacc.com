@@ -6,12 +6,10 @@ const { createUser, cleanupUsers, SOLID_URL } = require('./helpers/solidMessagin
 const created = [];
 test.afterAll(async () => cleanupUsers(created));
 
-// NOTE: MarketPanel.jsx currently renders two copies of the market list/detail
-// tree (a `md:hidden` mobile branch and a `hidden md:flex` desktop branch) —
-// both exist in the DOM at all times, CSS just hides one per viewport. A
-// later task merges the duplication. Until then, every testid below is
-// duplicated, so we scope locators to `:visible` to target only the branch
-// that's actually rendered at the default (desktop) test viewport.
+// MarketPanel.jsx mounts a single list/detail tree and toggles visibility via
+// responsive classes (see `market list is mounted exactly once` below). The
+// `:visible` scoping on locators is kept anyway so these tests remain
+// viewport-agnostic — a single rendered element still matches `:visible`.
 async function openMarketPane(page, prefix) {
   const u = await createUser(prefix);
   created.push(u);
@@ -42,4 +40,10 @@ test('search queries the server', async ({ page }) => {
   await page.locator('[data-testid="market-search"]:visible').fill('zzz-no-such-event-zzz');
   await expect(page.locator('[data-testid="market-empty"]:visible')).toBeVisible({ timeout: 10000 });
   await expect(page.locator('[data-testid="market-count"]:visible')).toContainText('0/');
+});
+
+test('market list is mounted exactly once', async ({ page }) => {
+  await openMarketPane(page, 'tmkt4');
+  const searchBoxes = await page.locator('[data-testid="market-search"]').count();
+  expect(searchBoxes).toBe(1);
 });
