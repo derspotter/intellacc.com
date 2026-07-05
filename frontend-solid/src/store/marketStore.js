@@ -15,15 +15,19 @@ const [state, setState] = createStore({
     selectedMarketId: null
 });
 
+let fetchEpoch = 0;
+
 const fetchPage = async ({ reset }) => {
     if (!getToken()) {
         setState({ markets: [], total: 0, hasMore: false, loading: false, loadingMore: false, error: null });
         return;
     }
+    const epoch = ++fetchEpoch;
     const offset = reset ? 0 : state.markets.length;
-    setState(reset ? { loading: true, error: null } : { loadingMore: true, error: null });
+    setState(reset ? { loading: true, loadingMore: false, error: null } : { loadingMore: true, error: null });
     try {
         const res = await api.events.getPage({ search: state.search, limit: PAGE_SIZE, offset });
+        if (epoch !== fetchEpoch) return; // superseded by a newer request
         const items = Array.isArray(res?.items) ? res.items : [];
         setState({
             markets: reset ? items : [...state.markets, ...items],
@@ -33,6 +37,7 @@ const fetchPage = async ({ reset }) => {
             loadingMore: false
         });
     } catch (err) {
+        if (epoch !== fetchEpoch) return;
         console.error("Failed to load markets", err);
         setState({ error: err.message, loading: false, loadingMore: false });
     }

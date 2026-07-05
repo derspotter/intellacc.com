@@ -1,4 +1,4 @@
-import { Show, createSignal, onCleanup } from "solid-js";
+import { Show, createSignal, createEffect, onCleanup } from "solid-js";
 import { Panel } from "./ui/Panel";
 import { MarketList } from "./market/MarketList";
 import { MarketDetail } from "./market/MarketDetail";
@@ -7,8 +7,16 @@ import { marketStore } from "../store/marketStore";
 
 const MarketSearchRow = () => {
     let debounceTimer;
+    let inputEl;
     const [value, setValue] = createSignal(marketStore.state.search);
     onCleanup(() => clearTimeout(debounceTimer));
+
+    createEffect(() => {
+        const s = marketStore.state.search;
+        if (typeof document === 'undefined' || document.activeElement !== inputEl) {
+            setValue(s);
+        }
+    });
 
     const onInput = (e) => {
         const q = e.currentTarget.value;
@@ -27,6 +35,7 @@ const MarketSearchRow = () => {
                 placeholder="SEARCH MARKETS..."
                 value={value()}
                 onInput={onInput}
+                ref={el => inputEl = el}
             />
             <span data-testid="market-count" class="text-bb-muted">
                 {marketStore.state.markets.length}/{marketStore.state.total}
