@@ -57,8 +57,8 @@ transaction structure:
 - Payout = `C(q) − C(q − Δ)` via the existing `lmsr_multi_core::cost`.
 - Atomically: decrement `user_outcome_shares.shares` and `staked_ledger`
   proportionally, update `event_outcome_states` q-values, credit user ledger balance
-  (RP), journal a `market_outcome_updates` row (negative-stake style, matching binary
-  sell journaling).
+  (RP). No journal row: binary sells do not write `market_updates` rows, and outcome
+  sells match that behavior for consistency.
 - Response: binary `SellResult` fields (`payout`, `new_prob` of the sold outcome,
   `current_cost_c`) **plus** refreshed `outcomes: [MarketOutcomeView]` so the UI
   repaints all prices in one round trip.
@@ -85,18 +85,31 @@ Union `user_outcome_shares` joined to `event_outcomes` into the result set. Mult
 rows carry `event_id, outcome_id, label, shares, staked_ledger` (+ event title/type as
 the binary rows do). Binary rows keep their exact current shape — additive change.
 
-### Events list payload
+### Market-question pipeline (creation path)
 
-Add `resolution_outcome_id` to the SELECT in `getEvents`/`getEventById`
-(`predictionsController.js:464,511`) so the admin unresolved filter works (see §4).
+User-facing creation flows through the community submission pipeline
+(`POST /market-questions` → bond → validator review → event created at finalize in
+`marketQuestionController.js:520`), NOT `api.events.create`. Supporting multi-outcome
+creation therefore needs:
+
+- Migration: `ALTER TABLE market_question_submissions` adding
+  `event_type VARCHAR(20) DEFAULT 'binary'` (same CHECK values as `events`),
+  `outcomes JSONB`, `numeric_buckets JSONB`.
+- `createSubmission`: accept + validate `event_type`/`outcomes`/`numeric_buckets`
+  using the same normalize/validate helpers as `createEvent` (extracted to a shared
+  module `backend/src/utils/eventOutcomes.js`), persist them on the submission.
+- Finalize step (`submitReview` approval branch): insert the event with `event_type`
+  and seed `event_outcomes`/`event_outcome_states` via the shared `seedEventOutcomes`.
 
 ### No changes needed
 
 - `POST /events/:id/update-outcome` proxy exists (`api.js:679`) and is correct.
 - `GET /events/:id/market` proxy exists (`api.js:408`), returns outcomes array.
-- `createEvent` already accepts `event_type`, `outcomes`, `numeric_buckets` (Tier 3).
 - `PATCH /events/:id` resolution already dispatches on `outcome_id` /
   `numerical_outcome` / `outcome`.
+- Admin unresolved filter: resolving a multi-outcome event sets
+  `outcome = 'resolved_outcome_<id>'`, so the existing `!e.outcome` filter already
+  excludes resolved events of every type.
 
 ### Tests (jest, in-container)
 
@@ -129,8 +142,9 @@ Data flow:
   open cards via the existing `onStakeUpdate` path.
 
 UI (approved select-then-trade shape):
-- Radio list of outcomes: label (numeric buckets formatted as bound range, open-ended
-  ends as `<x` / `≥x`), probability %, user's share count in that outcome if > 0.
+- Radio list of outcomes: label (numeric buckets formatted as bound range, e.g.
+  `120 – 140`; all buckets have finite bounds — the backend rejects open-ended ones),
+  probability %, user's share count in that outcome if > 0.
 - One trade panel bound to the selected outcome: stake input, BUY, SELL (SELL enabled
   only when holdings > 0 in the selected outcome; amount capped at holdings). Same
   ledger-unit conventions and stake clamps as the binary panel.
@@ -155,8 +169,8 @@ conventions so terminal and van skins inherit.
   bucket).
 - `api.events.resolve` extended to pass `outcome_id` / `numerical_outcome` alongside
   legacy `outcome`.
-- Unresolved filter becomes: no `outcome` AND no `resolution_outcome_id` AND no
-  `numerical_outcome`.
+- Unresolved filter unchanged: `!e.outcome` already covers all event types (multi
+  resolution writes `outcome = 'resolved_outcome_<id>'`).
 
 ## 5. Creation UI (question submission flow, `MarketQuestionHub.jsx`)
 
@@ -165,10 +179,12 @@ conventions so terminal and van skins inherit.
 - Multiple choice: dynamic outcomes editor — 2 to 10 text rows, add/remove, client-side
   checks for empty/duplicate labels (backend `normalizeOutcomeRows` re-validates
   authoritatively).
-- Numeric: bucket-boundary editor (ordered numbers → N+1 buckets including open-ended
-  ends), matching `createEvent`'s `numeric_buckets` validation.
-- Submission passes `event_type` + `outcomes`/`numeric_buckets` through the existing
-  create call; gating unchanged (backend enforces Tier 3 as today).
+- Numeric: bucket-boundary editor — an ordered list of finite boundaries
+  `b0 < b1 < … < bn` producing n buckets `[b_i, b_{i+1})`; no open-ended buckets
+  (backend requires finite bounds on every bucket).
+- Submission passes `event_type` + `outcomes`/`numeric_buckets` through
+  `createMarketQuestion` into the submission pipeline (see §2); bond/review gating
+  unchanged.
 
 ## Error handling
 
