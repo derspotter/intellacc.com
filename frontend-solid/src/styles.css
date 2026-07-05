@@ -70,20 +70,20 @@
    needs the double-class selector to win when a skin class is present. */
 body.dark-mode,
 body.skin-van.dark-mode {
-  --blue-bg: #121212;
-  --black-bg: #1e1e1e;
-  --text-color: #e0e0e0;
-  --border-color: #444;
-  --card-bg: #1e1e1e;
-  --secondary-text: #aaa;
-  --hover-bg: rgba(255, 255, 255, 0.06);
+  --blue-bg: #000;
+  --black-bg: #050505;
+  --text-color: #e6e6e6;
+  --border-color: #333;
+  --card-bg: #0a0a0a;
+  --secondary-text: #999;
+  --hover-bg: rgba(255, 255, 255, 0.07);
 
-  --button-bg: #1a1a1a;
+  --button-bg: #0a0a0a;
   --button-fg: var(--text-color);
   --button-border: var(--border-color);
-  --button-hover-bg: #242424;
-  --button-disabled-bg: #2a2a2a;
-  --button-disabled-fg: #777;
+  --button-hover-bg: #1a1a1a;
+  --button-disabled-bg: #161616;
+  --button-disabled-fg: #666;
 
   --focus-ring: rgba(0, 0, 255, 0.38);
   background-color: var(--blue-bg);
@@ -1494,7 +1494,7 @@ body.dark-mode .ai-content-badge {
 }
 
 body.dark-mode .post-content-hover-overlay {
-  background: #121212;
+  background: var(--card-bg);
 }
 
 /* No custom scrollbars: the overlay should never scroll. */
