@@ -14,6 +14,7 @@ import { isAuthenticated } from "../services/auth";
 import { normalizeHashPath } from "../services/routes";
 import { TerminalViewHost, closeTerminalView } from "./terminal/TerminalViewHost";
 import { TERMINAL_VIEWS } from "./terminal/views/registry";
+import TerminalRPBalance from "./terminal/TerminalRPBalance";
 
 function App() {
   const { connect, disconnect, state: socketState } = useSocket();
@@ -409,6 +410,7 @@ function App() {
 	        {/* Left Block */}
 	        <div class="px-3 flex items-center border-r border-bb-bg/20 gap-2">
 	          <span>[INTELLACC] USER: @{userData()?.username || 'GUEST'}</span>
+	          <TerminalRPBalance />
 	          <button
 	            type="button"
 	            onClick={switchToVan}

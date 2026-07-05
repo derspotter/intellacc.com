@@ -39,3 +39,14 @@ test('command palette opens the leaderboard view', async ({ page }) => {
 
   await expect(page.locator('[data-view="leaderboard"]')).toBeVisible({ timeout: 10000 });
 });
+
+test('RP readout shows in top bar and opens leaderboard', async ({ page }) => {
+  await loginTerminal(page, 'tview3');
+
+  const rp = page.locator('[data-testid="rp-readout"]');
+  await expect(rp).toBeVisible({ timeout: 10000 });
+  await expect(rp).toContainText(/RP:\d/);
+
+  await rp.click();
+  await expect(page.locator('[data-view="leaderboard"]')).toBeVisible({ timeout: 10000 });
+});

@@ -158,6 +158,7 @@ const TradeTicket = (props) => {
         try {
             const result = await api.events.update(m.id, { stake, target_prob });
             setLastFill(result);
+            window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
             setStakeShares("");
         } catch (err) {
             setError(err?.data?.message || err?.message || "Trade failed.");
