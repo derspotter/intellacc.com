@@ -52,6 +52,27 @@ async function createUser(label) {
     method: 'POST',
     body: JSON.stringify(user)
   });
+  if (response.status === 429) {
+    // Registration queue full: a REAL pending signup occupies the approval
+    // queue (REGISTRATION_APPROVAL_MAX_PENDING). Never approve/delete it from
+    // tests — insert an approved test user directly instead, cloning the
+    // bcrypt hash of the seeded user1 account (same PASSWORD).
+    const hash = dbQuery(`SELECT password_hash FROM users WHERE email = 'user1@example.com' LIMIT 1;`);
+    if (!hash) {
+      throw new Error('Registration queue full and user1@example.com missing; run tests/e2e/reset-test-users.sh');
+    }
+    const insertedId = dbQuery(`
+      INSERT INTO users (username, email, password_hash, is_approved, approved_at, created_at, updated_at)
+      VALUES ('${user.username}', '${user.email}', '${hash}', TRUE, NOW(), NOW(), NOW())
+      RETURNING id;
+    `);
+    // psql output includes the "INSERT 0 1" command tag on a second line.
+    user.id = Number(String(insertedId).split('\n')[0]);
+    if (!user.id) {
+      throw new Error(`Direct-insert fallback failed for ${user.username}`);
+    }
+    return finishLogin(user);
+  }
   if (!response.ok) {
     throw new Error(`Registration failed for ${user.username} (${response.status}): ${text}`);
   }
@@ -78,6 +99,10 @@ async function createUser(label) {
     }
   }
 
+  return finishLogin(user);
+}
+
+async function finishLogin(user) {
   const login = await apiFetch('/api/login', {
     method: 'POST',
     body: JSON.stringify({ email: user.email, password: user.password })
