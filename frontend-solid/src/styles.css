@@ -3788,6 +3788,8 @@ body.dark-mode .trades-table th {
   flex: 0 0 auto;
   min-width: 0;
   padding: 0;
+  background: none;
+  border: none;
 }
 
 .user-stats-horizontal .stat-main {
