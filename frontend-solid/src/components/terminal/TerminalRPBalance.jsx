@@ -14,10 +14,10 @@ export default function TerminalRPBalance() {
     const u = user.status === 'fulfilled' ? user.value : null;
     const r = rank.status === 'fulfilled' ? rank.value : null;
     if (!u && !r) return; // keep last known value on transient failure
-    setData({
-      balance: Number(u?.rp_balance) || 0,
-      rank: r?.rank || null
-    });
+    setData((prev) => ({
+      balance: u ? (Number(u.rp_balance) || 0) : (prev?.balance ?? 0),
+      rank: r ? (r.rank || null) : (prev?.rank ?? null)
+    }));
   };
 
   createEffect(() => {
