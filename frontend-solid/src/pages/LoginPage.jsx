@@ -156,6 +156,9 @@ export default function LoginPage() {
 
                 <div class="auth-links">
                   <a href="#forgot-password">Forgot password?</a>
+                  <p>
+                    No account yet? <a href="#signup">Create one</a>
+                  </p>
                 </div>
               </div>
             </form>

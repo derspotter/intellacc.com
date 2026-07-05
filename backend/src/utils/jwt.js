@@ -3,7 +3,9 @@ const jwt = require('jsonwebtoken');
 
 // Get secret from environment variable
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
-const JWT_EXPIRY = process.env.JWT_EXPIRY || '1h';
+// 30d: sessions on a social app must survive phone tab suspends; tokens
+// issued before a password change are revoked via password_changed_at.
+const JWT_EXPIRY = process.env.JWT_EXPIRY || '30d';
 
 /**
  * JWT utility functions for token operations
