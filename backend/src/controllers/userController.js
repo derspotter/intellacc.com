@@ -1274,20 +1274,50 @@ exports.getUserPositions = async (req, res) => {
     console.log('🔍 getUserPositions for userId:', authedUserId);
     
     const result = await db.query(`
-      SELECT 
+      SELECT
         us.event_id,
         us.yes_shares,
         us.no_shares,
+        NULL::bigint AS outcome_id,
+        NULL::text AS outcome_label,
+        NULL::double precision AS outcome_shares,
+        NULL::numeric AS outcome_staked_rp,
         e.title as event_title,
         'General'::text AS category,
         e.closing_date,
         e.market_prob,
-        e.cumulative_stake
+        e.cumulative_stake,
+        e.event_type,
+        us.last_updated AS last_updated
       FROM user_shares us
       JOIN events e ON us.event_id = e.id
-      WHERE us.user_id = $1 
+      WHERE us.user_id = $1
         AND (us.yes_shares > 0 OR us.no_shares > 0)
-      ORDER BY us.last_updated DESC
+
+      UNION ALL
+
+      SELECT
+        uos.event_id,
+        0::double precision AS yes_shares,
+        0::double precision AS no_shares,
+        uos.outcome_id,
+        eo.label AS outcome_label,
+        uos.shares AS outcome_shares,
+        (uos.staked_ledger::numeric / 1000000.0) AS outcome_staked_rp,
+        e.title as event_title,
+        'General'::text AS category,
+        e.closing_date,
+        e.market_prob,
+        e.cumulative_stake,
+        e.event_type,
+        uos.updated_at AS last_updated
+      FROM user_outcome_shares uos
+      JOIN events e ON uos.event_id = e.id
+      JOIN event_outcomes eo ON eo.id = uos.outcome_id
+      WHERE uos.user_id = $1
+        AND uos.shares > 0
+
+      ORDER BY last_updated DESC
     `, [authedUserId]);
     
     console.log('🔍 Found', result.rows.length, 'positions for user', authedUserId);
