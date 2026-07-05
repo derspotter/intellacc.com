@@ -100,7 +100,7 @@ body.skin-van.dark-mode {
 
 html {
   scroll-behavior: smooth;
-  overflow-x: hidden;
+  overflow-x: clip;
   /* Prevent "snap back" on first scroll when late layout changes occur (fonts/images/virtualization). */
   overflow-anchor: none;
 }
@@ -108,7 +108,7 @@ html {
 body {
   line-height: 1.5;
   background-color: var(--blue-bg);
-  overflow-x: hidden;
+  overflow-x: clip;
   overflow-anchor: none;
 }
 
@@ -1004,6 +1004,13 @@ body.dark-mode .device-item {
   text-align: center;
   overflow-y: auto;
   box-sizing: border-box;
+  /* Pin the nav while the content column scrolls (overridden by the
+     off-canvas fixed positioning at <=1024px). */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: 100vh;
+  max-height: 100svh;
 }
 
 .sidebar-logo {

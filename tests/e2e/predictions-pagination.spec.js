@@ -25,7 +25,7 @@ test.describe('predictions pagination', () => {
   });
 
   test('search filters server-side', async ({ page }) => {
-    await page.locator('input[placeholder*="Search by title"]').fill('zzz-no-such-event-zzz');
+    await page.locator('.events-filters input[type="text"]').fill('zzz-no-such-event-zzz');
     await expect(page.locator('.no-events')).toBeVisible({ timeout: 10000 });
   });
 });
