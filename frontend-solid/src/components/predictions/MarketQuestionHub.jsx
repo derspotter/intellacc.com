@@ -60,6 +60,9 @@ export default function MarketQuestionHub() {
   const [details, setDetails] = createSignal('');
   const [category, setCategory] = createSignal('');
   const [closingDate, setClosingDate] = createSignal(toLocalDateTimeValue(new Date(Date.now() + 24 * 60 * 60 * 1000)));
+  const [eventType, setEventType] = createSignal('binary');
+  const [outcomeLabels, setOutcomeLabels] = createSignal(['', '']);
+  const [bucketBoundaries, setBucketBoundaries] = createSignal('');
   const [reviewNotes, setReviewNotes] = createSignal({});
 
   const noteFor = (id) => {
@@ -159,9 +162,46 @@ export default function MarketQuestionHub() {
       return;
     }
 
+    const payloadExtras = {};
+    if (eventType() === 'multiple_choice') {
+      const labels = outcomeLabels().map((l) => String(l).trim()).filter(Boolean);
+      const uniqueLabels = new Set(labels.map((l) => l.toLowerCase()));
+      if (labels.length < 2) {
+        setErrors('Multiple choice questions need at least two outcomes.');
+        return;
+      }
+      if (labels.length > 10) {
+        setErrors('At most 10 outcomes allowed.');
+        return;
+      }
+      if (uniqueLabels.size !== labels.length) {
+        setErrors('Outcome labels must be unique.');
+        return;
+      }
+      payloadExtras.event_type = 'multiple_choice';
+      payloadExtras.outcomes = labels;
+    } else if (eventType() === 'numeric') {
+      const bounds = String(bucketBoundaries())
+        .split(',')
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isFinite(n));
+      const sorted = [...bounds].sort((a, b) => a - b);
+      const strictlyIncreasing = sorted.every((v, i) => i === 0 || v > sorted[i - 1]);
+      if (bounds.length < 3 || !strictlyIncreasing) {
+        setErrors('Enter at least 3 strictly increasing boundaries (e.g. "0, 10, 20") — they define the buckets.');
+        return;
+      }
+      payloadExtras.event_type = 'numeric';
+      payloadExtras.numeric_buckets = sorted.slice(0, -1).map((lower, i) => ({
+        lower_bound: lower,
+        upper_bound: sorted[i + 1]
+      }));
+    }
+
     setCreating(true);
     try {
       const payload = {
+        ...payloadExtras,
         title: String(title()).trim(),
         details: String(details()).trim(),
         category: String(category()).trim() || null,
@@ -173,6 +213,9 @@ export default function MarketQuestionHub() {
       setDetails('');
       setCategory('');
       setClosingDate(toLocalDateTimeValue(new Date(Date.now() + 24 * 60 * 60 * 1000)));
+      setEventType('binary');
+      setOutcomeLabels(['', '']);
+      setBucketBoundaries('');
       setMineOnly(true);
       setActiveTab('mine');
       setListLoaded(false);
@@ -289,6 +332,67 @@ export default function MarketQuestionHub() {
           value={closingDate()}
           onInput={(event) => setClosingDate(event.target.value)}
         />
+        <label for="mq-event-type">Question type</label>
+        <select
+          id="mq-event-type"
+          value={eventType()}
+          onChange={(e) => setEventType(e.currentTarget.value)}
+        >
+          <option value="binary">Binary (yes / no)</option>
+          <option value="multiple_choice">Multiple choice</option>
+          <option value="numeric">Numeric buckets</option>
+        </select>
+
+        <Show when={eventType() === 'multiple_choice'}>
+          <label>Outcomes (2–10)</label>
+          <For each={outcomeLabels()}>
+            {(label, index) => (
+              <div class="mq-outcome-row">
+                <input
+                  type="text"
+                  value={label}
+                  placeholder={`Outcome ${index() + 1}`}
+                  onInput={(e) => {
+                    const next = [...outcomeLabels()];
+                    next[index()] = e.target.value;
+                    setOutcomeLabels(next);
+                  }}
+                />
+                <Show when={outcomeLabels().length > 2}>
+                  <button
+                    type="button"
+                    class="button"
+                    onClick={() => setOutcomeLabels(outcomeLabels().filter((_, i) => i !== index()))}
+                  >
+                    Remove
+                  </button>
+                </Show>
+              </div>
+            )}
+          </For>
+          <Show when={outcomeLabels().length < 10}>
+            <button
+              type="button"
+              class="button"
+              onClick={() => setOutcomeLabels([...outcomeLabels(), ''])}
+            >
+              Add outcome
+            </button>
+          </Show>
+        </Show>
+
+        <Show when={eventType() === 'numeric'}>
+          <label for="mq-bucket-bounds">Bucket boundaries (comma-separated, ascending)</label>
+          <input
+            id="mq-bucket-bounds"
+            type="text"
+            value={bucketBoundaries()}
+            placeholder="e.g. 0, 10, 20, 50"
+            onInput={(e) => setBucketBoundaries(e.target.value)}
+          />
+          <p class="muted">N boundaries create N−1 buckets, e.g. "0, 10, 20" → [0–10), [10–20).</p>
+        </Show>
+
         <div class="market-question-form-actions">
           <button type="submit" class="button button-primary" disabled={creating()}>
             {creating() ? 'Submitting...' : 'Submit question'}
