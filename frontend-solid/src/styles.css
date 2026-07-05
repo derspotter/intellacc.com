@@ -861,11 +861,11 @@ body.dark-mode .event-prob-bar {
 /* Bauhaus framing on black: hard white strokes separate the nav and the
    content column from the void. */
 body.dark-mode .sidebar {
-  border-right: 2px solid #fff;
+  border: 1px solid #fff;
 }
 
 body.dark-mode .main-content {
-  border: 2px solid #fff;
+  border: 1px solid #fff;
   box-shadow: none;
 }
 
