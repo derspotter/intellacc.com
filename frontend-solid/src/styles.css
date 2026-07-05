@@ -858,6 +858,17 @@ body.dark-mode .event-prob-bar {
   border-color: var(--border-color);
 }
 
+/* Bauhaus framing on black: hard white strokes separate the nav and the
+   content column from the void. */
+body.dark-mode .sidebar {
+  border-right: 2px solid #fff;
+}
+
+body.dark-mode .main-content {
+  border: 2px solid #fff;
+  box-shadow: none;
+}
+
 /* Settings layout */
 .settings-page {
   display: flex;
