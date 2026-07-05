@@ -13,7 +13,9 @@ export const TerminalViewHost = (props) => {
 
   return (
     <Show when={view()}>
-      <div class="absolute inset-0 z-30 bg-bb-bg flex flex-col" data-view={props.viewKey}>
+      {/* z-[55]: must beat pane internals (chat sidebar z-40, resize handles z-50);
+          the command palette lives in a sibling z-[60] layer and stays on top. */}
+      <div class="absolute inset-0 z-[55] bg-bb-bg flex flex-col" data-view={props.viewKey}>
         <div class="shrink-0 h-8 flex items-center justify-between px-3 bg-bb-panel border-b border-bb-border font-mono text-xs select-none">
           <span class="text-bb-accent font-bold">[VIEW] {view().title}</span>
           <button
