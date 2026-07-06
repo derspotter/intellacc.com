@@ -149,6 +149,7 @@ app.use(express.json({
 if (!isJestRuntime()) {
   passwordResetService.startResetWorker();
   mlsService.startCleanupWorker();
+  require('./services/topicService').startClassificationWorker();
 }
 
 // Security headers

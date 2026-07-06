@@ -1,5 +1,5 @@
 // Metaculus API integration for fetching prediction questions
-use crate::market_import::{exclusion_reason, ImportedMarket, MarketImportProvider};
+use crate::market_import::{ImportedMarket, MarketImportProvider};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
@@ -210,14 +210,6 @@ impl MetaculusClient {
 
         for (question, post) in questions_with_posts {
             let market = self.convert_to_imported_market(&question, &post);
-
-            if let Some(reason) = exclusion_reason(&market) {
-                println!(
-                    "⏭️ Skipping {} market ({}): {}",
-                    reason, market.external_id, market.title
-                );
-                continue;
-            }
 
             // Check if we already have this question by Metaculus ID (more reliable)
             let metaculus_id_pattern = format!("Metaculus ID: {}", market.external_id);

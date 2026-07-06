@@ -192,15 +192,6 @@ async fn sync_provider(pool: &PgPool, provider: ImportProvider, full: bool) -> R
     let topic_id = ensure_external_import_topic(pool).await?;
 
     for market in markets {
-        if let Some(reason) = exclusion_reason(&market) {
-            stats.excluded_count += 1;
-            println!(
-                "⏭️ [{}] Excluded {} [{}]: {}",
-                stats.provider, reason, market.external_id, market.title
-            );
-            continue;
-        }
-
         match upsert_market(pool, topic_id, &market, has_pgvector).await {
             Ok(PersistOutcome::LinkedExisting) => {
                 stats.linked_count += 1;
@@ -1367,50 +1358,3 @@ fn ensure_unique_outcome_keys(outcomes: &mut [ImportedOutcome]) {
     }
 }
 
-pub fn exclusion_reason(market: &ImportedMarket) -> Option<&'static str> {
-    let category = market.category.to_lowercase();
-    let title = market.title.to_lowercase();
-    let description = market.description.to_lowercase();
-    let haystack = format!("{} {} {}", category, title, description);
-
-    let sports_keywords = [
-        "sport",
-        "soccer",
-        "football",
-        "nfl",
-        "nba",
-        "mlb",
-        "nhl",
-        "tennis",
-        "golf",
-        "f1",
-        "formula 1",
-        "olympic",
-        "world cup",
-        "champions league",
-        "betting odds",
-        "match result",
-        "vs ",
-    ];
-    if sports_keywords.iter().any(|k| haystack.contains(k)) {
-        return Some("sports market");
-    }
-
-    let mention_keywords = [
-        "mention market",
-        "mentions market",
-        "who will mention",
-        "will mention",
-        "mentions ",
-        "tweet about",
-        "x post about",
-        "posts about",
-        "talk about on x",
-        "say on x",
-    ];
-    if mention_keywords.iter().any(|k| haystack.contains(k)) {
-        return Some("mention market");
-    }
-
-    None
-}

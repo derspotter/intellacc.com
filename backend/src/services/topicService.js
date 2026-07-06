@@ -191,11 +191,42 @@ const classifyUnclassifiedEventsLLM = async () => {
   return classified;
 };
 
+// Periodic sweep so engine imports get topic + junk verdicts without anyone
+// hitting the admin endpoint. Deterministic keyword filtering was removed from
+// the prediction engine (too many false positives); Gemma's junk verdict is
+// the only content gate, so unclassified events must not linger.
+const CLASSIFY_SWEEP_INTERVAL_MS = Number(process.env.TOPIC_CLASSIFY_SWEEP_INTERVAL_MS || 15 * 60 * 1000);
+let sweepRunning = false;
+let sweepTimer = null;
+
+const startClassificationWorker = () => {
+  if (sweepTimer) return;
+  const run = async () => {
+    if (sweepRunning) return;
+    sweepRunning = true;
+    try {
+      const classified = await classifyUnclassifiedEventsLLM();
+      if (classified > 0) {
+        console.log(`[Topics] Sweep classified ${classified} events`);
+      }
+    } catch (error) {
+      console.error('[Topics] Classification sweep failed:', error.message || String(error));
+    } finally {
+      sweepRunning = false;
+    }
+  };
+  sweepTimer = setInterval(run, CLASSIFY_SWEEP_INTERVAL_MS);
+  if (typeof sweepTimer.unref === 'function') sweepTimer.unref();
+  // First pass shortly after boot (let migrations/startup settle).
+  setTimeout(run, 30 * 1000).unref?.();
+};
+
 module.exports = {
   embedMissingTopicEmbeddings,
   classifyEvent,
   classifyUnclassifiedEvents,
   classifyEventLLM,
   classifyUnclassifiedEventsLLM,
+  startClassificationWorker,
   SECOND_TOPIC_MARGIN
 };
