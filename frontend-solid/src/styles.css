@@ -1005,12 +1005,14 @@ body.dark-mode .device-item {
   overflow-y: auto;
   box-sizing: border-box;
   /* Pin the nav while the content column scrolls (overridden by the
-     off-canvas fixed positioning at <=1024px). */
+     off-canvas fixed positioning at <=1024px). top matches the wrapper's
+     10vh offset so the sidebar never visually moves, not even the first
+     10vh before a top:0 sticky would engage. */
   position: sticky;
-  top: 0;
+  top: 10vh;
   align-self: flex-start;
-  max-height: 100vh;
-  max-height: 100svh;
+  max-height: 90vh;
+  max-height: 90svh;
 }
 
 .sidebar-logo {
