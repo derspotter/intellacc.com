@@ -51,7 +51,7 @@ export default function NotificationsView() {
       })(items()));
       setHasMore(rows.length >= PAGE);
       const c = await getUnreadNotificationCount().catch(() => null);
-      setUnread(Number(c?.count ?? items().filter(i => !i.read).length) || 0);
+      setUnread(Math.max(0, Number(c?.count ?? items().filter(i => !i.read).length) || 0));
     } catch (e) {
       setError(e?.message || 'FAILED TO LOAD NOTIFICATIONS');
     } finally {
@@ -63,7 +63,7 @@ export default function NotificationsView() {
     load(true);
     const off = registerSocketEventHandler('notification', (payload) => {
       const n = unwrap(payload);
-      if (payload?.type === 'unreadCountUpdate') { setUnread(Number(payload.count) || 0); return; }
+      if (payload?.type === 'unreadCountUpdate') { setUnread(Math.max(0, Number(payload.count) || 0)); return; }
       if (!n) return;
       setItems((prev) => prev.some(i => String(i.id) === String(n.id)) ? prev : [n, ...prev]);
       setUnread((u) => u + (n.read ? 0 : 1));
@@ -75,7 +75,7 @@ export default function NotificationsView() {
     if (n.read) return;
     setItems((prev) => prev.map(i => i.id === n.id ? { ...i, read: true } : i));
     setUnread((u) => Math.max(0, u - 1));
-    try { await markNotificationRead(n.id); } catch { /* stays optimistic; refresh corrects */ }
+    try { await markNotificationRead(n.id); } catch { load(true); }
   };
 
   const markAll = async () => {
