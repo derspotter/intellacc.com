@@ -30,6 +30,8 @@ export default function ProfileView(props) {
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
 
+  let loadEpoch = 0;
+
   const targetId = () => (props.param ? String(props.param) : null);
   const isOwn = () => {
     const current = getCurrentUserId();
@@ -44,19 +46,26 @@ export default function ProfileView(props) {
     setFollowing(null);
     setNetwork(null);
     setError('');
+    const epoch = ++loadEpoch;
     const load = async () => {
       try {
         const p = id && !isOwn() ? await getUser(id) : await getCurrentUser();
+        if (epoch !== loadEpoch) return;
         setProfile(p?.user || p);
         if (isOwn()) {
           getPredictions().then((rows) => {
+            if (epoch !== loadEpoch) return;
             const items = Array.isArray(rows) ? rows : (rows?.items || rows?.predictions || []);
             setPredictions(items.slice(0, 5));
           }).catch(() => {});
         } else if (isLoggedIn()) {
-          getFollowingStatus(id).then((s) => setFollowing(Boolean(s?.isFollowing))).catch(() => {});
+          getFollowingStatus(id).then((s) => {
+            if (epoch !== loadEpoch) return;
+            setFollowing(Boolean(s?.isFollowing));
+          }).catch(() => {});
         }
       } catch (e) {
+        if (epoch !== loadEpoch) return;
         setError(e?.message || 'FAILED TO LOAD PROFILE');
       }
     };
