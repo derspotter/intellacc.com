@@ -1,10 +1,12 @@
-import { Show, createSignal, createEffect, onCleanup } from "solid-js";
+import { Show, createSignal, createEffect, onCleanup, onMount } from "solid-js";
 import { clsx } from "clsx";
 import { Panel } from "./ui/Panel";
 import { MarketList } from "./market/MarketList";
 import { MarketDetail } from "./market/MarketDetail";
 import { MarketTicker } from "./market/MarketTicker";
 import { marketStore } from "../store/marketStore";
+import { api } from "../services/api";
+import { getCurrentUserId } from "../services/auth";
 
 const MarketSearchRow = () => {
     let debounceTimer;
@@ -45,6 +47,39 @@ const MarketSearchRow = () => {
     );
 };
 
+const WeeklySlot = () => {
+    const [assignment, setAssignment] = createSignal(null);
+    onMount(async () => {
+        try {
+            const userId = getCurrentUserId();
+            if (!userId) return;
+            const status = await api.weekly.getUserStatus(userId);
+            const a = status?.assignment;
+            if (status?.success && a?.event_id && !status?.isCompleted && !a?.weekly_assignment_completed) {
+                setAssignment(a);
+            }
+        } catch { /* slot simply doesn't render */ }
+    });
+    return (
+        <Show when={assignment()}>
+            <div data-testid="weekly-slot" class="shrink-0 flex items-center justify-between gap-2 px-2 py-1 border-b border-bb-border bg-bb-tmux/10 font-mono text-xs">
+                <span class="min-w-0 truncate">
+                    <span class="text-bb-tmux font-bold">[WEEKLY]</span>{' '}
+                    {assignment().event_title || `EVENT ${assignment().event_id}`}
+                </span>
+                <button
+                    type="button"
+                    data-testid="weekly-stake"
+                    class="shrink-0 px-2 py-0.5 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 uppercase font-bold"
+                    onClick={() => { window.location.hash = `#predictions/${assignment().event_id}`; }}
+                >
+                    [STAKE NOW]
+                </button>
+            </div>
+        </Show>
+    );
+};
+
 export const MarketPanel = () => {
     const hasSelection = () => marketStore.state.selectedMarketId != null;
 
@@ -62,6 +97,7 @@ export const MarketPanel = () => {
                 <div class="shrink-0 z-10">
                     <MarketTicker />
                 </div>
+                <WeeklySlot />
                 <MarketSearchRow />
                 <div class="flex-1 min-h-0">
                     <Show when={!marketStore.state.loading} fallback={<div class="p-4 text-bb-muted animate-pulse">Loading Markets...</div>}>

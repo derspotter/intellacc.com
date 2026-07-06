@@ -336,7 +336,7 @@ export const MarketDetail = () => {
                 </div>
 
                 <div class="border-b border-bb-border pb-2 mb-4">
-                    <h2 class="text-lg font-bold text-bb-accent mb-1">{market().title}</h2>
+                    <h2 data-testid="market-detail-title" class="text-lg font-bold text-bb-accent mb-1">{market().title}</h2>
                     <div class="flex justify-between text-xs text-bb-muted">
                         <span>ID: {market().id}</span>
                         <span>CLOSE: {market().closing_date ? new Date(market().closing_date).toLocaleDateString() : 'N/A'}</span>

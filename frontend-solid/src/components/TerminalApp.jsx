@@ -34,6 +34,9 @@ function App() {
     if (PANE_ROUTES[route]) {
       setActivePane(PANE_ROUTES[route]);
       setActiveView(null);
+      if (route === 'predictions' && param) {
+        marketStore.ensureMarket(Number(param));
+      }
     } else if (TERMINAL_VIEWS[route]) {
       setActiveView({ key: route, param: param || null });
     }

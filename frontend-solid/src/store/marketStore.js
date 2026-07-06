@@ -29,8 +29,16 @@ const fetchPage = async ({ reset }) => {
         const res = await api.events.getPage({ search: state.search, limit: PAGE_SIZE, offset });
         if (epoch !== fetchEpoch) return; // superseded by a newer request
         const items = Array.isArray(res?.items) ? res.items : [];
+        // A reset (fresh page load / new search) replaces state.markets wholesale.
+        // If ensureMarket() concurrently pinned the currently-selected market into
+        // state.markets (e.g. a #predictions/:id deep link racing the initial
+        // loadMarkets() call) and the new page doesn't happen to include it, keep
+        // it pinned at the front rather than silently dropping the selection.
+        const pinned = reset && state.selectedMarketId != null && !items.some(m => m.id === state.selectedMarketId)
+            ? state.markets.find(m => m.id === state.selectedMarketId)
+            : null;
         setState({
-            markets: reset ? items : [...state.markets, ...items],
+            markets: reset ? (pinned ? [pinned, ...items] : items) : [...state.markets, ...items],
             total: Number(res?.total) || items.length,
             hasMore: Boolean(res?.hasMore),
             loading: false,
@@ -101,6 +109,26 @@ const applyMarketUpdate = (update) => {
     );
 };
 
+// Ensures a specific market is present in state.markets and selected, even if
+// it isn't on the currently loaded page(s). Used by the #predictions/:id deep
+// link. Deliberately does NOT touch total/hasMore: this is a targeted fetch
+// for one market, not a page of results.
+const ensureMarket = async (id) => {
+    if (!Number.isFinite(id)) return;
+    if (state.markets.some(m => m.id === id)) {
+        selectMarket(id);
+        return;
+    }
+    try {
+        const market = await api.events.getById(id);
+        if (!market?.id) return;
+        setState('markets', (prev) => prev.some(m => m.id === market.id) ? prev : [market, ...prev]);
+        selectMarket(market.id);
+    } catch (err) {
+        console.error('ensureMarket failed', err);
+    }
+};
+
 const clear = () => {
     fetchEpoch++; // invalidate any in-flight fetch so it can't repopulate cleared state
     setState({ markets: [], total: 0, hasMore: false, search: '', loading: false, loadingMore: false, error: null, selectedMarketId: null });
@@ -114,5 +142,6 @@ export const marketStore = {
     selectMarket,
     getSelectedMarket,
     applyMarketUpdate,
+    ensureMarket,
     clear
 };
