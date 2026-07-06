@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onMount } from 'solid-js';
+import { For, Show, createSignal, onMount, onCleanup } from 'solid-js';
 import { getActiveSkin, setSkin, VALID_SKINS } from '../../../services/skinProvider';
 import { api, ApiError, getFeedWeights, saveFeedWeights, updateUiPreferences } from '../../../services/api';
 import { KEYS, redistribute } from '../../../lib/feedRanking';
@@ -398,6 +398,8 @@ function ApiKeysSection() {
 
   onMount(loadKeys);
 
+  onCleanup(() => { if (confirmTimer) clearTimeout(confirmTimer); });
+
   const clearConfirm = () => {
     if (confirmTimer) clearTimeout(confirmTimer);
     confirmTimer = null;
@@ -557,6 +559,8 @@ function PasskeysSection() {
     setChecked(true);
     loadCredentials();
   });
+
+  onCleanup(() => { if (confirmTimer) clearTimeout(confirmTimer); });
 
   const clearConfirm = () => {
     if (confirmTimer) clearTimeout(confirmTimer);
