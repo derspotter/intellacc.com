@@ -2,7 +2,7 @@ import { FeedPanel } from "./FeedPanel";
 import { MarketPanel } from "./MarketPanel";
 import { ThreePaneLayout } from "./ui/ThreePaneLayout";
 import { useSocket } from "../services/socket";
-import { createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
+import { createSignal, createEffect, createMemo, onCleanup, onMount, Show, For } from "solid-js";
 import { userData, isLoggedIn } from "../services/tokenService";
 import { LoginModal } from "./auth/LoginModal";
 import { ChatPanel } from "./ChatPanel";
@@ -79,7 +79,12 @@ function App() {
   };
 
   // Actions for Command Palette
-  const allActions = [
+  // Derived (not a static array) so the adminOnly filter re-evaluates when
+  // isAdmin() changes. isAdmin() reads the reactive `token` signal (via
+  // getTokenData() -> getToken()), so this memo re-derives on login/logout
+  // mid-session — an admin logging in without a page reload now sees the
+  // "Open Admin" entry immediately.
+  const allActions = createMemo(() => [
     { id: 'feed', label: 'Focus Feed', shortcut: '1', action: () => goPane('home') },
     { id: 'market', label: 'Focus Market', shortcut: '2', action: () => goPane('predictions') },
     { id: 'chat', label: 'Focus Chat', shortcut: '3', action: () => goPane('messages') },
@@ -92,12 +97,12 @@ function App() {
     { id: 'help', label: 'Toggle Help', shortcut: '?', action: () => setShowHelp(prev => !prev) },
     { id: 'skin-van', label: 'Switch to Van Skin', shortcut: '', action: switchToVan },
     { id: 'logout', label: 'Logout', shortcut: '', action: () => import("../services/tokenService").then(s => s.clearToken()) }
-  ];
+  ]);
 
   const filteredActions = () => {
     const q = paletteQuery().toLowerCase();
-    return allActions.filter(a => 
-      a.label.toLowerCase().includes(q) || 
+    return allActions().filter(a =>
+      a.label.toLowerCase().includes(q) ||
       a.id.toLowerCase().includes(q)
     );
   };

@@ -441,29 +441,33 @@ function MaintenanceSection() {
 }
 
 export default function AdminView() {
+  const [eventsRefresh, setEventsRefresh] = createSignal(0);
+
   // Defense in depth: routing + palette already skip this view for
   // non-admins (TerminalApp's applyRoute/palette filter check isAdmin()),
   // but the view guards itself too in case it is ever reached another way.
-  if (!isAdmin()) {
-    return (
-      <div class="p-4 font-mono text-xs text-market-down uppercase" data-testid="admin-guard">
-        ADMIN ONLY
-      </div>
-    );
-  }
-
-  const [eventsRefresh, setEventsRefresh] = createSignal(0);
-
+  // isAdmin() reads getTokenData(), which reads the reactive `token` signal
+  // from tokenService, so this Show re-evaluates whenever the token changes
+  // (e.g. an admin logging in mid-session) instead of only at first render.
   return (
-    <div class="font-mono text-sm">
-      <Section title="CREATE EVENT">
-        <CreateEventSection onCreated={() => setEventsRefresh((v) => v + 1)} />
-      </Section>
-      <Section title="RESOLVE MARKET">
-        <ResolveMarketSection refreshToken={eventsRefresh} />
-      </Section>
-      <Section title="REVIEW QUEUE"><ReviewQueueSection /></Section>
-      <Section title="MAINTENANCE"><MaintenanceSection /></Section>
-    </div>
+    <Show
+      when={isAdmin()}
+      fallback={(
+        <div class="p-4 font-mono text-xs text-market-down uppercase" data-testid="admin-guard">
+          ADMIN ONLY
+        </div>
+      )}
+    >
+      <div class="font-mono text-sm">
+        <Section title="CREATE EVENT">
+          <CreateEventSection onCreated={() => setEventsRefresh((v) => v + 1)} />
+        </Section>
+        <Section title="RESOLVE MARKET">
+          <ResolveMarketSection refreshToken={eventsRefresh} />
+        </Section>
+        <Section title="REVIEW QUEUE"><ReviewQueueSection /></Section>
+        <Section title="MAINTENANCE"><MaintenanceSection /></Section>
+      </div>
+    </Show>
   );
 }
