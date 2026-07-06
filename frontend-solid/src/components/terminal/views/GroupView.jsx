@@ -57,6 +57,7 @@ export default function GroupView(props) {
   const [chatLoaded, setChatLoaded] = createSignal(false);
   const [chatText, setChatText] = createSignal('');
   const [chatBusy, setChatBusy] = createSignal(false);
+  const [chatError, setChatError] = createSignal('');
 
   // Markets tab
   const [markets, setMarkets] = createSignal([]);
@@ -84,7 +85,7 @@ export default function GroupView(props) {
     setNotFound(false);
     setTab('feed');
     setPosts([]); setFeedLoaded(false); setPostText(''); setPostError('');
-    setMessages([]); setChatLoaded(false); setChatText('');
+    setMessages([]); setChatLoaded(false); setChatText(''); setChatError('');
     setMarkets([]); setMarketsLoaded(false); setPinQuery(''); setPinResults([]);
     setMembers([]); setMembersLoaded(false);
     setReportOpen(false); setReportReason(''); setReportMsg('');
@@ -140,13 +141,16 @@ export default function GroupView(props) {
   const loadFeed = async () => {
     const g = group();
     if (!g) return;
+    const epoch = loadEpoch;
     try {
       const r = await getGroupPosts(g.slug, { limit: 30 });
+      if (epoch !== loadEpoch) return;
       setPosts(Array.isArray(r?.posts) ? r.posts : []);
     } catch {
+      if (epoch !== loadEpoch) return;
       setPosts([]);
     } finally {
-      setFeedLoaded(true);
+      if (epoch === loadEpoch) setFeedLoaded(true);
     }
   };
   createEffect(() => {
@@ -185,13 +189,16 @@ export default function GroupView(props) {
   const loadChat = async () => {
     const g = group();
     if (!g) return;
+    const epoch = loadEpoch;
     try {
       const r = await getGroupMessages(g.slug, { limit: 50 });
+      if (epoch !== loadEpoch) return;
       setMessages(Array.isArray(r?.messages) ? r.messages : []);
     } catch {
+      if (epoch !== loadEpoch) return;
       setMessages([]);
     } finally {
-      setChatLoaded(true);
+      if (epoch === loadEpoch) setChatLoaded(true);
     }
   };
   createEffect(() => {
@@ -223,8 +230,10 @@ export default function GroupView(props) {
       // (joinGroupChat put us in it) — no local append here.
       await sendGroupMessage(g.id, text);
       setChatText('');
+      setChatError('');
     } catch {
       /* keep text so the user can retry */
+      setChatError('SEND FAILED // RETRY');
     } finally {
       setChatBusy(false);
     }
@@ -234,13 +243,16 @@ export default function GroupView(props) {
   const loadMarkets = async () => {
     const g = group();
     if (!g) return;
+    const epoch = loadEpoch;
     try {
       const r = await getGroupMarkets(g.slug);
+      if (epoch !== loadEpoch) return;
       setMarkets(Array.isArray(r?.markets) ? r.markets : []);
     } catch {
+      if (epoch !== loadEpoch) return;
       setMarkets([]);
     } finally {
-      setMarketsLoaded(true);
+      if (epoch === loadEpoch) setMarketsLoaded(true);
     }
   };
   createEffect(() => {
@@ -296,13 +308,16 @@ export default function GroupView(props) {
   const loadMembers = async () => {
     const g = group();
     if (!g) return;
+    const epoch = loadEpoch;
     try {
       const r = await getGroupMembers(g.slug);
+      if (epoch !== loadEpoch) return;
       setMembers(Array.isArray(r?.members) ? r.members : []);
     } catch {
+      if (epoch !== loadEpoch) return;
       setMembers([]);
     } finally {
-      setMembersLoaded(true);
+      if (epoch === loadEpoch) setMembersLoaded(true);
     }
   };
   createEffect(() => {
@@ -455,16 +470,18 @@ export default function GroupView(props) {
             </Show>
             <For each={posts()}>
               {(p) => (
-                <div class="relative">
+                <div>
                   <Show when={group().is_owner}>
-                    <button
-                      type="button"
-                      data-testid="group-post-remove"
-                      onClick={() => removePost(p.id)}
-                      class="absolute top-2 right-2 z-10 px-1.5 py-0.5 border border-market-down/60 text-market-down hover:bg-market-down/20 uppercase text-xxs font-bold"
-                    >
-                      [REMOVE]
-                    </button>
+                    <div class="flex justify-end px-3 py-1 border-b border-bb-border/20">
+                      <button
+                        type="button"
+                        data-testid="group-post-remove"
+                        onClick={() => removePost(p.id)}
+                        class="px-1.5 py-0.5 border border-market-down/60 text-market-down hover:bg-market-down/20 uppercase text-xxs font-bold"
+                      >
+                        [REMOVE POST]
+                      </button>
+                    </div>
                   </Show>
                   <PostItem post={p} disableFeedStore />
                 </div>
@@ -496,27 +513,32 @@ export default function GroupView(props) {
                 when={group().is_member}
                 fallback={<div class="p-3 border-t border-bb-border/30 text-bb-muted text-xxs uppercase">JOIN THIS GROUP TO CHAT</div>}
               >
-                <div class="p-3 border-t border-bb-border/30 flex gap-2 text-xs">
-                  <input
-                    type="text"
-                    data-testid="group-chat-input"
-                    class="flex-1 bg-bb-bg border border-bb-border px-2 py-1 text-bb-text outline-none"
-                    placeholder="MESSAGE..."
-                    maxlength="1000"
-                    value={chatText()}
-                    disabled={chatBusy()}
-                    onInput={(e) => setChatText(e.currentTarget.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitChat(); } }}
-                  />
-                  <button
-                    type="button"
-                    data-testid="group-chat-submit"
-                    disabled={chatBusy() || !chatText().trim()}
-                    onClick={submitChat}
-                    class="px-2 py-1 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 uppercase font-bold disabled:opacity-50"
-                  >
-                    [SEND]
-                  </button>
+                <div class="p-3 border-t border-bb-border/30">
+                  <div class="flex gap-2 text-xs">
+                    <input
+                      type="text"
+                      data-testid="group-chat-input"
+                      class="flex-1 bg-bb-bg border border-bb-border px-2 py-1 text-bb-text outline-none"
+                      placeholder="MESSAGE..."
+                      maxlength="1000"
+                      value={chatText()}
+                      disabled={chatBusy()}
+                      onInput={(e) => { setChatText(e.currentTarget.value); setChatError(''); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitChat(); } }}
+                    />
+                    <button
+                      type="button"
+                      data-testid="group-chat-submit"
+                      disabled={chatBusy() || !chatText().trim()}
+                      onClick={submitChat}
+                      class="px-2 py-1 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 uppercase font-bold disabled:opacity-50"
+                    >
+                      [SEND]
+                    </button>
+                  </div>
+                  <Show when={chatError()}>
+                    <div class="mt-1 text-market-down text-xxs" data-testid="group-chat-error">{chatError()}</div>
+                  </Show>
                 </div>
               </Show>
             </div>
