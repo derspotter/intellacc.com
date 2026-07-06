@@ -976,8 +976,9 @@ exports.getFeed = async (req, res) => {
     }
 
     if (cursor) {
-      params.push(cursor.createdAt, cursor.id);
-      whereClauses.push(`(p.created_at, p.id) < ($${params.length}, $${params.length + 1})`);
+      const cursorIdx = params.length + 1;
+      params.push(cursor.createdAt.toISOString(), cursor.id);
+      whereClauses.push(`(p.created_at, p.id) < ($${cursorIdx}, $${cursorIdx + 1})`);
     }
 
     const result = await db.query(

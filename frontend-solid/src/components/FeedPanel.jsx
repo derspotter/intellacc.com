@@ -1,7 +1,8 @@
-import { For, Show, createSignal, createEffect, onCleanup } from "solid-js";
+import { For, Show, createSignal, createEffect, createMemo, onMount, onCleanup } from "solid-js";
 import { Panel } from "./ui/Panel";
 import { feedStore } from "../store/feedStore";
-import { api, ApiError, getPostComments, createComment, requestBlob } from "../services/api";
+import { api, ApiError, getPostComments, createComment, requestBlob, followUser, getFeedWeights } from "../services/api";
+import { rankPosts } from "../lib/feedRanking";
 
 const PostComposer = () => {
     const [content, setContent] = createSignal("");
@@ -256,6 +257,18 @@ const PostItem = (props) => {
                     >
                         [{props.post.liked_by_user ? 'LIKED' : 'LIKE'}:{props.post.like_count || 0}]
                     </button>
+                    <Show when={feedStore.state.discoverMode}>
+                        <button
+                            type="button"
+                            data-testid="discover-follow"
+                            class="text-bb-accent hover:text-white uppercase"
+                            onClick={async () => {
+                                try { await followUser(props.post.user_id); feedStore.loadPosts(); } catch (err) { console.error('Follow failed', err); }
+                            }}
+                        >
+                            [FOLLOW]
+                        </button>
+                    </Show>
                 </div>
             </div>
             <div class="flex gap-2 text-xxs font-mono mt-1">
@@ -295,26 +308,46 @@ const PostItem = (props) => {
 };
 
 export const FeedPanel = () => {
+    const [weights, setWeights] = createSignal(null);
+    onMount(() => {
+        getFeedWeights().then(w => setWeights(w?.weights || w || null)).catch(() => {});
+    });
+    const rankedPosts = createMemo(() => rankPosts(feedStore.state.posts, weights()));
+
     return (
         <Panel title="[1] FEED // LIVE" class="h-full flex flex-col">
             <PostComposer />
+            <Show when={feedStore.state.discoverMode}>
+                <div data-testid="feed-discover-banner" class="px-2 py-1 text-xxs text-bb-tmux border-b border-bb-border/40 bg-bb-panel/60 uppercase">
+                    [DISCOVER MODE] TOP PREDICTORS IN YOUR TOPICS — FOLLOW TO BUILD YOUR FEED
+                </div>
+            </Show>
             <div class="flex-1 overflow-y-auto">
                 <Show when={!feedStore.state.loading} fallback={<div class="p-2 text-bb-muted font-mono animate-pulse">Running query...</div>}>
-                    <div class="flex flex-col">
-                        <For each={feedStore.state.posts}>
-                            {(post) => <PostItem post={post} />}
-                        </For>
-                    </div>
-                    <Show when={feedStore.state.hasMore}>
-                        <button
-                            type="button"
-                            data-testid="feed-load-more"
-                            class="w-full py-2 text-center text-bb-accent hover:bg-bb-accent/10 uppercase font-bold font-mono text-xs disabled:opacity-50"
-                            disabled={feedStore.state.loadingMore}
-                            onClick={() => feedStore.loadMore()}
-                        >
-                            {feedStore.state.loadingMore ? 'LOADING...' : 'LOAD MORE'}
-                        </button>
+                    <Show
+                        when={rankedPosts().length > 0}
+                        fallback={
+                            <Show when={!feedStore.state.discoverMode}>
+                                <div data-testid="feed-empty" class="p-4 text-bb-muted font-mono text-xs">FEED EMPTY // FOLLOW USERS OR CHECK BACK LATER</div>
+                            </Show>
+                        }
+                    >
+                        <div class="flex flex-col">
+                            <For each={rankedPosts()}>
+                                {(post) => <PostItem post={post} />}
+                            </For>
+                        </div>
+                        <Show when={feedStore.state.hasMore}>
+                            <button
+                                type="button"
+                                data-testid="feed-load-more"
+                                class="w-full py-2 text-center text-bb-accent hover:bg-bb-accent/10 uppercase font-bold font-mono text-xs disabled:opacity-50"
+                                disabled={feedStore.state.loadingMore}
+                                onClick={() => feedStore.loadMore()}
+                            >
+                                {feedStore.state.loadingMore ? 'LOADING...' : 'LOAD MORE'}
+                            </button>
+                        </Show>
                     </Show>
                 </Show>
             </div>

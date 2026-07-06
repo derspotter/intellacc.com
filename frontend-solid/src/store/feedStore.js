@@ -10,7 +10,9 @@ const [state, setState] = createStore({
     nextCursor: null,
     loading: false,
     loadingMore: false,
-    error: null
+    error: null,
+    usingFeed: true,
+    discoverMode: false
 });
 
 let fetchEpoch = 0;
@@ -22,20 +24,59 @@ const appendUnique = (current, next) => {
 
 const fetchPage = async ({ reset }) => {
     if (!getToken()) {
-        setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null });
+        setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: false, discoverMode: false });
         return;
     }
     const epoch = ++fetchEpoch;
+    if (reset) setState('usingFeed', Boolean(getToken()));
     setState(reset ? { loading: true, error: null } : { loadingMore: true, error: null });
     try {
         const cursor = reset ? null : state.nextCursor;
-        const response = await api.posts.getPage({ cursor, limit: PAGE_LIMIT });
+        let response;
+        let usingFeed = state.usingFeed;
+        if (usingFeed) {
+            try {
+                response = await api.posts.getFeedPage({ cursor, limit: PAGE_LIMIT });
+            } catch (err) {
+                const msg = String(err?.message || '');
+                if (reset && (msg.includes('401') || msg.includes('403'))) {
+                    usingFeed = false;
+                    response = await api.posts.getPage({ cursor, limit: PAGE_LIMIT });
+                } else {
+                    throw err;
+                }
+            }
+        } else {
+            response = await api.posts.getPage({ cursor, limit: PAGE_LIMIT });
+        }
         if (epoch !== fetchEpoch) return; // superseded by a newer request
         const paging = getPostsPaging(response);
+
+        // Empty following-feed on reset: discover fallback (top predictors).
+        if (reset && usingFeed && paging.items.length === 0) {
+            try {
+                const discover = await api.discover.feed();
+                if (epoch !== fetchEpoch) return;
+                const items = Array.isArray(discover?.items) ? discover.items : [];
+                if (items.length > 0) {
+                    setState({
+                        posts: items, usingFeed, discoverMode: true,
+                        hasMore: false, nextCursor: null,
+                        loading: false, loadingMore: false
+                    });
+                    return;
+                }
+            } catch (err) {
+                console.error('Discover fallback failed', err);
+            }
+        }
+
         setState({
             posts: reset ? paging.items : appendUnique(state.posts, paging.items),
             hasMore: paging.hasMore,
             nextCursor: paging.nextCursor,
+            usingFeed,
+            discoverMode: reset ? false : state.discoverMode,
             loading: false,
             loadingMore: false
         });
@@ -119,7 +160,7 @@ const unlikePost = (postId) => {
 
 const clear = () => {
     fetchEpoch++; // invalidate any in-flight fetch so it can't repopulate cleared state
-    setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null });
+    setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: true, discoverMode: false });
 };
 
 export const feedStore = {
