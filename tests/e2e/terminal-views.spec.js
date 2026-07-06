@@ -50,3 +50,19 @@ test('RP readout shows in top bar and opens leaderboard', async ({ page }) => {
   await rp.click();
   await expect(page.locator('[data-view="leaderboard"]')).toBeVisible({ timeout: 10000 });
 });
+
+test('top-bar window list escapes an open view', async ({ page }) => {
+  await loginTerminal(page, 'tview5');
+
+  // Landing directly on a view route (e.g. after switching skins from van
+  // settings) must leave a visible way back to the panes.
+  await page.evaluate(() => { window.location.hash = '#settings'; });
+  await expect(page.locator('[data-view="settings"]')).toBeVisible({ timeout: 10000 });
+
+  await page.locator('[data-testid="nav-home"]').click();
+  await expect(page.locator('[data-view="settings"]')).not.toBeVisible();
+  expect(new URL(page.url()).hash).toBe('#home');
+
+  await page.locator('[data-testid="nav-menu"]').click();
+  await expect(page.getByPlaceholder('Type a command...')).toBeVisible();
+});

@@ -473,6 +473,37 @@ function App() {
 	          </Show>
 	        </div>
 
+	        {/* Window list (tmux style): persistent nav. Views are otherwise
+	            palette/hotkey-driven, so the bar must always offer a visible
+	            way back to the panes — e.g. after landing in #settings. */}
+	        <div class="hidden sm:flex px-3 items-center gap-2 border-r border-bb-bg/20">
+	          <For each={[['home', '1:FEED', 1], ['predictions', '2:MKT', 2], ['messages', '3:CHAT', 3]]}>
+	            {([route, label, pane]) => (
+	              <button
+	                type="button"
+	                data-testid={`nav-${route}`}
+	                onClick={() => goPane(route)}
+	                class={
+	                  activePane() === pane && !activeView()
+	                    ? "underline underline-offset-2 cursor-pointer"
+	                    : "opacity-75 hover:opacity-100 hover:text-bb-accent cursor-pointer"
+	                }
+	              >
+	                {label}
+	              </button>
+	            )}
+	          </For>
+	          <button
+	            type="button"
+	            data-testid="nav-menu"
+	            onClick={() => setShowPalette(true)}
+	            class="opacity-75 hover:opacity-100 hover:text-bb-accent cursor-pointer"
+	            title="All views (Ctrl+K)"
+	          >
+	            [MENU]
+	          </button>
+	        </div>
+
 		        {/* Middle Spacer */}
 		        <div class="flex-1 flex items-center justify-end px-3 gap-4">
 		          <span>SYS: {socketState.connected ? 'ONLINE' : 'OFFLINE'}</span>
