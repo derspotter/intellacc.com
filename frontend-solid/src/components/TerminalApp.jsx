@@ -440,7 +440,18 @@ function App() {
 	      <header class="min-h-6 shrink-0 flex items-stretch text-xs font-mono z-20 relative select-none bg-bb-tmux text-bb-bg font-bold overflow-x-auto no-scrollbar whitespace-nowrap">
 	        {/* Left Block */}
 	        <div class="px-3 flex items-center border-r border-bb-bg/20 gap-2">
-	          <span>[INTELLACC] USER: @{userData()?.username || 'GUEST'}</span>
+	          <span>[INTELLACC] USER:</span>
+	          <Show when={isLoggedIn()} fallback={<span>@GUEST</span>}>
+	            <button
+	              type="button"
+	              data-testid="user-readout"
+	              onClick={() => { window.location.hash = '#profile'; }}
+	              class="hover:text-bb-accent cursor-pointer"
+	              title="Open profile"
+	            >
+	              @{userData()?.username}
+	            </button>
+	          </Show>
 	          <TerminalRPBalance />
 	          <button
 	            type="button"

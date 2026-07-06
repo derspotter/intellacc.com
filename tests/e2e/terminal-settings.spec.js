@@ -89,3 +89,21 @@ test('password change (no vault) updates login credentials', async ({ page }) =>
   expect(res.response.status).toBe(200);
   expect(res.body?.token).toBeTruthy();
 });
+
+test('topics section saves selection', async ({ page }) => {
+  const u = await createUser('tset6');
+  created.push(u);
+  const view = await openSettings(page, u);
+  const chips = view.locator('[data-testid="topic-chip"]');
+  await expect(chips.first()).toBeVisible({ timeout: 15000 });
+
+  // Backend enforces a 3-topic minimum (topicsController MIN_TOPICS), so a
+  // fresh user (0 topics) must select at least 3 chips before saving.
+  const count = await chips.count();
+  const toSelect = Math.min(3, count);
+  for (let i = 0; i < toSelect; i++) {
+    await chips.nth(i).click();
+  }
+  await view.locator('[data-testid="topics-save"]').click();
+  await expect(view).toContainText('SAVED // TOPICS', { timeout: 10000 });
+});

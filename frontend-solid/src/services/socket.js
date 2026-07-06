@@ -14,6 +14,18 @@ let socket = null;
 
 const MAX_NOTIFICATIONS = 50;
 
+// Busy markets can emit marketUpdate frequently; debounce the RP balance
+// refresh (rather than firing on every update) so we don't hammer
+// getCurrentUser. TerminalRPBalance listens for this event.
+let rpRefreshTimer = null;
+const scheduleRpRefresh = () => {
+    if (rpRefreshTimer) clearTimeout(rpRefreshTimer);
+    rpRefreshTimer = setTimeout(() => {
+        rpRefreshTimer = null;
+        window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
+    }, 2000);
+};
+
 // Simple pub/sub for MLS socket events (ChatPanel subscribes here).
 const mlsMessageSubscribers = new Set();
 const mlsWelcomeSubscribers = new Set();
@@ -148,6 +160,7 @@ const connect = () => {
 
     socket.on('marketUpdate', (update) => {
         marketStore.applyMarketUpdate(update);
+        scheduleRpRefresh();
     });
 
     socket.on('notification', (data) => {
