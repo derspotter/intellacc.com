@@ -742,4 +742,62 @@ router.post("/events/:eventId/update-outcome", authenticateJWT, requirePhoneVeri
     }
 });
 
+router.post("/events/:eventId/sell-outcome", authenticateJWT, requirePhoneVerified, requireScope('market:trade'), async (req, res) => {
+    const { eventId } = req.params;
+    const eventIdNumber = Number(eventId);
+    const outcomeIdNumber = Number(req.body?.outcome_id);
+    const amount = Number(req.body?.amount);
+
+    if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
+        return res.status(400).json({ message: 'Invalid event id' });
+    }
+    if (!Number.isInteger(outcomeIdNumber) || outcomeIdNumber <= 0) {
+        return res.status(400).json({ message: 'Invalid outcome id' });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ message: 'Invalid amount' });
+    }
+
+    try {
+        const lifecycleValidation = await ensureEventIsActive(eventIdNumber);
+        if (lifecycleValidation.status !== 200) {
+            return res.status(lifecycleValidation.status).json(lifecycleValidation.payload);
+        }
+    } catch (error) {
+        console.error('Error loading event lifecycle state:', error);
+        return res.status(500).json({ error: 'Failed to validate event state' });
+    }
+
+    try {
+        const userId = req.user.id;
+        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/sell-outcome`, {
+            method: 'POST',
+            headers: predictionEngineHeaders,
+            body: JSON.stringify({ user_id: userId, outcome_id: outcomeIdNumber, amount })
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            const io = req.app.get('io');
+            if (io && data.market_prob !== undefined) {
+                io.to('predictions').emit('marketUpdate', {
+                    eventId: eventIdNumber,
+                    market_prob: parseFloat(data.market_prob),
+                    cumulative_stake: data.current_cost_c,
+                    action: 'sell-outcome',
+                    user_id: userId,
+                    outcome_id: outcomeIdNumber,
+                    amount,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            return res.json(data);
+        }
+        return res.status(response.status).json(data);
+    } catch (error) {
+        console.error('Sell outcome proxy error:', error);
+        return res.status(500).json({ error: 'Failed to sell outcome shares' });
+    }
+});
+
 module.exports = router;

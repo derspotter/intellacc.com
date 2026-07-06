@@ -198,6 +198,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/events/:id/kelly", get(kelly_suggestion_endpoint))
         .route("/events/:id/sell", post(sell_shares_endpoint))
         .route(
+            "/events/:id/sell-outcome",
+            post(sell_outcome_shares_endpoint),
+        )
+        .route(
             "/events/:id/market-resolve",
             post(resolve_market_event_endpoint),
         )
@@ -253,6 +257,7 @@ async fn main() -> anyhow::Result<()> {
     println!("  POST /events/:id/update-outcome - Update N-outcome market with stake");
     println!("  GET /events/:id/kelly - Get Kelly criterion suggestion");
     println!("  POST /events/:id/sell - Sell shares back to market");
+    println!("  POST /events/:id/sell-outcome - Sell shares of an N-outcome market outcome");
     println!("  POST /events/:id/market-resolve - Resolve market event");
     println!("  GET /events/:id/shares - Get user's shares for event");
     println!("  POST /lmsr/verify-balance-invariant - Verify balance invariant");
@@ -1009,6 +1014,100 @@ async fn update_market_outcome_endpoint(
                 "Market outcome update error: {}",
                 msg
             )))
+        }
+    }
+}
+
+// Sell shares of an explicit outcome (multiple choice / numeric buckets)
+async fn sell_outcome_shares_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+
+    let user_id = payload
+        .get("user_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| {
+            bad_request_error("Missing or invalid user_id: must be a positive integer")
+        })? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
+
+    let outcome_id = payload
+        .get("outcome_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| bad_request_error("Missing or invalid outcome_id"))?;
+    if outcome_id <= 0 {
+        return Err(bad_request_error("Invalid outcome_id: must be positive"));
+    }
+
+    let amount = payload
+        .get("amount")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| bad_request_error("Missing or invalid amount: must be a finite number"))?;
+    if !amount.is_finite() || amount <= 0.0 {
+        return Err(bad_request_error("Invalid amount: must be positive and finite"));
+    }
+    if amount > 10_000_000.0 {
+        return Err(bad_request_error(
+            "Invalid amount: exceeds maximum allowed (10,000,000 shares)",
+        ));
+    }
+    if amount < 0.000001 {
+        return Err(bad_request_error(
+            "Invalid amount: below minimum allowed (0.000001 shares)",
+        ));
+    }
+
+    match lmsr_api::sell_outcome_shares(
+        &app_state.db,
+        &app_state.config,
+        user_id,
+        event_id,
+        outcome_id,
+        amount,
+    )
+    .await
+    {
+        Ok(result) => {
+            invalidate_and_broadcast(
+                &app_state,
+                "shares_sold",
+                json!({
+                    "event_id": event_id,
+                    "user_id": user_id,
+                    "outcome_id": outcome_id,
+                    "amount": amount,
+                    "payout": result.payout,
+                    "new_prob": result.market_prob,
+                    "cumulative_stake": result.current_cost_c
+                }),
+            );
+            Ok(Json(json!(result)))
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            let msg_lower = msg.to_lowercase();
+            if msg_lower.contains("market resolved") {
+                return Err(bad_request_error("Market resolved"));
+            }
+            if msg_lower.contains("market closed") {
+                return Err(bad_request_error("Market closed"));
+            }
+            if msg_lower.contains("insufficient shares")
+                || msg_lower.contains("hold period")
+                || msg_lower.contains("no configured outcomes")
+                || msg_lower.contains("selected outcome")
+                || msg_lower.contains("binary markets")
+            {
+                return Err(bad_request_error(&msg));
+            }
+            Err(internal_error(&format!("Outcome sell error: {}", msg)))
         }
     }
 }

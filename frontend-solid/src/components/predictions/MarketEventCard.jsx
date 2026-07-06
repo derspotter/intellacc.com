@@ -8,52 +8,16 @@ import {
   placeEventUpdate
 } from '../../services/api';
 import { ApiError } from '../../services/api';
-
-const safeNumber = (value, fallback = 0) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const formatProbability = (value) => `${(safeNumber(value, 0.5) * 100).toFixed(1)}%`;
-const formatCurrency = (value, { includeSymbol = true } = {}) => {
-  const formatted = safeNumber(value).toFixed(2);
-  return includeSymbol ? `${formatted} RP` : formatted;
-};
-
-const toDate = (value) => {
-  const parsed = new Date(value || '');
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-  return parsed;
-};
-
-const toShortDate = (value) => {
-  const parsed = toDate(value);
-  if (!parsed) {
-    return 'No date';
-  }
-  return parsed.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-};
-
-const isPhoneVerificationMessage = (message) =>
-  typeof message === 'string' && message.toLowerCase().includes('verify your phone');
-
-const getProbabilityColor = (probability) => {
-  const prob = safeNumber(probability, 0.5);
-  const red = Math.round(prob * 255);
-  const blue = Math.round((1 - prob) * 255);
-  return `color: rgb(${red}, 0, ${blue})`;
-};
-
-const getKellyEdge = (belief, currentProb) =>
-  (safeNumber(belief, 0.5) - safeNumber(currentProb, 0.5));
+import {
+  safeNumber,
+  formatProbability,
+  formatCurrency,
+  toDate,
+  toShortDate,
+  isPhoneVerificationMessage,
+  getProbabilityColor,
+  getKellyEdge
+} from './marketCardShared';
 
 export default function MarketEventCard(props) {
   const event = () => props.event || {};

@@ -246,7 +246,13 @@ class WeeklyAssignmentService {
         FROM weekly_user_assignments wua
         JOIN users u ON u.id = wua.user_id
         LEFT JOIN events e ON e.id = wua.event_id
-        LEFT JOIN market_updates mu
+        LEFT JOIN (
+          SELECT user_id, event_id, stake_amount, stake_amount_ledger, created_at
+          FROM market_updates
+          UNION ALL
+          SELECT user_id, event_id, stake_amount, stake_amount_ledger, created_at
+          FROM market_outcome_updates
+        ) mu
           ON wua.user_id = mu.user_id
           AND wua.event_id = mu.event_id
           AND mu.created_at >= date_trunc('week', NOW() - INTERVAL '1 week')
@@ -532,7 +538,13 @@ class WeeklyAssignmentService {
           ON wua.user_id = u.id
           AND wua.week_year = $2
         LEFT JOIN events e ON COALESCE(wua.event_id, u.weekly_assigned_event_id) = e.id
-        LEFT JOIN market_updates mu
+        LEFT JOIN (
+          SELECT user_id, event_id, stake_amount, stake_amount_ledger, created_at
+          FROM market_updates
+          UNION ALL
+          SELECT user_id, event_id, stake_amount, stake_amount_ledger, created_at
+          FROM market_outcome_updates
+        ) mu
           ON u.id = mu.user_id
           AND COALESCE(wua.event_id, u.weekly_assigned_event_id) = mu.event_id
           AND mu.created_at >= date_trunc('week', NOW())

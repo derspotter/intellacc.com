@@ -159,6 +159,18 @@ pub struct OutcomeUpdateResult {
     pub market_outcome_update_id: i64,
 }
 
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../shared/types/OutcomeSellResult.ts")]
+pub struct OutcomeSellResult {
+    pub event_id: i32,
+    pub outcome_id: i64,
+    pub payout: f64,
+    pub new_prob: f64,
+    pub current_cost_c: f64,
+    pub market_prob: f64,
+    pub outcomes: Vec<MarketOutcomeView>,
+}
+
 /// Macro for executing transactions with SERIALIZABLE isolation and retry logic
 macro_rules! with_serializable_tx {
     ($pool:expr, $tx_var:ident, $body:block) => {{
@@ -927,6 +939,254 @@ async fn sell_shares_transaction(
         payout,
         new_prob,
         current_cost_c: new_cumulative_cost,
+    })
+}
+
+// Sell shares of one outcome back into an N-outcome market.
+pub async fn sell_outcome_shares(
+    pool: &PgPool,
+    config: &Config,
+    user_id: i32,
+    event_id: i32,
+    outcome_id: i64,
+    amount: f64,
+) -> Result<OutcomeSellResult> {
+    if outcome_id <= 0 {
+        return Err(anyhow!("outcome_id must be positive"));
+    }
+    if !amount.is_finite() || amount <= 0.0 {
+        return Err(anyhow!("Amount must be positive"));
+    }
+
+    with_optimistic_tx!(pool, tx, {
+        sell_outcome_shares_transaction(&mut tx, config, user_id, event_id, outcome_id, amount)
+            .await
+    })
+}
+
+async fn sell_outcome_shares_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    config: &Config,
+    user_id: i32,
+    event_id: i32,
+    outcome_id: i64,
+    amount: f64,
+) -> Result<OutcomeSellResult> {
+    // Lock the event row FIRST (consistent lock order with the buy path).
+    let event_row = sqlx::query(
+        r#"
+        SELECT
+            event_type,
+            liquidity_b,
+            q_yes,
+            q_no,
+            outcome,
+            COALESCE(closing_date <= NOW(), false) AS is_closed
+        FROM events
+        WHERE id = $1
+        FOR UPDATE
+        "#,
+    )
+    .bind(event_id)
+    .fetch_one(tx.as_mut())
+    .await
+    .map_err(|_| anyhow!("Event not found or market not initialized"))?;
+
+    let event_type: String = event_row.get("event_type");
+    let outcome: Option<String> = event_row.get("outcome");
+    let is_closed: bool = event_row.get("is_closed");
+    if outcome.is_some() {
+        return Err(anyhow!(ERR_MARKET_RESOLVED));
+    }
+    if is_closed {
+        return Err(anyhow!(ERR_MARKET_CLOSED));
+    }
+    if event_type == "binary" {
+        return Err(anyhow!("Use legacy binary sell endpoint for binary markets"));
+    }
+
+    // Hold period: outcome buys journal into market_outcome_updates.
+    if config.market.enable_hold_period {
+        let active_holds: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM market_outcome_updates
+             WHERE user_id = $1 AND event_id = $2 AND hold_until > NOW()",
+        )
+        .bind(user_id)
+        .bind(event_id)
+        .fetch_one(tx.as_mut())
+        .await?;
+        if active_holds > 0 {
+            return Err(anyhow!("Hold period not expired for recent purchases"));
+        }
+    }
+
+    // Lock the user's position row SECOND (consistent lock order).
+    let share_row = sqlx::query(
+        "SELECT shares, staked_ledger
+         FROM user_outcome_shares
+         WHERE user_id = $1 AND event_id = $2 AND outcome_id = $3
+         FOR UPDATE",
+    )
+    .bind(user_id)
+    .bind(event_id)
+    .bind(outcome_id)
+    .fetch_optional(tx.as_mut())
+    .await?;
+
+    let (held_shares, staked_ledger): (f64, i64) = match share_row {
+        Some(r) => (r.get("shares"), r.get("staked_ledger")),
+        None => (0.0, 0),
+    };
+    if held_shares < amount {
+        return Err(anyhow!("Insufficient shares in selected outcome"));
+    }
+
+    let liquidity_b: f64 = event_row.get("liquidity_b");
+    let mut outcomes = fetch_outcome_state_rows(tx, event_id).await?;
+    if outcomes.len() < 2 {
+        return Err(anyhow!(
+            "This market has no configured outcomes yet. Configure outcomes first."
+        ));
+    }
+    let selected_idx = outcomes
+        .iter()
+        .position(|o| o.outcome_id == outcome_id)
+        .ok_or_else(|| anyhow!("Selected outcome is not active for this market"))?;
+
+    let q: Vec<f64> = outcomes.iter().map(|o| o.q_value).collect();
+    let mut market = MultiMarket::new(q, liquidity_b)?;
+    let payout = market.sell_outcome(selected_idx, amount)?;
+    let new_probs = market.probs();
+    let new_prob = new_probs[selected_idx];
+    let new_cumulative_cost = market.cost();
+
+    // Proportional stake unwind in pure integer ledger math (binary-sell pattern).
+    let amount_ledger =
+        to_ledger_units(amount).map_err(|e| anyhow!("Invalid sell amount: {}", e))?;
+    let shares_ledger =
+        to_ledger_units(held_shares).map_err(|e| anyhow!("Invalid shares amount: {}", e))?;
+    if shares_ledger == 0 {
+        return Err(anyhow!("Cannot calculate proportional stake for zero shares"));
+    }
+    let numer = (staked_ledger as i128)
+        .checked_mul(amount_ledger)
+        .ok_or_else(|| anyhow!("Arithmetic overflow in proportional stake calculation"))?;
+    let stake_to_unwind = ((numer + (shares_ledger / 2)) / shares_ledger)
+        .max(0)
+        .min(staked_ledger as i128);
+    let stake_to_unwind_ledger = i64::try_from(stake_to_unwind)
+        .map_err(|_| anyhow!("stake_to_unwind_ledger out of i64 range"))?;
+
+    let payout_ledger =
+        to_ledger_units(payout).map_err(|e| anyhow!("Invalid payout: {}", e))?;
+    let payout_ledger_i64 =
+        i64::try_from(payout_ledger).map_err(|_| anyhow!("payout_ledger out of i64 range"))?;
+
+    // Persist new outcome states (same upsert as the buy path).
+    for (idx, outcome_row) in outcomes.iter_mut().enumerate() {
+        outcome_row.q_value = market.q[idx];
+        outcome_row.prob = new_probs[idx];
+        sqlx::query(
+            r#"
+            INSERT INTO event_outcome_states (event_id, outcome_id, q_value, prob, updated_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (event_id, outcome_id)
+            DO UPDATE SET
+                q_value = EXCLUDED.q_value,
+                prob = EXCLUDED.prob,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(event_id)
+        .bind(outcome_row.outcome_id)
+        .bind(outcome_row.q_value)
+        .bind(outcome_row.prob)
+        .execute(tx.as_mut())
+        .await?;
+    }
+
+    // Mirror the buy path's events-row bookkeeping.
+    let market_prob = outcomes
+        .iter()
+        .find(|o| o.outcome_key.eq_ignore_ascii_case("yes"))
+        .map(|o| o.prob)
+        .unwrap_or_else(|| outcomes.iter().fold(0.0, |acc, row| acc.max(row.prob)));
+    let q_yes = outcomes
+        .iter()
+        .find(|o| o.outcome_key.eq_ignore_ascii_case("yes"))
+        .map(|o| o.q_value)
+        .unwrap_or_else(|| event_row.get("q_yes"));
+    let q_no = outcomes
+        .iter()
+        .find(|o| o.outcome_key.eq_ignore_ascii_case("no"))
+        .map(|o| o.q_value)
+        .unwrap_or_else(|| event_row.get("q_no"));
+
+    sqlx::query(
+        r#"
+        UPDATE events
+        SET market_prob = $1,
+            cumulative_stake = $2,
+            q_yes = $3,
+            q_no = $4
+        WHERE id = $5
+        "#,
+    )
+    .bind(market_prob)
+    .bind(new_cumulative_cost)
+    .bind(q_yes)
+    .bind(q_no)
+    .bind(event_id)
+    .execute(tx.as_mut())
+    .await?;
+
+    // Credit payout, unwind staked total (balance += payout, staked -= unwind).
+    let rows = DbAdapter::update_user_balance_ledger(
+        tx,
+        user_id,
+        payout_ledger_i64,
+        -stake_to_unwind_ledger,
+    )
+    .await?;
+    if rows == 0 {
+        return Err(anyhow!("Failed to update user balance"));
+    }
+
+    sqlx::query(
+        "UPDATE user_outcome_shares
+         SET shares = shares - $4,
+             staked_ledger = staked_ledger - $5,
+             version = version + 1,
+             updated_at = NOW()
+         WHERE user_id = $1 AND event_id = $2 AND outcome_id = $3",
+    )
+    .bind(user_id)
+    .bind(event_id)
+    .bind(outcome_id)
+    .bind(amount)
+    .bind(stake_to_unwind_ledger)
+    .execute(tx.as_mut())
+    .await?;
+
+    Ok(OutcomeSellResult {
+        event_id,
+        outcome_id,
+        payout,
+        new_prob,
+        current_cost_c: new_cumulative_cost,
+        market_prob,
+        outcomes: outcomes
+            .into_iter()
+            .map(|row| MarketOutcomeView {
+                outcome_id: row.outcome_id,
+                outcome_key: row.outcome_key,
+                label: row.label,
+                prob: row.prob,
+                q_value: row.q_value,
+                lower_bound: row.lower_bound,
+                upper_bound: row.upper_bound,
+            })
+            .collect(),
     })
 }
 

@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import { getUserPositions, api } from '../../services/api';
 import MarketEventCard from './MarketEventCard';
+import OutcomeMarketCard from './OutcomeMarketCard';
 import { isAuthenticated, getCurrentUserId } from '../../services/auth';
 
 const formatProbability = (value) => {
@@ -40,6 +41,9 @@ const appendUniqueById = (current, next) => {
   const seen = new Set(current.map((item) => String(item.id)));
   return [...current, ...next.filter((item) => !seen.has(String(item.id)))];
 };
+
+const isMultiOutcome = (eventItem) =>
+  ['multiple_choice', 'numeric'].includes(eventItem?.event_type);
 
 export default function EventsList(props) {
   const [events, setEvents] = createSignal([]);
@@ -522,13 +526,25 @@ export default function EventsList(props) {
                         </div>
                         <Show when={isExpanded(marketItem.id)}>
                           <div class="event-row-expanded">
-                            <MarketEventCard
-                              event={marketItem}
-                              onTrade={handleTradeRefresh}
-                              onVerificationNotice={props.onVerificationNotice}
-                              hideTitle={true}
-                              authenticated={authed()}
-                            />
+                            <Show
+                              when={isMultiOutcome(marketItem)}
+                              fallback={
+                                <MarketEventCard
+                                  event={marketItem}
+                                  onTrade={handleTradeRefresh}
+                                  onVerificationNotice={props.onVerificationNotice}
+                                  hideTitle={true}
+                                  authenticated={authed()}
+                                />
+                              }
+                            >
+                              <OutcomeMarketCard
+                                event={marketItem}
+                                onTrade={handleTradeRefresh}
+                                onVerificationNotice={props.onVerificationNotice}
+                                hideTitle={true}
+                              />
+                            </Show>
                           </div>
                         </Show>
                       </li>

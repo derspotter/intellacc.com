@@ -681,8 +681,11 @@ export const api = {
     create: (eventData) =>
       request('/events', { method: 'POST', body: eventData }),
 
-    resolve: (eventId, outcome) =>
-      request(`/events/${eventId}`, { method: 'PATCH', body: { outcome } }),
+    resolve: (eventId, resolution) =>
+      request(`/events/${eventId}`, {
+        method: 'PATCH',
+        body: typeof resolution === 'string' ? { outcome: resolution } : resolution
+      }),
 
     getShares: (eventId) =>
       request(`/events/${eventId}/shares`),
@@ -694,7 +697,16 @@ export const api = {
       request(`/events/${eventId}/update`, { method: 'POST', body: { stake, target_prob } }),
 
     sell: (eventId, { share_type, amount }) =>
-      request(`/events/${eventId}/sell`, { method: 'POST', body: { share_type, amount } })
+      request(`/events/${eventId}/sell`, { method: 'POST', body: { share_type, amount } }),
+
+    getMarketState: (eventId) =>
+      request(`/events/${eventId}/market`),
+
+    updateOutcome: (eventId, { stake, outcome_id }) =>
+      request(`/events/${eventId}/update-outcome`, { method: 'POST', body: { stake, outcome_id } }),
+
+    sellOutcome: (eventId, { outcome_id, amount }) =>
+      request(`/events/${eventId}/sell-outcome`, { method: 'POST', body: { outcome_id, amount } })
   },
 
   // Predictions endpoints
@@ -1101,6 +1113,12 @@ export const placeEventUpdate = (eventId, { stake, target_prob }) =>
     stake,
     target_prob
   });
+
+export const getMarketState = (eventId) => api.events.getMarketState(eventId);
+export const placeOutcomeUpdate = (eventId, { stake, outcome_id }) =>
+  api.events.updateOutcome(eventId, { stake, outcome_id });
+export const sellOutcomeShares = (eventId, { outcome_id, amount }) =>
+  api.events.sellOutcome(eventId, { outcome_id, amount });
 
 export const resolveEvent = (eventId, outcome) => api.events.resolve(eventId, outcome);
 
