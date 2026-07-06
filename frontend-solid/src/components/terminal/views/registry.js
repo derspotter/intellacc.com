@@ -24,6 +24,10 @@ export const TERMINAL_VIEWS = {
     title: 'SEARCH',
     component: lazy(() => import('./SearchView'))
   },
+  groups: {
+    title: 'GROUPS',
+    component: lazy(() => import('./GroupsView'))
+  },
   settings: {
     title: 'SETTINGS',
     component: lazy(() => import('./SettingsView'))
