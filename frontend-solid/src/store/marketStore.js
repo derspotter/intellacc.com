@@ -12,35 +12,30 @@ const [state, setState] = createStore({
     loading: false,
     loadingMore: false,
     error: null,
-    selectedMarketId: null
+    selectedMarketId: null,
+    serverCount: 0
 });
 
 let fetchEpoch = 0;
+let activeFetch = null;
 
-const fetchPage = async ({ reset }) => {
+const doFetchPage = async ({ reset }) => {
     if (!getToken()) {
-        setState({ markets: [], total: 0, hasMore: false, loading: false, loadingMore: false, error: null });
+        setState({ markets: [], total: 0, hasMore: false, loading: false, loadingMore: false, error: null, serverCount: 0 });
         return;
     }
     const epoch = ++fetchEpoch;
-    const offset = reset ? 0 : state.markets.length;
+    const offset = reset ? 0 : state.serverCount;
     setState(reset ? { loading: true, loadingMore: false, error: null } : { loadingMore: true, error: null });
     try {
         const res = await api.events.getPage({ search: state.search, limit: PAGE_SIZE, offset });
         if (epoch !== fetchEpoch) return; // superseded by a newer request
         const items = Array.isArray(res?.items) ? res.items : [];
-        // A reset (fresh page load / new search) replaces state.markets wholesale.
-        // If ensureMarket() concurrently pinned the currently-selected market into
-        // state.markets (e.g. a #predictions/:id deep link racing the initial
-        // loadMarkets() call) and the new page doesn't happen to include it, keep
-        // it pinned at the front rather than silently dropping the selection.
-        const pinned = reset && state.selectedMarketId != null && !items.some(m => m.id === state.selectedMarketId)
-            ? state.markets.find(m => m.id === state.selectedMarketId)
-            : null;
         setState({
-            markets: reset ? (pinned ? [pinned, ...items] : items) : [...state.markets, ...items],
+            markets: reset ? items : [...state.markets, ...items.filter(m => !state.markets.some(x => x.id === m.id))],
             total: Number(res?.total) || items.length,
             hasMore: Boolean(res?.hasMore),
+            serverCount: reset ? items.length : state.serverCount + items.length,
             loading: false,
             loadingMore: false
         });
@@ -49,6 +44,13 @@ const fetchPage = async ({ reset }) => {
         console.error("Failed to load markets", err);
         setState({ error: err.message, loading: false, loadingMore: false });
     }
+};
+
+const fetchPage = (opts) => {
+    const p = doFetchPage(opts);
+    activeFetch = p;
+    p.finally(() => { if (activeFetch === p) activeFetch = null; });
+    return p;
 };
 
 // "Markets" are events with attached market fields (market_prob, cumulative_stake, etc).
@@ -115,6 +117,9 @@ const applyMarketUpdate = (update) => {
 // for one market, not a page of results.
 const ensureMarket = async (id) => {
     if (!Number.isFinite(id)) return;
+    if (activeFetch) {
+        try { await activeFetch; } catch { /* load errors surface elsewhere */ }
+    }
     if (state.markets.some(m => m.id === id)) {
         selectMarket(id);
         return;
@@ -131,7 +136,7 @@ const ensureMarket = async (id) => {
 
 const clear = () => {
     fetchEpoch++; // invalidate any in-flight fetch so it can't repopulate cleared state
-    setState({ markets: [], total: 0, hasMore: false, search: '', loading: false, loadingMore: false, error: null, selectedMarketId: null });
+    setState({ markets: [], total: 0, hasMore: false, search: '', loading: false, loadingMore: false, error: null, selectedMarketId: null, serverCount: 0 });
 };
 
 export const marketStore = {
