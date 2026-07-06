@@ -60,3 +60,32 @@ test('api keys create and revoke', async ({ page }) => {
 
   await expect(view).toContainText('[PASSKEYS]'); // section renders (headless can't run WebAuthn ceremonies)
 });
+
+test('vault and devices sections render', async ({ page }) => {
+  const u = await createUser('tset4');
+  created.push(u);
+  const view = await openSettings(page, u);
+  await expect(view).toContainText('[VAULT]');
+  await expect(view.locator('[data-testid="vault-status"]')).toBeVisible({ timeout: 10000 });
+  await expect(view).toContainText('[DEVICES]');
+  // Fresh user has no vault: devices section shows the unlock/no-vault gate.
+  await expect(view.locator('[data-testid="devices-gate"]')).toBeVisible();
+});
+
+test('password change (no vault) updates login credentials', async ({ page }) => {
+  const u = await createUser('tset5');
+  created.push(u);
+  const view = await openSettings(page, u);
+
+  await view.locator('[data-testid="password-current"]').fill(u.password);
+  await view.locator('[data-testid="password-new"]').fill('newpassword456');
+  await view.locator('[data-testid="password-submit"]').click();
+  await expect(view).toContainText('PASSWORD CHANGED', { timeout: 10000 });
+
+  const res = await apiFetch('/api/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: u.email, password: 'newpassword456' })
+  });
+  expect(res.response.status).toBe(200);
+  expect(res.body?.token).toBeTruthy();
+});

@@ -13,6 +13,9 @@ import {
 } from '../../../services/pushService';
 import webauthnService from '../../../services/webauthn';
 import vaultService from '../../../services/mls/vaultService';
+import vaultStore from '../../../store/vaultStore';
+import { configureIdleAutoLock, loadIdleLockConfig } from '../../../services/idleLock';
+import { clearToken } from '../../../services/tokenService';
 
 // `LABEL` is not exported from lib/feedRanking — define the display strings locally.
 const LABELS = { accuracy: 'ACCURACY', followers: 'FOLLOWERS', likes: 'LIKES', views: 'VIEWS' };
@@ -308,18 +311,36 @@ function VerificationSection() {
 function PasswordSection() {
   const [oldPw, setOldPw] = createSignal('');
   const [newPw, setNewPw] = createSignal('');
+  const [confirmPw, setConfirmPw] = createSignal('');
   const [busy, setBusy] = createSignal(false);
   const [message, setMessage] = createSignal('');
   const [error, setError] = createSignal('');
+
+  // Two-step vault re-wrap only applies once the vault exists AND is unlocked
+  // (vaultService.changePassphrase requires the in-memory local key).
+  const vaultActive = () => vaultStore.vaultExists && !vaultStore.isLocked;
 
   const submit = async () => {
     setBusy(true);
     setMessage('');
     setError('');
     try {
-      await api.users.changePassword(oldPw(), newPw());
+      if (vaultActive()) {
+        if (newPw() !== confirmPw()) {
+          throw new Error('NEW PASSWORDS DO NOT MATCH');
+        }
+        if (newPw().length < 6) {
+          throw new Error('PASSWORD MUST BE AT LEAST 6 CHARACTERS');
+        }
+        // Sequential: abort the account-password update if the vault re-wrap fails.
+        await vaultService.changePassphrase(oldPw(), newPw());
+        await api.users.changePassword(oldPw(), newPw());
+      } else {
+        await api.users.changePassword(oldPw(), newPw());
+      }
       setOldPw('');
       setNewPw('');
+      setConfirmPw('');
       setMessage('PASSWORD CHANGED');
     } catch (e) {
       setError(e?.message || 'FAILED TO CHANGE PASSWORD');
@@ -332,6 +353,7 @@ function PasswordSection() {
     <div class="text-xs flex flex-col gap-2 max-w-sm">
       <input
         type="password"
+        data-testid="password-current"
         placeholder="CURRENT PASSWORD"
         value={oldPw()}
         onInput={(e) => setOldPw(e.currentTarget.value)}
@@ -339,19 +361,31 @@ function PasswordSection() {
       />
       <input
         type="password"
+        data-testid="password-new"
         placeholder="NEW PASSWORD"
         value={newPw()}
         onInput={(e) => setNewPw(e.currentTarget.value)}
         class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-text focus:outline-none focus:border-bb-accent"
       />
+      <Show when={vaultActive()}>
+        <input
+          type="password"
+          data-testid="password-confirm"
+          placeholder="CONFIRM NEW PASSWORD"
+          value={confirmPw()}
+          onInput={(e) => setConfirmPw(e.currentTarget.value)}
+          class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-text focus:outline-none focus:border-bb-accent"
+        />
+      </Show>
       <div class="flex items-center gap-3">
         <button
           type="button"
-          disabled={busy() || !oldPw() || !newPw()}
+          data-testid="password-submit"
+          disabled={busy() || !oldPw() || !newPw() || (vaultActive() && !confirmPw())}
           onClick={submit}
           class="px-3 py-1 border border-bb-border text-bb-text hover:border-bb-accent hover:text-bb-accent disabled:opacity-50 uppercase font-bold"
         >
-          [CHANGE PASSWORD]
+          {busy() ? '[CHANGING...]' : '[CHANGE PASSWORD]'}
         </button>
         <Show when={message()}>
           <span class="text-market-up">{message()}</span>
@@ -360,6 +394,443 @@ function PasswordSection() {
           <span class="text-market-down">ERROR // {error().toUpperCase()}</span>
         </Show>
       </div>
+    </div>
+  );
+}
+
+function VaultSection() {
+  const status = () => {
+    if (!vaultStore.vaultExists) return 'NO VAULT';
+    return vaultStore.isLocked ? 'LOCKED' : 'UNLOCKED';
+  };
+  const statusColor = () => {
+    if (status() === 'UNLOCKED') return 'text-market-up';
+    if (status() === 'LOCKED') return 'text-market-down';
+    return 'text-bb-muted';
+  };
+
+  const [unlockPw, setUnlockPw] = createSignal('');
+  const [unlockBusy, setUnlockBusy] = createSignal(false);
+  const [unlockError, setUnlockError] = createSignal('');
+
+  const [wipeText, setWipeText] = createSignal('');
+  const [wipeBusy, setWipeBusy] = createSignal(false);
+  const [wipeError, setWipeError] = createSignal('');
+  const canWipe = () => wipeText() === 'WIPE' && !wipeBusy();
+
+  onMount(() => {
+    loadIdleLockConfig();
+  });
+
+  const handleUnlock = async (event) => {
+    event.preventDefault();
+    setUnlockBusy(true);
+    setUnlockError('');
+    try {
+      await vaultService.unlockWithPassword(unlockPw());
+      setUnlockPw('');
+    } catch (err) {
+      setUnlockError(err?.message || 'INCORRECT PASSWORD');
+    } finally {
+      setUnlockBusy(false);
+    }
+  };
+
+  const handleAutoLockChange = (event) => {
+    configureIdleAutoLock(parseInt(event.target.value, 10));
+  };
+
+  const handleLockNow = async () => {
+    await vaultService.lockKeys();
+    window.location.hash = '#home';
+  };
+
+  const handlePanicWipe = async () => {
+    if (!canWipe()) return;
+    setWipeBusy(true);
+    setWipeError('');
+    try {
+      if (typeof vaultService.panicWipe === 'function') {
+        await vaultService.panicWipe();
+      } else {
+        await vaultService.lockKeys();
+      }
+      clearToken();
+      window.location.hash = '#home';
+    } catch (err) {
+      setWipeError(err?.message || 'FAILED TO WIPE VAULT');
+      setWipeBusy(false);
+    }
+  };
+
+  return (
+    <div class="text-xs flex flex-col gap-4">
+      <div class="flex items-center gap-2" data-testid="vault-status">
+        <span class="uppercase text-bb-muted">STATUS:</span>
+        <span class={`font-bold uppercase ${statusColor()}`}>{status()}</span>
+      </div>
+
+      <Show when={vaultStore.vaultExists && vaultStore.isLocked}>
+        <form onSubmit={handleUnlock} class="flex flex-col gap-2 max-w-sm">
+          <input
+            type="password"
+            placeholder="PASSWORD"
+            value={unlockPw()}
+            onInput={(e) => setUnlockPw(e.currentTarget.value)}
+            disabled={unlockBusy()}
+            class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-text focus:outline-none focus:border-bb-accent"
+          />
+          <div class="flex items-center gap-3">
+            <button
+              type="submit"
+              disabled={unlockBusy()}
+              class="px-3 py-1 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 disabled:opacity-50 uppercase font-bold"
+            >
+              {unlockBusy() ? '[UNLOCKING...]' : '[UNLOCK VAULT]'}
+            </button>
+            <Show when={unlockError()}>
+              <span class="text-market-down">ERROR // {unlockError().toUpperCase()}</span>
+            </Show>
+          </div>
+        </form>
+      </Show>
+
+      <Show when={vaultStore.vaultExists && !vaultStore.isLocked}>
+        <div class="flex items-center gap-3 flex-wrap">
+          <label class="uppercase text-bb-muted" for="vault-autolock">AUTO-LOCK:</label>
+          <select
+            id="vault-autolock"
+            value={String(vaultStore.autoLockMinutes)}
+            onChange={handleAutoLockChange}
+            class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-text"
+          >
+            <option value="0">NEVER</option>
+            <option value="5">5 MINUTES</option>
+            <option value="15">15 MINUTES</option>
+            <option value="30">30 MINUTES</option>
+            <option value="60">1 HOUR</option>
+          </select>
+          <button
+            type="button"
+            onClick={handleLockNow}
+            class="px-3 py-1 border border-bb-border text-bb-text hover:border-bb-accent hover:text-bb-accent uppercase font-bold"
+          >
+            [LOCK NOW]
+          </button>
+        </div>
+      </Show>
+
+      <div class="border-t border-bb-border/40 pt-3">
+        <div class="text-bb-muted uppercase font-bold mb-2">CHANGE PASSWORD</div>
+        <PasswordSection />
+      </div>
+
+      <div class="border-t border-market-down/40 pt-3">
+        <div class="text-market-down uppercase font-bold mb-2">PANIC WIPE</div>
+        <div class="flex flex-col gap-2 max-w-sm">
+          <p class="text-bb-muted">TYPE "WIPE" TO PERMANENTLY ERASE LOCAL VAULT DATA AND MESSAGES.</p>
+          <input
+            type="text"
+            placeholder="TYPE WIPE TO CONFIRM"
+            value={wipeText()}
+            onInput={(e) => setWipeText(e.currentTarget.value)}
+            class="bg-bb-bg border border-market-down/60 px-2 py-1 text-bb-text focus:outline-none focus:border-market-down"
+          />
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={!canWipe()}
+              onClick={handlePanicWipe}
+              class="px-3 py-1 border border-market-down text-market-down hover:bg-market-down/20 disabled:opacity-40 uppercase font-bold"
+            >
+              {wipeBusy() ? '[WIPING...]' : '[WIPE VAULT]'}
+            </button>
+            <Show when={wipeError()}>
+              <span class="text-market-down">ERROR // {wipeError().toUpperCase()}</span>
+            </Show>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DevicesSection() {
+  const [devices, setDevices] = createSignal([]);
+  const [loading, setLoading] = createSignal(true);
+  const [pending, setPending] = createSignal([]);
+  const [pendingLoading, setPendingLoading] = createSignal(true);
+  const [error, setError] = createSignal('');
+
+  const [linkToken, setLinkToken] = createSignal(null);
+  const [polling, setPolling] = createSignal(false);
+  const [linkError, setLinkError] = createSignal('');
+
+  const [approveToken, setApproveToken] = createSignal('');
+  const [approverPassword, setApproverPassword] = createSignal('');
+  const [approving, setApproving] = createSignal(false);
+  const [approveError, setApproveError] = createSignal('');
+  const [approveMessage, setApproveMessage] = createSignal('');
+
+  const [confirmId, setConfirmId] = createSignal(null);
+  let confirmTimer;
+  let pollTimer;
+  let pendingTimer;
+
+  const requiresVaultAuth = () => vaultStore.isLocked || !vaultStore.vaultExists;
+
+  const loadDevices = async () => {
+    try {
+      const rows = await api.devices.list();
+      setDevices(rows || []);
+    } catch (e) {
+      setDevices([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadPending = async () => {
+    try {
+      setPending(await api.devices.listPendingLinkRequests());
+    } catch (e) {
+      setPending([]);
+    } finally {
+      setPendingLoading(false);
+    }
+  };
+
+  const stopPolling = () => {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    setPolling(false);
+  };
+
+  const pollLinkStatus = async () => {
+    const token = linkToken();
+    if (!token) return;
+    try {
+      const status = await api.devices.getLinkingStatus(token);
+      if (status?.approved) {
+        stopPolling();
+        setLinkToken(null);
+        await loadDevices();
+        await loadPending();
+      }
+    } catch (e) { /* keep polling */ }
+  };
+
+  const startLinking = async () => {
+    setLinkError('');
+    try {
+      const deviceId = vaultService.getDeviceId();
+      const name = `${navigator.platform || 'Web'} - ${navigator.userAgent.split('/')[0]}`;
+      const result = await api.devices.startLinking(deviceId, name);
+      setLinkToken(result?.token || null);
+      setPolling(true);
+      pollLinkStatus();
+      pollTimer = window.setInterval(() => { void pollLinkStatus(); }, 3000);
+      await loadPending();
+    } catch (e) {
+      setLinkError(e?.message || 'FAILED TO START LINKING');
+    }
+  };
+
+  const clearConfirm = () => {
+    if (confirmTimer) clearTimeout(confirmTimer);
+    confirmTimer = null;
+    setConfirmId(null);
+  };
+
+  const revokeClick = async (id) => {
+    if (confirmId() !== id) {
+      if (confirmTimer) clearTimeout(confirmTimer);
+      setConfirmId(id);
+      confirmTimer = setTimeout(() => setConfirmId((cur) => (cur === id ? null : cur)), 4000);
+      return;
+    }
+    clearConfirm();
+    setError('');
+    try {
+      await api.devices.revoke(id);
+      setDevices((prev) => prev.filter((d) => d.id !== id));
+    } catch (e) {
+      setError(e?.message || 'FAILED TO REVOKE DEVICE');
+    }
+  };
+
+  const handleApprove = async () => {
+    const token = approveToken().trim();
+    setApproveError('');
+    setApproveMessage('');
+    if (!token) {
+      setApproveError('TOKEN IS REQUIRED');
+      return;
+    }
+    if (!approverPassword().trim()) {
+      setApproveError('APPROVER PASSWORD IS REQUIRED');
+      return;
+    }
+    setApproving(true);
+    try {
+      await api.devices.approveLinking(token, approverPassword());
+      setApproveToken('');
+      setApproverPassword('');
+      setApproveMessage('DEVICE APPROVED');
+      await loadDevices();
+      await loadPending();
+    } catch (e) {
+      setApproveError(e?.message || 'APPROVAL FAILED');
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  onMount(() => {
+    void loadDevices();
+    void loadPending();
+    pendingTimer = window.setInterval(() => { void loadPending(); }, 15000);
+  });
+
+  onCleanup(() => {
+    if (confirmTimer) clearTimeout(confirmTimer);
+    if (pendingTimer) clearInterval(pendingTimer);
+    stopPolling();
+  });
+
+  return (
+    <div class="text-xs flex flex-col gap-3">
+      <Show when={requiresVaultAuth()}>
+        <div data-testid="devices-gate" class="text-bb-muted">
+          UNLOCK VAULT TO MANAGE DEVICES // SEE [VAULT] SECTION ABOVE
+        </div>
+      </Show>
+
+      <Show when={!requiresVaultAuth()}>
+        <Show when={loading()}>
+          <div class="text-bb-muted animate-pulse">RUNNING QUERY...</div>
+        </Show>
+        <Show when={!loading()}>
+          <Show when={devices().length > 0} fallback={<div class="text-bb-muted">NO DEVICES YET</div>}>
+            <div class="flex flex-col gap-1">
+              <For each={devices()}>
+                {(device) => (
+                  <div data-testid="device-row" class="flex items-center gap-3 py-1 border-b border-bb-border/30">
+                    <span class="flex-1 text-bb-text">
+                      {device.name || 'UNKNOWN DEVICE'}
+                      {device.is_primary ? <span class="ml-2 text-bb-accent">[PRIMARY]</span> : null}
+                    </span>
+                    <span class="text-bb-muted">
+                      {device.created_at ? new Date(device.created_at).toLocaleDateString() : 'UNKNOWN'}
+                    </span>
+                    <Show when={!device.is_primary}>
+                      <button
+                        type="button"
+                        data-testid="device-revoke"
+                        onClick={() => revokeClick(device.id)}
+                        onBlur={() => { if (confirmId() === device.id) clearConfirm(); }}
+                        class="px-2 py-0.5 border border-market-down text-market-down hover:bg-market-down/20 uppercase font-bold"
+                      >
+                        {confirmId() === device.id ? '[CONFIRM?]' : '[REVOKE]'}
+                      </button>
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+
+          <div class="border-t border-bb-border/40 pt-3 mt-2">
+            <div class="text-bb-muted uppercase font-bold mb-2">PENDING LINK REQUESTS</div>
+            <Show when={pendingLoading()}>
+              <div class="text-bb-muted animate-pulse">RUNNING QUERY...</div>
+            </Show>
+            <Show when={!pendingLoading()}>
+              <Show when={pending().length > 0} fallback={<div class="text-bb-muted">NO PENDING REQUESTS</div>}>
+                <div class="flex flex-col gap-1">
+                  <For each={pending()}>
+                    {(request) => (
+                      <div data-testid="device-pending-row" class="flex items-center gap-3 py-1 border-b border-bb-border/30">
+                        <span class="flex-1 text-bb-text">{request.device_name || 'NEW DEVICE'}</span>
+                        <span class="text-bb-muted">
+                          EXPIRES: {request.expires_at ? new Date(request.expires_at).toLocaleDateString() : 'UNKNOWN'}
+                        </span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </Show>
+
+            <div class="flex items-center gap-3 mt-3">
+              <button
+                type="button"
+                data-testid="device-link-start"
+                onClick={startLinking}
+                class="px-3 py-1 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 uppercase font-bold"
+              >
+                [LINK NEW DEVICE]
+              </button>
+              <Show when={polling()}>
+                <span class="text-bb-muted">WAITING FOR APPROVAL...</span>
+              </Show>
+              <Show when={linkError()}>
+                <span class="text-market-down">ERROR // {linkError().toUpperCase()}</span>
+              </Show>
+            </div>
+            <Show when={linkToken()}>
+              <div data-testid="device-link-token" class="mt-2 break-all text-bb-text">
+                TOKEN: {linkToken()}
+              </div>
+            </Show>
+          </div>
+
+          <div class="border-t border-bb-border/40 pt-3 mt-2">
+            <div class="text-bb-muted uppercase font-bold mb-2">APPROVE LINK REQUEST</div>
+            <div class="flex flex-col gap-2 max-w-sm">
+              <input
+                type="text"
+                data-testid="device-approve-token"
+                placeholder="LINKING TOKEN"
+                value={approveToken()}
+                onInput={(e) => setApproveToken(e.currentTarget.value)}
+                class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-text focus:outline-none focus:border-bb-accent"
+              />
+              <input
+                type="password"
+                data-testid="device-approve-password"
+                placeholder="APPROVER PASSWORD"
+                value={approverPassword()}
+                onInput={(e) => setApproverPassword(e.currentTarget.value)}
+                class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-text focus:outline-none focus:border-bb-accent"
+              />
+              <div class="flex items-center gap-3">
+                <button
+                  type="button"
+                  data-testid="device-approve-submit"
+                  disabled={approving()}
+                  onClick={handleApprove}
+                  class="px-3 py-1 border border-bb-border text-bb-text hover:border-bb-accent hover:text-bb-accent disabled:opacity-50 uppercase font-bold"
+                >
+                  {approving() ? '[APPROVING...]' : '[APPROVE]'}
+                </button>
+                <Show when={approveMessage()}>
+                  <span class="text-market-up">{approveMessage()}</span>
+                </Show>
+                <Show when={approveError()}>
+                  <span class="text-market-down">ERROR // {approveError().toUpperCase()}</span>
+                </Show>
+              </div>
+            </div>
+          </div>
+        </Show>
+      </Show>
+
+      <Show when={error()}>
+        <div class="text-market-down">ERROR // {error().toUpperCase()}</div>
+      </Show>
     </div>
   );
 }
@@ -781,11 +1252,9 @@ export default function SettingsView() {
       <Section title="VERIFICATION"><VerificationSection /></Section>
       <Section title="API KEYS"><ApiKeysSection /></Section>
       <Section title="PASSKEYS"><PasskeysSection /></Section>
-      <Section title="PASSWORD"><PasswordSection /></Section>
+      <Section title="VAULT"><VaultSection /></Section>
+      <Section title="DEVICES"><DevicesSection /></Section>
       <Section title="DANGER ZONE"><DangerZoneSection /></Section>
-      <div class="px-3 py-2 text-bb-muted text-xxs uppercase">
-        [DEVICES / VAULT] // AVAILABLE IN VAN SETTINGS UNTIL PHASE 4
-      </div>
     </div>
   );
 }
