@@ -69,6 +69,7 @@ const fetchPage = async ({ reset }) => {
             } catch (err) {
                 console.error('Discover fallback failed', err);
             }
+            if (epoch !== fetchEpoch) return; // superseded while discover was in flight
         }
 
         setState({
