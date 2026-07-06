@@ -89,7 +89,11 @@ const deliverOnce = async ({ targetUrl, signingKeyId, payload }) => {
   }
 };
 
-const processDueDeliveries = async (limit = DEFAULT_BATCH_SIZE) => {
+// Claim rows in a short transaction on a dedicated client and RELEASE the
+// client before any delivery I/O. Holding it across the delivery loop
+// deadlocked the whole pool: concurrent runs held every pooled client while
+// their per-row status updates waited for a client that could never free up.
+const claimDueDeliveries = async (limit) => {
   const pool = db.getPool();
   const client = await pool.connect();
 
@@ -116,71 +120,7 @@ const processDueDeliveries = async (limit = DEFAULT_BATCH_SIZE) => {
       [limit]
     );
     await client.query('COMMIT');
-
-    let processed = 0;
-    for (const row of claimed.rows) {
-      processed += 1;
-      const attemptCount = row.attempt_count;
-
-      try {
-        const result = await deliverOnce({
-          targetUrl: row.target_url,
-          signingKeyId: row.signing_key_id,
-          payload: row.payload
-        });
-
-        if (result.ok) {
-          await db.query(
-            `UPDATE federation_delivery_queue
-             SET status = 'delivered',
-                 delivered_at = NOW(),
-                 last_status_code = $2,
-                 last_error = NULL,
-                 updated_at = NOW()
-             WHERE id = $1`,
-            [row.id, result.status]
-          );
-          continue;
-        }
-
-        const next = attemptCount >= MAX_ATTEMPTS ? null : computeNextAttemptAt(attemptCount);
-        await db.query(
-          `UPDATE federation_delivery_queue
-           SET status = $2,
-               next_attempt_at = COALESCE($3, next_attempt_at),
-               last_status_code = $4,
-               last_error = $5,
-               updated_at = NOW()
-           WHERE id = $1`,
-          [
-            row.id,
-            attemptCount >= MAX_ATTEMPTS ? 'dead' : 'pending',
-            next,
-            result.status,
-            `HTTP ${result.status}`
-          ]
-        );
-      } catch (err) {
-        const next = attemptCount >= MAX_ATTEMPTS ? null : computeNextAttemptAt(attemptCount);
-        await db.query(
-          `UPDATE federation_delivery_queue
-           SET status = $2,
-               next_attempt_at = COALESCE($3, next_attempt_at),
-               last_status_code = NULL,
-               last_error = $4,
-               updated_at = NOW()
-           WHERE id = $1`,
-          [
-            row.id,
-            attemptCount >= MAX_ATTEMPTS ? 'dead' : 'pending',
-            next,
-            err?.message ? String(err.message).slice(0, 500) : 'Delivery failed'
-          ]
-        );
-      }
-    }
-
-    return processed;
+    return claimed.rows;
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -191,12 +131,88 @@ const processDueDeliveries = async (limit = DEFAULT_BATCH_SIZE) => {
   }
 };
 
+const processDueDeliveries = async (limit = DEFAULT_BATCH_SIZE) => {
+  const rows = await claimDueDeliveries(limit);
+
+  let processed = 0;
+  for (const row of rows) {
+    processed += 1;
+    const attemptCount = row.attempt_count;
+
+    try {
+      const result = await deliverOnce({
+        targetUrl: row.target_url,
+        signingKeyId: row.signing_key_id,
+        payload: row.payload
+      });
+
+      if (result.ok) {
+        await db.query(
+          `UPDATE federation_delivery_queue
+           SET status = 'delivered',
+               delivered_at = NOW(),
+               last_status_code = $2,
+               last_error = NULL,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [row.id, result.status]
+        );
+        continue;
+      }
+
+      const next = attemptCount >= MAX_ATTEMPTS ? null : computeNextAttemptAt(attemptCount);
+      await db.query(
+        `UPDATE federation_delivery_queue
+         SET status = $2,
+             next_attempt_at = COALESCE($3, next_attempt_at),
+             last_status_code = $4,
+             last_error = $5,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [
+          row.id,
+          attemptCount >= MAX_ATTEMPTS ? 'dead' : 'pending',
+          next,
+          result.status,
+          `HTTP ${result.status}`
+        ]
+      );
+    } catch (err) {
+      const next = attemptCount >= MAX_ATTEMPTS ? null : computeNextAttemptAt(attemptCount);
+      await db.query(
+        `UPDATE federation_delivery_queue
+         SET status = $2,
+             next_attempt_at = COALESCE($3, next_attempt_at),
+             last_status_code = NULL,
+             last_error = $4,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [
+          row.id,
+          attemptCount >= MAX_ATTEMPTS ? 'dead' : 'pending',
+          next,
+          err?.message ? String(err.message).slice(0, 500) : 'Delivery failed'
+        ]
+      );
+    }
+  }
+
+  return processed;
+};
+
 const startDeliveryWorker = ({ intervalMs = DEFAULT_INTERVAL_MS } = {}) => {
+  // Deliveries to slow/dead remotes can outlast the interval; without this
+  // guard the async ticks stack concurrent runs.
+  let running = false;
   const timer = setInterval(async () => {
+    if (running) return;
+    running = true;
     try {
       await processDueDeliveries();
     } catch (err) {
       console.error('[FederationDelivery] Worker error:', err?.message || err);
+    } finally {
+      running = false;
     }
   }, intervalMs);
   timer.unref();

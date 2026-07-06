@@ -38,7 +38,11 @@ const loadPost = async (userId, postId) => {
   return result.rows[0] || null;
 };
 
-const processDueDeliveries = async (limit = DEFAULT_BATCH_SIZE) => {
+// Claim rows in a short transaction on a dedicated client and RELEASE the
+// client before any delivery I/O. Holding it across the delivery loop
+// deadlocked the whole pool: concurrent runs held every pooled client while
+// their per-row status updates waited for a client that could never free up.
+const claimDueDeliveries = async (limit) => {
   const pool = db.getPool();
   const client = await pool.connect();
 
@@ -64,48 +68,7 @@ const processDueDeliveries = async (limit = DEFAULT_BATCH_SIZE) => {
       [limit]
     );
     await client.query('COMMIT');
-
-    let processed = 0;
-
-    for (const row of claimed.rows) {
-      processed += 1;
-
-      try {
-        const post = await loadPost(row.user_id, row.post_id);
-        if (!post) {
-          await markDeliveryResult({
-            id: row.id,
-            status: 'dead',
-            errorText: 'Local post not found',
-            httpStatus: 404
-          });
-          continue;
-        }
-
-        const result = await publishPost({
-          userId: row.user_id,
-          post
-        });
-
-        await markDeliveryResult({
-          id: row.id,
-          status: 'delivered',
-          httpStatus: result.skipped ? 204 : 200,
-          errorText: null
-        });
-      } catch (err) {
-        const terminal = row.attempt_count >= MAX_ATTEMPTS || err?.code === 'ATPROTO_NO_ACCOUNT';
-        await markDeliveryResult({
-          id: row.id,
-          status: terminal ? 'dead' : 'pending',
-          httpStatus: err?.statusCode || null,
-          errorText: String(err?.message || 'ATProto delivery failed').slice(0, 500),
-          nextAttemptAt: terminal ? null : computeNextAttemptAt(row.attempt_count)
-        });
-      }
-    }
-
-    return processed;
+    return claimed.rows;
   } catch (err) {
     try {
       await client.query('ROLLBACK');
@@ -116,12 +79,65 @@ const processDueDeliveries = async (limit = DEFAULT_BATCH_SIZE) => {
   }
 };
 
+const processDueDeliveries = async (limit = DEFAULT_BATCH_SIZE) => {
+  const rows = await claimDueDeliveries(limit);
+
+  let processed = 0;
+
+  for (const row of rows) {
+    processed += 1;
+
+    try {
+      const post = await loadPost(row.user_id, row.post_id);
+      if (!post) {
+        await markDeliveryResult({
+          id: row.id,
+          status: 'dead',
+          errorText: 'Local post not found',
+          httpStatus: 404
+        });
+        continue;
+      }
+
+      const result = await publishPost({
+        userId: row.user_id,
+        post
+      });
+
+      await markDeliveryResult({
+        id: row.id,
+        status: 'delivered',
+        httpStatus: result.skipped ? 204 : 200,
+        errorText: null
+      });
+    } catch (err) {
+      const terminal = row.attempt_count >= MAX_ATTEMPTS || err?.code === 'ATPROTO_NO_ACCOUNT';
+      await markDeliveryResult({
+        id: row.id,
+        status: terminal ? 'dead' : 'pending',
+        httpStatus: err?.statusCode || null,
+        errorText: String(err?.message || 'ATProto delivery failed').slice(0, 500),
+        nextAttemptAt: terminal ? null : computeNextAttemptAt(row.attempt_count)
+      });
+    }
+  }
+
+  return processed;
+};
+
 const startDeliveryWorker = ({ intervalMs = DEFAULT_INTERVAL_MS } = {}) => {
+  // Deliveries to slow/dead remotes can outlast the interval; without this
+  // guard the async ticks stack concurrent runs.
+  let running = false;
   const timer = setInterval(async () => {
+    if (running) return;
+    running = true;
     try {
       await processDueDeliveries();
     } catch (err) {
       console.error('[ATProtoDelivery] Worker error:', err?.message || err);
+    } finally {
+      running = false;
     }
   }, intervalMs);
   timer.unref();

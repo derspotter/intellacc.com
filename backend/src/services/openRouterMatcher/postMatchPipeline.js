@@ -673,6 +673,17 @@ const runPipeline = async (postId, content) => {
 
   const pool = db.getPool();
   const client = await pool.connect();
+  // The client MUST go back to the pool before any pool-based follow-up
+  // (logPipelineResult, persistUsageRecords, failure upserts). Holding it
+  // across those awaits deadlocked the pool: concurrent pipelines held every
+  // client while their follow-ups waited for a free one.
+  let clientReleased = false;
+  const releaseClient = () => {
+    if (!clientReleased) {
+      clientReleased = true;
+      client.release();
+    }
+  };
   const usageRecords = [];
   const usageRecorder = async (record) => {
     usageRecords.push(normalizeUsageRecord(record));
@@ -683,7 +694,7 @@ const runPipeline = async (postId, content) => {
   try {
     capabilities = await loadPipelineCapabilities();
   } catch (capabilitiesError) {
-    client.release();
+    releaseClient();
     console.error('[PostMatchPipeline] Failed to load matching capabilities:', capabilitiesError.message || capabilitiesError);
     await logPipelineResult({
       postId: normalizedPostId,
@@ -703,7 +714,7 @@ const runPipeline = async (postId, content) => {
   }
 
   if (!canRunPipeline(capabilities)) {
-    client.release();
+    releaseClient();
     await logPipelineResult({
       postId: normalizedPostId,
       status: 'not_started',
@@ -757,6 +768,7 @@ const runPipeline = async (postId, content) => {
       });
       await updateCandidates(client, normalizedPostId, []);
       await client.query('COMMIT');
+      releaseClient();
       await logPipelineResult({
         postId: normalizedPostId,
         status: 'gated_out',
@@ -907,6 +919,7 @@ const runPipeline = async (postId, content) => {
       });
 
       await client.query('COMMIT');
+      releaseClient();
       await persistUsageRecords({
         postId: normalizedPostId,
         records: usageRecords
@@ -946,6 +959,7 @@ const runPipeline = async (postId, content) => {
     });
     await updateCandidates(client, normalizedPostId, []);
     await client.query('COMMIT');
+    releaseClient();
     await persistUsageRecords({
       postId: normalizedPostId,
       records: usageRecords
@@ -967,7 +981,12 @@ const runPipeline = async (postId, content) => {
       duration_ms: Date.now() - start
     };
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (!clientReleased) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {}
+    }
+    releaseClient();
     const durationMs = Date.now() - start;
     const usageSummary = currentUsageSummary();
 
@@ -1025,7 +1044,7 @@ const runPipeline = async (postId, content) => {
 
     throw error;
   } finally {
-    client.release();
+    releaseClient();
   }
 };
 
