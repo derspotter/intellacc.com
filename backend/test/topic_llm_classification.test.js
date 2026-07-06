@@ -169,6 +169,19 @@ describe('topicService.classifyEventLLM', () => {
     expect(row.llm_checked_at).not.toBeNull();
   });
 
+  test('junk verdict applies even when the model returns no valid topic slugs', async () => {
+    // Junk markets frequently have no sensible topic: {"topics":[],"junk":true}.
+    const eventId = await insertEvent();
+    classifyWithGemma.mockResolvedValue({ topics: [], junk: true, junkReason: 'unserious/meta market' });
+
+    await topicService.classifyEventLLM(eventId);
+
+    const row = await getModeration(eventId);
+    expect(row.hidden_at).not.toBeNull();
+    expect(row.hidden_reason).toBe('llm: unserious/meta market');
+    expect(row.llm_checked_at).not.toBeNull();
+  });
+
   test('missing junk verdict writes topics but leaves llm_checked_at NULL for retry', async () => {
     const eventId = await insertEvent();
     classifyWithGemma.mockResolvedValue({ topics: ['science'], junk: null, junkReason: null });

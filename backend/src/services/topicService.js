@@ -117,21 +117,12 @@ const classifyEventLLM = async (eventId) => {
     failure = error.message || String(error);
   }
 
-  if (failure) {
-    console.error('[Topics] LLM classification failed for event', id, failure);
-    return classifyEvent(id);
-  }
-
-  const topicIds = slugs.map((slug) => idBySlug.get(slug));
-  return db.executeWithTransaction(async (client) => {
-    await client.query('DELETE FROM event_topics WHERE event_id = $1', [id]);
-    const inserted = await client.query(
-      `INSERT INTO event_topics (event_id, topic_id, similarity, source)
-       SELECT $1, topic_id, NULL, 'llm' FROM UNNEST($2::int[]) AS topic_id
-       RETURNING topic_id`,
-      [id, topicIds]
-    );
-
+  // Apply the junk verdict whenever the model returned a boolean — junk
+  // markets frequently have NO sensible topic ({"topics":[],"junk":true}), so
+  // the verdict must not be discarded just because topic validation failed.
+  // junk === null (no usable verdict) leaves llm_checked_at NULL so the sweep
+  // retries this event.
+  const applyJunkVerdict = async (client) => {
     if (junk === true) {
       await client.query(
         `UPDATE events
@@ -152,8 +143,25 @@ const classifyEventLLM = async (eventId) => {
         [id]
       );
     }
-    // junk === null: model gave no usable verdict; leave llm_checked_at NULL
-    // so the sweep retries this event.
+  };
+
+  if (failure) {
+    console.error('[Topics] LLM classification failed for event', id, failure);
+    await applyJunkVerdict(db);
+    return classifyEvent(id);
+  }
+
+  const topicIds = slugs.map((slug) => idBySlug.get(slug));
+  return db.executeWithTransaction(async (client) => {
+    await client.query('DELETE FROM event_topics WHERE event_id = $1', [id]);
+    const inserted = await client.query(
+      `INSERT INTO event_topics (event_id, topic_id, similarity, source)
+       SELECT $1, topic_id, NULL, 'llm' FROM UNNEST($2::int[]) AS topic_id
+       RETURNING topic_id`,
+      [id, topicIds]
+    );
+
+    await applyJunkVerdict(client);
 
     return inserted.rows;
   });
