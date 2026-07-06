@@ -40,5 +40,9 @@ export const TERMINAL_VIEWS = {
   network: {
     title: 'NETWORK',
     component: lazy(() => import('./NetworkView'))
+  },
+  analytics: {
+    title: 'ANALYTICS',
+    component: lazy(() => import('./AnalyticsView'))
   }
 };
