@@ -15,4 +15,6 @@ test('analytics view renders summary tiles', async ({ page }) => {
   await expect(view.locator('[data-testid="analytics-summary"]')).toBeVisible({ timeout: 15000 });
   await expect(view).toContainText('TOTAL PREDICTIONS');
   await expect(view).toContainText('ACCURACY');
+  await expect(view).toContainText('NO PREDICTIONS YET');
+  await expect(view).toContainText('NO OPEN POSITIONS');
 });

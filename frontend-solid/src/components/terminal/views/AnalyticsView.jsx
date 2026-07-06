@@ -160,43 +160,55 @@ export default function AnalyticsView() {
             </Show>
 
             {/* RECENT PREDICTIONS Section */}
-            <Show when={data()?.recent_predictions && data()?.recent_predictions.length > 0}>
+            <Show when={data()?.recent_predictions !== undefined && data() !== null}>
               <div>
                 <div class="text-bb-accent font-bold uppercase text-xs border-b border-bb-border pb-1 mb-2">
                   [RECENT PREDICTIONS]
                 </div>
                 <div class="space-y-1">
-                  <For each={data()?.recent_predictions || []}>
-                    {(pred) => (
-                      <div class="flex justify-between gap-3 py-1 border-b border-bb-border/20 text-xs">
-                        <span class="truncate text-bb-text">{pred.event || `EVENT ${pred.event_id || '--'}`}</span>
-                        <span class="text-bb-muted shrink-0">{fmtPercent(pred.prediction_value)}%</span>
-                        <span class="text-bb-muted shrink-0">{fmtPercent(pred.confidence)}%</span>
-                        <span class="text-bb-muted shrink-0 uppercase">{pred.outcome || 'PENDING'}</span>
-                      </div>
-                    )}
-                  </For>
+                  <Show when={data()?.recent_predictions && data()?.recent_predictions.length > 0} fallback={
+                    <div class="flex justify-between gap-3 py-1 border-b border-bb-border/20 text-xs">
+                      <span class="text-bb-muted">NO PREDICTIONS YET</span>
+                    </div>
+                  }>
+                    <For each={data()?.recent_predictions || []}>
+                      {(pred) => (
+                        <div class="flex justify-between gap-3 py-1 border-b border-bb-border/20 text-xs">
+                          <span class="truncate text-bb-text">{pred.event || `EVENT ${pred.event_id || '--'}`}</span>
+                          <span class="text-bb-muted shrink-0">{pred.prediction_value || '--'}</span>
+                          <span class="text-bb-muted shrink-0">{fmtPercent(pred.confidence)}%</span>
+                          <span class="text-bb-muted shrink-0 uppercase">{pred.outcome || 'PENDING'}</span>
+                        </div>
+                      )}
+                    </For>
+                  </Show>
                 </div>
               </div>
             </Show>
 
             {/* OPEN POSITIONS Section */}
-            <Show when={data()?.open_positions && data()?.open_positions.length > 0}>
+            <Show when={data()?.open_positions !== undefined && data() !== null}>
               <div>
                 <div class="text-bb-accent font-bold uppercase text-xs border-b border-bb-border pb-1 mb-2">
                   [OPEN POSITIONS]
                 </div>
                 <div class="space-y-1">
-                  <For each={data()?.open_positions || []}>
-                    {(pos) => (
-                      <div class="flex justify-between gap-3 py-1 border-b border-bb-border/20 text-xs">
-                        <span class="truncate text-bb-text">{pos.event_title || '--'}</span>
-                        <span class="text-bb-muted shrink-0">{pos.exposure_label || '--'}</span>
-                        <span class="text-bb-muted shrink-0">{fmtRP(pos.staked_rp)} RP</span>
-                        <span class="text-bb-muted shrink-0">{fmtPercent(pos.market_prob)}%</span>
-                      </div>
-                    )}
-                  </For>
+                  <Show when={data()?.open_positions && data()?.open_positions.length > 0} fallback={
+                    <div class="flex justify-between gap-3 py-1 border-b border-bb-border/20 text-xs">
+                      <span class="text-bb-muted">NO OPEN POSITIONS</span>
+                    </div>
+                  }>
+                    <For each={data()?.open_positions || []}>
+                      {(pos) => (
+                        <div class="flex justify-between gap-3 py-1 border-b border-bb-border/20 text-xs">
+                          <span class="truncate text-bb-text">{pos.event_title || '--'}</span>
+                          <span class="text-bb-muted shrink-0">{pos.exposure_label || '--'}</span>
+                          <span class="text-bb-muted shrink-0">{fmtRP(pos.staked_rp)} RP</span>
+                          <span class="text-bb-muted shrink-0">{fmtPercent((pos.market_prob ?? 0) * 100)}%</span>
+                        </div>
+                      )}
+                    </For>
+                  </Show>
                 </div>
               </div>
             </Show>
