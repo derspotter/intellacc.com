@@ -185,14 +185,14 @@ function App() {
 	                setShowHelp(false);
 	                return;
 	            }
-	            if (activeView()) {
-	                closeTerminalView();
-	                return;
-	            }
 	            if (isInput) {
                 e.target.blur();
                 return;
             }
+	            if (activeView()) {
+	                closeTerminalView();
+	                return;
+	            }
         }
 
         // Focus Trap Handling

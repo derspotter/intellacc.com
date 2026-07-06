@@ -16,7 +16,7 @@ export default function SearchView() {
   const run = async () => {
     const q = query().trim();
     const epoch = ++searchEpoch;
-    if (!q) { setUsers([]); setPosts([]); return; }
+    if (!q) { setUsers([]); setPosts([]); setLoading(false); setError(''); return; }
     setLoading(true);
     setError('');
     try {

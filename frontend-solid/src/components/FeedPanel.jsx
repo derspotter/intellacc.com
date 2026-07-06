@@ -146,8 +146,10 @@ const PostItem = (props) => {
     const [showComments, setShowComments] = createSignal(false);
     const [comments, setComments] = createSignal([]);
     const [commentsLoaded, setCommentsLoaded] = createSignal(false);
+    const [commentsError, setCommentsError] = createSignal(false);
     const [commentText, setCommentText] = createSignal("");
     const [commentBusy, setCommentBusy] = createSignal(false);
+    const [repostBusy, setRepostBusy] = createSignal(false);
     const commentCount = () => Number(props.post.comment_count || 0) + comments().filter(c => c.__local).length;
 
     const [attachmentSrc, setAttachmentSrc] = createSignal(null);
@@ -176,10 +178,11 @@ const PostItem = (props) => {
             try {
                 const rows = await getPostComments(props.post.id);
                 setComments(Array.isArray(rows) ? rows : (rows?.comments || []));
+                setCommentsError(false);
+                setCommentsLoaded(true);
             } catch (err) {
                 console.error("Failed to load comments", err);
-            } finally {
-                setCommentsLoaded(true);
+                setCommentsError(true);
             }
         }
     };
@@ -228,29 +231,34 @@ const PostItem = (props) => {
                         type="button"
                         data-testid="post-repost"
                         class={`cursor-pointer hover:text-white transition-colors uppercase ${props.post.reposted_by_user ? 'text-market-neutral font-bold' : 'text-bb-muted'}`}
-                        disabled={props.post.is_temp}
-                        onClick={() => feedStore.createPost('', null, null, props.post.id)
-                            .then((newPost) => {
-                                // The create endpoint only echoes repost_id, not the nested
-                                // original (that's assembled server-side only on feed GETs).
-                                // Attach it from the already-loaded source post so the embed
-                                // renders immediately without a refetch.
-                                if (newPost?.id) {
-                                    feedStore.updatePost({
-                                        id: newPost.id,
-                                        reposted_post: {
-                                            username: props.post.username,
-                                            content: props.post.content,
-                                            created_at: props.post.created_at
-                                        }
-                                    });
-                                }
-                            })
-                            .catch((err) => console.error('Repost failed', err))}
+                        disabled={props.post.is_temp || props.post.reposted_by_user || repostBusy()}
+                        onClick={() => {
+                            setRepostBusy(true);
+                            feedStore.createPost('', null, null, props.post.id)
+                                .then((newPost) => {
+                                    // The create endpoint only echoes repost_id, not the nested
+                                    // original (that's assembled server-side only on feed GETs).
+                                    // Attach it from the already-loaded source post so the embed
+                                    // renders immediately without a refetch.
+                                    if (newPost?.id) {
+                                        feedStore.updatePost({
+                                            id: newPost.id,
+                                            reposted_post: {
+                                                username: props.post.username,
+                                                content: props.post.content,
+                                                created_at: props.post.created_at
+                                            }
+                                        });
+                                    }
+                                })
+                                .catch((err) => console.error('Repost failed', err))
+                                .finally(() => setRepostBusy(false));
+                        }}
                     >
                         [RT:{props.post.repost_count || 0}]
                     </button>
                     <button
+                        type="button"
                         class={`cursor-pointer hover:text-white transition-colors uppercase ${props.post.liked_by_user ? 'text-market-up font-bold' : 'text-bb-muted'}`}
                         onClick={handleLike}
                         disabled={props.post.is_temp}
@@ -283,12 +291,17 @@ const PostItem = (props) => {
             </div>
             <Show when={showComments()}>
                 <div class="mt-2">
-                    <Show when={commentsLoaded()} fallback={<div class="text-xxs text-bb-muted animate-pulse">LOADING COMMENTS...</div>}>
-                        <For each={comments()}>
-                            {(c) => <CommentItem comment={c} />}
-                        </For>
-                        <Show when={comments().length === 0}>
-                            <div class="text-xxs text-bb-muted">NO COMMENTS</div>
+                    <Show when={commentsError()}>
+                        <div class="text-xxs text-market-down">ERROR // FAILED TO LOAD COMMENTS</div>
+                    </Show>
+                    <Show when={!commentsError()}>
+                        <Show when={commentsLoaded()} fallback={<div class="text-xxs text-bb-muted animate-pulse">LOADING COMMENTS...</div>}>
+                            <For each={comments()}>
+                                {(c) => <CommentItem comment={c} />}
+                            </For>
+                            <Show when={comments().length === 0}>
+                                <div class="text-xxs text-bb-muted">NO COMMENTS</div>
+                            </Show>
                         </Show>
                     </Show>
                     <input
