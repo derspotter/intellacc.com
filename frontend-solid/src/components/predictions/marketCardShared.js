@@ -38,7 +38,7 @@ export const getProbabilityColor = (probability) => {
   const prob = safeNumber(probability, 0.5);
   const red = Math.round(prob * 255);
   const blue = Math.round((1 - prob) * 255);
-  return `color: rgb(${red}, 0, ${blue})`;
+  return `rgb(${red}, 0, ${blue})`;
 };
 
 export const getKellyEdge = (belief, currentProb) =>
