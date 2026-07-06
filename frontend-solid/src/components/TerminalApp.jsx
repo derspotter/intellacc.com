@@ -3,6 +3,7 @@ import { MarketPanel } from "./MarketPanel";
 import { ThreePaneLayout } from "./ui/ThreePaneLayout";
 import { useSocket } from "../services/socket";
 import { createSignal, createEffect, createMemo, onCleanup, onMount, Show, For } from "solid-js";
+import { Dynamic } from "solid-js/web";
 import { userData, isLoggedIn } from "../services/tokenService";
 import { LoginModal } from "./auth/LoginModal";
 import { ChatPanel } from "./ChatPanel";
@@ -14,7 +15,12 @@ import { isAuthenticated, isAdmin } from "../services/auth";
 import { normalizeHashPath } from "../services/routes";
 import { TerminalViewHost, closeTerminalView } from "./terminal/TerminalViewHost";
 import { TERMINAL_VIEWS } from "./terminal/views/registry";
+import { AUTH_SCREENS } from "./terminal/views/auth/AuthScreens";
 import TerminalRPBalance from "./terminal/TerminalRPBalance";
+
+// Logged-out auth routes rendered as a full-screen terminal layer instead of
+// (or, for verify-email, on top of) LoginModal. See AuthScreens.jsx.
+const AUTH_SCREEN_ROUTES = ['signup', 'forgot-password', 'reset-password', 'verify-email'];
 
 function App() {
   const { connect, disconnect, state: socketState } = useSocket();
@@ -27,6 +33,10 @@ function App() {
   // full-screen view; anything else leaves the panes as-is.
   const PANE_ROUTES = { home: 1, predictions: 2, messages: 3 };
   const [activeView, setActiveView] = createSignal(null); // { key, param } | null
+  // Reactive hash-driven auth route (signup|forgot-password|reset-password|
+  // verify-email) or null. Kept separate from activeView since it renders
+  // even for logged-out users (who have no panes to focus yet).
+  const [authRoute, setAuthRoute] = createSignal(null);
 
   const applyRoute = () => {
     const value = normalizeHashPath(window.location.hash);
@@ -34,11 +44,18 @@ function App() {
     if (PANE_ROUTES[route]) {
       setActivePane(PANE_ROUTES[route]);
       setActiveView(null);
+      setAuthRoute(null);
       if (route === 'predictions' && param) {
         marketStore.ensureMarket(Number(param));
       }
     } else if (TERMINAL_VIEWS[route] && (!TERMINAL_VIEWS[route].adminOnly || isAdmin())) {
       setActiveView({ key: route, param: param || null });
+      setAuthRoute(null);
+    } else if (AUTH_SCREEN_ROUTES.includes(route)) {
+      setActiveView(null);
+      setAuthRoute(route);
+    } else {
+      setAuthRoute(null);
     }
   };
 
@@ -253,8 +270,14 @@ function App() {
           class="h-screen w-screen bg-bb-bg text-bb-text font-sans overflow-hidden flex flex-col relative"
           data-skin={activeSkin()}
         >
-      <Show when={!isLoggedIn()}>
-        <LoginModal />
+      {/* Logged-out auth routes (signup/forgot-password/reset-password) swap
+          in for LoginModal; verify-email renders on top regardless of login
+          state (auto-confirms), matching the van skin's behavior. */}
+      <Show
+        when={authRoute()}
+        fallback={<Show when={!isLoggedIn()}><LoginModal /></Show>}
+      >
+        <Dynamic component={AUTH_SCREENS[authRoute()]} />
       </Show>
 
       {/* Command Palette Overlay */}
