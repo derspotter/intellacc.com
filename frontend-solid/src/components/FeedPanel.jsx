@@ -1,7 +1,7 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, createEffect, onCleanup } from "solid-js";
 import { Panel } from "./ui/Panel";
 import { feedStore } from "../store/feedStore";
-import { api, ApiError, getPostComments, createComment } from "../services/api";
+import { api, ApiError, getPostComments, createComment, requestBlob } from "../services/api";
 
 const PostComposer = () => {
     const [content, setContent] = createSignal("");
@@ -149,6 +149,25 @@ const PostItem = (props) => {
     const [commentBusy, setCommentBusy] = createSignal(false);
     const commentCount = () => Number(props.post.comment_count || 0) + comments().filter(c => c.__local).length;
 
+    const [attachmentSrc, setAttachmentSrc] = createSignal(null);
+    createEffect(() => {
+        const id = props.post.image_attachment_id;
+        if (!id) { setAttachmentSrc(null); return; }
+        let revoked = false;
+        let url = null;
+        requestBlob(`/attachments/${id}`)
+            .then((blob) => {
+                if (revoked) return;
+                url = URL.createObjectURL(blob);
+                setAttachmentSrc(url);
+            })
+            .catch(() => setAttachmentSrc(null));
+        onCleanup(() => {
+            revoked = true;
+            if (url) URL.revokeObjectURL(url);
+        });
+    });
+
     const toggleComments = async () => {
         const next = !showComments();
         setShowComments(next);
@@ -186,6 +205,15 @@ const PostItem = (props) => {
                 <span class="text-xxs text-bb-muted font-mono">{new Date(props.post.created_at).toLocaleTimeString()}</span>
             </div>
             <p class="text-bb-text mb-2 break-words whitespace-pre-wrap">{props.post.content}</p>
+            <Show when={attachmentSrc()}>
+                <img src={attachmentSrc()} alt="" class="max-w-full max-h-64 border border-bb-border my-1" />
+            </Show>
+            <Show when={props.post.reposted_post}>
+                <div data-testid="repost-embed" class="border border-bb-border/60 bg-black/20 p-2 my-1 text-xs">
+                    <span class="text-bb-accent font-bold text-xxs">RT @{props.post.reposted_post.username}</span>
+                    <p class="text-bb-text break-words whitespace-pre-wrap">{props.post.reposted_post.content}</p>
+                </div>
+            </Show>
             <div class="flex justify-between items-center text-xxs font-mono">
                 <div class="flex gap-2 text-bb-muted">
                     <span>GRP: DEFAULT</span>
@@ -194,13 +222,41 @@ const PostItem = (props) => {
                          <span class="text-yellow-500 animate-pulse">SENDING...</span>
                     </Show>
                 </div>
-                <button 
-                    class={`cursor-pointer hover:text-white transition-colors uppercase ${props.post.liked_by_user ? 'text-market-up font-bold' : 'text-bb-muted'}`}
-                    onClick={handleLike}
-                    disabled={props.post.is_temp}
-                >
-                    [{props.post.liked_by_user ? 'LIKED' : 'LIKE'}:{props.post.like_count || 0}]
-                </button>
+                <div class="flex gap-2">
+                    <button
+                        type="button"
+                        data-testid="post-repost"
+                        class={`cursor-pointer hover:text-white transition-colors uppercase ${props.post.reposted_by_user ? 'text-market-neutral font-bold' : 'text-bb-muted'}`}
+                        disabled={props.post.is_temp}
+                        onClick={() => feedStore.createPost('', null, null, props.post.id)
+                            .then((newPost) => {
+                                // The create endpoint only echoes repost_id, not the nested
+                                // original (that's assembled server-side only on feed GETs).
+                                // Attach it from the already-loaded source post so the embed
+                                // renders immediately without a refetch.
+                                if (newPost?.id) {
+                                    feedStore.updatePost({
+                                        id: newPost.id,
+                                        reposted_post: {
+                                            username: props.post.username,
+                                            content: props.post.content,
+                                            created_at: props.post.created_at
+                                        }
+                                    });
+                                }
+                            })
+                            .catch((err) => console.error('Repost failed', err))}
+                    >
+                        [RT:{props.post.repost_count || 0}]
+                    </button>
+                    <button
+                        class={`cursor-pointer hover:text-white transition-colors uppercase ${props.post.liked_by_user ? 'text-market-up font-bold' : 'text-bb-muted'}`}
+                        onClick={handleLike}
+                        disabled={props.post.is_temp}
+                    >
+                        [{props.post.liked_by_user ? 'LIKED' : 'LIKE'}:{props.post.like_count || 0}]
+                    </button>
+                </div>
             </div>
             <div class="flex gap-2 text-xxs font-mono mt-1">
                 <button
