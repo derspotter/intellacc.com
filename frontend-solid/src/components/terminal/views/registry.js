@@ -36,5 +36,9 @@ export const TERMINAL_VIEWS = {
   settings: {
     title: 'SETTINGS',
     component: lazy(() => import('./SettingsView'))
+  },
+  network: {
+    title: 'NETWORK',
+    component: lazy(() => import('./NetworkView'))
   }
 };
