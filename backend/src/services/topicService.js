@@ -201,6 +201,7 @@ let sweepTimer = null;
 
 const startClassificationWorker = () => {
   if (sweepTimer) return;
+  console.log(`[Topics] Classification worker started (every ${Math.round(CLASSIFY_SWEEP_INTERVAL_MS / 60000)}m, first pass in 30s)`);
   const run = async () => {
     if (sweepRunning) return;
     sweepRunning = true;
