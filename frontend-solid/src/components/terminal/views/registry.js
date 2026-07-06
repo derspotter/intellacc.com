@@ -19,5 +19,9 @@ export const TERMINAL_VIEWS = {
   notifications: {
     title: 'NOTIFICATIONS',
     component: lazy(() => import('./NotificationsView'))
+  },
+  search: {
+    title: 'SEARCH',
+    component: lazy(() => import('./SearchView'))
   }
 };
