@@ -23,5 +23,9 @@ export const TERMINAL_VIEWS = {
   search: {
     title: 'SEARCH',
     component: lazy(() => import('./SearchView'))
+  },
+  settings: {
+    title: 'SETTINGS',
+    component: lazy(() => import('./SettingsView'))
   }
 };
