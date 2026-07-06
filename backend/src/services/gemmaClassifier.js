@@ -19,10 +19,18 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const buildPrompt = (title, details, slugs) =>
   `You classify prediction-market questions into topics and screen out junk.\n` +
   `Allowed topic slugs: ${slugs.join(', ')}\n` +
-  `A question is junk if it is an unserious/joke/meme market, OR a sports-betting ` +
-  `market on an individual match, game, race or fight outcome (e.g. "Will X beat Y", ` +
-  `"Will X win <specific game/race>"). Substantive sports questions (league policy, ` +
-  `host-city decisions, doping rulings, season-long records) are NOT junk.\n` +
+  `A question is junk if it is ANY of:\n` +
+  `- an unserious/joke/meme market;\n` +
+  `- a religious-prophecy or supernatural market (rapture, second coming, divine ` +
+  `intervention, miracles, end-times);\n` +
+  `- a market about the prediction platform itself, its users/moderators/mana, or ` +
+  `the author's personal life, goals or relationships;\n` +
+  `- a subjective question with no objective resolution criteria;\n` +
+  `- a sports-betting market on an individual match, game, race or fight outcome ` +
+  `(e.g. "Will X beat Y", "Will X win <specific game/race>").\n` +
+  `NOT junk: substantive sports questions (league policy, host-city decisions, ` +
+  `doping rulings, season-long records) and factual religion news (papal visits, ` +
+  `church decisions, religious demographics).\n` +
   `Return exactly one JSON object: ` +
   `{"topics": ["slug", ...], "junk": true|false, "junk_reason": "<short reason, empty if not junk>"} ` +
   `with 1-2 slugs, best first.\n` +
