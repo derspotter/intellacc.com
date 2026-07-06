@@ -19,56 +19,9 @@ import SearchPage from './pages/SearchPage';
 import TopicPicker from './components/onboarding/TopicPicker';
 import { api } from './services/api';
 import { isAuthenticated } from './services/auth';
+import { AUTH_ROUTES, NOT_FOUND_ROUTE, parseHashRoute, sanitizeRoute } from './services/routes';
 
 const Harness = import.meta.env.DEV ? lazy(() => import('./_harness/Harness')) : null;
-
-const ROUTES = {
-  home: 'home',
-  login: 'login',
-  signup: 'signup',
-  'forgot-password': 'forgot-password',
-  'reset-password': 'reset-password',
-  profile: 'profile',
-  user: 'user',
-  predictions: 'predictions',
-  analytics: 'analytics',
-  network: 'network',
-  groups: 'groups',
-  group: 'group',
-  messages: 'messages',
-  notifications: 'notifications',
-  settings: 'settings',
-  'verify-email': 'verify-email',
-  search: 'search',
-  ...(import.meta.env.DEV ? { __harness: '__harness' } : {})
-};
-
-const NOT_FOUND_ROUTE = 'notFound';
-
-const AUTH_ROUTES = [
-  'login',
-  'signup',
-  'forgot-password',
-  'reset-password',
-  'verify-email'
-];
-
-const normalizeHashPath = (raw) => {
-  const value = (raw || '').replace(/^#/, '').trim();
-  if (!value || value.startsWith('?')) {
-    return 'home';
-  }
-
-  const [path] = value.split('?');
-  const normalized = path.replace(/^\/+/, '').replace(/\/+$/, '');
-
-  return normalized || 'home';
-};
-
-const sanitizeRoute = (raw) => {
-  const route = normalizeHashPath(raw).split('/')[0];
-  return ROUTES[route] || NOT_FOUND_ROUTE;
-};
 
 function AppBackground() {
   return (
@@ -111,19 +64,9 @@ export default function App() {
   };
 
   const parseRoute = (hashValue) => {
-    const value = normalizeHashPath(hashValue);
-    const [route, param] = value.split('/');
-
-    if (route === 'user' && !param) {
-      setPage(NOT_FOUND_ROUTE);
-      setRouteParam(null);
-      return;
-    }
-
-    const normalizedRoute = ROUTES[route] || NOT_FOUND_ROUTE;
-
-    setPage(normalizedRoute);
-    setRouteParam(param || null);
+    const { page: nextPage, param } = parseHashRoute(hashValue);
+    setPage(nextPage);
+    setRouteParam(param);
   };
 
   const profilePageId = () => routeParam();
@@ -186,7 +129,7 @@ export default function App() {
       return <Harness />;
     }
 
-    if (page() === 'notFound' || page() === 'not-found') {
+    if (page() === NOT_FOUND_ROUTE || page() === 'not-found') {
       return (
         <div class="not-found">
           <h1>404</h1>

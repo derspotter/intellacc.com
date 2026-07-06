@@ -17,6 +17,7 @@ export const MarketList = () => {
                 <For each={marketStore.state.markets}>
                     {(market, index) => (
                         <div
+                            data-testid="market-row"
                             class={clsx(
                                 "grid grid-cols-[minmax(0,1fr)_max-content] sm:grid-cols-[4ch_minmax(0,1fr)_max-content_max-content] gap-x-0 px-2 py-0.5 border-b border-bb-border/20 cursor-pointer transition-colors",
                                 marketStore.state.selectedMarketId === market.id
@@ -47,6 +48,20 @@ export const MarketList = () => {
                         </div>
                     )}
                 </For>
+                <Show when={marketStore.state.markets.length === 0 && !marketStore.state.loading}>
+                    <div data-testid="market-empty" class="p-4 text-center text-bb-muted">NO MARKETS MATCH</div>
+                </Show>
+                <Show when={marketStore.state.hasMore}>
+                    <button
+                        type="button"
+                        data-testid="market-load-more"
+                        class="w-full py-2 text-center text-bb-accent border-b border-bb-border/20 hover:bg-bb-accent/10 uppercase font-bold disabled:opacity-50"
+                        disabled={marketStore.state.loadingMore}
+                        onClick={() => marketStore.loadMore()}
+                    >
+                        {marketStore.state.loadingMore ? 'LOADING...' : `LOAD MORE (${marketStore.state.markets.length}/${marketStore.state.total})`}
+                    </button>
+                </Show>
             </div>
         </div>
     );

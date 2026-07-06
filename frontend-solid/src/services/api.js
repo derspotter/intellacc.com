@@ -407,7 +407,13 @@ export const api = {
       request('/users/me/feed-weights'),
 
     saveFeedWeights: (weights) =>
-      request('/users/me/feed-weights', { method: 'PUT', body: weights })
+      request('/users/me/feed-weights', { method: 'PUT', body: weights }),
+
+    getUiPreferences: () =>
+      request('/users/me/preferences'),
+
+    updateUiPreferences: (skin) =>
+      request('/users/me/preferences', { method: 'PUT', body: { skin } })
   },
 
   // Topic onboarding endpoints

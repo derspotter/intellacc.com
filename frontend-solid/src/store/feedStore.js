@@ -1,30 +1,104 @@
 import { createStore } from "solid-js/store";
-import { api } from "../services/api";
+import { api, getPostsPaging } from "../services/api";
 import { getToken } from "../services/tokenService";
+
+const PAGE_LIMIT = 20;
 
 const [state, setState] = createStore({
     posts: [],
+    hasMore: false,
+    nextCursor: null,
     loading: false,
-    error: null
+    loadingMore: false,
+    error: null,
+    usingFeed: true,
+    discoverMode: false
 });
 
-const loadPosts = async () => {
-    // Skip fetch if not authenticated
+let fetchEpoch = 0;
+
+const appendUnique = (current, next) => {
+    const seen = new Set(current.map(p => String(p.id)));
+    return [...current, ...next.filter(p => !seen.has(String(p.id)))];
+};
+
+const fetchPage = async ({ reset }) => {
     if (!getToken()) {
-        setState({ posts: [], loading: false, error: null });
+        setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: false, discoverMode: false });
         return;
     }
-    setState({ loading: true, error: null });
+    const epoch = ++fetchEpoch;
+    if (reset) setState('usingFeed', Boolean(getToken()));
+    setState(reset ? { loading: true, error: null } : { loadingMore: true, error: null });
     try {
-        const posts = await api.posts.getAll();
-        setState({ posts: Array.isArray(posts) ? posts : [], loading: false });
+        const cursor = reset ? null : state.nextCursor;
+        let response;
+        let usingFeed = state.usingFeed;
+        if (usingFeed) {
+            try {
+                response = await api.posts.getFeedPage({ cursor, limit: PAGE_LIMIT });
+            } catch (err) {
+                const msg = String(err?.message || '');
+                if (reset && (msg.includes('401') || msg.includes('403'))) {
+                    usingFeed = false;
+                    response = await api.posts.getPage({ cursor, limit: PAGE_LIMIT });
+                } else {
+                    throw err;
+                }
+            }
+        } else {
+            response = await api.posts.getPage({ cursor, limit: PAGE_LIMIT });
+        }
+        if (epoch !== fetchEpoch) return; // superseded by a newer request
+        const paging = getPostsPaging(response);
+
+        // Empty following-feed on reset: discover fallback (top predictors).
+        if (reset && usingFeed && paging.items.length === 0) {
+            try {
+                const discover = await api.discover.feed();
+                if (epoch !== fetchEpoch) return;
+                const items = Array.isArray(discover?.items) ? discover.items : [];
+                if (items.length > 0) {
+                    setState({
+                        posts: items, usingFeed, discoverMode: true,
+                        hasMore: false, nextCursor: null,
+                        loading: false, loadingMore: false
+                    });
+                    return;
+                }
+            } catch (err) {
+                console.error('Discover fallback failed', err);
+            }
+            if (epoch !== fetchEpoch) return; // superseded while discover was in flight
+        }
+
+        setState({
+            posts: reset ? paging.items : appendUnique(state.posts, paging.items),
+            hasMore: paging.hasMore,
+            nextCursor: paging.nextCursor,
+            usingFeed,
+            discoverMode: reset ? false : state.discoverMode,
+            loading: false,
+            loadingMore: false
+        });
     } catch (err) {
+        if (epoch !== fetchEpoch) return;
         console.error("Failed to load posts", err);
-        setState({ error: err.message, loading: false });
+        setState({ error: err.message, loading: false, loadingMore: false });
     }
 };
 
+const loadPosts = () => fetchPage({ reset: true });
+
+const loadMore = () => {
+    if (state.loading || state.loadingMore || !state.hasMore) return;
+    return fetchPage({ reset: false });
+};
+
 const addPost = (post) => {
+    // The backend broadcasts 'new_post' globally, including posts made in a
+    // community group. Those belong on the group's feed, not the home feed.
+    if (post?.community_group_id != null) return;
     setState("posts", (prev) => [post, ...prev]);
 };
 
@@ -89,12 +163,14 @@ const unlikePost = (postId) => {
 };
 
 const clear = () => {
-    setState({ posts: [], loading: false, error: null });
+    fetchEpoch++; // invalidate any in-flight fetch so it can't repopulate cleared state
+    setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: true, discoverMode: false });
 };
 
 export const feedStore = {
     state,
     loadPosts,
+    loadMore,
     addPost,
     updatePost,
     addComment,

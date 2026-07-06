@@ -14,9 +14,22 @@ let socket = null;
 
 const MAX_NOTIFICATIONS = 50;
 
+// Busy markets can emit marketUpdate frequently; debounce the RP balance
+// refresh (rather than firing on every update) so we don't hammer
+// getCurrentUser. TerminalRPBalance listens for this event.
+let rpRefreshTimer = null;
+const scheduleRpRefresh = () => {
+    if (rpRefreshTimer) clearTimeout(rpRefreshTimer);
+    rpRefreshTimer = setTimeout(() => {
+        rpRefreshTimer = null;
+        window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
+    }, 2000);
+};
+
 // Simple pub/sub for MLS socket events (ChatPanel subscribes here).
 const mlsMessageSubscribers = new Set();
 const mlsWelcomeSubscribers = new Set();
+const notificationSubscribers = new Set();
 
 export const onMlsMessage = (handler) => {
     if (typeof handler !== 'function') return () => {};
@@ -30,18 +43,32 @@ export const onMlsWelcome = (handler) => {
     return () => mlsWelcomeSubscribers.delete(handler);
 };
 
+export const onNotification = (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    notificationSubscribers.add(handler);
+    return () => notificationSubscribers.delete(handler);
+};
+
 export const registerSocketEventHandler = (eventName, handler) => {
     if (typeof handler !== 'function') return () => {};
     if (eventName === 'mls-message') return onMlsMessage(handler);
     if (eventName === 'mls-welcome') return onMlsWelcome(handler);
+    if (eventName === 'notification') return onNotification(handler);
     return () => {};
 };
 
+// Group-chat rooms the client has joined. The server drops its room
+// membership on disconnect, so on reconnect we need to re-emit
+// 'join-group-chat' for each of these or the client goes deaf.
+const joinedGroupRooms = new Set();
+
 export const joinGroupChat = (groupId, handler) => {
     connect();
+    joinedGroupRooms.add(groupId);
     if (socket) { socket.emit('join-group-chat', groupId); socket.on('group-message', handler); }
 };
 export const leaveGroupChat = (groupId, handler) => {
+    joinedGroupRooms.delete(groupId);
     if (socket) { socket.emit('leave-group-chat', groupId); socket.off('group-message', handler); }
 };
 
@@ -96,6 +123,9 @@ const connect = () => {
         socket.emit('join-predictions');
         socket.emit('authenticate');
         socket.emit('join-mls');
+        for (const groupId of joinedGroupRooms) {
+            socket.emit('join-group-chat', groupId);
+        }
     });
 
     socket.on('disconnect', () => {
@@ -130,6 +160,7 @@ const connect = () => {
 
     socket.on('marketUpdate', (update) => {
         marketStore.applyMarketUpdate(update);
+        scheduleRpRefresh();
     });
 
     socket.on('notification', (data) => {
@@ -141,6 +172,8 @@ const connect = () => {
             const next = [...(prev || []), entry];
             return next.length > MAX_NOTIFICATIONS ? next.slice(-MAX_NOTIFICATIONS) : next;
         });
+
+        emitToSubscribers(notificationSubscribers, data);
     });
 
     // MLS realtime hints: "new messages available" + "new welcome available".

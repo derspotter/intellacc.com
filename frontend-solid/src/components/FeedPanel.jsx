@@ -1,7 +1,9 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, createMemo, onMount } from "solid-js";
 import { Panel } from "./ui/Panel";
 import { feedStore } from "../store/feedStore";
-import { api, ApiError } from "../services/api";
+import { api, ApiError, getFeedWeights } from "../services/api";
+import { rankPosts } from "../lib/feedRanking";
+import PostItem from "./terminal/PostItem";
 
 const PostComposer = () => {
     const [content, setContent] = createSignal("");
@@ -113,56 +115,48 @@ const PostComposer = () => {
     );
 };
 
-const PostItem = (props) => {
-    const handleLike = async () => {
-        const postId = props.post.id;
-        if (props.post.liked_by_user) {
-            feedStore.unlikePost(postId);
-            try { await api.posts.unlikePost(postId); } catch { feedStore.likePost(postId); }
-        } else {
-            feedStore.likePost(postId);
-            try { await api.posts.likePost(postId); } catch { feedStore.unlikePost(postId); }
-        }
-    };
-
-    return (
-        <div class="p-2 border-b border-bb-border/30 hover:bg-white/5 text-sm transition-colors">
-            <div class="flex justify-between items-baseline mb-1">
-                <span class="font-bold text-bb-accent text-xs">@{props.post.username}</span>
-                <span class="text-xxs text-bb-muted font-mono">{new Date(props.post.created_at).toLocaleTimeString()}</span>
-            </div>
-            <p class="text-bb-text mb-2 break-words whitespace-pre-wrap">{props.post.content}</p>
-            <div class="flex justify-between items-center text-xxs font-mono">
-                <div class="flex gap-2 text-bb-muted">
-                    <span>GRP: DEFAULT</span>
-                    <span>ID: {props.post.id}</span>
-                    <Show when={props.post.is_temp}>
-                         <span class="text-yellow-500 animate-pulse">SENDING...</span>
-                    </Show>
-                </div>
-                <button 
-                    class={`cursor-pointer hover:text-white transition-colors uppercase ${props.post.liked_by_user ? 'text-market-up font-bold' : 'text-bb-muted'}`}
-                    onClick={handleLike}
-                    disabled={props.post.is_temp}
-                >
-                    [{props.post.liked_by_user ? 'LIKED' : 'LIKE'}:{props.post.like_count || 0}]
-                </button>
-            </div>
-        </div>
-    );
-};
-
 export const FeedPanel = () => {
+    const [weights, setWeights] = createSignal(null);
+    onMount(() => {
+        getFeedWeights().then(w => setWeights(w?.weights || w || null)).catch(() => {});
+    });
+    const rankedPosts = createMemo(() => rankPosts(feedStore.state.posts, weights()));
+
     return (
         <Panel title="[1] FEED // LIVE" class="h-full flex flex-col">
             <PostComposer />
+            <Show when={feedStore.state.discoverMode}>
+                <div data-testid="feed-discover-banner" class="px-2 py-1 text-xxs text-bb-tmux border-b border-bb-border/40 bg-bb-panel/60 uppercase">
+                    [DISCOVER MODE] TOP PREDICTORS IN YOUR TOPICS — FOLLOW TO BUILD YOUR FEED
+                </div>
+            </Show>
             <div class="flex-1 overflow-y-auto">
                 <Show when={!feedStore.state.loading} fallback={<div class="p-2 text-bb-muted font-mono animate-pulse">Running query...</div>}>
-                    <div class="flex flex-col">
-                        <For each={feedStore.state.posts}>
-                            {(post) => <PostItem post={post} />}
-                        </For>
-                    </div>
+                    <Show
+                        when={rankedPosts().length > 0}
+                        fallback={
+                            <Show when={!feedStore.state.discoverMode}>
+                                <div data-testid="feed-empty" class="p-4 text-bb-muted font-mono text-xs">FEED EMPTY // FOLLOW USERS OR CHECK BACK LATER</div>
+                            </Show>
+                        }
+                    >
+                        <div class="flex flex-col">
+                            <For each={rankedPosts()}>
+                                {(post) => <PostItem post={post} />}
+                            </For>
+                        </div>
+                        <Show when={feedStore.state.hasMore}>
+                            <button
+                                type="button"
+                                data-testid="feed-load-more"
+                                class="w-full py-2 text-center text-bb-accent hover:bg-bb-accent/10 uppercase font-bold font-mono text-xs disabled:opacity-50"
+                                disabled={feedStore.state.loadingMore}
+                                onClick={() => feedStore.loadMore()}
+                            >
+                                {feedStore.state.loadingMore ? 'LOADING...' : 'LOAD MORE'}
+                            </button>
+                        </Show>
+                    </Show>
                 </Show>
             </div>
         </Panel>

@@ -2,7 +2,8 @@ import { FeedPanel } from "./FeedPanel";
 import { MarketPanel } from "./MarketPanel";
 import { ThreePaneLayout } from "./ui/ThreePaneLayout";
 import { useSocket } from "../services/socket";
-import { createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
+import { createSignal, createEffect, createMemo, onCleanup, onMount, Show, For } from "solid-js";
+import { Dynamic } from "solid-js/web";
 import { userData, isLoggedIn } from "../services/tokenService";
 import { LoginModal } from "./auth/LoginModal";
 import { ChatPanel } from "./ChatPanel";
@@ -10,7 +11,16 @@ import { feedStore } from "../store/feedStore";
 import { marketStore } from "../store/marketStore";
 import { getActiveSkin, setSkin } from "../services/skinProvider";
 import { updateUiPreferences } from "../services/api";
-import { isAuthenticated } from "../services/auth";
+import { isAuthenticated, isAdmin } from "../services/auth";
+import { normalizeHashPath } from "../services/routes";
+import { TerminalViewHost, closeTerminalView } from "./terminal/TerminalViewHost";
+import { TERMINAL_VIEWS } from "./terminal/views/registry";
+import { AUTH_SCREENS } from "./terminal/views/auth/AuthScreens";
+import TerminalRPBalance from "./terminal/TerminalRPBalance";
+
+// Logged-out auth routes rendered as a full-screen terminal layer instead of
+// (or, for verify-email, on top of) LoginModal. See AuthScreens.jsx.
+const AUTH_SCREEN_ROUTES = ['signup', 'forgot-password', 'reset-password', 'verify-email'];
 
 function App() {
   const { connect, disconnect, state: socketState } = useSocket();
@@ -19,6 +29,43 @@ function App() {
   // Navigation State
   // 1: Left (Feed), 2: Center (Market), 3: Right (Chat)
   const [activePane, setActivePane] = createSignal(2);
+  // Hash-driven navigation. Pane routes focus a pane; registry routes open a
+  // full-screen view; anything else leaves the panes as-is.
+  const PANE_ROUTES = { home: 1, predictions: 2, messages: 3 };
+  const [activeView, setActiveView] = createSignal(null); // { key, param } | null
+  // Reactive hash-driven auth route (signup|forgot-password|reset-password|
+  // verify-email) or null. Kept separate from activeView since it renders
+  // even for logged-out users (who have no panes to focus yet).
+  const [authRoute, setAuthRoute] = createSignal(null);
+
+  const applyRoute = () => {
+    const value = normalizeHashPath(window.location.hash);
+    const [route, param] = value.split('/');
+    if (PANE_ROUTES[route]) {
+      setActivePane(PANE_ROUTES[route]);
+      setActiveView(null);
+      setAuthRoute(null);
+      if (route === 'predictions' && param) {
+        marketStore.ensureMarket(Number(param));
+      }
+    } else if (TERMINAL_VIEWS[route] && (!TERMINAL_VIEWS[route].adminOnly || isAdmin())) {
+      setActiveView({ key: route, param: param || null });
+      setAuthRoute(null);
+    } else if (AUTH_SCREEN_ROUTES.includes(route)) {
+      setActiveView(null);
+      setAuthRoute(route);
+    } else {
+      setAuthRoute(null);
+    }
+  };
+
+  // Focus a pane immediately AND sync the hash. Setting only the hash would
+  // no-op when it already equals the target (no hashchange event fires).
+  const goPane = (route) => {
+    setActivePane(PANE_ROUTES[route]);
+    setActiveView(null);
+    window.location.hash = `#${route}`;
+  };
   const [showHelp, setShowHelp] = createSignal(false);
   const [showNotifications, setShowNotifications] = createSignal(false);
   const [showPalette, setShowPalette] = createSignal(false);
@@ -49,19 +96,30 @@ function App() {
   };
 
   // Actions for Command Palette
-  const allActions = [
-    { id: 'feed', label: 'Focus Feed', shortcut: '1', action: () => setActivePane(1) },
-    { id: 'market', label: 'Focus Market', shortcut: '2', action: () => setActivePane(2) },
-    { id: 'chat', label: 'Focus Chat', shortcut: '3', action: () => setActivePane(3) },
+  // Derived (not a static array) so the adminOnly filter re-evaluates when
+  // isAdmin() changes. isAdmin() reads the reactive `token` signal (via
+  // getTokenData() -> getToken()), so this memo re-derives on login/logout
+  // mid-session — an admin logging in without a page reload now sees the
+  // "Open Admin" entry immediately.
+  const allActions = createMemo(() => [
+    { id: 'feed', label: 'Focus Feed', shortcut: '1', action: () => goPane('home') },
+    { id: 'market', label: 'Focus Market', shortcut: '2', action: () => goPane('predictions') },
+    { id: 'chat', label: 'Focus Chat', shortcut: '3', action: () => goPane('messages') },
+    ...Object.entries(TERMINAL_VIEWS).filter(([, v]) => !v.hidden && (!v.adminOnly || isAdmin())).map(([key, view]) => ({
+      id: `view-${key}`,
+      label: `Open ${view.title.charAt(0) + view.title.slice(1).toLowerCase()}`,
+      shortcut: '',
+      action: () => { window.location.hash = `#${key}`; }
+    })),
     { id: 'help', label: 'Toggle Help', shortcut: '?', action: () => setShowHelp(prev => !prev) },
     { id: 'skin-van', label: 'Switch to Van Skin', shortcut: '', action: switchToVan },
     { id: 'logout', label: 'Logout', shortcut: '', action: () => import("../services/tokenService").then(s => s.clearToken()) }
-  ];
+  ]);
 
   const filteredActions = () => {
     const q = paletteQuery().toLowerCase();
-    return allActions.filter(a => 
-      a.label.toLowerCase().includes(q) || 
+    return allActions().filter(a =>
+      a.label.toLowerCase().includes(q) ||
       a.id.toLowerCase().includes(q)
     );
   };
@@ -117,6 +175,10 @@ function App() {
   });
 
   onMount(() => {
+    applyRoute();
+    window.addEventListener('hashchange', applyRoute);
+    onCleanup(() => window.removeEventListener('hashchange', applyRoute));
+
     const handleKeydown = (e) => {
         // Ignore if user is typing in an input/textarea
         const isInput = ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
@@ -149,6 +211,10 @@ function App() {
                 e.target.blur();
                 return;
             }
+	            if (activeView()) {
+	                closeTerminalView();
+	                return;
+	            }
         }
 
         // Focus Trap Handling
@@ -166,9 +232,9 @@ function App() {
 	        }
 
         if (!isInput) {
-            if (e.key === '1') setActivePane(1);
-            if (e.key === '2') setActivePane(2);
-            if (e.key === '3') setActivePane(3);
+            if (e.key === '1') goPane('home');
+            if (e.key === '2') goPane('predictions');
+            if (e.key === '3') goPane('messages');
             if (e.key === '?') setShowHelp(prev => !prev);
         }
     };
@@ -204,8 +270,14 @@ function App() {
           class="h-screen w-screen bg-bb-bg text-bb-text font-sans overflow-hidden flex flex-col relative"
           data-skin={activeSkin()}
         >
-      <Show when={!isLoggedIn()}>
-        <LoginModal />
+      {/* Logged-out auth routes (signup/forgot-password/reset-password) swap
+          in for LoginModal; verify-email renders on top regardless of login
+          state (auto-confirms), matching the van skin's behavior. */}
+      <Show
+        when={authRoute()}
+        fallback={<Show when={!isLoggedIn()}><LoginModal /></Show>}
+      >
+        <Dynamic component={AUTH_SCREENS[authRoute()]} />
       </Show>
 
       {/* Command Palette Overlay */}
@@ -323,6 +395,9 @@ function App() {
           center={<MarketPanel isActive={activePane() === 2} />}
           right={<ChatPanel isActive={activePane() === 3} />}
         />
+        <Show when={activeView()}>
+          <TerminalViewHost viewKey={activeView().key} param={activeView().param} />
+        </Show>
       </div>
 
       {/* Mobile Bottom Tabs (< md) */}
@@ -330,7 +405,7 @@ function App() {
         <nav class="md:hidden shrink-0 h-12 bg-bb-panel border-t border-bb-border flex font-mono text-xs select-none">
           <button
             type="button"
-            onClick={() => setActivePane(1)}
+            onClick={() => goPane('home')}
             class={`flex-1 flex items-center justify-center gap-2 border-r border-bb-border ${
               activePane() === 1 ? "bg-bb-accent/15 text-bb-accent font-bold" : "text-bb-muted hover:text-bb-text hover:bg-white/5"
             }`}
@@ -340,7 +415,7 @@ function App() {
           </button>
           <button
             type="button"
-            onClick={() => setActivePane(2)}
+            onClick={() => goPane('predictions')}
             class={`flex-1 flex items-center justify-center gap-2 border-r border-bb-border ${
               activePane() === 2 ? "bg-bb-accent/15 text-bb-accent font-bold" : "text-bb-muted hover:text-bb-text hover:bg-white/5"
             }`}
@@ -350,7 +425,7 @@ function App() {
           </button>
           <button
             type="button"
-            onClick={() => setActivePane(3)}
+            onClick={() => goPane('messages')}
             class={`flex-1 flex items-center justify-center gap-2 ${
               activePane() === 3 ? "bg-bb-accent/15 text-bb-accent font-bold" : "text-bb-muted hover:text-bb-text hover:bg-white/5"
             }`}
@@ -365,7 +440,19 @@ function App() {
 	      <header class="min-h-6 shrink-0 flex items-stretch text-xs font-mono z-20 relative select-none bg-bb-tmux text-bb-bg font-bold overflow-x-auto no-scrollbar whitespace-nowrap">
 	        {/* Left Block */}
 	        <div class="px-3 flex items-center border-r border-bb-bg/20 gap-2">
-	          <span>[INTELLACC] USER: @{userData()?.username || 'GUEST'}</span>
+	          <span>[INTELLACC] USER:</span>
+	          <Show when={isLoggedIn()} fallback={<span>@GUEST</span>}>
+	            <button
+	              type="button"
+	              data-testid="user-readout"
+	              onClick={() => { window.location.hash = '#profile'; }}
+	              class="hover:text-bb-accent cursor-pointer"
+	              title="Open profile"
+	            >
+	              @{userData()?.username}
+	            </button>
+	          </Show>
+	          <TerminalRPBalance />
 	          <button
 	            type="button"
 	            onClick={switchToVan}

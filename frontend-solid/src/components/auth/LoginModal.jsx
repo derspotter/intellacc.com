@@ -4,7 +4,7 @@ import { saveToken, userData } from "../../services/tokenService";
 import vaultService from "../../services/mls/vaultService";
 
 export const LoginModal = () => {
-    // Stage: 'identifier' | 'password' | 'register' | 'loading'
+    // Stage: 'identifier' | 'password' | 'register' | 'loading' | 'approval-pending'
     const [stage, setStage] = createSignal("identifier");
     const [identifier, setIdentifier] = createSignal("");
     const [password, setPassword] = createSignal("");
@@ -75,7 +75,13 @@ export const LoginModal = () => {
         setStage("loading");
 
         try {
-            await api.auth.register(username, regEmail, regPassword);
+            const response = await api.auth.register(username, regEmail, regPassword);
+
+            if (response?.requiresApproval) {
+                setStage("approval-pending");
+                return;
+            }
+
             const result = await api.auth.login(regEmail, regPassword);
 
             if (result && result.token) {
@@ -102,7 +108,11 @@ export const LoginModal = () => {
             }
         } catch (err) {
             console.error(err);
-            setError(err.message || "Registration failed");
+            if (err?.status === 429) {
+                setError("Registration queue full // try again later");
+            } else {
+                setError(err.message || "Registration failed");
+            }
             setStage("register");
         }
     };
@@ -202,6 +212,13 @@ export const LoginModal = () => {
                             </button>
                             <button
                                 type="button"
+                                onClick={() => { window.location.hash = '#forgot-password'; }}
+                                class="text-bb-accent text-xs hover:underline text-center"
+                            >
+                                Forgot password?
+                            </button>
+                            <button
+                                type="button"
                                 onClick={handleBack}
                                 class="text-bb-muted text-xs hover:text-bb-text text-center"
                             >
@@ -261,6 +278,25 @@ export const LoginModal = () => {
                                 </button>
                             </div>
                         </form>
+                    </Show>
+
+                    {/* === APPROVAL PENDING STAGE === */}
+                    <Show when={stage() === "approval-pending"}>
+                        <div class="text-center py-8 font-mono text-sm">
+                            <div class="text-bb-accent font-bold mb-4 uppercase tracking-wide">
+                                Account created // Awaiting admin approval
+                            </div>
+                            <p class="text-bb-muted text-xs mb-4">
+                                You'll be able to sign in once an administrator approves your account.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={handleGoToLogin}
+                                class="text-bb-accent hover:underline text-xs"
+                            >
+                                Back to sign in
+                            </button>
+                        </div>
                     </Show>
 
                     {/* === LOADING STAGE === */}

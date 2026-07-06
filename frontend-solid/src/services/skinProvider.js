@@ -80,13 +80,54 @@ export const initializeSkinProvider = () => {
   applyActiveSkin(resolveSkin(), null);
 
   const syncFromLocation = () => {
-    applyActiveSkin(resolveSkin(), null);
+    // Only override the current skin when the URL EXPLICITLY carries a skin
+    // selector. Plain in-app navigation (hash route changes without a skin
+    // query) must not snap the skin back to the default or to a stale
+    // ?skin= param left over from the initial load.
+    const q = parseSkinFromQuery() || parseSkinFromHash();
+    if (q) {
+      setSkinState(q);
+      applySkinClass(q);
+    }
   };
 
   window.addEventListener('hashchange', syncFromLocation);
   window.addEventListener('popstate', syncFromLocation);
 
   return skinState();
+};
+
+const stripSkinFromSearch = () => {
+  if (typeof window === 'undefined') return;
+
+  const params = new URLSearchParams(window.location.search || '');
+  if (!params.has('skin')) return;
+
+  params.delete('skin');
+  const newSearch = params.toString();
+  const newUrl =
+    window.location.pathname +
+    (newSearch ? `?${newSearch}` : '') +
+    (window.location.hash || '');
+  window.history.replaceState(window.history.state, '', newUrl);
+};
+
+const stripSkinFromHash = () => {
+  if (typeof window === 'undefined') return;
+
+  const hash = window.location.hash || '';
+  const hashPayload = hash.startsWith('#') ? hash.slice(1) : hash;
+  const [hashPath, hashQuery] = hashPayload.split('?');
+  if (!hashQuery) return;
+
+  const params = new URLSearchParams(hashQuery);
+  if (!params.has('skin')) return;
+
+  params.delete('skin');
+  const newQuery = params.toString();
+  const newHash = `#${hashPath}${newQuery ? `?${newQuery}` : ''}`;
+  const newUrl = window.location.pathname + window.location.search + newHash;
+  window.history.replaceState(window.history.state, '', newUrl);
 };
 
 export const setSkin = (skin) => {
@@ -97,6 +138,12 @@ export const setSkin = (skin) => {
   writeStoredSkin(skin);
   setSkinState(skin);
   applySkinClass(skin);
+
+  // A stale ?skin= param (query or hash-query) must not fight this choice
+  // on the next hashchange/popstate.
+  stripSkinFromSearch();
+  stripSkinFromHash();
+
   return skin;
 };
 
