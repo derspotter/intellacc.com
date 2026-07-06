@@ -4,6 +4,8 @@
 const { test, expect } = require('@playwright/test');
 const { execSync } = require('child_process');
 
+const BASE = process.env.E2E_BASE_URL || 'http://localhost:4174';
+
 // -q suppresses the command tag ("INSERT 0 1") that psql prints after
 // RETURNING output even with -tA — without it, Number(result) is NaN.
 const psql = (sql) =>
@@ -17,6 +19,9 @@ test.describe('multi-outcome trading', () => {
   const title = `E2E MC market ${Date.now()}`;
 
   test.beforeAll(() => {
+    // Trading routes require Tier 2 (phone verified); reset-test-users.sh
+    // leaves user1 at tier 1, so raise it for this spec and restore after.
+    psql(`UPDATE users SET verification_tier = 2 WHERE email = 'user1@example.com'`);
     eventId = Number(psql(
       `INSERT INTO events (title, details, closing_date, event_type, liquidity_b)
        VALUES ('${title}', 'e2e seed', NOW() + INTERVAL '7 days', 'multiple_choice', 5000)
@@ -37,17 +42,28 @@ test.describe('multi-outcome trading', () => {
   });
 
   test.afterAll(() => {
-    if (eventId) psql(`DELETE FROM events WHERE id = ${eventId}`);
+    if (eventId) {
+      // Refund any position left by a failed run before deleting the event —
+      // the cascade wipes user_outcome_shares but NOT users.rp_staked_ledger,
+      // so a bare DELETE leaks staked RP on the test account.
+      psql(`UPDATE users u
+            SET rp_balance_ledger = rp_balance_ledger + s.staked_ledger,
+                rp_staked_ledger = rp_staked_ledger - s.staked_ledger
+            FROM user_outcome_shares s
+            WHERE s.event_id = ${eventId} AND s.user_id = u.id AND s.staked_ledger > 0`);
+      psql(`DELETE FROM events WHERE id = ${eventId}`);
+    }
+    psql(`UPDATE users SET verification_tier = 1 WHERE email = 'user1@example.com'`);
   });
 
   test('buy then sell an outcome via the UI', async ({ page }) => {
-    await page.goto('http://localhost:4174/#login');
+    await page.goto(`${BASE}/#login`);
     await page.getByLabel(/email/i).fill('user1@example.com');
     await page.getByLabel(/password/i).fill('password123');
     await page.getByRole('button', { name: /sign in/i }).click();
     await page.waitForURL(/#(home|feed)/, { timeout: 15000 });
 
-    await page.goto('http://localhost:4174/#predictions');
+    await page.goto(`${BASE}/#predictions`);
     await page.getByPlaceholder(/search/i).fill(title);
     await page.getByText(title, { exact: false }).first().click();
 
@@ -61,19 +77,21 @@ test.describe('multi-outcome trading', () => {
 
     await card.locator('.stake-input').fill('100');
     await card.getByRole('button', { name: /^buy$/i }).click();
-    await expect(card.locator('.success')).toContainText(/bought/i, { timeout: 10000 });
 
-    // Price moved off 50% and a position exists.
+    // The success toast is transient (the post-trade list refresh remounts the
+    // card), so assert persistent state: a position exists and the price moved.
+    await expect(card.locator('.user-position')).toBeVisible({ timeout: 10000 });
     await expect(alphaRow.locator('.outcome-prob')).not.toHaveText(/50\.0%/);
-    await expect(card.locator('.user-position')).toBeVisible();
+
+    // Expire the hold period for this event directly in the DB so the sell
+    // works regardless of the engine's MARKET_ENABLE_HOLD_PERIOD setting.
+    psql(`UPDATE market_outcome_updates SET hold_until = NOW() - INTERVAL '1 minute'
+          WHERE event_id = ${eventId}`);
 
     // Sell it all back.
-    // NOTE: immediate sell-after-buy relies on the deployed engine running
-    // MARKET_ENABLE_HOLD_PERIOD=false; with hold periods on, this step fails
-    // with "Hold period not expired".
     page.on('dialog', (dialog) => dialog.accept());
     await card.getByRole('button', { name: /sell \(/i }).click();
-    await expect(card.locator('.success')).toContainText(/sold/i, { timeout: 10000 });
-    await expect(card.locator('.user-position')).not.toBeVisible();
+    await expect(card.locator('.user-position')).not.toBeVisible({ timeout: 10000 });
+    await expect(card.getByRole('button', { name: /sell \(0\.00\)/i })).toBeDisabled();
   });
 });
