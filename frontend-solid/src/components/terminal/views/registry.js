@@ -28,6 +28,11 @@ export const TERMINAL_VIEWS = {
     title: 'GROUPS',
     component: lazy(() => import('./GroupsView'))
   },
+  group: {
+    title: 'GROUP',
+    hidden: true, // reached via #group/:slug links, not the palette
+    component: lazy(() => import('./GroupView'))
+  },
   settings: {
     title: 'SETTINGS',
     component: lazy(() => import('./SettingsView'))
