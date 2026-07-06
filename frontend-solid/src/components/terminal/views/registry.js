@@ -15,5 +15,9 @@ export const TERMINAL_VIEWS = {
     title: 'PROFILE',
     hidden: true, // reached via #user/:id links, not the palette
     component: lazy(() => import('./ProfileView'))
+  },
+  notifications: {
+    title: 'NOTIFICATIONS',
+    component: lazy(() => import('./NotificationsView'))
   }
 };

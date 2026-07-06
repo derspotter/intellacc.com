@@ -17,6 +17,7 @@ const MAX_NOTIFICATIONS = 50;
 // Simple pub/sub for MLS socket events (ChatPanel subscribes here).
 const mlsMessageSubscribers = new Set();
 const mlsWelcomeSubscribers = new Set();
+const notificationSubscribers = new Set();
 
 export const onMlsMessage = (handler) => {
     if (typeof handler !== 'function') return () => {};
@@ -30,10 +31,17 @@ export const onMlsWelcome = (handler) => {
     return () => mlsWelcomeSubscribers.delete(handler);
 };
 
+export const onNotification = (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    notificationSubscribers.add(handler);
+    return () => notificationSubscribers.delete(handler);
+};
+
 export const registerSocketEventHandler = (eventName, handler) => {
     if (typeof handler !== 'function') return () => {};
     if (eventName === 'mls-message') return onMlsMessage(handler);
     if (eventName === 'mls-welcome') return onMlsWelcome(handler);
+    if (eventName === 'notification') return onNotification(handler);
     return () => {};
 };
 
@@ -141,6 +149,8 @@ const connect = () => {
             const next = [...(prev || []), entry];
             return next.length > MAX_NOTIFICATIONS ? next.slice(-MAX_NOTIFICATIONS) : next;
         });
+
+        emitToSubscribers(notificationSubscribers, data);
     });
 
     // MLS realtime hints: "new messages available" + "new welcome available".
