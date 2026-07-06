@@ -45,11 +45,18 @@ export const registerSocketEventHandler = (eventName, handler) => {
     return () => {};
 };
 
+// Group-chat rooms the client has joined. The server drops its room
+// membership on disconnect, so on reconnect we need to re-emit
+// 'join-group-chat' for each of these or the client goes deaf.
+const joinedGroupRooms = new Set();
+
 export const joinGroupChat = (groupId, handler) => {
     connect();
+    joinedGroupRooms.add(groupId);
     if (socket) { socket.emit('join-group-chat', groupId); socket.on('group-message', handler); }
 };
 export const leaveGroupChat = (groupId, handler) => {
+    joinedGroupRooms.delete(groupId);
     if (socket) { socket.emit('leave-group-chat', groupId); socket.off('group-message', handler); }
 };
 
@@ -104,6 +111,9 @@ const connect = () => {
         socket.emit('join-predictions');
         socket.emit('authenticate');
         socket.emit('join-mls');
+        for (const groupId of joinedGroupRooms) {
+            socket.emit('join-group-chat', groupId);
+        }
     });
 
     socket.on('disconnect', () => {

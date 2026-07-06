@@ -21,8 +21,11 @@ const CommentItem = (props) => (
 
 const PostItem = (props) => {
     const [localLiked, setLocalLiked] = createSignal(null);
+    const [likeBusy, setLikeBusy] = createSignal(false);
 
     const localLike = async () => {
+        if (likeBusy()) return;
+        setLikeBusy(true);
         const wasLiked = Boolean(props.post.liked_by_user);
         setLocalLiked(!wasLiked);
         try {
@@ -30,6 +33,8 @@ const PostItem = (props) => {
             else await api.posts.likePost(props.post.id);
         } catch {
             setLocalLiked(wasLiked);
+        } finally {
+            setLikeBusy(false);
         }
     };
 
@@ -131,7 +136,9 @@ const PostItem = (props) => {
             </Show>
             <div class="flex justify-between items-center text-xxs font-mono">
                 <div class="flex gap-2 text-bb-muted">
-                    <span>GRP: DEFAULT</span>
+                    <Show when={!props.disableFeedStore}>
+                        <span>GRP: DEFAULT</span>
+                    </Show>
                     <span>ID: {props.post.id}</span>
                     <Show when={props.post.is_temp}>
                          <span class="text-yellow-500 animate-pulse">SENDING...</span>

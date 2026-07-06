@@ -34,7 +34,25 @@ export default function NetworkView() {
 
   if (authed) {
     api.network.getGraph()
-      .then((res) => setGraph({ nodes: res?.nodes || [], edges: res?.edges || [] }))
+      .then((res) => {
+        const nodes = res?.nodes || [];
+        const edges = res?.edges || [];
+        setGraph({ nodes, edges });
+
+        // Seed the "already following" set from the graph edges so the
+        // follow buttons don't all start unfollowed even when the current
+        // user already follows some of these nodes.
+        const currentId = getCurrentUserId();
+        if (currentId != null) {
+          const seeded = new Set();
+          for (const edge of edges) {
+            if (Number(edge[0]) === Number(currentId)) {
+              seeded.add(Number(edge[1]));
+            }
+          }
+          setFollowed(seeded);
+        }
+      })
       .catch((e) => setError(e?.message || 'FAILED TO LOAD NETWORK'))
       .finally(() => setLoading(false));
   }
@@ -98,7 +116,7 @@ export default function NetworkView() {
   };
 
   const toggleFollow = async (node) => {
-    const id = String(node.id);
+    const id = Number(node.id);
     const wasFollowing = followed().has(id);
     setFollowed((prev) => {
       const next = new Set(prev);
@@ -217,7 +235,7 @@ export default function NetworkView() {
                           onClick={(e) => { e.stopPropagation(); toggleFollow(node); }}
                           class="px-2 py-0.5 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 uppercase text-xxs font-bold"
                         >
-                          {followed().has(String(node.id)) ? '[FOLLOWING]' : '[FOLLOW]'}
+                          {followed().has(Number(node.id)) ? '[FOLLOWING]' : '[FOLLOW]'}
                         </button>
                       </Show>
                     </div>

@@ -96,6 +96,9 @@ const loadMore = () => {
 };
 
 const addPost = (post) => {
+    // The backend broadcasts 'new_post' globally, including posts made in a
+    // community group. Those belong on the group's feed, not the home feed.
+    if (post?.community_group_id != null) return;
     setState("posts", (prev) => [post, ...prev]);
 };
 

@@ -161,26 +161,32 @@ export default function GroupView(props) {
     const g = group();
     const text = postText().trim();
     if (!g || !text || postBusy()) return;
+    const epoch = loadEpoch;
     setPostBusy(true);
     setPostError('');
     try {
       const created = await postToGroup(g.id, text);
+      if (epoch !== loadEpoch) return;
       setPosts((cur) => [created, ...cur]);
       setPostText('');
     } catch (e) {
+      if (epoch !== loadEpoch) return;
       setPostError(e?.message || 'FAILED TO POST');
     } finally {
-      setPostBusy(false);
+      if (epoch === loadEpoch) setPostBusy(false);
     }
   };
 
   const removePost = async (postId) => {
     const g = group();
     if (!g) return;
+    const epoch = loadEpoch;
     try {
       await removeGroupPost(g.id, postId);
+      if (epoch !== loadEpoch) return;
       setPosts((cur) => cur.filter((p) => p.id !== postId));
     } catch (e) {
+      if (epoch !== loadEpoch) return;
       setError(e?.message || 'FAILED TO REMOVE POST');
     }
   };
@@ -278,29 +284,35 @@ export default function GroupView(props) {
   const pinMarket = async (eventId) => {
     const g = group();
     if (!g || marketBusy()) return;
+    const epoch = loadEpoch;
     setMarketBusy(true);
     try {
       await pinGroupMarket(g.id, eventId);
+      if (epoch !== loadEpoch) return;
       setPinQuery(''); setPinResults([]);
       await loadMarkets();
     } catch (e) {
+      if (epoch !== loadEpoch) return;
       setError(e?.message || 'FAILED TO PIN MARKET');
     } finally {
-      setMarketBusy(false);
+      if (epoch === loadEpoch) setMarketBusy(false);
     }
   };
 
   const unpinMarket = async (eventId) => {
     const g = group();
     if (!g || marketBusy()) return;
+    const epoch = loadEpoch;
     setMarketBusy(true);
     try {
       await unpinGroupMarket(g.id, eventId);
+      if (epoch !== loadEpoch) return;
       await loadMarkets();
     } catch (e) {
+      if (epoch !== loadEpoch) return;
       setError(e?.message || 'FAILED TO UNPIN MARKET');
     } finally {
-      setMarketBusy(false);
+      if (epoch === loadEpoch) setMarketBusy(false);
     }
   };
 
@@ -327,15 +339,18 @@ export default function GroupView(props) {
   const removeMember = async (userId) => {
     const g = group();
     if (!g || memberBusy()) return;
+    const epoch = loadEpoch;
     setMemberBusy(true);
     try {
       const r = await removeGroupMember(g.id, userId);
+      if (epoch !== loadEpoch) return;
       setGroup((cur) => (cur ? { ...cur, member_count: r.member_count } : cur));
       setMembers((cur) => cur.filter((m) => m.user_id !== userId));
     } catch (e) {
+      if (epoch !== loadEpoch) return;
       setError(e?.message || 'FAILED TO REMOVE MEMBER');
     } finally {
-      setMemberBusy(false);
+      if (epoch === loadEpoch) setMemberBusy(false);
     }
   };
 

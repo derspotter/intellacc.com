@@ -23,6 +23,10 @@ test('server-persisted skin preference applies on visit', async ({ page }) => {
   await page.addInitScript((t) => localStorage.setItem('token', t), u.token);
   await page.goto(`${SOLID_URL}/#home`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('body')).toHaveAttribute('data-skin', 'terminal', { timeout: 15000 });
+
+  await page.evaluate(() => { window.location.hash = '#predictions'; });
+  await page.waitForTimeout(500);
+  await expect(page.locator('body')).toHaveAttribute('data-skin', 'terminal');
 });
 
 test('terminal [VAN] button persists the preference server-side', async ({ page }) => {
@@ -35,6 +39,10 @@ test('terminal [VAN] button persists the preference server-side', async ({ page 
 
   await page.getByRole('button', { name: '[VAN]' }).click();
   await expect(page.locator('body')).toHaveAttribute('data-skin', 'van', { timeout: 10000 });
+
+  await page.evaluate(() => { window.location.hash = '#predictions'; });
+  await page.waitForTimeout(500);
+  await expect(page.locator('body')).toHaveAttribute('data-skin', 'van');
 
   await expect.poll(async () => {
     const res = await apiFetch('/api/users/me/preferences', { token: u.token });
