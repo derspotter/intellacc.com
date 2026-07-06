@@ -1,6 +1,6 @@
 import { For, Show, createSignal, onMount } from 'solid-js';
 import { getActiveSkin, setSkin, VALID_SKINS } from '../../../services/skinProvider';
-import { api, getFeedWeights, saveFeedWeights, updateUiPreferences } from '../../../services/api';
+import { api, ApiError, getFeedWeights, saveFeedWeights, updateUiPreferences } from '../../../services/api';
 import { KEYS, redistribute } from '../../../lib/feedRanking';
 import { isAuthenticated } from '../../../services/auth';
 import {
@@ -11,6 +11,8 @@ import {
   unsubscribeFromPush,
   updatePreferences
 } from '../../../services/pushService';
+import webauthnService from '../../../services/webauthn';
+import vaultService from '../../../services/mls/vaultService';
 
 // `LABEL` is not exported from lib/feedRanking — define the display strings locally.
 const LABELS = { accuracy: 'ACCURACY', followers: 'FOLLOWERS', likes: 'LIKES', views: 'VIEWS' };
@@ -362,6 +364,351 @@ function PasswordSection() {
   );
 }
 
+function ApiKeysSection() {
+  const [keys, setKeys] = createSignal([]);
+  const [loading, setLoading] = createSignal(true);
+  const [needsVerification, setNeedsVerification] = createSignal(false);
+  const [error, setError] = createSignal('');
+  const [creating, setCreating] = createSignal(false);
+  const [newKey, setNewKey] = createSignal(null);
+  const [name, setName] = createSignal('');
+  const [isBot, setIsBot] = createSignal(false);
+  const [confirmId, setConfirmId] = createSignal(null);
+  let confirmTimer;
+
+  const isVerificationError = (e) => e instanceof ApiError && (e.status === 403 || e.message === 'Forbidden');
+
+  const loadKeys = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.users.getApiKeys();
+      setKeys(res?.keys || []);
+      setNeedsVerification(false);
+    } catch (e) {
+      if (isVerificationError(e)) {
+        setNeedsVerification(true);
+      } else {
+        setError(e?.message || 'FAILED TO LOAD API KEYS');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  onMount(loadKeys);
+
+  const clearConfirm = () => {
+    if (confirmTimer) clearTimeout(confirmTimer);
+    confirmTimer = null;
+    setConfirmId(null);
+  };
+
+  const create = async () => {
+    const trimmed = name().trim();
+    if (!trimmed) {
+      setError('KEY NAME IS REQUIRED');
+      return;
+    }
+    setCreating(true);
+    setError('');
+    setNewKey(null);
+    try {
+      const res = await api.users.createApiKey(trimmed, isBot());
+      if (res?.apiKey) {
+        setNewKey(res.apiKey);
+        setName('');
+        setIsBot(false);
+        await loadKeys();
+      }
+    } catch (e) {
+      if (isVerificationError(e)) {
+        setNeedsVerification(true);
+      } else {
+        setError(e?.message || 'FAILED TO CREATE KEY');
+      }
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const revokeClick = async (id) => {
+    if (confirmId() !== id) {
+      if (confirmTimer) clearTimeout(confirmTimer);
+      setConfirmId(id);
+      confirmTimer = setTimeout(() => setConfirmId((cur) => (cur === id ? null : cur)), 4000);
+      return;
+    }
+    clearConfirm();
+    setError('');
+    try {
+      await api.users.revokeApiKey(id);
+      setKeys((prev) => prev.filter((k) => k.id !== id));
+    } catch (e) {
+      setError(e?.message || 'FAILED TO REVOKE KEY');
+    }
+  };
+
+  return (
+    <div class="text-xs">
+      <Show when={loading()}>
+        <div class="text-bb-muted animate-pulse">RUNNING QUERY...</div>
+      </Show>
+      <Show when={!loading()}>
+        <Show
+          when={!needsVerification()}
+          fallback={<div class="text-market-down">NEEDS EMAIL + PHONE VERIFICATION</div>}
+        >
+          <div class="flex items-center gap-2 mb-3 max-w-md">
+            <input
+              type="text"
+              data-testid="apikey-name"
+              placeholder="KEY NAME"
+              value={name()}
+              onInput={(e) => setName(e.currentTarget.value)}
+              class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-text flex-1 focus:outline-none focus:border-bb-accent"
+            />
+            <button
+              type="button"
+              onClick={() => setIsBot((b) => !b)}
+              class={`px-2 py-1 border uppercase font-bold ${
+                isBot() ? 'border-bb-accent text-bb-accent' : 'border-bb-border text-bb-muted hover:text-bb-text'
+              }`}
+            >
+              [BOT]
+            </button>
+            <button
+              type="button"
+              data-testid="apikey-create"
+              disabled={creating()}
+              onClick={create}
+              class="px-3 py-1 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 disabled:opacity-50 uppercase font-bold"
+            >
+              {creating() ? '[CREATING...]' : '[CREATE KEY]'}
+            </button>
+          </div>
+
+          <Show when={newKey()}>
+            <div data-testid="apikey-reveal" class="mb-3 border border-market-up bg-market-up/10 p-2 max-w-md">
+              <div class="text-market-up font-bold">COPY IT NOW // SHOWN ONCE</div>
+              <div class="mt-1 break-all text-bb-text">{newKey()}</div>
+            </div>
+          </Show>
+
+          <Show when={keys().length > 0} fallback={<div class="text-bb-muted">NO API KEYS ACTIVE</div>}>
+            <div class="flex flex-col gap-1">
+              <For each={keys()}>
+                {(k) => (
+                  <div data-testid="apikey-row" class="flex items-center gap-3 py-1 border-b border-bb-border/30">
+                    <span class="flex-1 text-bb-text">{k.name}</span>
+                    <span class="text-bb-muted uppercase">{k.is_bot ? 'BOT' : 'CLI'}</span>
+                    <span class="text-bb-muted">
+                      {k.last_used_at ? new Date(k.last_used_at).toLocaleDateString() : 'NEVER'}
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="apikey-revoke"
+                      onClick={() => revokeClick(k.id)}
+                      onBlur={() => { if (confirmId() === k.id) clearConfirm(); }}
+                      class="px-2 py-0.5 border border-market-down text-market-down hover:bg-market-down/20 uppercase font-bold"
+                    >
+                      {confirmId() === k.id ? '[CONFIRM?]' : '[REVOKE]'}
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </Show>
+      </Show>
+      <Show when={error()}>
+        <div class="mt-2 text-market-down">ERROR // {error().toUpperCase()}</div>
+      </Show>
+    </div>
+  );
+}
+
+function PasskeysSection() {
+  const [checked, setChecked] = createSignal(false);
+  const [available, setAvailable] = createSignal(false);
+  const [credentials, setCredentials] = createSignal([]);
+  const [loading, setLoading] = createSignal(true);
+  const [showForm, setShowForm] = createSignal(false);
+  const [registering, setRegistering] = createSignal(false);
+  const [newName, setNewName] = createSignal('');
+  const [currentPassword, setCurrentPassword] = createSignal('');
+  const [error, setError] = createSignal('');
+  const [warning, setWarning] = createSignal('');
+  const [confirmId, setConfirmId] = createSignal(null);
+  let confirmTimer;
+
+  const loadCredentials = async () => {
+    try {
+      setCredentials(await webauthnService.getCredentials());
+    } catch {
+      setCredentials([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  onMount(async () => {
+    setAvailable(await webauthnService.isAvailable());
+    setChecked(true);
+    loadCredentials();
+  });
+
+  const clearConfirm = () => {
+    if (confirmTimer) clearTimeout(confirmTimer);
+    confirmTimer = null;
+    setConfirmId(null);
+  };
+
+  const register = async (e) => {
+    e.preventDefault();
+    const preferred = newName().trim() || 'MY PASSKEY';
+    setRegistering(true);
+    setError('');
+    setWarning('');
+    try {
+      const prfInput = vaultService.isUnlocked() ? await vaultService.getPrfInput() : null;
+      const passwordForPrf = vaultService.isUnlocked() ? currentPassword() : null;
+      if (vaultService.isUnlocked() && !passwordForPrf) {
+        throw new Error('CURRENT PASSWORD IS REQUIRED TO UPDATE VAULT PASSKEY UNLOCK');
+      }
+      const result = await webauthnService.register(preferred, prfInput);
+      const credentialId = result?.credentialID || result?.credentialId || result?.id;
+      if (result?.prfOutput && vaultService.isUnlocked()) {
+        try {
+          await vaultService.setupPrfWrapping(result.prfOutput, credentialId, result.prfInput, passwordForPrf);
+        } catch (err) {
+          setWarning(err?.message || 'PRF SETUP SKIPPED');
+        }
+      }
+      if (credentialId) await loadCredentials();
+      setShowForm(false);
+      setNewName('');
+      setCurrentPassword('');
+    } catch (err) {
+      setError(err?.message || 'FAILED TO REGISTER PASSKEY');
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  const confirmDelete = async (id) => {
+    if (confirmId() !== id) {
+      if (confirmTimer) clearTimeout(confirmTimer);
+      setConfirmId(id);
+      confirmTimer = setTimeout(() => setConfirmId((cur) => (cur === id ? null : cur)), 4000);
+      return;
+    }
+    clearConfirm();
+    setError('');
+    try {
+      await webauthnService.deleteCredential(id);
+      await loadCredentials();
+    } catch (e) {
+      setError(e?.message || 'FAILED TO DELETE PASSKEY');
+    }
+  };
+
+  return (
+    <div class="text-xs">
+      <Show when={checked() && !available()}>
+        <div class="text-bb-muted">WEBAUTHN NOT SUPPORTED</div>
+      </Show>
+      <Show when={available()}>
+        <Show when={loading()}>
+          <div class="text-bb-muted animate-pulse">RUNNING QUERY...</div>
+        </Show>
+        <Show when={!loading()}>
+          <Show when={credentials().length > 0} fallback={<div class="text-bb-muted mb-2">NO PASSKEYS REGISTERED</div>}>
+            <div class="flex flex-col gap-1 mb-2">
+              <For each={credentials()}>
+                {(c) => (
+                  <div data-testid="passkey-row" class="flex items-center gap-3 py-1 border-b border-bb-border/30">
+                    <span class="flex-1 text-bb-text">{c.name || 'PASSKEY'}</span>
+                    <span class="text-bb-muted">
+                      USED: {c.last_used_at ? new Date(c.last_used_at).toLocaleDateString() : 'NEVER'}
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="passkey-delete"
+                      onClick={() => confirmDelete(c.id)}
+                      onBlur={() => { if (confirmId() === c.id) clearConfirm(); }}
+                      class="px-2 py-0.5 border border-market-down text-market-down hover:bg-market-down/20 uppercase font-bold"
+                    >
+                      {confirmId() === c.id ? '[CONFIRM?]' : '[REMOVE]'}
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+
+          <Show when={!showForm()}>
+            <button
+              type="button"
+              onClick={() => setShowForm(true)}
+              class="px-3 py-1 border border-bb-border text-bb-text hover:border-bb-accent hover:text-bb-accent uppercase font-bold"
+            >
+              [ADD PASSKEY]
+            </button>
+          </Show>
+
+          <Show when={showForm()}>
+            <form onSubmit={register} class="flex flex-col gap-2 max-w-sm">
+              <input
+                type="text"
+                placeholder="PASSKEY NAME"
+                value={newName()}
+                disabled={registering()}
+                onInput={(e) => setNewName(e.currentTarget.value)}
+                class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-text focus:outline-none focus:border-bb-accent"
+              />
+              <Show when={vaultService.isUnlocked()}>
+                <input
+                  type="password"
+                  placeholder="CURRENT PASSWORD"
+                  value={currentPassword()}
+                  disabled={registering()}
+                  onInput={(e) => setCurrentPassword(e.currentTarget.value)}
+                  class="bg-bb-bg border border-bb-border px-2 py-1 text-bb-text focus:outline-none focus:border-bb-accent"
+                />
+              </Show>
+              <div class="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={registering()}
+                  onClick={() => { setShowForm(false); setNewName(''); setCurrentPassword(''); }}
+                  class="px-3 py-1 border border-bb-border text-bb-muted hover:text-bb-text uppercase font-bold"
+                >
+                  [CANCEL]
+                </button>
+                <button
+                  type="submit"
+                  disabled={registering()}
+                  class="px-3 py-1 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 disabled:opacity-50 uppercase font-bold"
+                >
+                  {registering() ? '[REGISTERING...]' : '[CONTINUE]'}
+                </button>
+              </div>
+            </form>
+          </Show>
+
+          <Show when={warning()}>
+            <div class="mt-2 text-market-down">WARNING // {warning().toUpperCase()}</div>
+          </Show>
+          <Show when={error()}>
+            <div class="mt-2 text-market-down">ERROR // {error().toUpperCase()}</div>
+          </Show>
+        </Show>
+      </Show>
+    </div>
+  );
+}
+
 function DangerZoneSection() {
   const [confirmText, setConfirmText] = createSignal('');
   const [password, setPassword] = createSignal('');
@@ -428,10 +775,12 @@ export default function SettingsView() {
       <Section title="FEED MIX"><FeedMixSection /></Section>
       <Section title="NOTIFICATIONS"><NotificationsSection /></Section>
       <Section title="VERIFICATION"><VerificationSection /></Section>
+      <Section title="API KEYS"><ApiKeysSection /></Section>
+      <Section title="PASSKEYS"><PasskeysSection /></Section>
       <Section title="PASSWORD"><PasswordSection /></Section>
       <Section title="DANGER ZONE"><DangerZoneSection /></Section>
       <div class="px-3 py-2 text-bb-muted text-xxs uppercase">
-        [PASSKEYS / DEVICES / VAULT / API KEYS] // AVAILABLE IN VAN SETTINGS UNTIL PHASE 4
+        [DEVICES / VAULT] // AVAILABLE IN VAN SETTINGS UNTIL PHASE 4
       </div>
     </div>
   );
