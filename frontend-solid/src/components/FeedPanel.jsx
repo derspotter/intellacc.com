@@ -1,7 +1,7 @@
 import { For, Show, createSignal } from "solid-js";
 import { Panel } from "./ui/Panel";
 import { feedStore } from "../store/feedStore";
-import { api, ApiError } from "../services/api";
+import { api, ApiError, getPostComments, createComment } from "../services/api";
 
 const PostComposer = () => {
     const [content, setContent] = createSignal("");
@@ -113,6 +113,23 @@ const PostComposer = () => {
     );
 };
 
+const CommentItem = (props) => (
+    <div data-testid="comment-row" class="pl-3 border-l border-bb-border/40 py-1">
+        <div class="flex justify-between items-baseline">
+            <span class="font-bold text-bb-accent text-xxs">@{props.comment.username}</span>
+            <span class="text-xxs text-bb-muted font-mono">
+                {props.comment.created_at ? new Date(props.comment.created_at).toLocaleTimeString() : ''}
+            </span>
+        </div>
+        <p class="text-bb-text text-xs break-words whitespace-pre-wrap">{props.comment.content}</p>
+        <Show when={Array.isArray(props.comment.replies) && props.comment.replies.length > 0}>
+            <For each={props.comment.replies}>
+                {(reply) => <CommentItem comment={reply} />}
+            </For>
+        </Show>
+    </div>
+);
+
 const PostItem = (props) => {
     const handleLike = async () => {
         const postId = props.post.id;
@@ -122,6 +139,43 @@ const PostItem = (props) => {
         } else {
             feedStore.likePost(postId);
             try { await api.posts.likePost(postId); } catch { feedStore.unlikePost(postId); }
+        }
+    };
+
+    const [showComments, setShowComments] = createSignal(false);
+    const [comments, setComments] = createSignal([]);
+    const [commentsLoaded, setCommentsLoaded] = createSignal(false);
+    const [commentText, setCommentText] = createSignal("");
+    const [commentBusy, setCommentBusy] = createSignal(false);
+    const commentCount = () => Number(props.post.comment_count || 0) + comments().filter(c => c.__local).length;
+
+    const toggleComments = async () => {
+        const next = !showComments();
+        setShowComments(next);
+        if (next && !commentsLoaded()) {
+            try {
+                const rows = await getPostComments(props.post.id);
+                setComments(Array.isArray(rows) ? rows : (rows?.comments || []));
+            } catch (err) {
+                console.error("Failed to load comments", err);
+            } finally {
+                setCommentsLoaded(true);
+            }
+        }
+    };
+
+    const submitComment = async () => {
+        const text = commentText().trim();
+        if (!text || commentBusy()) return;
+        setCommentBusy(true);
+        try {
+            const created = await createComment(props.post.id, text);
+            setComments((prev) => [...prev, { ...created, __local: true }]);
+            setCommentText("");
+        } catch (err) {
+            console.error("Failed to comment", err);
+        } finally {
+            setCommentBusy(false);
         }
     };
 
@@ -148,6 +202,38 @@ const PostItem = (props) => {
                     [{props.post.liked_by_user ? 'LIKED' : 'LIKE'}:{props.post.like_count || 0}]
                 </button>
             </div>
+            <div class="flex gap-2 text-xxs font-mono mt-1">
+                <button
+                    type="button"
+                    data-testid="post-comments-toggle"
+                    class="text-bb-muted hover:text-bb-accent uppercase"
+                    onClick={toggleComments}
+                >
+                    [CMT:{commentCount()}]
+                </button>
+            </div>
+            <Show when={showComments()}>
+                <div class="mt-2">
+                    <Show when={commentsLoaded()} fallback={<div class="text-xxs text-bb-muted animate-pulse">LOADING COMMENTS...</div>}>
+                        <For each={comments()}>
+                            {(c) => <CommentItem comment={c} />}
+                        </For>
+                        <Show when={comments().length === 0}>
+                            <div class="text-xxs text-bb-muted">NO COMMENTS</div>
+                        </Show>
+                    </Show>
+                    <input
+                        type="text"
+                        data-testid="comment-input"
+                        class="w-full mt-1 bg-black/20 border border-bb-border text-bb-text font-mono text-xs p-1 focus:outline-none focus:border-bb-accent placeholder-bb-muted/50"
+                        placeholder="// REPLY..."
+                        value={commentText()}
+                        disabled={commentBusy()}
+                        onInput={(e) => setCommentText(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitComment(); } }}
+                    />
+                </div>
+            </Show>
         </div>
     );
 };
