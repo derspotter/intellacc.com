@@ -80,7 +80,7 @@ function App() {
     { id: 'feed', label: 'Focus Feed', shortcut: '1', action: () => goPane('home') },
     { id: 'market', label: 'Focus Market', shortcut: '2', action: () => goPane('predictions') },
     { id: 'chat', label: 'Focus Chat', shortcut: '3', action: () => goPane('messages') },
-    ...Object.entries(TERMINAL_VIEWS).map(([key, view]) => ({
+    ...Object.entries(TERMINAL_VIEWS).filter(([, view]) => !view.hidden).map(([key, view]) => ({
       id: `view-${key}`,
       label: `Open ${view.title.charAt(0) + view.title.slice(1).toLowerCase()}`,
       shortcut: '',
