@@ -10,7 +10,7 @@ import { feedStore } from "../store/feedStore";
 import { marketStore } from "../store/marketStore";
 import { getActiveSkin, setSkin } from "../services/skinProvider";
 import { updateUiPreferences } from "../services/api";
-import { isAuthenticated } from "../services/auth";
+import { isAuthenticated, isAdmin } from "../services/auth";
 import { normalizeHashPath } from "../services/routes";
 import { TerminalViewHost, closeTerminalView } from "./terminal/TerminalViewHost";
 import { TERMINAL_VIEWS } from "./terminal/views/registry";
@@ -37,7 +37,7 @@ function App() {
       if (route === 'predictions' && param) {
         marketStore.ensureMarket(Number(param));
       }
-    } else if (TERMINAL_VIEWS[route]) {
+    } else if (TERMINAL_VIEWS[route] && (!TERMINAL_VIEWS[route].adminOnly || isAdmin())) {
       setActiveView({ key: route, param: param || null });
     }
   };
@@ -83,7 +83,7 @@ function App() {
     { id: 'feed', label: 'Focus Feed', shortcut: '1', action: () => goPane('home') },
     { id: 'market', label: 'Focus Market', shortcut: '2', action: () => goPane('predictions') },
     { id: 'chat', label: 'Focus Chat', shortcut: '3', action: () => goPane('messages') },
-    ...Object.entries(TERMINAL_VIEWS).filter(([, view]) => !view.hidden).map(([key, view]) => ({
+    ...Object.entries(TERMINAL_VIEWS).filter(([, v]) => !v.hidden && (!v.adminOnly || isAdmin())).map(([key, view]) => ({
       id: `view-${key}`,
       label: `Open ${view.title.charAt(0) + view.title.slice(1).toLowerCase()}`,
       shortcut: '',

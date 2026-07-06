@@ -44,5 +44,10 @@ export const TERMINAL_VIEWS = {
   analytics: {
     title: 'ANALYTICS',
     component: lazy(() => import('./AnalyticsView'))
+  },
+  admin: {
+    title: 'ADMIN',
+    adminOnly: true, // hidden from the palette + route for non-admins (TerminalApp gates both)
+    component: lazy(() => import('./AdminView'))
   }
 };
