@@ -4,9 +4,11 @@
 const { test, expect } = require('@playwright/test');
 const { execSync } = require('child_process');
 
+// -q suppresses the command tag ("INSERT 0 1") that psql prints after
+// RETURNING output even with -tA — without it, Number(result) is NaN.
 const psql = (sql) =>
   execSync(
-    `docker exec intellacc_db psql -U intellacc_user -d intellaccdb -tAc "${sql.replace(/"/g, '\\"')}"`,
+    `docker exec intellacc_db psql -U intellacc_user -d intellaccdb -qtAc "${sql.replace(/"/g, '\\"')}"`,
     { encoding: 'utf8' }
   ).trim();
 
