@@ -221,7 +221,10 @@ function NotificationsSection() {
       <Show when={!supported}>
         <div class="text-bb-muted">PUSH NOT SUPPORTED IN THIS BROWSER</div>
       </Show>
-      <Show when={supported}>
+      <Show when={supported && permission() === 'denied'}>
+        <div class="text-bb-muted">PUSH BLOCKED // NOTIFICATIONS ARE DENIED IN YOUR BROWSER SETTINGS</div>
+      </Show>
+      <Show when={supported && permission() !== 'denied'}>
         <div class="flex items-center gap-3">
           <span class="text-bb-muted">
             STATUS: {subscribed() ? 'SUBSCRIBED' : 'NOT SUBSCRIBED'} // PERMISSION: {permission().toUpperCase()}
