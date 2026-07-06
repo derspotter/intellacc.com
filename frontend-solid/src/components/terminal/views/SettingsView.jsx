@@ -623,6 +623,7 @@ function DevicesSection() {
   };
 
   const startLinking = async () => {
+    if (pollTimer) return;
     setLinkError('');
     try {
       const deviceId = vaultService.getDeviceId();
@@ -721,11 +722,12 @@ function DevicesSection() {
                     <span class="flex-1 text-bb-text">
                       {device.name || 'UNKNOWN DEVICE'}
                       {device.is_primary ? <span class="ml-2 text-bb-accent">[PRIMARY]</span> : null}
+                      {vaultService.getDeviceId() === device.device_public_id ? <span class="ml-2 text-bb-muted">[THIS DEVICE]</span> : null}
                     </span>
                     <span class="text-bb-muted">
                       {device.created_at ? new Date(device.created_at).toLocaleDateString() : 'UNKNOWN'}
                     </span>
-                    <Show when={!device.is_primary}>
+                    <Show when={!device.is_primary && vaultService.getDeviceId() !== device.device_public_id}>
                       <button
                         type="button"
                         data-testid="device-revoke"
@@ -768,8 +770,9 @@ function DevicesSection() {
               <button
                 type="button"
                 data-testid="device-link-start"
+                disabled={Boolean(linkToken()) || Boolean(polling())}
                 onClick={startLinking}
-                class="px-3 py-1 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 uppercase font-bold"
+                class="px-3 py-1 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 disabled:opacity-50 uppercase font-bold"
               >
                 [LINK NEW DEVICE]
               </button>
