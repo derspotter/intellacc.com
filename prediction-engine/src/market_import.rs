@@ -112,6 +112,12 @@ pub async fn sync_all_markets(pool: &PgPool, full: bool) -> Result<Vec<ImportRun
             }
         }
     }
+    // Nightly piggyback: pull provider resolutions for past-close events
+    // (imports only fetch status=open, so outcomes never arrive otherwise).
+    if let Err(err) = crate::resolution_sync::sync_resolutions(pool).await {
+        println!("\u{26a0}\u{fe0f} Resolution sync failed: {}", err);
+    }
+
     Ok(results)
 }
 

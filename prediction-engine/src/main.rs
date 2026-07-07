@@ -30,6 +30,7 @@ mod lmsr_core;
 mod lmsr_multi_core;
 mod market_import;
 mod metaculus; // Configuration management
+mod resolution_sync;
 
 #[cfg(test)]
 mod integration_tests;
@@ -181,6 +182,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/metaculus/sync-categories", get(manual_category_sync))
         .route("/imports/sync-all", post(sync_all_imports_endpoint))
+        .route("/resolutions/sync", post(resolution_sync_endpoint))
         .route(
             "/imports/sync/:provider",
             post(sync_provider_import_endpoint),
@@ -441,6 +443,20 @@ struct ImportStatusQuery {
 #[derive(Debug, Deserialize)]
 struct ImportSyncQuery {
     full: Option<bool>,
+}
+
+async fn resolution_sync_endpoint(State(app_state): State<AppState>) -> ApiResult<Value> {
+    match resolution_sync::sync_resolutions(&app_state.db).await {
+        Ok(stats) => {
+            invalidate_and_broadcast(
+                &app_state,
+                "resolution_sync",
+                json!({ "resolved": stats.resolved }),
+            );
+            Ok(Json(json!({ "success": true, "stats": stats.to_json() })))
+        }
+        Err(err) => Err(internal_error(&format!("Resolution sync error: {}", err))),
+    }
 }
 
 async fn sync_all_imports_endpoint(

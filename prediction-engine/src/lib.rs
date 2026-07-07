@@ -11,4 +11,5 @@ pub mod lmsr_core;
 pub mod lmsr_multi_core;
 pub mod market_import;
 pub mod metaculus;
+pub mod resolution_sync;
 pub mod stress;
