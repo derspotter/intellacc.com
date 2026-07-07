@@ -51,7 +51,7 @@ docker exec intellacc_backend npx jest test/messaging_e2e.test.js
 
 # E2E tests (from host, uses Playwright)
 ./tests/e2e/reset-test-users.sh
-npx playwright test tests/e2e/messaging-v2-smoke.spec.js
+npx playwright test tests/e2e/solid-messaging.spec.js
 
 # Solid cutover gate (build + smoke checks)
 RUN_PLAYWRIGHT=1 ./scripts/solid-cutover-gate.sh

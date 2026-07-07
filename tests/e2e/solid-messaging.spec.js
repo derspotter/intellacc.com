@@ -165,8 +165,11 @@ test.describe('Solid messaging E2E', () => {
           .toBe(0);
       }
     } finally {
-      await contextA.close();
-      await contextB.close();
+      // Guard each teardown step: a harness-level context-close race
+      // ("Target page, context or browser has been closed") must not red an
+      // otherwise-passing run, nor skip the later steps and leak test users.
+      await contextA.close().catch(() => {});
+      await contextB.close().catch(() => {});
       cleanupUsers([alice, bob]);
     }
   });
