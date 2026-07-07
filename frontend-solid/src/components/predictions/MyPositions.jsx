@@ -189,7 +189,12 @@ export default function MyPositions(props) {
       </Show>
 
       <Show when={positionsLoading() && positionRowIds().length === 0 && !positionsError()}>
-        <p class="my-positions-loading">Loading positions…</p>
+        {/* Reserve row-height space while loading so real content does not
+            shift the layout when it arrives (avoids CLS pop-in). */}
+        <ul class="events-simple-list my-positions-skeleton" aria-hidden="true">
+          <For each={[0, 1, 2]}>{() => <li class="my-positions-skeleton-row" />}</For>
+        </ul>
+        <span class="sr-only" role="status">Loading positions…</span>
       </Show>
 
       <Show when={!positionsLoading() && positionRowIds().length === 0 && !positionsError()}>

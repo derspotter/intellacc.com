@@ -527,6 +527,7 @@ export default function PostItem(props) {
             <li>
               <PostItem
                 post={comment}
+                nested
                 onPostUpdate={updateCommentInList}
                 onPostDelete={removeCommentFromList}
                 autoExpand={allCommentsExpanded()}
@@ -574,7 +575,7 @@ export default function PostItem(props) {
   });
 
   return (
-    <article class="card post-card" data-kb-row tabindex="-1">
+    <article class="card post-card" data-kb-row={props.nested ? undefined : ''} tabindex="-1">
       <div class="card-content">
       <header class="post-header">
         <div class="post-header-main">
