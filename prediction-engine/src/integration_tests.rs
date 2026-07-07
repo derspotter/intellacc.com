@@ -213,7 +213,8 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
             q_yes DOUBLE PRECISION DEFAULT 0.0,
             q_no DOUBLE PRECISION DEFAULT 0.0,
             cumulative_stake DOUBLE PRECISION DEFAULT 0.0,
-            event_type VARCHAR(32) NOT NULL DEFAULT 'binary'
+            event_type VARCHAR(32) NOT NULL DEFAULT 'binary',
+            resolved_at TIMESTAMP WITH TIME ZONE
         )
     "#,
     )
@@ -414,6 +415,19 @@ async fn verify_post_resolution_invariant(pool: &PgPool, event_id: i32) -> Resul
         return Err(anyhow!(
             "Post-resolution invariant violation: {} user_shares rows remain for event {}",
             remaining_shares,
+            event_id
+        ));
+    }
+
+    // resolved_at must be stamped in the same transaction that settles the market
+    let resolved_stamped: bool =
+        sqlx::query_scalar("SELECT resolved_at IS NOT NULL FROM events WHERE id = $1")
+            .bind(event_id)
+            .fetch_one(pool)
+            .await?;
+    if !resolved_stamped {
+        return Err(anyhow!(
+            "Post-resolution invariant violation: resolved_at not stamped for event {}",
             event_id
         ));
     }

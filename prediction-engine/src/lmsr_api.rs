@@ -1341,7 +1341,7 @@ async fn resolve_event_transaction(
     } else {
         "resolved_no"
     };
-    sqlx::query("UPDATE events SET outcome = $1 WHERE id = $2")
+    sqlx::query("UPDATE events SET outcome = $1, resolved_at = NOW() WHERE id = $2")
         .bind(outcome_str)
         .bind(event_id)
         .execute(tx.as_mut())
@@ -1429,7 +1429,8 @@ async fn resolve_event_by_outcome_transaction(
         "UPDATE events
          SET outcome = $1,
              resolution_outcome_id = $2,
-             numerical_outcome = COALESCE($3, numerical_outcome)
+             numerical_outcome = COALESCE($3, numerical_outcome),
+             resolved_at = NOW()
          WHERE id = $4",
     )
     .bind(outcome_marker)
