@@ -216,10 +216,7 @@ router.delete('/federation/atproto/account', authenticateJWT, atprotoController.
 router.post('/federation/atproto/posts/:postId/enqueue', authenticateJWT, atprotoController.enqueuePost);
 
 // Portfolio Routes
-router.get("/users/:id/positions", (req, res, next) => {
-    console.log('🚀 ROUTE HIT: /users/:id/positions for userId:', req.params.id);
-    next();
-}, authenticateJWT, userController.getUserPositions);
+router.get("/users/:id/positions", authenticateJWT, userController.getUserPositions);
 
 // Prediction/Events Routes
 router.post("/predict", authenticateJWT, requirePhoneVerified, predictionsController.createPrediction);
