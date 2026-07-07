@@ -7,6 +7,8 @@ import {
 import { isAuthenticated, logout } from '../services/auth';
 import { setSkin, skinState } from '../services/skinProvider';
 import MobileTabBar from './MobileTabBar';
+import { installShortcuts } from '../utils/keyboard';
+import ShortcutHelp from './ShortcutHelp';
 
 const refreshAuth = () => isAuthenticated();
 
@@ -95,8 +97,13 @@ function VanSidebar(props) {
 function VanLayout(props) {
   const [drawerOpen, setDrawerOpen] = createSignal(false);
   const closeDrawer = () => setDrawerOpen(false);
+  const [helpOpen, setHelpOpen] = createSignal(false);
 
-  onMount(() => window.addEventListener('hashchange', closeDrawer));
+  onMount(() => {
+    window.addEventListener('hashchange', closeDrawer);
+    const dispose = installShortcuts({ openHelp: () => setHelpOpen(true) });
+    onCleanup(dispose);
+  });
   onCleanup(() => window.removeEventListener('hashchange', closeDrawer));
 
   return (
@@ -111,6 +118,9 @@ function VanLayout(props) {
         </div>
       </div>
       <MobileTabBar moreOpen={drawerOpen()} onMoreToggle={() => setDrawerOpen((v) => !v)} />
+      <Show when={helpOpen()}>
+        <ShortcutHelp onClose={() => setHelpOpen(false)} />
+      </Show>
     </div>
   );
 }

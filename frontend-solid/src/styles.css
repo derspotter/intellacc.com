@@ -117,6 +117,27 @@ body {
   overflow-anchor: none;
 }
 
+/* Keyboard focus: visible ring for keyboard users only. */
+:focus-visible {
+  outline: 2px solid #0000ff;
+  outline-offset: 1px;
+}
+body.dark-mode :focus-visible {
+  outline-color: rgba(255, 255, 255, 0.85);
+}
+
+/* Strip button chrome when converting clickable divs/spans to <button>. */
+.button-reset {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
 /* Typography */
 h2 {
   font-size: 1rem;
@@ -7357,4 +7378,40 @@ body.skin-terminal * {
   .main-content {
     margin-bottom: calc(64px + env(safe-area-inset-bottom));
   }
+}
+
+/* Keyboard shortcut help overlay (opened with `?`). */
+.shortcut-help-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.shortcut-help {
+  background: var(--card-bg, #fff);
+  border: 2px solid #000;
+  padding: 1.25rem 1.5rem;
+  max-width: 420px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.shortcut-help table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0 1rem;
+}
+.shortcut-help td {
+  padding: 0.25rem 0.5rem 0.25rem 0;
+  border-bottom: 1px solid var(--border-color, #ddd);
+}
+.shortcut-keys {
+  font-weight: 600;
+  white-space: nowrap;
+}
+body.dark-mode .shortcut-help {
+  border-color: var(--border-color);
 }
