@@ -40,7 +40,7 @@ export default function ShortcutHelp(props) {
             </For>
           </tbody>
         </table>
-        <button type="button" class="secondary" onClick={props.onClose}>
+        <button type="button" onClick={props.onClose}>
           Close
         </button>
       </div>

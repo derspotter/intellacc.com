@@ -13,7 +13,7 @@ module.exports = defineConfig({
     }
   },
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:5173',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || process.env.E2E_BASE_URL || 'http://localhost:4174',
     trace: 'retain-on-failure'
   }
 });

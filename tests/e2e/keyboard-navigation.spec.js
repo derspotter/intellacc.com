@@ -92,12 +92,28 @@ test.describe('keyboard row operation', () => {
     expect(stillFocused).toBe(true);
   });
 
-  test('post comment toggle is a focusable button', async ({ page }) => {
+  test('post comment toggle opens and closes comments from the keyboard', async ({ page }) => {
     await login(page);
     await page.goto(`${BASE}/#home`);
     await page.waitForSelector('.post-card', { timeout: 15000 });
-    const toggle = page.locator('.post-card button.button-reset').first();
+    const card = page.locator('.post-card').first();
+    const toggle = card.locator('button.post-header-comments').first();
     await expect(toggle).toBeVisible();
+
+    // The comments body (list or "no comments yet") is hidden until toggled.
+    const body = card.locator('.comments-list, .empty-comments');
+    await expect(body).toHaveCount(0);
+
+    // Enter on the focused button opens it — proving keyboard operability,
+    // not just that the control exists.
+    await toggle.focus();
+    await page.keyboard.press('Enter');
+    await expect(body.first()).toBeVisible({ timeout: 5000 });
+
+    // And Enter again closes it.
+    await toggle.focus();
+    await page.keyboard.press('Enter');
+    await expect(body).toHaveCount(0);
   });
 });
 
