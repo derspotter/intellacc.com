@@ -16,6 +16,7 @@ const {
   apiFetch,
   createUser,
   provisionTier,
+  provisionTopics,
   loginOnSolid,
   provisionMessaging,
   waitWithSync,
@@ -30,6 +31,10 @@ test.describe('Solid messaging E2E', () => {
     const bob = await createUser('bob');
     provisionTier(alice);
     provisionTier(bob);
+    // Seed topics so the blocking onboarding gate (VanApp checkTopics ->
+    // TopicPicker) never hijacks #messages mid-test — see provisionTopics.
+    await provisionTopics(alice);
+    await provisionTopics(bob);
 
     // Welcomes auto-accept only when the receiver follows the sender;
     // otherwise they park as message requests awaiting UI confirmation.

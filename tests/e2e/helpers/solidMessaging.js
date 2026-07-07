@@ -124,6 +124,27 @@ function provisionTier(user) {
   `);
 }
 
+// A logged-in user with zero user_topics rows is held behind VanApp's
+// blocking topic-onboarding gate (checkTopics -> TopicPicker), which replaces
+// ALL page content — including #messages — until topics are chosen. That gate
+// is a race for provisioned test users: needsTopics defaults false, so the
+// spec can click into the UI before the async getMine() resolves, then the
+// TopicPicker takes over mid-test and the messaging locators never appear.
+// Seed topics through the real endpoint so these users look fully onboarded.
+//
+// Do NOT fold this into provisionTier: topic-onboarding.spec.js relies on
+// provisionTier leaving the user topic-less so the gate fires.
+async function provisionTopics(user, topicIds = [3, 4, 5]) {
+  const { response, text } = await apiFetch('/api/users/me/topics', {
+    method: 'PUT',
+    token: user.token,
+    body: JSON.stringify({ topicIds })
+  });
+  if (!response.ok) {
+    throw new Error(`Topic provisioning failed for ${user.username} (${response.status}): ${text}`);
+  }
+}
+
 // Surface page-side MLS/vault diagnostics in the test output; the clients
 // swallow upload errors into console.warn.
 function captureClientLogs(page, user) {
@@ -239,6 +260,7 @@ module.exports = {
   apiFetch,
   createUser,
   provisionTier,
+  provisionTopics,
   captureClientLogs,
   loginOnSolid,
   provisionMessaging,
