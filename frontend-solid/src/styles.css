@@ -103,6 +103,11 @@ html {
   overflow-x: clip;
   /* Prevent "snap back" on first scroll when late layout changes occur (fonts/images/virtualization). */
   overflow-anchor: none;
+  /* Reserve the classic-scrollbar gutter so short pages (Positions,
+     Leaderboard) and tall pages (Markets, Admin) share the same viewport
+     width — otherwise the centered layout shifts left when a tab makes the
+     page scrollable. No-op with overlay scrollbars. */
+  scrollbar-gutter: stable;
 }
 
 body {
