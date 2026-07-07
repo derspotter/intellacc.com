@@ -563,6 +563,7 @@ exports.resolveEvent = asyncHandler(async (req, res) => {
      SET outcome = $1,
          numerical_outcome = $2,
          resolution_outcome_id = $3,
+         resolved_at = COALESCE(resolved_at, NOW()),
          updated_at = NOW()
      WHERE id = $4
      RETURNING id, title, outcome, numerical_outcome, resolution_outcome_id, closing_date`,

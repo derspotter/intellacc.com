@@ -1271,26 +1271,32 @@ exports.getUserPositions = async (req, res) => {
       return res.status(403).json({ message: 'Forbidden: Cannot access other users\' positions' });
     }
 
-    console.log('🔍 getUserPositions for userId:', authedUserId);
-    
     const result = await db.query(`
       SELECT
         us.event_id,
+        'open'::text AS position_kind,
         us.yes_shares,
         us.no_shares,
         NULL::bigint AS outcome_id,
         NULL::text AS outcome_label,
         NULL::double precision AS outcome_shares,
         NULL::numeric AS outcome_staked_rp,
-        e.title as event_title,
+        e.title AS event_title,
         'General'::text AS category,
         e.closing_date,
         e.market_prob,
         e.cumulative_stake,
+        e.liquidity_b,
         e.event_type,
+        e.outcome,
+        e.resolution_outcome_id,
+        reo.label AS resolution_outcome_label,
+        e.resolved_at,
+        e.hidden_at,
         us.last_updated AS last_updated
       FROM user_shares us
       JOIN events e ON us.event_id = e.id
+      LEFT JOIN event_outcomes reo ON reo.id = e.resolution_outcome_id
       WHERE us.user_id = $1
         AND (us.yes_shares > 0 OR us.no_shares > 0)
 
@@ -1298,31 +1304,72 @@ exports.getUserPositions = async (req, res) => {
 
       SELECT
         uos.event_id,
+        'open'::text AS position_kind,
         0::double precision AS yes_shares,
         0::double precision AS no_shares,
         uos.outcome_id,
         eo.label AS outcome_label,
         uos.shares AS outcome_shares,
         (uos.staked_ledger::numeric / 1000000.0) AS outcome_staked_rp,
-        e.title as event_title,
+        e.title AS event_title,
         'General'::text AS category,
         e.closing_date,
         e.market_prob,
         e.cumulative_stake,
+        e.liquidity_b,
         e.event_type,
+        e.outcome,
+        e.resolution_outcome_id,
+        reo.label AS resolution_outcome_label,
+        e.resolved_at,
+        e.hidden_at,
         uos.updated_at AS last_updated
       FROM user_outcome_shares uos
       JOIN events e ON uos.event_id = e.id
       JOIN event_outcomes eo ON eo.id = uos.outcome_id
+      LEFT JOIN event_outcomes reo ON reo.id = e.resolution_outcome_id
       WHERE uos.user_id = $1
         AND uos.shares > 0
 
+      UNION ALL
+
+      -- Settlement deletes share rows, so recently resolved holdings are
+      -- reconstructed from trade history.
+      SELECT
+        e.id AS event_id,
+        'resolved'::text AS position_kind,
+        NULL::double precision AS yes_shares,
+        NULL::double precision AS no_shares,
+        NULL::bigint AS outcome_id,
+        NULL::text AS outcome_label,
+        NULL::double precision AS outcome_shares,
+        NULL::numeric AS outcome_staked_rp,
+        e.title AS event_title,
+        'General'::text AS category,
+        e.closing_date,
+        e.market_prob,
+        e.cumulative_stake,
+        e.liquidity_b,
+        e.event_type,
+        e.outcome,
+        e.resolution_outcome_id,
+        reo.label AS resolution_outcome_label,
+        e.resolved_at,
+        e.hidden_at,
+        e.resolved_at AS last_updated
+      FROM events e
+      LEFT JOIN event_outcomes reo ON reo.id = e.resolution_outcome_id
+      WHERE e.outcome IS NOT NULL
+        AND e.resolved_at > NOW() - INTERVAL '7 days'
+        AND (
+          EXISTS (SELECT 1 FROM market_updates mu WHERE mu.user_id = $1 AND mu.event_id = e.id)
+          OR EXISTS (SELECT 1 FROM market_outcome_updates mou WHERE mou.user_id = $1 AND mou.event_id = e.id)
+        )
+
       ORDER BY last_updated DESC
     `, [authedUserId]);
-    
-    console.log('🔍 Found', result.rows.length, 'positions for user', authedUserId);
-        
-        res.status(200).json(result.rows);
+
+    res.status(200).json(result.rows);
         
       } catch (err) {
         console.error('Error fetching user positions:', err);
