@@ -21,13 +21,25 @@ import { clearToken } from '../../../services/tokenService';
 const LABELS = { accuracy: 'ACCURACY', followers: 'FOLLOWERS', likes: 'LIKES', views: 'VIEWS' };
 const DEFAULT_WEIGHTS = { accuracy: 25, followers: 25, likes: 25, views: 25 };
 
+// Engineering-panel module: hairline box, header strip with a sheet code.
+// Sections pack into a masonry column grid so no screen width is wasted.
 function Section(props) {
+  const danger = props.tone === 'danger';
   return (
-    <div class="border-b border-bb-border/60">
-      <div class="px-3 py-1.5 bg-bb-panel text-bb-accent font-bold uppercase text-xs border-b border-bb-border/40">
-        [{props.title}]
+    <div
+      class={`break-inside-avoid mb-px border bg-bb-bg ${
+        danger ? 'border-market-down/60' : 'border-bb-border'
+      }`}
+    >
+      <div
+        class={`px-2 py-1 flex items-baseline justify-between bg-bb-panel font-bold uppercase text-xs border-b ${
+          danger ? 'border-market-down/60 text-market-down' : 'border-bb-border text-bb-accent'
+        }`}
+      >
+        <span>[{props.title}]</span>
+        <span class="text-bb-muted font-normal text-[10px] tracking-widest">{props.code}</span>
       </div>
-      <div class="p-3">
+      <div class="p-2">
         {props.children}
       </div>
     </div>
@@ -1343,17 +1355,17 @@ function DangerZoneSection() {
 
 export default function SettingsView() {
   return (
-    <div class="font-mono text-sm">
-      <Section title="SKIN"><SkinSection /></Section>
-      <Section title="FEED MIX"><FeedMixSection /></Section>
-      <Section title="TOPICS"><TopicsSection /></Section>
-      <Section title="NOTIFICATIONS"><NotificationsSection /></Section>
-      <Section title="VERIFICATION"><VerificationSection /></Section>
-      <Section title="API KEYS"><ApiKeysSection /></Section>
-      <Section title="PASSKEYS"><PasskeysSection /></Section>
-      <Section title="VAULT"><VaultSection /></Section>
-      <Section title="DEVICES"><DevicesSection /></Section>
-      <Section title="DANGER ZONE"><DangerZoneSection /></Section>
+    <div class="font-mono text-sm p-px columns-1 md:columns-2 xl:columns-3 gap-px">
+      <Section title="SKIN" code="SET·01"><SkinSection /></Section>
+      <Section title="FEED MIX" code="SET·02"><FeedMixSection /></Section>
+      <Section title="TOPICS" code="SET·03"><TopicsSection /></Section>
+      <Section title="NOTIFICATIONS" code="SET·04"><NotificationsSection /></Section>
+      <Section title="VERIFICATION" code="SET·05"><VerificationSection /></Section>
+      <Section title="API KEYS" code="SET·06"><ApiKeysSection /></Section>
+      <Section title="PASSKEYS" code="SET·07"><PasskeysSection /></Section>
+      <Section title="VAULT" code="SET·08"><VaultSection /></Section>
+      <Section title="DEVICES" code="SET·09"><DevicesSection /></Section>
+      <Section title="DANGER ZONE" code="SET·10" tone="danger"><DangerZoneSection /></Section>
     </div>
   );
 }
