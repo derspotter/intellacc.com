@@ -125,6 +125,8 @@ export default function NotificationItem(props) {
         unread: !props.notification.read,
         processing: processing()
       }}
+      data-kb-row
+      tabindex="-1"
       onclick={handleClick}
     >
       <div class="notification-content">

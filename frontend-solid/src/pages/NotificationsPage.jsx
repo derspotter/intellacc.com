@@ -344,7 +344,7 @@ export default function NotificationsPage() {
         </Show>
 
         <div class="notifications-page-content">
-          <div class="notifications-list" role="list">
+          <div class="notifications-list" role="list" data-primary-list>
             <For each={notifications()}>
               {(notification) => (
                 <NotificationItem

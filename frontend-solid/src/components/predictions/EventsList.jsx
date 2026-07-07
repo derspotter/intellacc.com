@@ -477,7 +477,7 @@ export default function EventsList(props) {
             </Show>
 
             <Show when={filteredEvents().length > 0}>
-              <ul class="events-simple-list">
+              <ul class="events-simple-list" data-primary-list>
                 <For each={orderedRows()}>
                   {(marketItem) => {
                     const weeklyId = () => weeklyAssignment()?.event?.id;
@@ -489,6 +489,7 @@ export default function EventsList(props) {
                       >
                         <div
                           class="event-list-item-row"
+                          data-kb-row
                           role="button"
                           tabindex="0"
                           aria-expanded={isExpanded(marketItem.id)}

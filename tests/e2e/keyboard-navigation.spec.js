@@ -100,3 +100,50 @@ test.describe('keyboard row operation', () => {
     await expect(toggle).toBeVisible();
   });
 });
+
+test.describe('list and pane navigation', () => {
+  test('j/k move focus through feed posts', async ({ page }) => {
+    await login(page);
+    await page.goto(`${BASE}/#home`);
+    await page.waitForSelector('.post-card', { timeout: 15000 });
+    await page.locator('body').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('j');
+    const first = await page.evaluate(() => document.activeElement?.className);
+    expect(first).toContain('post-card');
+    await page.keyboard.press('j');
+    const secondIsDifferent = await page.evaluate(
+      () => document.activeElement === document.querySelectorAll('[data-kb-row]')[1]
+    );
+    expect(secondIsDifferent).toBe(true);
+    await page.keyboard.press('k');
+    const backToFirst = await page.evaluate(
+      () => document.activeElement === document.querySelectorAll('[data-kb-row]')[0]
+    );
+    expect(backToFirst).toBe(true);
+  });
+
+  test('arrow keys jump between sidebar and market list', async ({ page }) => {
+    await login(page);
+    await page.goto(`${BASE}/#predictions/markets`);
+    await page.waitForSelector('.events-simple-list li');
+    // Click a market row itself (not the body at a fixed coordinate) — the
+    // filters/search header above the list shifts height with content, so a
+    // fixed (x, y) risks landing on the category-filter <select> instead.
+    await page.locator('.event-list-item-row').first().click();
+    await page.keyboard.press('ArrowLeft');
+    const inSidebar = await page.evaluate(() =>
+      document.activeElement?.closest('.sidebar') !== null
+    );
+    expect(inSidebar).toBe(true);
+    await page.keyboard.press('ArrowDown');
+    const stillInSidebar = await page.evaluate(() =>
+      document.activeElement?.closest('.sidebar') !== null
+    );
+    expect(stillInSidebar).toBe(true);
+    await page.keyboard.press('ArrowRight');
+    const onRow = await page.evaluate(() =>
+      document.activeElement?.hasAttribute('data-kb-row')
+    );
+    expect(onRow).toBe(true);
+  });
+});

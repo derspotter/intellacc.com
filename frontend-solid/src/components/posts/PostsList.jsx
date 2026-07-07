@@ -3,7 +3,7 @@ import PostItem from './PostItem';
 
 export default function PostsList(props) {
   return (
-    <section class="posts-list">
+    <section class="posts-list" data-primary-list>
       <For each={props.posts()}>
         {(post) => (
           <PostItem

@@ -918,7 +918,7 @@ export default function MessagesPage() {
               <p class="empty-state">No conversations yet.</p>
             </Show>
 
-            <ul>
+            <ul data-primary-list>
               <For each={visibleConversations()}>
                 {(conversation) => {
                   const groupId = getConversationId(conversation);
@@ -928,6 +928,7 @@ export default function MessagesPage() {
                     <li
                       class="conversation-item"
                       classList={{ selected: String(selectedGroup()) === String(groupId) }}
+                      data-kb-row
                       role="button"
                       tabindex="0"
                       onClick={() => selectConversation(groupId)}

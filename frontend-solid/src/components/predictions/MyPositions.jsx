@@ -200,7 +200,7 @@ export default function MyPositions(props) {
       </Show>
 
       <Show when={positionRowIds().length > 0}>
-        <ul class="events-simple-list">
+        <ul class="events-simple-list" data-primary-list>
           <For each={positionRowIds()}>
             {(id) => {
               const group = () => positionGroupsById().get(id);
@@ -214,6 +214,7 @@ export default function MyPositions(props) {
                   >
                     <div
                       class="event-list-item-row"
+                      data-kb-row
                       onClick={() => {
                         if (!isResolved()) togglePositionExpanded(rowKey);
                       }}
@@ -224,7 +225,7 @@ export default function MyPositions(props) {
                             'aria-expanded': expandedPositionIds().has(rowKey),
                             onKeyDown: activateOnKey(() => togglePositionExpanded(rowKey)),
                           }
-                        : {})}
+                        : { tabindex: '-1' })}
                     >
                       <div class="event-list-item-header">
                         <span class="event-title">{group().event.title}</span>
