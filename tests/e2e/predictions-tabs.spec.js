@@ -5,8 +5,10 @@ const BASE = (process.env.SOLID_URL || process.env.PLAYWRIGHT_BASE_URL || 'http:
 test.describe('predictions tabs', () => {
   test('tab bar switches between Markets, Submit, Leaderboard', async ({ page }) => {
     await page.goto(`${BASE}/#predictions`, { waitUntil: 'domcontentloaded' });
-    // Markets is the default: the events list header is visible.
+    // Logged out: Markets is the default (no Positions tab, no positions to show).
     await expect(page.getByText('Open Questions')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Markets' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: 'Positions' })).toHaveCount(0);
 
     await page.getByRole('tab', { name: 'Submit' }).click();
     await expect(page).toHaveURL(/#predictions\/submit$/);
@@ -17,6 +19,8 @@ test.describe('predictions tabs', () => {
     await expect(page.getByText('Reputation Leaderboard')).toBeVisible();
 
     await page.getByRole('tab', { name: 'Markets' }).click();
+    // goToTab('markets') now addresses the reserved `predictions/markets` keyword.
+    await expect(page).toHaveURL(/#predictions\/markets$/);
     await expect(page.getByText('Open Questions')).toBeVisible();
   });
 

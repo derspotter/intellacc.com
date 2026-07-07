@@ -62,18 +62,6 @@ export default function EventsList(props) {
 
   const [userPositions, setUserPositions] = createSignal([]);
   const [positionsLoading, setPositionsLoading] = createSignal(false);
-  const [positionsError, setPositionsError] = createSignal('');
-  const [positionsSectionOpen, setPositionsSectionOpen] = createSignal(true);
-  const [expandedPositionIds, setExpandedPositionIds] = createSignal(new Set());
-
-  const togglePositionExpanded = (id) => {
-    setExpandedPositionIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
 
   const [weeklyAssignment, setWeeklyAssignment] = createSignal(null);
   const [weeklyLoading, setWeeklyLoading] = createSignal(false);
@@ -209,13 +197,11 @@ export default function EventsList(props) {
     }
 
     setPositionsLoading(true);
-    setPositionsError('');
     try {
       const response = await getUserPositions(userId);
       setUserPositions(normalizeRows(response));
-    } catch (err) {
+    } catch {
       setUserPositions([]);
-      setPositionsError(err?.message || 'Failed to load your positions.');
     } finally {
       setPositionsLoading(false);
     }
@@ -372,68 +358,6 @@ export default function EventsList(props) {
       )
   );
 
-  // One entry per invested market. Open positions sorted most-urgent-first,
-  // recently resolved ones after, newest resolution first.
-  const positionGroups = createMemo(() => {
-    const byId = new Map();
-    for (const row of userPositions() || []) {
-      const key = String(row.event_id);
-      if (!byId.has(key)) {
-        byId.set(key, {
-          event: {
-            id: row.event_id,
-            title: row.event_title,
-            closing_date: row.closing_date,
-            market_prob: row.market_prob,
-            cumulative_stake: row.cumulative_stake,
-            liquidity_b: row.liquidity_b,
-            event_type: row.event_type,
-            outcome: row.outcome
-          },
-          kind: row.position_kind === 'resolved' ? 'resolved' : 'open',
-          hidden: !!row.hidden_at,
-          resolvedAt: row.resolved_at,
-          resolutionLabel: row.resolution_outcome_label,
-          outcomes: []
-        });
-      }
-      const group = byId.get(key);
-      if (row.outcome_label && Number(row.outcome_shares) > 0) {
-        group.outcomes.push({ label: row.outcome_label, shares: Number(row.outcome_shares) });
-      }
-      if (Number(row.yes_shares) > 0) group.outcomes.push({ label: 'YES', shares: Number(row.yes_shares) });
-      if (Number(row.no_shares) > 0) group.outcomes.push({ label: 'NO', shares: Number(row.no_shares) });
-    }
-    const groups = [...byId.values()];
-    const open = groups
-      .filter((g) => g.kind === 'open')
-      .sort((a, b) => new Date(a.event.closing_date) - new Date(b.event.closing_date));
-    const resolved = groups
-      .filter((g) => g.kind === 'resolved')
-      .sort((a, b) => new Date(b.resolvedAt) - new Date(a.resolvedAt));
-    return { byId, open, resolved, all: [...open, ...resolved] };
-  });
-
-  // Stable row identity for <For>: iterate primitive string ids (in the same
-  // open-then-resolved order as positionGroups().all) instead of the
-  // rebuilt group objects above. positionGroups() creates brand-new group
-  // objects on every recomputation of userPositions(), so keying <For> off
-  // those objects made every row unmount/remount after each trade refresh,
-  // wiping the expanded trading card's local state (success message,
-  // selected outcome, stake input). Primitive values are reconciled by
-  // value, so an unchanged id list keeps the rows (and their mounted
-  // cards) alive across refreshes.
-  const positionGroupsById = createMemo(() => positionGroups().byId);
-  const positionRowIds = createMemo(() => positionGroups().all.map((g) => String(g.event.id)));
-
-  const settledOutcomeText = (group) => {
-    if (group.resolutionLabel) return group.resolutionLabel;
-    const raw = String(group.event.outcome || '').toLowerCase();
-    if (raw.includes('yes')) return 'YES';
-    if (raw.includes('no')) return 'NO';
-    return 'Resolved';
-  };
-
   const handleFilterChange = async (value) => {
     setFilter(value);
     void loadEvents({ reset: true });
@@ -473,103 +397,6 @@ export default function EventsList(props) {
 
   return (
     <section class="events-container">
-      <Show when={authed() && (positionGroups().all.length > 0 || positionsError())}>
-        <div class="events-list-card my-positions-card">
-          <div
-            class="my-positions-header"
-            onClick={() => setPositionsSectionOpen(!positionsSectionOpen())}
-          >
-            <h2>{`My Positions (${positionGroups().open.length})`}</h2>
-            <span class="my-positions-toggle" aria-hidden="true">
-              {positionsSectionOpen() ? '▾' : '▸'}
-            </span>
-          </div>
-
-          <Show when={positionsSectionOpen()}>
-            <Show when={positionsError()}>
-              <div class="my-positions-error">
-                <p>{positionsError()}</p>
-                <button type="button" class="secondary" onClick={() => void loadUserPositions()}>
-                  Retry
-                </button>
-              </div>
-            </Show>
-
-            <ul class="events-simple-list">
-              <For each={positionRowIds()}>
-                {(id) => {
-                  const group = () => positionGroupsById().get(id);
-                  const rowKey = `pos-${id}`;
-                  const isResolved = () => group()?.kind === 'resolved';
-                  const prob = () => Number(group()?.event?.market_prob ?? 0.5);
-                  return (
-                    <Show when={group()}>
-                      <li
-                        class={`event-list-item ${isResolved() ? 'position-resolved' : ''} ${expandedPositionIds().has(rowKey) ? 'expanded' : ''}`}
-                      >
-                        <div
-                          class="event-list-item-row"
-                          onClick={() => {
-                            if (!isResolved()) togglePositionExpanded(rowKey);
-                          }}
-                        >
-                          <div class="event-list-item-header">
-                            <span class="event-title">{group().event.title}</span>
-                            <span class="event-prob">{formatProbability(group().event.market_prob || 0.5)}</span>
-                          </div>
-                          <div class="event-prob-bar" aria-hidden="true">
-                            <div class="event-prob-bar-fill" style={{ width: `${Math.round(prob() * 100)}%` }} />
-                          </div>
-                          <div class="event-list-item-meta">
-                            <Show when={group().outcomes.length > 0}>
-                              <span class="event-category">
-                                {group().outcomes.map((o) => `${o.label} ×${o.shares.toFixed(1)}`).join(' · ')}
-                              </span>
-                            </Show>
-                            <Show when={!isResolved()}>
-                              <span class="event-date">{`Closes: ${formatDate(group().event.closing_date)}`}</span>
-                            </Show>
-                            <Show when={group().hidden}>
-                              <span class="event-unlisted-tag">Unlisted</span>
-                            </Show>
-                            <Show when={isResolved()}>
-                              <span class="event-settled-tag">{`Settled: ${settledOutcomeText(group())}`}</span>
-                            </Show>
-                          </div>
-                        </div>
-                        <Show when={!isResolved() && expandedPositionIds().has(rowKey)}>
-                          <div class="event-row-expanded">
-                            <Show
-                              when={isMultiOutcome(group().event)}
-                              fallback={
-                                <MarketEventCard
-                                  event={group().event}
-                                  onTrade={handleTradeRefresh}
-                                  onVerificationNotice={props.onVerificationNotice}
-                                  hideTitle={true}
-                                  authenticated={authed()}
-                                />
-                              }
-                            >
-                              <OutcomeMarketCard
-                                event={group().event}
-                                onTrade={handleTradeRefresh}
-                                onVerificationNotice={props.onVerificationNotice}
-                                hideTitle={true}
-                              />
-                            </Show>
-                          </div>
-                        </Show>
-                      </li>
-                    </Show>
-                  );
-                }}
-              </For>
-            </ul>
-          </Show>
-        </div>
-      </Show>
-
       <div class="events-list-card">
         <div class="events-list-header">
           <h2>Open Questions</h2>

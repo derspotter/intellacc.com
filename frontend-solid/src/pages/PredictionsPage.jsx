@@ -1,5 +1,6 @@
 import { Show, createSignal, createMemo } from 'solid-js';
 import EventsList from '../components/predictions/EventsList';
+import MyPositions from '../components/predictions/MyPositions';
 import LeaderboardCard from '../components/predictions/LeaderboardCard';
 import MarketQuestionHub from '../components/predictions/MarketQuestionHub';
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
@@ -38,12 +39,17 @@ export default function PredictionsPage(props) {
 
   // The hash segment after `predictions/` is either a reserved tab keyword,
   // a numeric market id (deep-link to expand on the Markets tab), or empty.
+  // Empty defaults to Positions for logged-in users (anonymous users have no
+  // positions, so they default to Markets).
   const activeTab = createMemo(() => {
     const param = String(props.marketId || '').trim().toLowerCase();
     if (param === 'submit') return 'submit';
     if (param === 'leaderboard') return 'leaderboard';
     if (param === 'admin' && isAdmin()) return 'admin';
-    return 'markets';
+    if (param === 'markets') return 'markets';
+    if (param === 'positions') return 'positions';
+    if (/^\d+$/.test(param)) return 'markets';
+    return isAuthenticated() ? 'positions' : 'markets';
   });
 
   const targetedMarketId = createMemo(() => {
@@ -52,7 +58,7 @@ export default function PredictionsPage(props) {
   });
 
   const goToTab = (tab) => {
-    window.location.hash = tab === 'markets' ? 'predictions' : `predictions/${tab}`;
+    window.location.hash = tab === 'positions' ? 'predictions' : `predictions/${tab}`;
   };
 
   return (
@@ -66,6 +72,9 @@ export default function PredictionsPage(props) {
       </div>
 
       <nav class="predictions-tabs" role="tablist">
+        <Show when={isAuthenticated()}>
+          <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'positions' ? 'on' : ''}`} aria-selected={activeTab() === 'positions'} onClick={() => goToTab('positions')}>Positions</button>
+        </Show>
         <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'markets' ? 'on' : ''}`} aria-selected={activeTab() === 'markets'} onClick={() => goToTab('markets')}>Markets</button>
         <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'submit' ? 'on' : ''}`} aria-selected={activeTab() === 'submit'} onClick={() => goToTab('submit')}>Submit</button>
         <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'leaderboard' ? 'on' : ''}`} aria-selected={activeTab() === 'leaderboard'} onClick={() => goToTab('leaderboard')}>Leaderboard</button>
@@ -75,6 +84,10 @@ export default function PredictionsPage(props) {
       </nav>
 
       <div class="predictions-main">
+        <Show when={activeTab() === 'positions'}>
+          <MyPositions onVerificationNotice={handleVerificationNotice} />
+        </Show>
+
         <Show when={activeTab() === 'markets'}>
           <div class="predictions-top-grid">
             <div class="events-list-column">

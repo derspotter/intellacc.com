@@ -858,8 +858,9 @@ body.dark-mode .event-prob-bar {
   border-color: var(--border-color);
 }
 
-body.dark-mode .my-positions-header {
-  border-bottom-color: var(--border-color);
+body.dark-mode .my-positions-empty,
+body.dark-mode .my-positions-loading {
+  border-color: var(--border-color);
 }
 body.dark-mode .event-unlisted-tag {
   border-color: var(--border-color);
@@ -4403,26 +4404,51 @@ body.dark-mode .belief-slider::-moz-range-thumb {
   border-radius: 2px;
   font-weight: 600;
 }
-/* My Positions section — same Bauhaus row language as the main list */
+/* My Positions tab — same Bauhaus row language as the main list, but its own
+   card sizing: content-sized (no fixed height/overflow clamp inherited from
+   .events-list-card). */
 .my-positions-card {
-  margin-bottom: 1rem;
-}
-.my-positions-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  cursor: pointer;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #000;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--border-radius);
+  box-shadow: var(--box-shadow);
+  padding: 1rem;
+  height: auto;
 }
-.my-positions-header h2 {
-  margin: 0;
+.my-positions-card h2 {
+  margin: 0 0 0.75rem 0;
+  text-align: center;
+}
+.my-positions-card .events-simple-list {
+  flex: initial;
+  overflow-y: visible;
+  height: auto;
+  min-height: 0;
+  max-height: none;
 }
 .my-positions-error {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
+}
+.my-positions-empty,
+.my-positions-loading {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 0.75rem;
+  text-align: center;
+}
+.my-positions-empty p,
+.my-positions-loading {
+  margin: 0 0 0.5rem 0;
+}
+.my-positions-empty a {
+  font-weight: 600;
 }
 .event-unlisted-tag {
   border: 1px dashed #000;
@@ -4983,7 +5009,8 @@ select {
     min-height: 0;
   }
 
-  .events-list-card {
+  .events-list-card,
+  .my-positions-card {
     padding: 0.75rem;
   }
 
@@ -5068,7 +5095,8 @@ select {
     font-size: 0.75rem;
   }
 
-  .events-list-card {
+  .events-list-card,
+  .my-positions-card {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     box-shadow: none;

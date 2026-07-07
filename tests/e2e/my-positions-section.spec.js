@@ -98,6 +98,13 @@ test.describe('my positions section', () => {
     await page.waitForURL(/#(home|feed)/, { timeout: 15000 });
 
     await page.goto(`${BASE}/#predictions`);
+
+    // Default-tab regression guard: landing on plain #predictions must show
+    // the POSITIONS tab active with its content, with no tab click needed.
+    const positionsTab = page.getByRole('tab', { name: 'Positions' });
+    await expect(positionsTab).toBeVisible();
+    await expect(positionsTab).toHaveAttribute('aria-selected', 'true');
+
     const section = page.locator('.my-positions-card');
     await expect(section).toBeVisible({ timeout: 20000 });
 
@@ -105,6 +112,40 @@ test.describe('my positions section', () => {
     const openRow = section.locator('.event-list-item', { hasText: titles.open });
     await expect(openRow).toBeVisible();
     await expect(openRow.locator('.event-category')).toContainText('Alpha ×4.0');
+
+    // Junk-hidden market still shows, marked Unlisted.
+    const hiddenRow = section.locator('.event-list-item', { hasText: titles.hidden });
+    await expect(hiddenRow).toBeVisible();
+    await expect(hiddenRow.locator('.event-unlisted-tag')).toBeVisible();
+
+    // Recently resolved: muted, settled badge.
+    const resolvedRow = section.locator('.event-list-item.position-resolved', { hasText: titles.resolved });
+    await expect(resolvedRow).toBeVisible();
+    await expect(resolvedRow.locator('.event-settled-tag')).toContainText(/YES/i);
+
+    // Resolved 10 days ago: gone.
+    await expect(section.locator('.event-list-item', { hasText: titles.stale })).toHaveCount(0);
+
+    // Box fit: with all seeded rows rendered (none expanded), the card must
+    // size to its rows, not inherit the 780px frame .events-list-card used
+    // before extraction.
+    const box = await section.boundingBox();
+    expect(box.height).toBeLessThan(700);
+
+    // Settled rows never expand.
+    await resolvedRow.locator('.event-list-item-row').click();
+    await expect(resolvedRow.locator('.event-row-expanded')).toHaveCount(0);
+
+    // Hidden market stays out of the browsable Markets tab list.
+    await page.goto(`${BASE}/#predictions/markets`);
+    await expect(page.getByText('Open Questions')).toBeVisible();
+    await expect(
+      page.locator('.events-list-card .event-list-item', { hasText: titles.hidden })
+    ).toHaveCount(0);
+
+    // Back to Positions to expand the open row and trade.
+    await page.goto(`${BASE}/#predictions`);
+    await expect(section).toBeVisible({ timeout: 20000 });
     await openRow.locator('.event-list-item-row').click();
     const card = openRow.locator('.outcome-market-card');
     await expect(card).toBeVisible({ timeout: 10000 });
@@ -124,30 +165,16 @@ test.describe('my positions section', () => {
     // card down and rebuilds it, wiping its local success message/state.
     await expect(card).toBeVisible();
     await expect(card.locator('p.success')).toContainText(/bought .* shares of/i);
-
-    // Junk-hidden market still shows, marked Unlisted — and stays out of the
-    // browsable list below.
-    const hiddenRow = section.locator('.event-list-item', { hasText: titles.hidden });
-    await expect(hiddenRow).toBeVisible();
-    await expect(hiddenRow.locator('.event-unlisted-tag')).toBeVisible();
-    await expect(
-      page.locator('.events-list-card:not(.my-positions-card) .event-list-item', { hasText: titles.hidden })
-    ).toHaveCount(0);
-
-    // Recently resolved: muted, settled badge, no expansion.
-    const resolvedRow = section.locator('.event-list-item.position-resolved', { hasText: titles.resolved });
-    await expect(resolvedRow).toBeVisible();
-    await expect(resolvedRow.locator('.event-settled-tag')).toContainText(/YES/i);
-    await resolvedRow.locator('.event-list-item-row').click();
-    await expect(resolvedRow.locator('.event-row-expanded')).toHaveCount(0);
-
-    // Resolved 10 days ago: gone.
-    await expect(section.locator('.event-list-item', { hasText: titles.stale })).toHaveCount(0);
   });
 
   test('logged out shows no section', async ({ page }) => {
     await page.goto(`${BASE}/#predictions`);
     await page.waitForSelector('.events-simple-list li', { timeout: 20000 });
+
+    // Anonymous users default to Markets, and never see a Positions tab.
+    await expect(page.getByText('Open Questions')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Markets' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: 'Positions' })).toHaveCount(0);
     await expect(page.locator('.my-positions-card')).toHaveCount(0);
   });
 });
