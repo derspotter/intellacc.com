@@ -2,14 +2,16 @@
 // (Report endpoint + form are covered by the backend test; the report UI gate
 // can't be cleanly exercised in one shared browser context.)
 const { test, expect } = require('@playwright/test');
-const { createUser, apiFetch, cleanupUsers, dbQuery, SOLID_URL } = require('./helpers/solidMessaging');
+const { createUser, apiFetch, cleanupUsers, dbQuery, SOLID_URL, provisionTopics } = require('./helpers/solidMessaging');
 
 const created = [];
 test.afterAll(async () => cleanupUsers(created));
 
 test('owner kicks a member from the Members tab', async ({ page }) => {
   const owner = await createUser('gmodui_o');
+  await provisionTopics(owner);
   const member = await createUser('gmodui_m');
+  await provisionTopics(member);
   created.push(owner, member);
   dbQuery(`UPDATE users SET verification_tier = 2, email_verified_at = NOW() WHERE id IN (${owner.id}, ${member.id})`);
   const topics = (await apiFetch('/api/topics')).body.topics;

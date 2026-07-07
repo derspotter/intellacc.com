@@ -7,6 +7,7 @@ const {
   apiFetch,
   createUser,
   provisionTier,
+  provisionTopics,
   loginOnSolid,
   provisionMessaging,
   waitWithSync,
@@ -20,7 +21,9 @@ test.describe('Solid group membership E2E', () => {
     const alice = await createUser('ralice');
     const dave = await createUser('rdave');
     provisionTier(alice);
+    await provisionTopics(alice);
     provisionTier(dave);
+    await provisionTopics(dave);
     // Deliberately NO follow: the invite must park as a message request.
 
     const contextA = await browser.newContext();
@@ -78,8 +81,11 @@ test.describe('Solid group membership E2E', () => {
     const bob = await createUser('lbob');
     const carol = await createUser('lcarol');
     provisionTier(alice);
+    await provisionTopics(alice);
     provisionTier(bob);
+    await provisionTopics(bob);
     provisionTier(carol);
+    await provisionTopics(carol);
     for (const follower of [bob, carol]) {
       const follow = await apiFetch(`/api/users/${alice.id}/follow`, { method: 'POST', token: follower.token });
       if (!follow.response.ok) throw new Error(`follow failed: ${follow.text}`);

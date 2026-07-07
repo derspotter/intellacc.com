@@ -10,6 +10,7 @@ const {
   apiFetch,
   createUser,
   provisionTier,
+  provisionTopics,
   loginOnSolid,
   provisionMessaging,
   waitWithSync,
@@ -26,6 +27,9 @@ test.describe('Solid group messaging E2E', () => {
     provisionTier(alice);
     provisionTier(bob);
     provisionTier(carol);
+    await provisionTopics(alice);
+    await provisionTopics(bob);
+    await provisionTopics(carol);
 
     // Group welcomes auto-accept only when the receiver follows the inviter.
     for (const follower of [bob, carol]) {

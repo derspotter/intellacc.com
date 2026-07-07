@@ -1,6 +1,6 @@
 // Smoke (sub-project B): a group member posts on the Feed tab and sees it appear.
 const { test, expect } = require('@playwright/test');
-const { createUser, apiFetch, cleanupUsers, dbQuery, SOLID_URL } = require('./helpers/solidMessaging');
+const { createUser, apiFetch, cleanupUsers, dbQuery, provisionTopics, SOLID_URL } = require('./helpers/solidMessaging');
 
 const created = [];
 test.afterAll(async () => cleanupUsers(created));
@@ -8,6 +8,7 @@ test.afterAll(async () => cleanupUsers(created));
 test('member posts into a group on the Feed tab', async ({ page }) => {
   const owner = await createUser('gfeed');
   created.push(owner);
+  await provisionTopics(owner);
   dbQuery(`UPDATE users SET verification_tier = 2, email_verified_at = NOW() WHERE id = ${owner.id}`);
   const topics = (await apiFetch('/api/topics')).body.topics;
   await apiFetch('/api/users/me/topics', { method: 'PUT', token: owner.token, body: JSON.stringify({ topicIds: topics.slice(0, 3).map((t) => t.id) }) });

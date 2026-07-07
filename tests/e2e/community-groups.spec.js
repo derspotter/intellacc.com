@@ -1,13 +1,14 @@
 // Smoke: a tier>=2 user creates a group via the UI, lands on its page (1 member,
 // Feed tab active), and the membership toggle on the page leaves -> 0 and re-joins -> 1.
 const { test, expect } = require('@playwright/test');
-const { createUser, apiFetch, cleanupUsers, dbQuery, SOLID_URL } = require('./helpers/solidMessaging');
+const { createUser, apiFetch, cleanupUsers, dbQuery, SOLID_URL, provisionTopics } = require('./helpers/solidMessaging');
 
 const created = [];
 test.afterAll(async () => cleanupUsers(created));
 
 test('create a group (tier>=2), it opens, and membership toggles', async ({ page }) => {
   const owner = await createUser('cguiowner');
+  await provisionTopics(owner);
   created.push(owner);
   dbQuery(`UPDATE users SET verification_tier = 2 WHERE id = ${owner.id}`);
   const topics = (await apiFetch('/api/topics')).body.topics;

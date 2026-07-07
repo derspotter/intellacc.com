@@ -22,7 +22,7 @@
 // Covering those needs a component-isolation harness (render PostItem/MarketPanel
 // with fixed props on a static route) — deferred. See the design doc.
 const { test, expect } = require('@playwright/test');
-const { createUser, apiFetch, cleanupUsers } = require('./helpers/solidMessaging');
+const { createUser, apiFetch, cleanupUsers, provisionTopics } = require('./helpers/solidMessaging');
 const { masks, gotoStable } = require('./helpers/visual');
 
 const created = [];
@@ -39,6 +39,7 @@ test.beforeAll(async () => {
   // its analytics/settings/notifications render in deterministic empty states.
   onboardedUser = await createUser('visualfeed');
   created.push(onboardedUser);
+  await provisionTopics(onboardedUser);
   const topics = (await apiFetch('/api/topics')).body.topics;
   const topicIds = topics.slice(0, 3).map((t) => t.id);
   await apiFetch('/api/users/me/topics', {

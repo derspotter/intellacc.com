@@ -2,7 +2,7 @@
 // graph render itself stays out of the visual net (animated). See
 // docs/superpowers/specs/2026-06-14-graph-exploration-controls-design.md
 const { test, expect } = require('@playwright/test');
-const { createUser, apiFetch, cleanupUsers, SOLID_URL } = require('./helpers/solidMessaging');
+const { createUser, apiFetch, cleanupUsers, provisionTopics, SOLID_URL } = require('./helpers/solidMessaging');
 
 const created = [];
 test.afterAll(async () => cleanupUsers(created));
@@ -12,6 +12,7 @@ const total = (s) => Number(s.match(/showing (\d+) \/ (\d+)/)[2]);
 
 test('network controls filter and reset the stats', async ({ page }) => {
   const u = await createUser('netsmoke');
+  await provisionTopics(u);
   created.push(u);
   const topics = (await apiFetch('/api/topics')).body.topics;
   await apiFetch('/api/users/me/topics', { method: 'PUT', token: u.token, body: JSON.stringify({ topicIds: topics.slice(0, 3).map((t) => t.id) }) });
