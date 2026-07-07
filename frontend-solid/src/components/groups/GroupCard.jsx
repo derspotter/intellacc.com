@@ -23,7 +23,13 @@ export default function GroupCard(props) {
   };
 
   return (
-    <div class="group-card" role="button" tabindex="0" onClick={open} onKeyDown={activateOnKey(open)}>
+    <div
+      class="group-card"
+      role="button"
+      tabindex="0"
+      onClick={open}
+      onKeyDown={(e) => { if (e.target === e.currentTarget) activateOnKey(open)(e); }}
+    >
       <div class="group-card-top">
         <span class="group-card-name">{props.group.name}</span>
         <span class="group-chip">{props.group.topic_name}</span>

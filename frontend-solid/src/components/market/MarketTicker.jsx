@@ -40,6 +40,7 @@ const TickerItem = (props) => {
             type="button"
             class="button-reset flex gap-2 text-xs font-mono cursor-pointer hover:bg-white/10 px-1 rounded transition-colors"
             onClick={() => handleTickerClick(props.market.id)}
+            tabindex={props.decorative ? "-1" : undefined}
         >
             <span class="text-bb-accent font-bold uppercase">{props.market.title}</span>
             <FlashValue
@@ -73,9 +74,9 @@ export const MarketTicker = () => {
                     </Show>
                 </div>
                 
-                <div class="animate-marquee flex gap-8 items-center px-4 shrink-0 min-w-full">
+                <div class="animate-marquee flex gap-8 items-center px-4 shrink-0 min-w-full" aria-hidden="true">
                     <For each={marketStore.state.markets.slice(0, 10)}>
-                        {(market) => <TickerItem market={market} />}
+                        {(market) => <TickerItem market={market} decorative />}
                     </For>
                     <Show when={marketStore.state.markets.length === 0}>
                         <span class="text-bb-muted text-xs font-mono">WAITING FOR MARKET DATA...</span>
