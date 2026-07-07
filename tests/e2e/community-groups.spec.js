@@ -27,12 +27,12 @@ test('create a group (tier>=2), it opens, and membership toggles', async ({ page
   await expect(page.locator('.group-tab.on')).toHaveText('Feed');
 
   const memberBtn = page.locator('.group-detail-actions .group-join');
-  await expect(memberBtn).toHaveText('Joined ✓');
+  await expect(memberBtn).toHaveText('Joined');
   await memberBtn.click();
   await expect(memberBtn).toHaveText('Join', { timeout: 10000 });
   await expect(page.locator('.group-detail-actions')).toContainText('0 members');
   await memberBtn.click();
-  await expect(memberBtn).toHaveText('Joined ✓', { timeout: 10000 });
+  await expect(memberBtn).toHaveText('Joined', { timeout: 10000 });
   await expect(page.locator('.group-detail-actions')).toContainText('1 member');
 
   await page.locator('.group-detail-card').screenshot({ path: '/tmp/group-page.png' });
