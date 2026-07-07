@@ -3,6 +3,7 @@ import { getUserPositions } from '../../services/api';
 import MarketEventCard from './MarketEventCard';
 import OutcomeMarketCard from './OutcomeMarketCard';
 import { isAuthenticated, getCurrentUserId } from '../../services/auth';
+import { activateOnKey } from '../../utils/keyboard';
 
 const formatProbability = (value) => {
   const parsed = Number(value);
@@ -216,6 +217,14 @@ export default function MyPositions(props) {
                       onClick={() => {
                         if (!isResolved()) togglePositionExpanded(rowKey);
                       }}
+                      {...(!isResolved()
+                        ? {
+                            role: 'button',
+                            tabindex: '0',
+                            'aria-expanded': expandedPositionIds().has(rowKey),
+                            onKeyDown: activateOnKey(() => togglePositionExpanded(rowKey)),
+                          }
+                        : {})}
                     >
                       <div class="event-list-item-header">
                         <span class="event-title">{group().event.title}</span>

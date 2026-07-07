@@ -112,7 +112,7 @@ function VanLayout(props) {
         <div class="content-container">
           <VanSidebar open={drawerOpen()} onClose={closeDrawer} />
           <Show when={drawerOpen()}>
-            <div class="sidebar-backdrop" onClick={closeDrawer} />
+            <div class="sidebar-backdrop" aria-hidden="true" onClick={closeDrawer} />
           </Show>
           <main class={`main-content page-${props.page || 'home'}`}>{props.children}</main>
         </div>

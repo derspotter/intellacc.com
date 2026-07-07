@@ -1,6 +1,7 @@
 import { For, Show } from "solid-js";
 import { marketStore } from "../../store/marketStore";
 import { clsx } from "clsx";
+import { activateOnKey } from "../../utils/keyboard";
 
 export const MarketList = () => {
     return (
@@ -27,7 +28,10 @@ export const MarketList = () => {
                                         "hover:bg-bb-accent/10"
                                     ]
                             )}
+                            role="button"
+                            tabindex="0"
                             onClick={() => marketStore.selectMarket(market.id)}
+                            onKeyDown={activateOnKey(() => marketStore.selectMarket(market.id))}
                         >
                             <div class={clsx("hidden sm:block pr-2", marketStore.state.selectedMarketId === market.id ? "text-black" : "text-bb-muted")}>{market.id.toString().substring(0, 4)}</div>
                             <div class={clsx("min-w-0 truncate sm:border-l sm:border-bb-border/50 sm:px-2", marketStore.state.selectedMarketId === market.id ? "text-black" : "text-bb-text")}>{market.title}</div>

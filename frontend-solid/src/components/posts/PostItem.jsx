@@ -597,14 +597,14 @@ export default function PostItem(props) {
           </div>
           <div class="post-meta post-meta-main">
             <span class="post-header-likes">{likeText()}</span>
-            <span
-              class="post-header-comments"
-              role="button"
-              tabindex="0"
+            <button
+              type="button"
+              class="button-reset post-header-comments"
+              data-kb-enter
               onClick={toggleCommentList}
             >
               {commentCountText()}
-            </span>
+            </button>
             <span class="post-date">{postDate()}</span>
           </div>
         </div>
@@ -810,17 +810,16 @@ export default function PostItem(props) {
       <div class="comments-section">
         <Show when={currentCommentCount() > 0 && !autoExpand()}>
           <div class="post-card-footer-meta">
-            <span
-              class="post-header-expand"
-              role="button"
-              tabindex="0"
+            <button
+              type="button"
+              class="button-reset post-header-expand"
               onClick={(event) => {
                 event.stopPropagation();
                 void handleToggleExpandCollapseAll();
               }}
             >
               {allCommentsExpanded() ? 'Collapse All' : 'Expand All'}
-            </span>
+            </button>
           </div>
         </Show>
         <div class="comment-form-container">

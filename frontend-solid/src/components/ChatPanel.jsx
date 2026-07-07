@@ -439,6 +439,7 @@ export const ChatPanel = () => {
                     <Show when={sidebarOpen()}>
                         <div
                             class="md:hidden absolute inset-0 bg-black/70 z-30"
+                            aria-hidden="true"
                             onClick={() => setSidebarOpen(false)}
                         ></div>
                     </Show>
@@ -473,13 +474,14 @@ export const ChatPanel = () => {
                                 value={showNewDM() ? searchQuery() : ""}
                                 onInput={(e) => showNewDM() && setSearchQuery(e.target.value)}
                             />
-                            <span
-                                class={`text-bb-bg font-bold cursor-pointer hover:text-white text-xs ${showNewDM() ? 'underline' : ''}`}
+                            <button
+                                type="button"
+                                class={`button-reset text-bb-bg font-bold cursor-pointer hover:text-white text-xs ${showNewDM() ? 'underline' : ''}`}
                                 onClick={toggleNewDM}
                                 title={showNewDM() ? 'Cancel New DM' : 'New DM'}
                             >
                                 [+]
-                            </span>
+                            </button>
                         </div>
 
                         {/* New DM Search Results */}
@@ -500,9 +502,10 @@ export const ChatPanel = () => {
 
                                 <For each={searchResults()}>
                                     {(u) => (
-                                        <div
+                                        <button
+                                            type="button"
                                             onClick={() => createDMWithUser(u.id)}
-                                            class="px-3 py-2 cursor-pointer border-t border-bb-border/30 hover:bg-bb-border/40 transition-colors flex items-center justify-between"
+                                            class="button-reset w-full px-3 py-2 cursor-pointer border-t border-bb-border/30 hover:bg-bb-border/40 transition-colors flex items-center justify-between"
                                         >
                                             <span class="truncate text-xs text-bb-text">
                                                 {(u.username || `USER ${u.id}`).toUpperCase()}
@@ -510,7 +513,7 @@ export const ChatPanel = () => {
                                             <span class="text-[10px] text-bb-muted">
                                                 #{u.id}
                                             </span>
-                                        </div>
+                                        </button>
                                     )}
                                 </For>
                             </div>
@@ -534,9 +537,10 @@ export const ChatPanel = () => {
 
                             <For each={conversations()}>
                                 {(conv) => (
-                                    <div
+                                    <button
+                                        type="button"
                                         onClick={() => selectConversation(conv)}
-                                        class={`px-3 py-2 cursor-pointer flex justify-between items-center border-b border-bb-border/30 transition-colors ${
+                                        class={`button-reset w-full px-3 py-2 cursor-pointer flex justify-between items-center border-b border-bb-border/30 transition-colors ${
                                             (selectedConversation()?.id === conv.id || selectedConversation()?.group_id === conv.group_id)
                                             ? 'bg-bb-border text-bb-accent font-bold'
                                             : 'text-bb-text hover:bg-bb-border/50'
@@ -550,7 +554,7 @@ export const ChatPanel = () => {
                                                 {unreadCounts()[getConversationId(conv)]}
                                             </span>
                                         </Show>
-                                    </div>
+                                    </button>
                                 )}
                             </For>
                         </div>

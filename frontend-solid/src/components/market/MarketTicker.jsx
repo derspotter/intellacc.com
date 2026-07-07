@@ -36,8 +36,9 @@ const FlashValue = (props) => {
 
 const TickerItem = (props) => {
     return (
-        <div
-            class="flex gap-2 text-xs font-mono cursor-pointer hover:bg-white/10 px-1 rounded transition-colors"
+        <button
+            type="button"
+            class="button-reset flex gap-2 text-xs font-mono cursor-pointer hover:bg-white/10 px-1 rounded transition-colors"
             onClick={() => handleTickerClick(props.market.id)}
         >
             <span class="text-bb-accent font-bold uppercase">{props.market.title}</span>
@@ -53,7 +54,7 @@ const TickerItem = (props) => {
                 format={(v) => `STK: $${Number(v).toFixed(0)}`}
                 defaultColor="text-bb-muted"
             />
-        </div>
+        </button>
     );
 };
 

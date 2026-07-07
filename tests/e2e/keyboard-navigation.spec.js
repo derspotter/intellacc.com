@@ -68,3 +68,35 @@ test.describe('keyboard shortcuts', () => {
     await expect(page).not.toHaveURL(/#predictions/);
   });
 });
+
+test.describe('keyboard row operation', () => {
+  test('market row expands with Enter and collapses with Escape', async ({ page }) => {
+    await login(page);
+    await page.goto(`${BASE}/#predictions/markets`);
+    await page.waitForSelector('.events-simple-list li');
+    // Skip the weekly-assignment row: it auto-expands (and re-expands whenever
+    // nothing else is open) independent of keyboard interaction, so it isn't
+    // a stable target for asserting Enter/Escape toggle behavior.
+    const targetLi = page.locator('.events-simple-list li:not(.weekly)').first();
+    const firstRow = targetLi.locator('.event-list-item-row').first();
+    await firstRow.focus();
+    await page.keyboard.press('Enter');
+    await expect(targetLi.locator('.event-row-expanded')).toBeVisible();
+    await expect(firstRow).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Escape');
+    await expect(targetLi.locator('.event-row-expanded')).toHaveCount(0);
+    // Focus stays on the row after collapsing.
+    const stillFocused = await page.evaluate(() =>
+      document.activeElement?.classList.contains('event-list-item-row')
+    );
+    expect(stillFocused).toBe(true);
+  });
+
+  test('post comment toggle is a focusable button', async ({ page }) => {
+    await login(page);
+    await page.goto(`${BASE}/#home`);
+    await page.waitForSelector('.post-card', { timeout: 15000 });
+    const toggle = page.locator('.post-card button.button-reset').first();
+    await expect(toggle).toBeVisible();
+  });
+});

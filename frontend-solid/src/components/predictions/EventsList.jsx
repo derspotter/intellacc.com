@@ -3,6 +3,7 @@ import { getUserPositions, api } from '../../services/api';
 import MarketEventCard from './MarketEventCard';
 import OutcomeMarketCard from './OutcomeMarketCard';
 import { isAuthenticated, getCurrentUserId } from '../../services/auth';
+import { activateOnKey } from '../../utils/keyboard';
 
 const formatProbability = (value) => {
   const parsed = Number(value);
@@ -486,7 +487,14 @@ export default function EventsList(props) {
                       <li
                         class={`event-list-item ${isExpanded(marketItem.id) ? 'expanded' : ''} ${marketItem.outcome ? 'resolved' : ''} ${isWeekly() ? 'weekly' : ''}`}
                       >
-                        <div class="event-list-item-row" onClick={() => handleEventClick(marketItem)}>
+                        <div
+                          class="event-list-item-row"
+                          role="button"
+                          tabindex="0"
+                          aria-expanded={isExpanded(marketItem.id)}
+                          onClick={() => handleEventClick(marketItem)}
+                          onKeyDown={activateOnKey(() => handleEventClick(marketItem))}
+                        >
                           <div class="event-list-item-header">
                             <span class="event-title">{marketItem.title}</span>
                             <span class="event-prob">{formatProbability(marketItem.market_prob || 0.5)}</span>

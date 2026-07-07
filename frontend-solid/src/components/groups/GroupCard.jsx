@@ -1,6 +1,7 @@
 import { createSignal, Show } from 'solid-js';
 import { joinGroup, leaveGroup } from '../../services/api';
 import { isAuthenticated } from '../../services/auth';
+import { activateOnKey } from '../../utils/keyboard';
 
 export default function GroupCard(props) {
   const [member, setMember] = createSignal(!!props.group.is_member);
@@ -22,7 +23,7 @@ export default function GroupCard(props) {
   };
 
   return (
-    <div class="group-card" onClick={open}>
+    <div class="group-card" role="button" tabindex="0" onClick={open} onKeyDown={activateOnKey(open)}>
       <div class="group-card-top">
         <span class="group-card-name">{props.group.name}</span>
         <span class="group-chip">{props.group.topic_name}</span>

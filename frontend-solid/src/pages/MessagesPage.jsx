@@ -6,6 +6,7 @@ import vaultService from '../services/mls/vaultService';
 import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import { onMlsMessage, onMlsWelcome } from '../services/socket';
 import { DeviceLinkModal } from '../components/vault/DeviceLinkModal';
+import { activateOnKey } from '../utils/keyboard';
 
 const normalizeRows = (payload) => {
   if (Array.isArray(payload)) {
@@ -928,7 +929,9 @@ export default function MessagesPage() {
                       class="conversation-item"
                       classList={{ selected: String(selectedGroup()) === String(groupId) }}
                       role="button"
+                      tabindex="0"
                       onClick={() => selectConversation(groupId)}
+                      onKeyDown={activateOnKey(() => selectConversation(groupId))}
                     >
                       <div class="conversation-info">
                         <span class="conversation-name">{displayName}</span>
