@@ -411,8 +411,20 @@ export default function EventsList(props) {
     const resolved = groups
       .filter((g) => g.kind === 'resolved')
       .sort((a, b) => new Date(b.resolvedAt) - new Date(a.resolvedAt));
-    return { open, resolved, all: [...open, ...resolved] };
+    return { byId, open, resolved, all: [...open, ...resolved] };
   });
+
+  // Stable row identity for <For>: iterate primitive string ids (in the same
+  // open-then-resolved order as positionGroups().all) instead of the
+  // rebuilt group objects above. positionGroups() creates brand-new group
+  // objects on every recomputation of userPositions(), so keying <For> off
+  // those objects made every row unmount/remount after each trade refresh,
+  // wiping the expanded trading card's local state (success message,
+  // selected outcome, stake input). Primitive values are reconciled by
+  // value, so an unchanged id list keeps the rows (and their mounted
+  // cards) alive across refreshes.
+  const positionGroupsById = createMemo(() => positionGroups().byId);
+  const positionRowIds = createMemo(() => positionGroups().all.map((g) => String(g.event.id)));
 
   const settledOutcomeText = (group) => {
     if (group.resolutionLabel) return group.resolutionLabel;
@@ -484,69 +496,72 @@ export default function EventsList(props) {
             </Show>
 
             <ul class="events-simple-list">
-              <For each={positionGroups().all}>
-                {(group) => {
-                  const isResolved = group.kind === 'resolved';
-                  const rowKey = `pos-${group.event.id}`;
-                  const prob = () => Number(group.event.market_prob ?? 0.5);
+              <For each={positionRowIds()}>
+                {(id) => {
+                  const group = () => positionGroupsById().get(id);
+                  const rowKey = `pos-${id}`;
+                  const isResolved = () => group()?.kind === 'resolved';
+                  const prob = () => Number(group()?.event?.market_prob ?? 0.5);
                   return (
-                    <li
-                      class={`event-list-item ${isResolved ? 'position-resolved' : ''} ${expandedPositionIds().has(rowKey) ? 'expanded' : ''}`}
-                    >
-                      <div
-                        class="event-list-item-row"
-                        onClick={() => {
-                          if (!isResolved) togglePositionExpanded(rowKey);
-                        }}
+                    <Show when={group()}>
+                      <li
+                        class={`event-list-item ${isResolved() ? 'position-resolved' : ''} ${expandedPositionIds().has(rowKey) ? 'expanded' : ''}`}
                       >
-                        <div class="event-list-item-header">
-                          <span class="event-title">{group.event.title}</span>
-                          <span class="event-prob">{formatProbability(group.event.market_prob || 0.5)}</span>
+                        <div
+                          class="event-list-item-row"
+                          onClick={() => {
+                            if (!isResolved()) togglePositionExpanded(rowKey);
+                          }}
+                        >
+                          <div class="event-list-item-header">
+                            <span class="event-title">{group().event.title}</span>
+                            <span class="event-prob">{formatProbability(group().event.market_prob || 0.5)}</span>
+                          </div>
+                          <div class="event-prob-bar" aria-hidden="true">
+                            <div class="event-prob-bar-fill" style={{ width: `${Math.round(prob() * 100)}%` }} />
+                          </div>
+                          <div class="event-list-item-meta">
+                            <Show when={group().outcomes.length > 0}>
+                              <span class="event-category">
+                                {group().outcomes.map((o) => `${o.label} ×${o.shares.toFixed(1)}`).join(' · ')}
+                              </span>
+                            </Show>
+                            <Show when={!isResolved()}>
+                              <span class="event-date">{`Closes: ${formatDate(group().event.closing_date)}`}</span>
+                            </Show>
+                            <Show when={group().hidden}>
+                              <span class="event-unlisted-tag">Unlisted</span>
+                            </Show>
+                            <Show when={isResolved()}>
+                              <span class="event-settled-tag">{`Settled: ${settledOutcomeText(group())}`}</span>
+                            </Show>
+                          </div>
                         </div>
-                        <div class="event-prob-bar" aria-hidden="true">
-                          <div class="event-prob-bar-fill" style={{ width: `${Math.round(prob() * 100)}%` }} />
-                        </div>
-                        <div class="event-list-item-meta">
-                          <Show when={group.outcomes.length > 0}>
-                            <span class="event-category">
-                              {group.outcomes.map((o) => `${o.label} ×${o.shares.toFixed(1)}`).join(' · ')}
-                            </span>
-                          </Show>
-                          <Show when={!isResolved}>
-                            <span class="event-date">{`Closes: ${formatDate(group.event.closing_date)}`}</span>
-                          </Show>
-                          <Show when={group.hidden}>
-                            <span class="event-unlisted-tag">Unlisted</span>
-                          </Show>
-                          <Show when={isResolved}>
-                            <span class="event-settled-tag">{`Settled: ${settledOutcomeText(group)}`}</span>
-                          </Show>
-                        </div>
-                      </div>
-                      <Show when={!isResolved && expandedPositionIds().has(rowKey)}>
-                        <div class="event-row-expanded">
-                          <Show
-                            when={isMultiOutcome(group.event)}
-                            fallback={
-                              <MarketEventCard
-                                event={group.event}
+                        <Show when={!isResolved() && expandedPositionIds().has(rowKey)}>
+                          <div class="event-row-expanded">
+                            <Show
+                              when={isMultiOutcome(group().event)}
+                              fallback={
+                                <MarketEventCard
+                                  event={group().event}
+                                  onTrade={handleTradeRefresh}
+                                  onVerificationNotice={props.onVerificationNotice}
+                                  hideTitle={true}
+                                  authenticated={authed()}
+                                />
+                              }
+                            >
+                              <OutcomeMarketCard
+                                event={group().event}
                                 onTrade={handleTradeRefresh}
                                 onVerificationNotice={props.onVerificationNotice}
                                 hideTitle={true}
-                                authenticated={authed()}
                               />
-                            }
-                          >
-                            <OutcomeMarketCard
-                              event={group.event}
-                              onTrade={handleTradeRefresh}
-                              onVerificationNotice={props.onVerificationNotice}
-                              hideTitle={true}
-                            />
-                          </Show>
-                        </div>
-                      </Show>
-                    </li>
+                            </Show>
+                          </div>
+                        </Show>
+                      </li>
+                    </Show>
                   );
                 }}
               </For>

@@ -118,6 +118,13 @@ test.describe('my positions section', () => {
       .poll(async () => openRow.locator('.event-category').textContent(), { timeout: 15000 })
       .not.toContain('Alpha ×4.0');
 
+    // Regression: the position row refresh (handleTradeRefresh -> loadUserPositions)
+    // must not remount the still-open trading card. If the row is keyed by a
+    // freshly-built group object instead of a stable event id, <For> tears the
+    // card down and rebuilds it, wiping its local success message/state.
+    await expect(card).toBeVisible();
+    await expect(card.locator('p.success')).toContainText(/bought .* shares of/i);
+
     // Junk-hidden market still shows, marked Unlisted — and stays out of the
     // browsable list below.
     const hiddenRow = section.locator('.event-list-item', { hasText: titles.hidden });
