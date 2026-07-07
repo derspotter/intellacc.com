@@ -1,7 +1,8 @@
-import { createSignal, createEffect, on, onCleanup, Show } from "solid-js";
+import { createSignal, createEffect, on, onMount, onCleanup, Show } from "solid-js";
 import vaultStore from "../../store/vaultStore";
 import { api } from "../../services/api";
 import { getPendingDeviceId, setPendingDeviceId, clearPendingDeviceId } from "../../services/deviceIdStore";
+import { createFocusTrap, pushOverlay, popOverlay } from "../../utils/keyboard";
 
 const getDevicePublicId = () => {
     let id = getPendingDeviceId();
@@ -167,101 +168,150 @@ export const DeviceLinkModal = (props) => {
 
     return (
         <Show when={vaultStore.state.showDeviceLinkModal}>
-            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 font-mono">
-                <div class="w-full max-w-sm mx-4 border border-bb-border bg-bb-panel shadow-glow-red">
-                    {/* Header */}
-                    <div class="border-b border-bb-border px-4 py-3 flex items-center gap-2">
-                        <span class="text-bb-accent font-bold text-xs">DEVICE VERIFICATION</span>
-                    </div>
+            {() => {
+                // DeviceLinkModal is rendered unconditionally by its parents
+                // (MessagesPage/ChatPanel) and toggles its own visibility via
+                // this <Show>, so component-level onMount/onCleanup would only
+                // fire once for the parent's whole lifetime. Using the
+                // function-child form of <Show> gives this block its own
+                // owner that mounts/unmounts each time the modal opens/closes
+                // — on every close path (Cancel, successful approval, or
+                // Escape below) — so push/pop and focus restore stay balanced.
+                let panelRef;
+                let disposeTrap;
+                let invoker;
 
-                    {/* Body */}
-                    <div class="p-4">
-                        {/* Loading */}
-                        <Show when={status() === "loading" || status() === "init"}>
-                            <div class="text-bb-muted text-xs text-center py-4">
-                                INITIALIZING DEVICE VERIFICATION...
+                const handlePanelKeydown = (e) => {
+                    // Fallback for skins without the van keyboard registry:
+                    // DeviceLinkModal also renders inside the terminal skin's
+                    // ChatPanel, where utils/keyboard.js's installShortcuts
+                    // (and thus the overlay stack's Escape handling) is never
+                    // installed. stopPropagation prevents a double-close in the
+                    // van skin (MessagesPage), where the registry IS active
+                    // and would otherwise also invoke the pushed handler.
+                    if (e.key === "Escape") {
+                        e.stopPropagation();
+                        handleCancel();
+                    }
+                };
+
+                onMount(() => {
+                    invoker = document.activeElement;
+                    pushOverlay(handleCancel);
+                    disposeTrap = createFocusTrap(panelRef);
+                    panelRef.querySelector("input, button")?.focus();
+                });
+                onCleanup(() => {
+                    popOverlay();
+                    disposeTrap?.();
+                    invoker?.focus?.();
+                });
+
+                return (
+                    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 font-mono">
+                        <div
+                            class="w-full max-w-sm mx-4 border border-bb-border bg-bb-panel shadow-glow-red"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-label="Link device"
+                            ref={panelRef}
+                            onKeyDown={handlePanelKeydown}
+                        >
+                            {/* Header */}
+                            <div class="border-b border-bb-border px-4 py-3 flex items-center gap-2">
+                                <span class="text-bb-accent font-bold text-xs">DEVICE VERIFICATION</span>
                             </div>
-                        </Show>
 
-                        {/* Waiting for approval */}
-                        <Show when={status() === "waiting"}>
-                            <div class="flex flex-col gap-3">
-                                <div class="text-bb-muted text-[10px] leading-relaxed">
-                                    THIS DEVICE NEEDS VERIFICATION BEFORE ACCESSING E2EE MESSAGES.
-                                    ENTER THIS CODE ON A VERIFIED DEVICE:
-                                </div>
+                            {/* Body */}
+                            <div class="p-4">
+                                {/* Loading */}
+                                <Show when={status() === "loading" || status() === "init"}>
+                                    <div class="text-bb-muted text-xs text-center py-4">
+                                        INITIALIZING DEVICE VERIFICATION...
+                                    </div>
+                                </Show>
 
-                                <div class="flex items-center justify-center gap-2 py-3">
-                                    <code class="text-bb-accent text-lg font-bold tracking-widest bg-black px-4 py-2 border border-bb-accent">
-                                        {formatToken(linkToken())}
-                                    </code>
-                                    <button
-                                        type="button"
-                                        onClick={copyToken}
-                                        class="bg-bb-bg border border-bb-border text-bb-muted px-2 py-2 text-[10px] hover:text-bb-accent hover:border-bb-accent transition-colors"
-                                        title="Copy code"
-                                    >
-                                        COPY
-                                    </button>
-                                </div>
+                                {/* Waiting for approval */}
+                                <Show when={status() === "waiting"}>
+                                    <div class="flex flex-col gap-3">
+                                        <div class="text-bb-muted text-[10px] leading-relaxed">
+                                            THIS DEVICE NEEDS VERIFICATION BEFORE ACCESSING E2EE MESSAGES.
+                                            ENTER THIS CODE ON A VERIFIED DEVICE:
+                                        </div>
 
-                                <div class="text-center text-[10px] text-bb-muted">
-                                    EXPIRES IN: <span class="text-bb-accent font-bold">{timeRemaining()}</span>
-                                </div>
+                                        <div class="flex items-center justify-center gap-2 py-3">
+                                            <code class="text-bb-accent text-lg font-bold tracking-widest bg-black px-4 py-2 border border-bb-accent">
+                                                {formatToken(linkToken())}
+                                            </code>
+                                            <button
+                                                type="button"
+                                                onClick={copyToken}
+                                                class="bg-bb-bg border border-bb-border text-bb-muted px-2 py-2 text-[10px] hover:text-bb-accent hover:border-bb-accent transition-colors"
+                                                title="Copy code"
+                                            >
+                                                COPY
+                                            </button>
+                                        </div>
 
-                                <div class="border-t border-bb-border/50 pt-3 flex flex-col gap-2 text-[10px] text-bb-muted">
-                                    <div class="font-bold text-bb-text">HOW TO VERIFY:</div>
-                                    <div class="flex gap-2"><span class="text-bb-accent">[1]</span> OPEN APP ON A VERIFIED DEVICE</div>
-                                    <div class="flex gap-2"><span class="text-bb-accent">[2]</span> GO TO SETTINGS &gt; DEVICES</div>
-                                    <div class="flex gap-2"><span class="text-bb-accent">[3]</span> TAP "APPROVE NEW DEVICE" AND ENTER CODE</div>
-                                </div>
+                                        <div class="text-center text-[10px] text-bb-muted">
+                                            EXPIRES IN: <span class="text-bb-accent font-bold">{timeRemaining()}</span>
+                                        </div>
 
-                                <div class="text-center text-[10px] text-bb-muted animate-pulse mt-2">
-                                    WAITING FOR APPROVAL...
-                                </div>
+                                        <div class="border-t border-bb-border/50 pt-3 flex flex-col gap-2 text-[10px] text-bb-muted">
+                                            <div class="font-bold text-bb-text">HOW TO VERIFY:</div>
+                                            <div class="flex gap-2"><span class="text-bb-accent">[1]</span> OPEN APP ON A VERIFIED DEVICE</div>
+                                            <div class="flex gap-2"><span class="text-bb-accent">[2]</span> GO TO SETTINGS &gt; DEVICES</div>
+                                            <div class="flex gap-2"><span class="text-bb-accent">[3]</span> TAP "APPROVE NEW DEVICE" AND ENTER CODE</div>
+                                        </div>
+
+                                        <div class="text-center text-[10px] text-bb-muted animate-pulse mt-2">
+                                            WAITING FOR APPROVAL...
+                                        </div>
+                                    </div>
+                                </Show>
+
+                                {/* Approved */}
+                                <Show when={status() === "approved"}>
+                                    <div class="text-center py-4">
+                                        <div class="text-market-up text-lg font-bold mb-2">VERIFIED</div>
+                                        <div class="text-bb-muted text-xs">DEVICE APPROVED SUCCESSFULLY.</div>
+                                    </div>
+                                </Show>
+
+                                {/* Error */}
+                                <Show when={status() === "error"}>
+                                    <div class="flex flex-col gap-3 py-2">
+                                        <div class="text-market-down text-xs text-center">
+                                            {error() || "AN ERROR OCCURRED"}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleRetry}
+                                            class="bg-bb-accent text-bb-bg font-bold py-1 px-4 text-xs hover:brightness-110 mx-auto"
+                                        >
+                                            &gt; TRY AGAIN
+                                        </button>
+                                    </div>
+                                </Show>
                             </div>
-                        </Show>
 
-                        {/* Approved */}
-                        <Show when={status() === "approved"}>
-                            <div class="text-center py-4">
-                                <div class="text-market-up text-lg font-bold mb-2">VERIFIED</div>
-                                <div class="text-bb-muted text-xs">DEVICE APPROVED SUCCESSFULLY.</div>
-                            </div>
-                        </Show>
-
-                        {/* Error */}
-                        <Show when={status() === "error"}>
-                            <div class="flex flex-col gap-3 py-2">
-                                <div class="text-market-down text-xs text-center">
-                                    {error() || "AN ERROR OCCURRED"}
-                                </div>
+                            {/* Footer */}
+                            <div class="border-t border-bb-border px-4 py-3 flex items-center justify-between">
                                 <button
                                     type="button"
-                                    onClick={handleRetry}
-                                    class="bg-bb-accent text-bb-bg font-bold py-1 px-4 text-xs hover:brightness-110 mx-auto"
+                                    onClick={handleCancel}
+                                    class="bg-bb-bg border border-bb-border text-bb-muted px-3 py-1 text-[10px] hover:text-bb-text hover:border-bb-text transition-colors"
                                 >
-                                    &gt; TRY AGAIN
+                                    CANCEL
                                 </button>
+                                <span class="text-[9px] text-bb-muted">
+                                    SKIP TO BROWSE WITHOUT E2EE
+                                </span>
                             </div>
-                        </Show>
+                        </div>
                     </div>
-
-                    {/* Footer */}
-                    <div class="border-t border-bb-border px-4 py-3 flex items-center justify-between">
-                        <button
-                            type="button"
-                            onClick={handleCancel}
-                            class="bg-bb-bg border border-bb-border text-bb-muted px-3 py-1 text-[10px] hover:text-bb-text hover:border-bb-text transition-colors"
-                        >
-                            CANCEL
-                        </button>
-                        <span class="text-[9px] text-bb-muted">
-                            SKIP TO BROWSE WITHOUT E2EE
-                        </span>
-                    </div>
-                </div>
-            </div>
+                );
+            }}
         </Show>
     );
 };

@@ -1,7 +1,8 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, onMount, onCleanup, Show } from "solid-js";
 import { api } from "../../services/api";
 import { saveToken, userData } from "../../services/tokenService";
 import vaultService from "../../services/mls/vaultService";
+import { createFocusTrap, pushOverlay, popOverlay } from "../../utils/keyboard";
 
 export const LoginModal = () => {
     // Stage: 'identifier' | 'password' | 'register' | 'loading' | 'approval-pending'
@@ -138,9 +139,39 @@ export const LoginModal = () => {
         setStage("identifier");
     };
 
+    let panelRef;
+    let disposeTrap;
+    let invoker;
+
+    onMount(() => {
+        invoker = document.activeElement;
+        // LoginModal only ever mounts in the terminal skin (see TerminalApp.jsx),
+        // where the van keyboard registry (utils/keyboard.js installShortcuts)
+        // is never installed, so nothing reads the overlay stack's Escape
+        // handling here. That's fine: this modal has no dismiss action — you
+        // can't Escape out of needing to sign in — so it registers a no-op
+        // close purely to reserve the overlay slot (suppresses other van
+        // shortcuts if this component is ever reused inside a registry-backed
+        // skin) rather than to actually close anything on Escape.
+        pushOverlay(() => {});
+        disposeTrap = createFocusTrap(panelRef);
+        panelRef.querySelector('input, button')?.focus();
+    });
+    onCleanup(() => {
+        popOverlay();
+        disposeTrap?.();
+        invoker?.focus?.();
+    });
+
     return (
         <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-            <div class="w-full max-w-md bg-bb-panel border border-bb-border p-1 shadow-2xl">
+            <div
+                class="w-full max-w-md bg-bb-panel border border-bb-border p-1 shadow-2xl"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Sign in"
+                ref={panelRef}
+            >
                 {/* Terminal Header */}
                 {/* Terminal Header Removed */}
 
