@@ -1,5 +1,6 @@
 import { createSignal } from 'solid-js';
 import { api } from '../../services/api';
+import { activateOnKey } from '../../utils/keyboard';
 
 const getNotificationIcon = (type) => {
   switch (type) {
@@ -126,8 +127,14 @@ export default function NotificationItem(props) {
         processing: processing()
       }}
       data-kb-row
-      tabindex="-1"
+      role="button"
+      tabindex="0"
       onclick={handleClick}
+      onKeyDown={(e) => {
+        // Only when the row itself is focused — Enter on the nested
+        // mark-read / delete buttons must not also open the notification.
+        if (e.target === e.currentTarget) activateOnKey(handleClick)(e);
+      }}
     >
       <div class="notification-content">
         <span class="notification-icon">{getNotificationIcon(props.notification.type)}</span>
