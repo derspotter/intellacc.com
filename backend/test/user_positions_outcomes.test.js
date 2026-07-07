@@ -88,4 +88,63 @@ describe('GET /users/:id/positions with multi-outcome holdings', () => {
     expect(Number(outcomeRow.outcome_staked_rp)).toBeCloseTo(3); // 3_000_000 ledger / 1e6
     expect(outcomeRow.event_type).toBe('multiple_choice');
   });
+
+  test('recently-resolved outcome market surfaces via market_outcome_updates alone', async () => {
+    // Settlement deletes user_outcome_shares, so a resolved multi-outcome
+    // market the user traded is reconstructed from trade history. That branch
+    // OR's market_updates (binary trades) with market_outcome_updates
+    // (outcome trades); a user who only ever traded outcomes has no
+    // market_updates row, so the mou disjunct is the only thing that can
+    // include the market. This guards that disjunct against regression.
+    const user = await makeUser('positions_resolved_mou');
+    cleanup.users.add(user.id);
+
+    // Resolved multi-outcome event, resolved just now (inside the 7-day window),
+    // with NO surviving share rows for the user.
+    const resolvedEvent = await db.query(
+      `INSERT INTO events (title, details, closing_date, event_type, outcome, resolved_at)
+       VALUES ('Resolved MC via mou', 'x', NOW() - INTERVAL '1 day', 'multiple_choice', 'Alpha', NOW())
+       RETURNING id`
+    );
+    const resolvedEventId = resolvedEvent.rows[0].id;
+    cleanup.events.add(resolvedEventId);
+    const resolvedOutcome = await db.query(
+      `INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order)
+       VALUES ($1, 'choice_1', 'Alpha', 0) RETURNING id`,
+      [resolvedEventId]
+    );
+    const resolvedOutcomeId = resolvedOutcome.rows[0].id;
+    // Trade-history row only — no user_outcome_shares (settlement deleted it),
+    // and no market_updates row (this user never traded a binary market here).
+    await db.query(
+      `INSERT INTO market_outcome_updates
+         (user_id, event_id, outcome_id, prev_prob, new_prob, stake_amount, shares_acquired, hold_until)
+       VALUES ($1, $2, $3, 0.25, 0.4, 5, 6.0, NOW() - INTERVAL '2 days')`,
+      [user.id, resolvedEventId, resolvedOutcomeId]
+    );
+
+    // Control: a resolved market the user never traded must NOT appear.
+    const untradedEvent = await db.query(
+      `INSERT INTO events (title, details, closing_date, event_type, outcome, resolved_at)
+       VALUES ('Resolved MC untraded', 'x', NOW() - INTERVAL '1 day', 'multiple_choice', 'Beta', NOW())
+       RETURNING id`
+    );
+    const untradedEventId = untradedEvent.rows[0].id;
+    cleanup.events.add(untradedEventId);
+
+    const res = await request(app)
+      .get(`/api/users/${user.id}/positions`)
+      .set('Authorization', `Bearer ${user.token}`);
+
+    expect(res.statusCode).toBe(200);
+    const rows = res.body;
+
+    const resolvedRow = rows.find((r) => Number(r.event_id) === resolvedEventId);
+    expect(resolvedRow).toBeDefined();
+    expect(resolvedRow.position_kind).toBe('resolved');
+    expect(resolvedRow.outcome).toBe('Alpha');
+
+    const untradedRow = rows.find((r) => Number(r.event_id) === untradedEventId);
+    expect(untradedRow).toBeUndefined();
+  });
 });

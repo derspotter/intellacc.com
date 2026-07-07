@@ -84,6 +84,23 @@ test.describe('modal keyboard behavior', () => {
     );
     expect(focusInside).toBe(true);
 
+    // Tab from the last focusable element wraps back into the dialog rather
+    // than escaping to the page behind it (createFocusTrap in
+    // utils/keyboard.js) — the same trap the device-link modal relies on.
+    const hasFocusable = await page.evaluate(() => {
+      const dlg = document.querySelector('[role="dialog"]');
+      const focusable = [...dlg.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+        .filter((el) => el.offsetParent !== null);
+      focusable[focusable.length - 1].focus();
+      return focusable.length > 0;
+    });
+    expect(hasFocusable).toBe(true);
+    await page.keyboard.press('Tab');
+    const focusInsideAfterTab = await page.evaluate(() =>
+      document.querySelector('[role="dialog"]').contains(document.activeElement)
+    );
+    expect(focusInsideAfterTab).toBe(true);
+
     // Escape is intentionally inert here: it must neither close the dialog
     // nor throw.
     await page.keyboard.press('Escape');
