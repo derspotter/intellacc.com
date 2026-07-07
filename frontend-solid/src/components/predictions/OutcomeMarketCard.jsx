@@ -21,7 +21,9 @@ import {
 const formatOutcomeLabel = (outcome) => {
   const lower = outcome?.lower_bound;
   const upper = outcome?.upper_bound;
-  if (Number.isFinite(Number(lower)) && Number.isFinite(Number(upper))) {
+  // null bounds mean multiple_choice, not a zero bucket: Number(null) is 0,
+  // so the null checks must come before the finiteness checks.
+  if (lower != null && upper != null && Number.isFinite(Number(lower)) && Number.isFinite(Number(upper))) {
     return `${Number(lower)} – ${Number(upper)}`;
   }
   return outcome?.label || 'Outcome';
