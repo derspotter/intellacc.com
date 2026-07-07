@@ -112,12 +112,12 @@ test.describe('list and pane navigation', () => {
     expect(first).toContain('post-card');
     await page.keyboard.press('j');
     const secondIsDifferent = await page.evaluate(
-      () => document.activeElement === document.querySelectorAll('[data-kb-row]')[1]
+      () => document.activeElement === document.querySelectorAll('[data-primary-list] [data-kb-row]')[1]
     );
     expect(secondIsDifferent).toBe(true);
     await page.keyboard.press('k');
     const backToFirst = await page.evaluate(
-      () => document.activeElement === document.querySelectorAll('[data-kb-row]')[0]
+      () => document.activeElement === document.querySelectorAll('[data-primary-list] [data-kb-row]')[0]
     );
     expect(backToFirst).toBe(true);
   });
