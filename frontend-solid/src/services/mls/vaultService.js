@@ -148,13 +148,29 @@ class VaultService {
         });
     }
 
+    // DeviceLinkModal persists the approved device id after linking; it is
+    // the only durable record of trust until keystore setup writes the
+    // device record. Scoped per account: device ids are globally unique
+    // server-side, so another account on this browser must not inherit it.
+    getPersistedLinkedDeviceId() {
+        const userId = vaultStore.userId;
+        return (userId && window.localStorage?.getItem(`device_public_id:${userId}`))
+            || window.localStorage?.getItem('device_public_id')
+            || null;
+    }
+
     async getLocalDeviceIds({ includePending = true } = {}) {
         await this.initDB();
+        // The approved-but-not-yet-set-up device id must be presented as an
+        // x-device-ids candidate or the freshly-linked device stays
+        // LINK_REQUIRED.
+        const approvedId = this.getPersistedLinkedDeviceId();
         return new Promise((resolve) => {
             const tx = this.db.transaction([KEYSTORE_STORE_NAME], 'readonly');
             const req = tx.objectStore(KEYSTORE_STORE_NAME).getAllKeys();
             req.onsuccess = () => {
                 const ids = new Set((req.result || []).map((id) => String(id)));
+                if (approvedId) ids.add(approvedId);
                 if (includePending) {
                     const pendingId = getPendingDeviceId();
                     if (pendingId) ids.add(pendingId);
@@ -162,12 +178,12 @@ class VaultService {
                 resolve(Array.from(ids));
             };
             req.onerror = () => {
+                const ids = new Set(approvedId ? [approvedId] : []);
                 if (includePending) {
                     const pendingId = getPendingDeviceId();
-                    resolve(pendingId ? [pendingId] : []);
-                } else {
-                    resolve([]);
+                    if (pendingId) ids.add(pendingId);
                 }
+                resolve(Array.from(ids));
             };
         });
     }
@@ -322,11 +338,19 @@ class VaultService {
         if (!userId) throw new Error('No user ID set');
 
         await this.initDB();
-        const deviceId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : 'rand';
+        // A device that just completed linking must keep the approved id
+        // (persisted by DeviceLinkModal) so its keystore record carries the
+        // server-side trust; a random id here would demote it back to
+        // LINK_REQUIRED. Fresh first devices have neither and generate one.
+        const linkedId = this.getPersistedLinkedDeviceId() || getPendingDeviceId();
+        const deviceId = linkedId
+            || ((window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : 'rand');
         this.setDeviceId(deviceId);
 
         // Register the first device before creating the first server Master Key.
         // Later devices remain untrusted and must still complete linking.
+        // (Re-registering a linked device is a conflict no-op server-side and
+        // preserves last_verified_at.)
         try {
             const deviceName = `${navigator.platform || 'Web'} - ${navigator.userAgent.split('/')[0]}`;
             await api.devices.register(deviceId, deviceName);

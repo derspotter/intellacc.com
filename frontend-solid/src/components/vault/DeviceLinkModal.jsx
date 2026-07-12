@@ -109,10 +109,17 @@ export const DeviceLinkModal = (props) => {
 
     const handleApproved = async () => {
         try {
-            // Persist approved device ID so api.js x-device-id header picks it up
+            // Persist the approved device ID (scoped per account — device ids
+            // are globally unique server-side, so another account on this
+            // browser profile must not inherit it). vaultService reads it
+            // back for x-device-ids and keystore setup.
             const approvedId = getPendingDeviceId();
             if (approvedId) {
-                localStorage.setItem('device_public_id', approvedId);
+                const userId = vaultStore.userId;
+                localStorage.setItem(
+                    userId ? `device_public_id:${userId}` : 'device_public_id',
+                    approvedId
+                );
             }
             clearPendingDeviceId();
             vaultStore.setShowDeviceLinkModal(false);

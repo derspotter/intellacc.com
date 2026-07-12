@@ -894,6 +894,8 @@ class CoreCryptoClient {
 
                     // Save state after EACH member add to persist the new epoch
                     await this.saveState();
+                    // TOFU: the inviter fingerprints the member it just added.
+                    await this.recordGroupMemberFingerprints(groupId);
                     try {
                         await this.syncGroupMembers(groupId);
                     } catch (syncErr) {
@@ -1972,6 +1974,10 @@ class CoreCryptoClient {
         // Save state after processing commit (epoch advanced, keys rotated)
         await this.saveState();
 
+        // TOFU: re-record roster fingerprints — adds and key changes land
+        // through commits, and a changed signature key must raise a warning.
+        await this.recordGroupMemberFingerprints(groupId);
+
         await this._broadcastGroupConfirmationTag(groupId, 'after staged commit');
 
         try {
@@ -2317,6 +2323,54 @@ class CoreCryptoClient {
         } catch (e) {
             console.error('[MLS] Error recording contact fingerprint:', e);
             return { isNew: false, changed: false, error: e.message };
+        }
+    }
+
+    /**
+     * Record TOFU fingerprints for all current members of a group from the
+     * local roster (signature keys, so key changes are detected). Covers the
+     * inviter side — welcome recipients record members in
+     * acceptStagedWelcome, but the group creator/inviter otherwise never
+     * fingerprints the peers it added.
+     * @param {string} groupId
+     */
+    async recordGroupMemberFingerprints(groupId) {
+        const fingerprintWarnings = [];
+        try {
+            const selfUserId = parseInt(this.identityName, 10);
+            for (const member of this.getGroupMembers(groupId)) {
+                if (!member?.signature_key_hex) continue;
+                try {
+                    const memberUserId = parseInt(member.identity, 10);
+                    if (isNaN(memberUserId) || memberUserId === selfUserId) continue;
+
+                    const fingerprint = await this.extractFingerprintFromSignatureKey(member.signature_key_hex);
+                    if (fingerprint) {
+                        const result = await this.recordContactFingerprint(memberUserId, fingerprint);
+                        if (result.changed) {
+                            fingerprintWarnings.push({
+                                userId: memberUserId,
+                                previousFingerprint: result.previousFingerprint,
+                                currentFingerprint: fingerprint
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[MLS] Error recording member fingerprint:', e);
+                }
+            }
+        } catch (e) {
+            console.warn('[MLS] Failed to record group member fingerprints:', e);
+        }
+
+        if (fingerprintWarnings.length > 0) {
+            console.warn('[MLS] SECURITY: Fingerprint changes detected for members:', fingerprintWarnings);
+            try {
+                const { default: messagingStore } = await import('@app-messaging-store');
+                messagingStore.addFingerprintWarnings(fingerprintWarnings);
+            } catch (e) {
+                console.warn('[MLS] Could not notify UI of fingerprint warnings:', e);
+            }
         }
     }
 
