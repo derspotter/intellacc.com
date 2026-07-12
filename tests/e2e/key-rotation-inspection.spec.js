@@ -1,141 +1,109 @@
+// DM message-request review + key rotation E2E (Solid).
+//
+// Successor to the legacy VanJS "invite inspection" spec: in the Solid UI an
+// unsolicited DM welcome parks as a Message Request the receiver must accept
+// before the conversation is established (the group-chat variant is covered
+// by solid-group-membership.spec.js). Afterwards the sender rotates her MLS
+// keys across all groups and the conversation must keep working through the
+// new epoch in both directions.
+
 const { test, expect } = require('@playwright/test');
+const {
+  createUser,
+  provisionTier,
+  provisionTopics,
+  loginOnSolid,
+  provisionMessaging,
+  waitWithSync,
+  cleanupUsers
+} = require('./helpers/solidMessaging');
 
-// Test data
-const USER1 = { email: 'user1@example.com', password: 'password123', name: 'testuser1' };
-const USER2 = { email: 'user2@example.com', password: 'password123', name: 'testuser2' };
+test.describe('DM message requests & key rotation E2E', () => {
+  test('unsolicited DM needs explicit accept; keys rotate without breaking the chat', async ({ browser }) => {
+    test.setTimeout(240000);
 
-async function resetServerState() {
-  const { exec } = require('child_process');
-  return new Promise((resolve) => {
-    exec('./tests/e2e/reset-test-users.sh', () => resolve());
-  });
-}
+    const alice = await createUser('kr_alice');
+    const bob = await createUser('kr_bob');
+    provisionTier(alice);
+    provisionTier(bob);
+    await provisionTopics(alice);
+    await provisionTopics(bob);
+    // Deliberately NO follow relationship: the welcome must NOT auto-accept.
 
-async function clearBrowserStorage(page) {
-  await page.goto('/#login');
-  await page.waitForTimeout(500);
-  await page.evaluate(async () => {
-    localStorage.clear();
-    sessionStorage.clear();
-    const databases = await indexedDB.databases();
-    await Promise.all(databases.map(db => {
-      return new Promise(r => {
-        if (!db.name) return r();
-        const req = indexedDB.deleteDatabase(db.name);
-        req.onsuccess = r; req.onerror = r; req.onblocked = r;
+    const contextA = await browser.newContext();
+    const contextB = await browser.newContext();
+    const pageA = await contextA.newPage();
+    const pageB = await contextB.newPage();
+
+    try {
+      await loginOnSolid(pageA, alice);
+      await provisionMessaging(pageA, alice);
+      await loginOnSolid(pageB, bob);
+      await provisionMessaging(pageB, bob);
+
+      // Alice opens a DM with Bob and sends the first message.
+      await pageA.getByRole('button', { name: '+ New' }).click();
+      await pageA.fill('input[placeholder="Start by user id"]', String(bob.id));
+      await pageA.locator('.new-conversation-form button[type="submit"]').click();
+      await expect(pageA.locator('.conversation-item').first()).toBeVisible({ timeout: 45000 });
+
+      const firstMessage = `hello before accept ${Date.now()}`;
+      await pageA.fill('textarea.message-textarea', firstMessage);
+      await pageA.locator('button.send-button').click();
+      await expect(pageA.locator('.message-item.sent .message-text').last())
+        .toHaveText(firstMessage, { timeout: 30000 });
+
+      // Bob does not follow Alice, so the welcome parks as a message request
+      // he has to review — nothing lands in his conversation list yet.
+      await waitWithSync(pageB, pageB.locator('.message-request'), { timeout: 90000 });
+      await expect(pageB.locator('.message-request-from', { hasText: alice.username }))
+        .toBeVisible({ timeout: 15000 });
+      expect(await pageB.locator('.conversation-item').count()).toBe(0);
+
+      // Accepting establishes the conversation and delivers the message.
+      await pageB.locator('.message-request button', { hasText: 'Accept' }).click();
+      await waitWithSync(pageB, pageB.locator('.conversation-item'), { timeout: 90000 });
+      await pageB.locator('.conversation-item').first().click();
+      await waitWithSync(
+        pageB,
+        pageB.locator('.message-item.received .message-text', { hasText: firstMessage }),
+        { timeout: 90000, reopenConversation: true }
+      );
+
+      // Alice rotates her MLS keys across all conversations (self-update
+      // commit — advances the group epoch).
+      const rotation = await pageA.evaluate(async () => {
+        try {
+          await window.coreCryptoClient.rotateKeysAllGroups();
+          return { ok: true };
+        } catch (err) {
+          return { ok: false, reason: err?.message || String(err) };
+        }
       });
-    }));
-  });
-}
+      expect(rotation, 'key rotation').toMatchObject({ ok: true });
 
-async function loginUser(page, user) {
-  await page.goto('/#login');
-  await page.fill('#email', user.email);
-  await page.fill('#password', user.password);
-  await page.getByRole('button', { name: 'Sign In' }).click();
-  await page.waitForFunction(() => window.location.hash === '#home', { timeout: 15000 });
-  await page.waitForFunction(() => window.__vaultStore?.userId, null, { timeout: 15000 });
-}
+      // The conversation still works in both directions on the new epoch.
+      const postRotationFromAlice = `post-rotation from alice ${Date.now()}`;
+      await pageA.fill('textarea.message-textarea', postRotationFromAlice);
+      await pageA.locator('button.send-button').click();
+      await waitWithSync(
+        pageB,
+        pageB.locator('.message-item.received .message-text', { hasText: postRotationFromAlice }),
+        { timeout: 90000, reopenConversation: true }
+      );
 
-async function getUserIdByUsername(page, username) {
-  const result = await page.evaluate(async (target) => {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`/api/users/username/${encodeURIComponent(target)}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) return { error: `Fetch failed: ${res.status}` };
-    const data = await res.json();
-    return { id: data?.id ?? null };
-  }, username);
-
-  if (result.error || !result.id) {
-    throw new Error(`Could not resolve user id for ${username}. Details: ${result.error}`);
-  }
-  return result.id;
-}
-
-async function startDirectMessageByUsername(page, username) {
-  const targetId = await getUserIdByUsername(page, username);
-  console.log(`Resolved ${username} to ID: ${targetId}`);
-  return page.evaluate(async (recipientId) => {
-    const coreCryptoClient = window.coreCryptoClient;
-    const messagingStore = window.__messagingStore || window.messagingStore;
-    const result = await coreCryptoClient.startDirectMessage(recipientId);
-    console.log(`Direct message started. Group ID: ${result.groupId}`);
-    const messagingService = (await import('/src/services/messaging.js')).default;
-    const groups = await messagingService.getMlsGroups();
-    messagingStore.setMlsGroups(groups);
-    messagingStore.selectMlsGroup(result.groupId);
-    return result.groupId;
-  }, targetId);
-}
-
-
-test.describe.skip('LEGACY: E2E Messaging - Invite Inspection & Key Rotation (quarantined)', () => {
-
-  test.beforeAll(async () => {
-    await resetServerState();
-  });
-
-  test('User can inspect invite before accepting and rotate keys later', async ({ browser }) => {
-    const tempContext = await browser.newContext();
-    await clearBrowserStorage(await tempContext.newPage());
-    await tempContext.close();
-
-    const contextAlice = await browser.newContext();
-    const pageAlice = await contextAlice.newPage();
-    pageAlice.on('console', msg => console.log(`Alice: ${msg.text()}`));
-    const contextBob = await browser.newContext();
-    const pageBob = await contextBob.newPage();
-    pageBob.on('console', msg => console.log(`Bob: ${msg.text()}`));
-
-    // Bob logs in and initializes MLS (uploads KeyPackages)
-    await loginUser(pageBob, USER2);
-    await pageBob.goto('/#messages');
-    await pageBob.waitForSelector('.messages-page', { timeout: 15000 });
-    // Wait for MLS to initialize
-    await pageBob.waitForFunction(() => window.coreCryptoClient?.initialized, null, { timeout: 15000 });
-
-    // Alice logs in and initializes MLS
-    await loginUser(pageAlice, USER1);
-    await pageAlice.goto('/#messages');
-    await pageAlice.waitForSelector('.messages-page', { timeout: 15000 });
-    await pageAlice.waitForFunction(() => window.coreCryptoClient?.initialized, null, { timeout: 15000 });
-
-    // Alice starts DM with Bob. Since Bob is initialized, he has KeyPackages on the server.
-    await startDirectMessageByUsername(pageAlice, USER2.name);
-
-    // Bob should receive the pending invite via WebSocket or Sync
-    const inspectBtn = pageBob.getByRole('button', { name: 'Inspect' });
-    await expect(inspectBtn).toBeVisible({ timeout: 15000 });
-
-    // Bob inspects the invite
-    await inspectBtn.click();
-    const modal = pageBob.locator('.modal-content');
-    await expect(modal).toBeVisible();
-    await expect(modal.locator('h3', { hasText: 'Inspect Group Invitation' })).toBeVisible();
-
-    // Bob accepts the invite
-    const acceptJoinBtn = pageBob.getByRole('button', { name: 'Accept & Join' });
-    await acceptJoinBtn.click();
-    await expect(modal).not.toBeVisible();
-
-    // Chat should appear in Bob's sidebar
-    const convItem = pageBob.locator('.conversation-item, .chat-item, .dm-item').filter({ hasText: USER1.name });
-    await expect(convItem).toBeVisible({ timeout: 15000 });
-
-    // Alice tests Key Rotation
-    await pageAlice.goto('/#settings');
-    await pageAlice.waitForSelector('.settings-page', { timeout: 15000 });
-
-    const refreshBtn = pageAlice.getByRole('button', { name: 'Refresh Encryption Keys' });
-    await expect(refreshBtn).toBeVisible({ timeout: 15000 });
-    await refreshBtn.click();
-
-    const successMsg = pageAlice.locator('.success-message', { hasText: 'Keys refreshed successfully' });
-    await expect(successMsg).toBeVisible({ timeout: 15000 });
-
-    await contextAlice.close();
-    await contextBob.close();
+      const postRotationFromBob = `post-rotation from bob ${Date.now()}`;
+      await pageB.fill('textarea.message-textarea', postRotationFromBob);
+      await pageB.locator('button.send-button').click();
+      await waitWithSync(
+        pageA,
+        pageA.locator('.message-item.received .message-text', { hasText: postRotationFromBob }),
+        { timeout: 90000, reopenConversation: true }
+      );
+    } finally {
+      await contextA.close().catch(() => {});
+      await contextB.close().catch(() => {});
+      cleanupUsers([alice, bob]);
+    }
   });
 });
