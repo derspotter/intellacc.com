@@ -17,9 +17,12 @@ Updated: 2026-07-13 (delta below; last full audit 2026-06-12)
 - `Done` CI runs an E2E smoke of the E2EE suite on every push (solid-messaging,
   device-linking, safety-numbers, key-rotation-inspection, granular-persistence)
   against a fresh stack; rehearsed green on fresh DB.
-- `Ops` Phone verification (Tier 2): SMS gateway back online and backend reports
-  provider available. The live send/receive smoke needs a consented phone number —
-  blocked on operator. Stripe (Tier 3) still needs staging credentials.
+- `Done` Phone verification (Tier 2) production smoke (2026-07-13): full live flow
+  executed against production — /verification/phone/start dispatched via smsgate,
+  real SMS delivered, /verification/phone/confirm accepted the code (also exercised
+  the 10-min code expiry and the 3/hour per-number rate limit along the way).
+  Account state consistent afterwards. Remaining verification ops item: Stripe
+  (Tier 3) still needs staging credentials.
 
 Forward feature plan: `docs/feature-roadmap.md`. Completed plan documents are in `docs/archive/`.
 
