@@ -129,11 +129,15 @@ test.describe('Safety numbers / TOFU fingerprints E2E', () => {
       await expect(modalA).toBeHidden({ timeout: 5000 });
 
       // Bob marks Alice verified through the UI; badge appears in the header
-      // and the vault record flips.
+      // and the vault record flips. NOTE: assert the anchored 'STATUS:
+      // VERIFIED' — a bare 'VERIFIED' substring also matches 'UNVERIFIED'
+      // and let this race the async verify on slow CI runners.
       await modalB.locator('.verify-contact-btn').click();
-      await expect(modalB.locator('.verification-status')).toContainText('VERIFIED', { timeout: 10000 });
-      const verified = await getContactFingerprint(pageB, alice.id);
-      expect(verified.status).toBe('verified');
+      await expect(modalB.locator('.verification-status')).toContainText('STATUS: VERIFIED', { timeout: 10000 });
+      const verified = await expect
+        .poll(() => getContactFingerprint(pageB, alice.id).then((r) => r.status), { timeout: 10000 })
+        .toBe('verified')
+        .then(() => getContactFingerprint(pageB, alice.id));
       expect(verified.verifiedAt).toBeTruthy();
       await modalB.getByRole('button', { name: 'CLOSE' }).click();
       await expect(modalB).toBeHidden({ timeout: 5000 });
@@ -143,11 +147,12 @@ test.describe('Safety numbers / TOFU fingerprints E2E', () => {
       await pageB.locator('.btn-safety-numbers').click();
       await expect(modalB).toBeVisible({ timeout: 10000 });
       await modalB.locator('.unverify-contact-btn').click();
-      await expect(modalB.locator('.verification-status')).toContainText('UNVERIFIED', { timeout: 10000 });
+      await expect(modalB.locator('.verification-status')).toContainText('STATUS: UNVERIFIED', { timeout: 10000 });
       await modalB.getByRole('button', { name: 'CLOSE' }).click();
       await expect(modalB).toBeHidden({ timeout: 5000 });
-      const unverified = await getContactFingerprint(pageB, alice.id);
-      expect(unverified.status).toBe('unverified');
+      await expect
+        .poll(() => getContactFingerprint(pageB, alice.id).then((r) => r.status), { timeout: 10000 })
+        .toBe('unverified');
 
       // MITM detection: a different fingerprint for a known contact is
       // flagged as changed, keeps the previous fingerprint, and resets
@@ -190,7 +195,7 @@ test.describe('Safety numbers / TOFU fingerprints E2E', () => {
       // Review opens the modal with the changed-key warning + previous number.
       await pageB.locator('.fingerprint-warning-banner button', { hasText: 'Review' }).click();
       await expect(modalB).toBeVisible({ timeout: 10000 });
-      await expect(modalB.locator('.verification-status')).toContainText('CHANGED', { timeout: 10000 });
+      await expect(modalB.locator('.verification-status')).toContainText('STATUS: CHANGED', { timeout: 10000 });
       await expect(modalB.locator('.safety-warning')).toContainText(formatFp(bobViewOfAlice.fingerprint));
       await modalB.getByRole('button', { name: 'CLOSE' }).click();
       await expect(modalB).toBeHidden({ timeout: 5000 });
