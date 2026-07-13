@@ -37,9 +37,10 @@ Updated: 2026-07-13 (delta below; last full audit 2026-06-12)
   against the sandbox: setup endpoint issues approval URLs; the confirm endpoint
   exchanged an (auto-approved card) setup token for payment token 8fa32449… and
   upgraded a tier-2 user to tier 3; unsigned webhook posts are rejected 400 by
-  signature verification. Remaining: browser smoke through the PayPal-wallet
-  approval page — needs the sandbox buyer login
-  (tests/e2e/paypal-verification.spec.js is ready, env-gated).
+  signature verification. Browser smoke through the real PayPal-wallet approval
+  page green 2026-07-13 (paypal-verification.spec.js, 43s: login -> approve ->
+  return -> confirm -> tier 3). Sandbox-complete; go-live = Live app credentials
+  + PAYPAL_API_BASE swap + live webhook registration.
 
 Forward feature plan: `docs/feature-roadmap.md`. Completed plan documents are in `docs/archive/`.
 
