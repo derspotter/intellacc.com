@@ -306,12 +306,12 @@ export default function DeviceManager() {
               </Show>
 
               <div style="margin-top: 1rem;">
-                <p style="margin-bottom: 0.4rem;">Approve link from full token:</p>
+                <p style="margin-bottom: 0.4rem;">Approve a new device — enter the code it displays:</p>
                 <div class="linking-approve-row">
                   <input
                     type="text"
                     class="form-input"
-                    placeholder="Enter linking token"
+                    placeholder="Enter device code"
                     value={approveToken()}
                     onInput={(event) => setApproveToken(event.target.value)}
                   />

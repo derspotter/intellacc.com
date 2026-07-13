@@ -152,13 +152,28 @@ exports.approveLinking = async (req, res) => {
             return res.status(403).json({ error: 'Approver password is incorrect' });
         }
 
+        // The new-device modal displays a shortened pairing code (first 12
+        // hex chars, dash-grouped); accept it as an unambiguous prefix of a
+        // pending token so the on-screen instructions actually work. 48 bits
+        // of prefix on an authenticated, password-confirmed, single-use,
+        // expiring token is not brute-forceable. Full tokens still match.
+        const normalizedToken = String(token).toLowerCase().replace(/[^a-f0-9]/g, '');
+        if (normalizedToken.length < 12) {
+            return res.status(400).json({ error: 'Code too short — enter the code shown on the new device' });
+        }
+
         const tokenResult = await db.query(
-            'SELECT * FROM device_linking_tokens WHERE token = $1 AND user_id = $2 AND expires_at > NOW() AND approved_at IS NULL',
-            [token, userId]
+            `SELECT * FROM device_linking_tokens
+             WHERE user_id = $2 AND expires_at > NOW() AND approved_at IS NULL
+               AND token LIKE $1 || '%'`,
+            [normalizedToken, userId]
         );
 
         if (tokenResult.rows.length === 0) {
             return res.status(400).json({ error: 'Invalid or expired token' });
+        }
+        if (tokenResult.rows.length > 1) {
+            return res.status(400).json({ error: 'Code matches multiple pending requests — enter the full token' });
         }
 
         const approverDeviceId = await resolveApproverDeviceId(userId, headerApproverDeviceId);

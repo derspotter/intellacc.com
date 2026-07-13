@@ -84,7 +84,7 @@ test.describe('Device linking E2E', () => {
         await unlockVaultButton.click();
         await expect(unlockVaultButton).toBeHidden({ timeout: 15000 });
       }
-      await expect(pageA.getByPlaceholder('Enter linking token')).toBeVisible({ timeout: 15000 });
+      await expect(pageA.getByPlaceholder('Enter device code')).toBeVisible({ timeout: 15000 });
       await expect(pageA.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
 
       // Device B: clean browser, same account. The master key endpoint must
@@ -107,22 +107,14 @@ test.describe('Device linking E2E', () => {
       await expect(modal).toBeVisible({ timeout: 15000 });
       await expect(modal.locator('code')).not.toBeEmpty({ timeout: 15000 });
 
-      // The modal shows a shortened pairing code; the approve API wants the
-      // full token, so read it from the linking request the modal created.
-      let linkToken = '';
-      await expect
-        .poll(() => {
-          linkToken = dbQuery(`
-            SELECT token FROM device_linking_tokens
-            WHERE user_id = ${user.id} AND approved_at IS NULL AND expires_at > NOW()
-            ORDER BY created_at DESC LIMIT 1;
-          `);
-          return linkToken;
-        }, { timeout: 15000, message: 'linking token issued' })
-        .not.toBe('');
+      // The human flow: read the shortened pairing code off the new device's
+      // screen and type it on the trusted device. The backend accepts it as
+      // an unambiguous prefix of the pending token.
+      const displayedCode = (await modal.locator('code').innerText()).trim();
+      expect(displayedCode).toMatch(/^[A-F0-9]{3}(-[A-F0-9]{3}){3}$/i);
 
-      // Device A approves through the real settings form.
-      await pageA.getByPlaceholder('Enter linking token').fill(linkToken);
+      // Device A approves through the real settings form using that code.
+      await pageA.getByPlaceholder('Enter device code').fill(displayedCode);
       await pageA.getByPlaceholder('Approver password').fill(PASSWORD);
       pageA.once('dialog', (dialog) => dialog.accept());
       await pageA.getByRole('button', { name: 'Approve', exact: true }).click();
