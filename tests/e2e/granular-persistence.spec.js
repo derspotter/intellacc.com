@@ -124,24 +124,24 @@ test.describe('Granular MLS persistence E2E', () => {
       expect(reloaded.granularEventCount).toBeGreaterThanOrEqual(after.granularEventCount);
       expect(reloaded.keystoreRecordCount).toBe(after.keystoreRecordCount);
 
-      // Logout hygiene: wipeMemory() drops the client and identity
-      // immediately (capture within one evaluate — reactive code can re-init).
+      // Logout hygiene: after re-provisioning (the reload re-locked the
+      // vault), clicking Logout must lock the vault and wipe the MLS client
+      // from memory — not just drop the token. (logout -> lockKeys ->
+      // wipeMemory + clearCache, so this also covers the raw wipe path.)
       await loginOnSolid(page, user);
       await provisionMessaging(page, user);
-      const wipe = await page.evaluate(() => {
-        const client = window.coreCryptoClient;
-        if (!client) return { error: 'coreCryptoClient not on window' };
-        const clientBefore = !!client.client;
-        client.wipeMemory();
-        return {
-          clientBefore,
-          clientAfter: !!client.client,
-          identityAfter: client.identityName || null
-        };
-      });
-      expect(wipe.clientBefore, `wipe result: ${JSON.stringify(wipe)}`).toBe(true);
-      expect(wipe.clientAfter).toBe(false);
-      expect(wipe.identityAfter).toBeFalsy();
+      const beforeLogout = await page.evaluate(() => !!window.coreCryptoClient?.client);
+      expect(beforeLogout, 'client alive before logout').toBe(true);
+
+      await page.evaluate(() => { window.location.hash = '#home'; });
+      await page.locator('.logout-btn, .nav-btn:has-text("Logout")').first().click();
+      await expect
+        .poll(() => page.evaluate(() => ({
+          token: localStorage.getItem('token'),
+          client: !!window.coreCryptoClient?.client,
+          locked: window.__vaultStore?.state?.locked === true || window.__vaultStore?.state?.isLocked === true
+        })), { timeout: 10000, message: 'logout wipes session' })
+        .toMatchObject({ token: null, client: false, locked: true });
     } finally {
       await context.close().catch(() => {});
       cleanupUsers([user]);

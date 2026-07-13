@@ -62,6 +62,13 @@ export const resetPassword = (token, newPassword, acknowledged = false) =>
   api.auth.resetPassword(token, newPassword, acknowledged);
 
 export const logout = () => {
+  // Session keys must not outlive the session token: lock the vault (wipes
+  // MLS keys, decrypted messages, and the in-memory master/local keys) on
+  // the way out. Best-effort and lazy-imported to avoid a module cycle; the
+  // next login re-unlocks with the login password.
+  import('./mls/vaultService.js')
+    .then((mod) => mod.default?.lockKeys?.())
+    .catch(() => {});
   clearToken();
   window.location.hash = 'login';
 };

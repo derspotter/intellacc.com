@@ -113,7 +113,14 @@ function App() {
     })),
     { id: 'help', label: 'Toggle Help', shortcut: '?', action: () => setShowHelp(prev => !prev) },
     { id: 'skin-van', label: 'Switch to Van Skin', shortcut: '', action: switchToVan },
-    { id: 'logout', label: 'Logout', shortcut: '', action: () => import("../services/tokenService").then(s => s.clearToken()) }
+    {
+      id: 'logout', label: 'Logout', shortcut: '', action: () => {
+        // Lock the vault alongside clearing the token so MLS keys and
+        // decrypted messages don't outlive the session (mirrors auth.logout).
+        import("../services/mls/vaultService").then((m) => m.default?.lockKeys?.()).catch(() => {});
+        return import("../services/tokenService").then(s => s.clearToken());
+      }
+    }
   ]);
 
   const filteredActions = () => {

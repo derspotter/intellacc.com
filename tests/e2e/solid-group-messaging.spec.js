@@ -129,6 +129,25 @@ test.describe('Solid group messaging E2E', () => {
         { timeout: 90000, reopenConversation: true }
       );
       await expect(pageB.locator('.group-members')).toContainText(carol.username, { timeout: 30000 });
+
+      // Group safety numbers: Alice opens the member inspector — one row per
+      // other member with a fingerprint — and verifies Bob.
+      await pageA.locator('.btn-safety-numbers').click();
+      const modal = pageA.locator('.safety-numbers-modal');
+      await expect(modal).toBeVisible({ timeout: 10000 });
+      await expect(modal.locator('.member-fingerprint-row')).toHaveCount(2, { timeout: 15000 });
+      await expect(modal.locator('.fingerprint-section.yours .fingerprint-display')).not.toBeEmpty();
+      const bobRow = modal.locator('.member-fingerprint-row', { hasText: bob.username.toUpperCase() });
+      await expect(bobRow.locator('.fingerprint-display')).toContainText(/[A-F0-9]{4}( [A-F0-9]{4})+/);
+      await bobRow.locator('.verify-contact-btn').click();
+      await expect(bobRow.locator('.member-fingerprint-status')).toHaveText('VERIFIED', { timeout: 10000 });
+      const bobStatus = await pageA.evaluate(
+        (contactId) => window.coreCryptoClient.getContactVerificationStatus(contactId),
+        bob.id
+      );
+      expect(bobStatus).toBe('verified');
+      await modal.getByRole('button', { name: 'CLOSE' }).click();
+      await expect(modal).toBeHidden({ timeout: 5000 });
     } finally {
       await contextA.close();
       await contextB.close();

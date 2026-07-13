@@ -291,10 +291,18 @@ export default function MessagesPage() {
     void refreshPeerVerification();
   });
 
-  const peerWarning = () => {
+  // Key-change warnings for the open conversation: the DM peer, or any
+  // member of the open group.
+  const conversationWarnings = () => {
+    const warnings = messagingStore.fingerprintWarnings || [];
+    if (warnings.length === 0 || !selectedGroup()) return [];
     const peer = dmPeerId();
-    if (!peer) return null;
-    return (messagingStore.fingerprintWarnings || []).find((w) => Number(w.userId) === peer) || null;
+    if (peer) return warnings.filter((w) => Number(w.userId) === peer);
+    if (isGroupChat(selectedGroup())) {
+      const memberIds = new Set(groupMembers().map((id) => Number(id)));
+      return warnings.filter((w) => memberIds.has(Number(w.userId)));
+    }
+    return [];
   };
 
   // Member list comes from local MLS group state (authoritative once joined).
@@ -1016,32 +1024,30 @@ export default function MessagesPage() {
                     })()}
                   </h3>
                   <div class="encryption-status mls-active">MLS conversation</div>
-                  <Show when={!isGroupChat(selectedGroup()) && dmPeerId()}>
-                    <div class="safety-numbers-controls">
-                      <Show when={peerVerification()}>
-                        <span
-                          class="verification-badge"
-                          classList={{
-                            verified: peerVerification() === 'verified',
-                            warning: peerVerification() === 'changed',
-                            unverified: peerVerification() === 'unverified'
-                          }}
-                        >
-                          {peerVerification() === 'verified' ? '✓ Verified'
-                            : peerVerification() === 'changed' ? '⚠ Key changed'
-                            : 'Not verified'}
-                        </span>
-                      </Show>
-                      <button
-                        type="button"
-                        class="btn-safety-numbers"
-                        title="Safety numbers"
-                        onClick={() => setSafetyNumbersOpen(true)}
+                  <div class="safety-numbers-controls">
+                    <Show when={dmPeerId() && peerVerification()}>
+                      <span
+                        class="verification-badge"
+                        classList={{
+                          verified: peerVerification() === 'verified',
+                          warning: peerVerification() === 'changed',
+                          unverified: peerVerification() === 'unverified'
+                        }}
                       >
-                        Safety number
-                      </button>
-                    </div>
-                  </Show>
+                        {peerVerification() === 'verified' ? '✓ Verified'
+                          : peerVerification() === 'changed' ? '⚠ Key changed'
+                          : 'Not verified'}
+                      </span>
+                    </Show>
+                    <button
+                      type="button"
+                      class="btn-safety-numbers"
+                      title="Safety numbers"
+                      onClick={() => setSafetyNumbersOpen(true)}
+                    >
+                      {isGroupChat(selectedGroup()) ? 'Member safety numbers' : 'Safety number'}
+                    </button>
+                  </div>
                   <Show when={isGroupChat(selectedGroup()) && groupMembers().length > 0}>
                     <div class="group-members">
                       {groupMembers().map((memberId) => usernameFor(memberId)).join(', ')}
@@ -1086,10 +1092,12 @@ export default function MessagesPage() {
                 </label>
               </div>
 
-              <Show when={peerWarning()}>
+              <Show when={conversationWarnings().length > 0}>
                 <div class="fingerprint-warning-banner">
                   <span class="fingerprint-warning-text">
-                    ⚠ {usernameFor(dmPeerId())}'s encryption key has changed. Verify before trusting.
+                    ⚠ {conversationWarnings().map((w) => usernameFor(w.userId)).join(', ')}
+                    {conversationWarnings().length === 1 ? "'s encryption key has" : "'s encryption keys have"} changed.
+                    Verify before trusting.
                   </span>
                   <span class="fingerprint-warning-actions">
                     <button
@@ -1102,7 +1110,7 @@ export default function MessagesPage() {
                     <button
                       type="button"
                       class="post-action"
-                      onClick={() => messagingStore.dismissFingerprintWarning(dmPeerId())}
+                      onClick={() => conversationWarnings().forEach((w) => messagingStore.dismissFingerprintWarning(w.userId))}
                     >
                       Dismiss
                     </button>
@@ -1252,11 +1260,12 @@ export default function MessagesPage() {
         <p class="error">{error()}</p>
       </Show>
       <DeviceLinkModal onSuccess={handleDeviceLinkSuccess} onCancel={handleDeviceLinkCancel} />
-      <Show when={safetyNumbersOpen() && dmPeerId()}>
+      <Show when={safetyNumbersOpen() && selectedGroup()}>
         <SafetyNumberModal
           groupId={String(selectedGroup())}
           contactUserId={dmPeerId()}
-          contactName={usernameFor(dmPeerId())}
+          contactName={dmPeerId() ? usernameFor(dmPeerId()) : undefined}
+          nameFor={usernameFor}
           onClose={() => setSafetyNumbersOpen(false)}
           onStatusChange={() => void refreshPeerVerification()}
         />

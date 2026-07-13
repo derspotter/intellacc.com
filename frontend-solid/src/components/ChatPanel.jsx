@@ -614,22 +614,20 @@ export const ChatPanel = () => {
                             <Show when={selectedConversation()}>
                                 <div class="w-2 h-2 rounded-full bg-market-up shadow-glow-green"></div>
                                 <span class="font-bold text-bb-text text-sm uppercase">{selectedConversation()?.displayName}</span>
-                                <Show when={dmPeerId()}>
-                                    <Show when={peerVerification() === 'verified'}>
-                                        <span class="verification-badge verified text-market-up text-[10px]">[✓ VERIFIED]</span>
-                                    </Show>
-                                    <Show when={peerVerification() === 'changed'}>
-                                        <span class="verification-badge warning text-market-down text-[10px] animate-pulse">[⚠ KEY CHANGED]</span>
-                                    </Show>
-                                    <button
-                                        type="button"
-                                        class="btn-safety-numbers text-bb-muted text-[10px] hover:text-bb-accent cursor-pointer bg-transparent border-0 font-mono"
-                                        title="Safety numbers"
-                                        onClick={() => setSafetyNumbersOpen(true)}
-                                    >
-                                        [SAFETY#]
-                                    </button>
+                                <Show when={dmPeerId() && peerVerification() === 'verified'}>
+                                    <span class="verification-badge verified text-market-up text-[10px]">[✓ VERIFIED]</span>
                                 </Show>
+                                <Show when={dmPeerId() && peerVerification() === 'changed'}>
+                                    <span class="verification-badge warning text-market-down text-[10px] animate-pulse">[⚠ KEY CHANGED]</span>
+                                </Show>
+                                <button
+                                    type="button"
+                                    class="btn-safety-numbers text-bb-muted text-[10px] hover:text-bb-accent cursor-pointer bg-transparent border-0 font-mono"
+                                    title="Safety numbers"
+                                    onClick={() => setSafetyNumbersOpen(true)}
+                                >
+                                    [SAFETY#]
+                                </button>
                             </Show>
                             <Show when={!selectedConversation()}>
                                 <span class="text-bb-muted text-xs uppercase">[SELECT CONVERSATION]</span>
@@ -764,11 +762,11 @@ export const ChatPanel = () => {
             </Show>
 
             <DeviceLinkModal onSuccess={handleDeviceLinkSuccess} onCancel={handleDeviceLinkCancel} />
-            <Show when={safetyNumbersOpen() && dmPeerId()}>
+            <Show when={safetyNumbersOpen() && selectedConversation()}>
                 <SafetyNumberModal
                     groupId={getConversationId(selectedConversation())}
                     contactUserId={dmPeerId()}
-                    contactName={selectedConversation()?.displayName}
+                    contactName={dmPeerId() ? selectedConversation()?.displayName : undefined}
                     onClose={() => setSafetyNumbersOpen(false)}
                     onStatusChange={() => void refreshPeerVerification()}
                 />
