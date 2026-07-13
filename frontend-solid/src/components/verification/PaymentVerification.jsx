@@ -59,9 +59,17 @@ export default function PaymentVerification({ onSuccess } = {}) {
         paymentElement.unmount();
       }
 
-      paymentElement = elementsInstance.create('payment');
-      paymentElement.mount(paymentContainer());
+      // The mount target (.payment-form-body) only renders in the 'ready'
+      // state, so flip status BEFORE mounting — Solid renders synchronously,
+      // making the ref available on the next line. Mounting first (as this
+      // originally did) always passed a null container and threw.
       setStatus('ready');
+      const container = paymentContainer();
+      if (!container) {
+        throw new Error('Payment form container failed to render');
+      }
+      paymentElement = elementsInstance.create('payment');
+      paymentElement.mount(container);
     } catch (err) {
       setError(err?.data?.error || err?.message || 'Failed to start payment verification');
       setStatus('error');
@@ -78,11 +86,13 @@ export default function PaymentVerification({ onSuccess } = {}) {
     setStatus('processing');
     setError('');
     try {
+      // `redirect` is a top-level confirmSetup option; inside confirmParams
+      // it is forwarded to the API, which rejects it as an unknown parameter.
       const result = await stripeInstance.confirmSetup({
         elements: elementsInstance,
+        redirect: 'if_required',
         confirmParams: {
-          return_url: `${window.location.origin}/#settings/verification`,
-          redirect: 'if_required'
+          return_url: `${window.location.origin}/#settings/verification`
         }
       });
 
@@ -123,6 +133,9 @@ export default function PaymentVerification({ onSuccess } = {}) {
           <p style="margin: 0;">Confirming your payment method...</p>
         </div>
       </Show>
+      {/* The payment form must STAY MOUNTED during 'processing':
+          stripe.confirmSetup reads from the live Element, and unmounting it
+          on the status flip made confirmation fail unconditionally. */}
       <Show when={status() === 'success'}>
         <div class="success-state" style="text-align: left; padding: 1rem 0;">
           <div class="success-icon" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: var(--success-color); color: white; border-radius: 50%; margin-bottom: 0.5rem;"></div>
@@ -130,14 +143,20 @@ export default function PaymentVerification({ onSuccess } = {}) {
           <p class="instructions" style="margin-bottom: 0;">This will update shortly once Stripe confirms.</p>
         </div>
       </Show>
-      <Show when={['idle', 'ready', 'error'].includes(status())}>
+      <Show when={['idle', 'ready', 'error', 'processing'].includes(status())}>
         <div class="payment-form" style="text-align: left;">
           <p class="description" style="margin-bottom: 1rem;">Verify payment to unlock market creation and governance actions.</p>
-          {status() === 'ready' ? (
+          {['ready', 'processing'].includes(status()) ? (
             <>
               <div class="payment-form-body" ref={setPaymentContainer} />
-              <button type="button" class="button button-primary" style="margin-top: 1rem;" onClick={confirmPayment}>
-                Confirm verification
+              <button
+                type="button"
+                class="button button-primary"
+                style="margin-top: 1rem;"
+                onClick={confirmPayment}
+                disabled={status() === 'processing'}
+              >
+                {status() === 'processing' ? 'Confirming…' : 'Confirm verification'}
               </button>
             </>
           ) : (

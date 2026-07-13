@@ -21,8 +21,17 @@ Updated: 2026-07-13 (delta below; last full audit 2026-06-12)
   executed against production — /verification/phone/start dispatched via smsgate,
   real SMS delivered, /verification/phone/confirm accepted the code (also exercised
   the 10-min code expiry and the 3/hour per-number rate limit along the way).
-  Account state consistent afterwards. Remaining verification ops item: Stripe
-  (Tier 3) still needs staging credentials.
+  Account state consistent afterwards.
+- `Done` Payment verification (Tier 3) test-mode smoke (2026-07-13): Stripe test keys
+  wired (webhook endpoint we_1Tsnhp8xJJuJ6Jjp… registered via CLI on
+  https://intellacc.com/api/webhooks/stripe), full browser flow green: SetupIntent →
+  Elements → test card → confirmSetup → live webhook delivery → tier 3.
+  First real execution found and fixed THREE latent frontend bugs in
+  PaymentVerification.jsx (mount-before-render, unmount-during-confirm,
+  redirect param misplacement) — the flow had never worked. Go-live remains:
+  activate the Stripe account, swap live keys + live-mode webhook in backend/.env.
+- `Open` PayPal verification (Tier 3 alternative): vault setup-token flow design
+  agreed; blocked on operator creating the PayPal sandbox app (client id/secret).
 
 Forward feature plan: `docs/feature-roadmap.md`. Completed plan documents are in `docs/archive/`.
 
