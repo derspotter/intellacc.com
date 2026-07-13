@@ -60,15 +60,27 @@ test.describe('PayPal verification staging smoke', () => {
     await passwordField.fill(BUYER_PASSWORD);
     await page.locator('#btnLogin').click();
 
-    // Approve saving the payment method. Button copy varies by experiment.
-    const approveButton = page.getByRole('button', {
-      name: /Agree|Continue|Save|Zustimmen|Weiter|Speichern/i
+    // Approve saving the payment method. The consent screen can arrive after
+    // interstitials and re-render, so keep clicking the EXPLICIT agree button
+    // (localized copy) whenever it is visible until PayPal redirects back.
+    const agreeButton = page.getByRole('button', {
+      name: /Agree & Continue|Agree and Continue|Zustimmen und weiter/i
     }).first();
-    await approveButton.waitFor({ state: 'visible', timeout: 60000 });
-    await approveButton.click();
+    const approvalDeadline = Date.now() + 90000;
+    while (Date.now() < approvalDeadline && !/#settings/.test(page.url())) {
+      if (await agreeButton.isVisible().catch(() => false)) {
+        await agreeButton.click().catch(() => {});
+      }
+      await page.waitForTimeout(1500);
+    }
 
-    // Back in the app: the pending setup token confirms on mount.
-    await page.waitForURL(/#settings/, { timeout: 60000 });
+    // PayPal redirects to the PRODUCTION origin (FRONTEND_URL) — correct for
+    // real users, but this test session (token + pending setup token in
+    // per-origin storage) lives on the test origin. Same tab, so navigating
+    // back to our origin restores both and the mount-time confirm runs.
+    await page.waitForURL(/#settings/, { timeout: 15000 });
+    await page.goto('/#settings');
+    await page.waitForSelector('.verification-settings, .verification-status', { timeout: 15000 });
     await expect(page.getByText('Payment method verified.', { exact: true }))
       .toBeVisible({ timeout: 30000 })
       .catch(() => {}); // transient — the authoritative check is below
