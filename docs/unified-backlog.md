@@ -33,9 +33,12 @@ Updated: 2026-07-13 (delta below; last full audit 2026-06-12)
 - `Partial` PayPal verification (Tier 3 alternative, 2026-07-13): vault setup-token
   flow implemented end-to-end (paypalVerificationService, setup/confirm routes,
   /api/webhooks/paypal with verify-webhook-signature, "Verify with PayPal" button,
-  sandbox webhook 442982701T2561525 registered via API). Setup endpoint verified
-  live against the sandbox (approval URL issued). Remaining: browser smoke through
-  the PayPal approval popup — needs the sandbox buyer login
+  sandbox webhook 442982701T2561525 registered via API). Backend loop proven live
+  against the sandbox: setup endpoint issues approval URLs; the confirm endpoint
+  exchanged an (auto-approved card) setup token for payment token 8fa32449… and
+  upgraded a tier-2 user to tier 3; unsigned webhook posts are rejected 400 by
+  signature verification. Remaining: browser smoke through the PayPal-wallet
+  approval page — needs the sandbox buyer login
   (tests/e2e/paypal-verification.spec.js is ready, env-gated).
 
 Forward feature plan: `docs/feature-roadmap.md`. Completed plan documents are in `docs/archive/`.
