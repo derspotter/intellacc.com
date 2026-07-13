@@ -68,6 +68,119 @@ jobs:
         # table locks (account deletion vs. the rest) and flake on timeouts.
         run: npm test -- --runInBand
 
+  e2e-smoke:
+    name: E2E messaging smoke (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgres://intellacc_user:ci_password@localhost:5432/intellaccdb
+      JWT_SECRET: ci-test-jwt-secret
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend-solid/package-lock.json
+
+      # The E2E helpers provision/clean test users via
+      # `docker exec intellacc_db psql`, so the database must be a docker
+      # container with exactly that name (a GitHub `services:` container gets
+      # a generated name).
+      - name: Start database
+        run: |
+          docker run -d --name intellacc_db \
+            -e POSTGRES_USER=intellacc_user \
+            -e POSTGRES_PASSWORD=ci_password \
+            -e POSTGRES_DB=intellaccdb \
+            -p 5432:5432 pgvector/pgvector:pg18
+          for i in $(seq 1 30); do
+            docker exec intellacc_db pg_isready -U intellacc_user -d intellaccdb && exit 0
+            sleep 2
+          done
+          echo "database never became ready" >&2
+          exit 1
+
+      - name: Apply migrations
+        working-directory: backend
+        run: |
+          # Same ordering as scripts/docker-dev-entrypoint.sh and the
+          # backend-tests job: initial first, then alphabetical, no backups.
+          psql() { docker exec -i intellacc_db psql -U intellacc_user -d intellaccdb -v ON_ERROR_STOP=1 "$@"; }
+          psql -c "CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());"
+          apply() {
+            echo "Applying migration: $(basename "$1")"
+            psql < "$1"
+          }
+          [ -f migrations/initial_migration.sql ] && apply migrations/initial_migration.sql
+          for file in migrations/*.sql; do
+            base="$(basename "$file")"
+            [ "$base" = "initial_migration.sql" ] && continue
+            case "$base" in *backup*) continue ;; esac
+            apply "$file"
+          done
+
+      - name: Start backend
+        working-directory: backend
+        env:
+          NODE_ENV: development
+          PORT: "3000"
+          ALLOW_REGISTRATION: "true"
+          REGISTRATION_APPROVAL_REQUIRED: "false"
+          FRONTEND_URL: http://localhost:4174
+        run: |
+          npm ci --no-audit --no-fund
+          node src/index.js > "$RUNNER_TEMP/backend.log" 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3000/api/health-check >/dev/null && exit 0
+            sleep 2
+          done
+          echo "backend never became healthy" >&2
+          tail -50 "$RUNNER_TEMP/backend.log"
+          exit 1
+
+      - name: Start frontend (Vite dev, proxies /api and /socket.io)
+        working-directory: frontend-solid
+        env:
+          VITE_API_PROXY_TARGET: http://localhost:3000
+          VITE_SERVER_PORT: "4174"
+        run: |
+          npm ci --no-audit --no-fund
+          npx vite --host 127.0.0.1 --port 4174 --strictPort > "$RUNNER_TEMP/vite.log" 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4174/api/health-check >/dev/null && exit 0
+            sleep 2
+          done
+          echo "frontend never became ready" >&2
+          tail -50 "$RUNNER_TEMP/vite.log"
+          exit 1
+
+      - name: Install Playwright
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run E2E smoke (core messaging + device linking)
+        env:
+          SOLID_URL: http://127.0.0.1:4174
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:4174
+        run: npx playwright test tests/e2e/solid-messaging.spec.js tests/e2e/device-linking.spec.js
+
+      - name: Upload traces and logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-smoke-artifacts
+          path: |
+            .playwright-test-results/
+            ${{ runner.temp }}/backend.log
+            ${{ runner.temp }}/vite.log
+          if-no-files-found: ignore
+
   mls-dedup-guard:
     name: MLS shared-client de-duplication guard
     runs-on: ubuntu-latest
