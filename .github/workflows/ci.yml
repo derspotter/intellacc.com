@@ -164,11 +164,17 @@ jobs:
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Run E2E smoke (core messaging + device linking)
+      - name: Run E2E smoke (E2EE suite)
         env:
           SOLID_URL: http://127.0.0.1:4174
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:4174
-        run: npx playwright test tests/e2e/solid-messaging.spec.js tests/e2e/device-linking.spec.js
+        run: >
+          npx playwright test
+          tests/e2e/solid-messaging.spec.js
+          tests/e2e/device-linking.spec.js
+          tests/e2e/safety-numbers.spec.js
+          tests/e2e/key-rotation-inspection.spec.js
+          tests/e2e/granular-persistence.spec.js
 
       - name: Upload traces and logs on failure
         if: failure()

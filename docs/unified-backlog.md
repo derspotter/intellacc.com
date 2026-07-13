@@ -1,5 +1,25 @@
 # Unified Backlog
-Updated: 2026-06-12 (audited against current codebase)
+Updated: 2026-07-13 (delta below; last full audit 2026-06-12)
+
+## 2026-07-12/13 Delta
+- `Done` Legacy E2E quarantine dissolved: device-linking, key-rotation-inspection,
+  granular-persistence, and safety-numbers specs ported to the Solid flows and green.
+  Reactivation caught and fixed two production bugs: second-device linking looped on
+  LINK_REQUIRED forever (approved device id was never read back), and inviter-side TOFU
+  fingerprinting did not exist (only welcome recipients recorded fingerprints).
+- `Done` Safety-number verification UI in both skins (DM badge/modal/warning banner,
+  group member inspector with per-member verify) — closes the UI half of "MLS
+  staged-welcome inspection"; safety numbers derive from leaf signature keys so
+  out-of-band comparison matches what peers record.
+- `Done` Device-link approval now accepts the short pairing code the modal displays
+  (unambiguous prefix match, authenticated + password-confirmed + single-use).
+- `Done` Logout locks the vault and wipes MLS keys/decrypted messages in both skins.
+- `Done` CI runs an E2E smoke of the E2EE suite on every push (solid-messaging,
+  device-linking, safety-numbers, key-rotation-inspection, granular-persistence)
+  against a fresh stack; rehearsed green on fresh DB.
+- `Ops` Phone verification (Tier 2): SMS gateway back online and backend reports
+  provider available. The live send/receive smoke needs a consented phone number —
+  blocked on operator. Stripe (Tier 3) still needs staging credentials.
 
 Forward feature plan: `docs/feature-roadmap.md`. Completed plan documents are in `docs/archive/`.
 
