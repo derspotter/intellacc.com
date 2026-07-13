@@ -7,6 +7,8 @@ import { api } from "../services/api";
 import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import { onMlsMessage, onMlsWelcome } from "../services/socket";
 import { DeviceLinkModal } from "./vault/DeviceLinkModal";
+import { SafetyNumberModal } from "./vault/SafetyNumberModal";
+import messagingStore from "../store/messagingStore";
 
 export const ChatPanel = () => {
     const [password, setPassword] = createSignal("");
@@ -43,6 +45,44 @@ export const ChatPanel = () => {
     const [searching, setSearching] = createSignal(false);
 
     const getConversationId = (conv) => String(conv?.group_id || conv?.groupId || conv?.id || '');
+
+    // ---- Safety numbers / TOFU verification (DMs only) ----
+    const [safetyNumbersOpen, setSafetyNumbersOpen] = createSignal(false);
+    const [peerVerification, setPeerVerification] = createSignal(null);
+
+    const dmPeerId = () => {
+        const groupId = getConversationId(selectedConversation());
+        if (!coreCryptoClient.isDirectMessage(groupId)) return null;
+        const self = String(userData()?.userId || '');
+        const peer = coreCryptoClient.getDmParticipantIds(groupId).find((id) => String(id) !== self);
+        return peer ? Number(peer) : null;
+    };
+
+    const refreshPeerVerification = async () => {
+        const peer = dmPeerId();
+        if (!peer || vaultStore.state.locked) {
+            setPeerVerification(null);
+            return;
+        }
+        try {
+            setPeerVerification(await coreCryptoClient.getContactVerificationStatus(peer));
+        } catch {
+            setPeerVerification(null);
+        }
+    };
+
+    createEffect(() => {
+        void selectedConversation();
+        void vaultStore.state.locked;
+        void messagingStore.fingerprintWarnings;
+        void refreshPeerVerification();
+    });
+
+    const peerWarning = () => {
+        const peer = dmPeerId();
+        if (!peer) return null;
+        return (messagingStore.fingerprintWarnings || []).find((w) => Number(w.userId) === peer) || null;
+    };
     const normalizeArrayResult = (value, keys) => {
         if (Array.isArray(value)) return value;
         if (value && typeof value === 'object') {
@@ -574,6 +614,22 @@ export const ChatPanel = () => {
                             <Show when={selectedConversation()}>
                                 <div class="w-2 h-2 rounded-full bg-market-up shadow-glow-green"></div>
                                 <span class="font-bold text-bb-text text-sm uppercase">{selectedConversation()?.displayName}</span>
+                                <Show when={dmPeerId()}>
+                                    <Show when={peerVerification() === 'verified'}>
+                                        <span class="verification-badge verified text-market-up text-[10px]">[✓ VERIFIED]</span>
+                                    </Show>
+                                    <Show when={peerVerification() === 'changed'}>
+                                        <span class="verification-badge warning text-market-down text-[10px] animate-pulse">[⚠ KEY CHANGED]</span>
+                                    </Show>
+                                    <button
+                                        type="button"
+                                        class="btn-safety-numbers text-bb-muted text-[10px] hover:text-bb-accent cursor-pointer bg-transparent border-0 font-mono"
+                                        title="Safety numbers"
+                                        onClick={() => setSafetyNumbersOpen(true)}
+                                    >
+                                        [SAFETY#]
+                                    </button>
+                                </Show>
                             </Show>
                             <Show when={!selectedConversation()}>
                                 <span class="text-bb-muted text-xs uppercase">[SELECT CONVERSATION]</span>
@@ -584,6 +640,29 @@ export const ChatPanel = () => {
                                 <span class="cursor-pointer hover:text-bb-accent">[MENU]</span>
                             </div>
                         </div>
+
+                        {/* TOFU key-change warning */}
+                        <Show when={peerWarning()}>
+                            <div class="fingerprint-warning-banner flex items-center justify-between gap-2 border-b border-market-down/40 bg-market-down/10 px-4 py-2 text-[10px] text-market-down font-mono">
+                                <span>⚠ ENCRYPTION KEY CHANGED FOR {selectedConversation()?.displayName?.toUpperCase()}. VERIFY BEFORE TRUSTING.</span>
+                                <span class="flex gap-2 shrink-0">
+                                    <button
+                                        type="button"
+                                        class="cursor-pointer hover:text-bb-accent bg-transparent border-0 font-mono text-[10px] text-market-down"
+                                        onClick={() => setSafetyNumbersOpen(true)}
+                                    >
+                                        [REVIEW]
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="cursor-pointer hover:text-bb-accent bg-transparent border-0 font-mono text-[10px] text-market-down"
+                                        onClick={() => messagingStore.dismissFingerprintWarning(dmPeerId())}
+                                    >
+                                        [DISMISS]
+                                    </button>
+                                </span>
+                            </div>
+                        </Show>
 
                         {/* Messages Area */}
                         <div class="flex-1 overflow-y-auto p-3 sm:p-4 font-mono text-xs custom-scrollbar">
@@ -685,6 +764,15 @@ export const ChatPanel = () => {
             </Show>
 
             <DeviceLinkModal onSuccess={handleDeviceLinkSuccess} onCancel={handleDeviceLinkCancel} />
+            <Show when={safetyNumbersOpen() && dmPeerId()}>
+                <SafetyNumberModal
+                    groupId={getConversationId(selectedConversation())}
+                    contactUserId={dmPeerId()}
+                    contactName={selectedConversation()?.displayName}
+                    onClose={() => setSafetyNumbersOpen(false)}
+                    onStatusChange={() => void refreshPeerVerification()}
+                />
+            </Show>
         </Panel>
     );
 };

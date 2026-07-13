@@ -2327,6 +2327,29 @@ class CoreCryptoClient {
     }
 
     /**
+     * Signature-key fingerprints for every member of a group, computed from
+     * the local roster. This is the safety-number source of truth: the own
+     * entry is exactly what peers record for us via TOFU (SHA-256 of the
+     * leaf signature public key — NOT the credential hash that
+     * getIdentityFingerprint returns), so out-of-band comparison works.
+     * @param {string} groupId
+     * @returns {Promise<Array<{userId: number, isSelf: boolean, fingerprint: string}>>}
+     */
+    async getGroupFingerprints(groupId) {
+        const selfUserId = parseInt(this.identityName, 10);
+        const out = [];
+        for (const member of this.getGroupMembers(groupId)) {
+            if (!member?.signature_key_hex) continue;
+            const memberUserId = parseInt(member.identity, 10);
+            if (isNaN(memberUserId)) continue;
+            const fingerprint = await this.extractFingerprintFromSignatureKey(member.signature_key_hex);
+            if (!fingerprint) continue;
+            out.push({ userId: memberUserId, isSelf: memberUserId === selfUserId, fingerprint });
+        }
+        return out;
+    }
+
+    /**
      * Record TOFU fingerprints for all current members of a group from the
      * local roster (signature keys, so key changes are detected). Covers the
      * inviter side — welcome recipients record members in

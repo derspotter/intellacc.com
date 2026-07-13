@@ -100,13 +100,52 @@ test.describe('Safety numbers / TOFU fingerprints E2E', () => {
       expect(aliceViewOfBob.fingerprint, `Alice's record of Bob: ${JSON.stringify(aliceViewOfBob)}`).toBeTruthy();
       expect(aliceViewOfBob.status).toBe('unverified');
 
-      // Out-of-band verification marks the contact verified; unverify resets.
-      await pageB.evaluate((contactId) => window.coreCryptoClient.verifyContact(contactId), alice.id);
+      // ---- Safety-number UI (van skin) ----
+      const formatFp = (fp) => fp.toUpperCase().match(/.{1,4}/g).join(' ');
+
+      // Bob's DM header offers the safety-number inspector; no verified
+      // badge yet (unverified badge is intentionally display:none).
+      await expect(pageB.locator('.btn-safety-numbers')).toBeVisible({ timeout: 15000 });
+      expect(await pageB.locator('.verification-badge.verified').count()).toBe(0);
+
+      // Bob opens the modal: both fingerprints render, and the contact
+      // number matches what his vault recorded for Alice.
+      await pageB.locator('.btn-safety-numbers').click();
+      const modalB = pageB.locator('.safety-numbers-modal');
+      await expect(modalB).toBeVisible({ timeout: 10000 });
+      await expect(modalB.locator('.fingerprint-section.theirs .fingerprint-display'))
+        .toHaveText(formatFp(bobViewOfAlice.fingerprint), { timeout: 15000 });
+      await expect(modalB.locator('.fingerprint-section.yours .fingerprint-display'))
+        .not.toBeEmpty();
+
+      // Cross-device safety-number property: the "your number" Alice sees
+      // equals the "their number" Bob sees for her.
+      await pageA.locator('.btn-safety-numbers').click();
+      const modalA = pageA.locator('.safety-numbers-modal');
+      await expect(modalA).toBeVisible({ timeout: 10000 });
+      await expect(modalA.locator('.fingerprint-section.yours .fingerprint-display'))
+        .toHaveText(formatFp(bobViewOfAlice.fingerprint), { timeout: 15000 });
+      await pageA.keyboard.press('Escape');
+      await expect(modalA).toBeHidden({ timeout: 5000 });
+
+      // Bob marks Alice verified through the UI; badge appears in the header
+      // and the vault record flips.
+      await modalB.locator('.verify-contact-btn').click();
+      await expect(modalB.locator('.verification-status')).toContainText('VERIFIED', { timeout: 10000 });
       const verified = await getContactFingerprint(pageB, alice.id);
       expect(verified.status).toBe('verified');
       expect(verified.verifiedAt).toBeTruthy();
+      await modalB.getByRole('button', { name: 'CLOSE' }).click();
+      await expect(modalB).toBeHidden({ timeout: 5000 });
+      await expect(pageB.locator('.verification-badge.verified')).toBeVisible({ timeout: 10000 });
 
-      await pageB.evaluate((contactId) => window.coreCryptoClient.unverifyContact(contactId), alice.id);
+      // Unverify through the modal; badge disappears.
+      await pageB.locator('.btn-safety-numbers').click();
+      await expect(modalB).toBeVisible({ timeout: 10000 });
+      await modalB.locator('.unverify-contact-btn').click();
+      await expect(modalB.locator('.verification-status')).toContainText('UNVERIFIED', { timeout: 10000 });
+      await modalB.getByRole('button', { name: 'CLOSE' }).click();
+      await expect(modalB).toBeHidden({ timeout: 5000 });
       const unverified = await getContactFingerprint(pageB, alice.id);
       expect(unverified.status).toBe('unverified');
 
@@ -132,6 +171,33 @@ test.describe('Safety numbers / TOFU fingerprints E2E', () => {
         alice.id
       );
       expect(stable).toMatchObject({ isNew: false, changed: false });
+
+      // ---- Key-change warning UI ----
+      // Commit processing pushes warnings into messagingStore (see
+      // recordGroupMemberFingerprints); feed one the same way and the
+      // banner + warning badge must render.
+      await pageB.evaluate(({ contactId, previous }) => {
+        window.__messagingStore.addFingerprintWarnings([{
+          userId: contactId,
+          previousFingerprint: previous,
+          currentFingerprint: 'deadbeef'.repeat(8)
+        }]);
+      }, { contactId: alice.id, previous: bobViewOfAlice.fingerprint });
+
+      await expect(pageB.locator('.fingerprint-warning-banner')).toBeVisible({ timeout: 10000 });
+      await expect(pageB.locator('.verification-badge.warning')).toBeVisible({ timeout: 10000 });
+
+      // Review opens the modal with the changed-key warning + previous number.
+      await pageB.locator('.fingerprint-warning-banner button', { hasText: 'Review' }).click();
+      await expect(modalB).toBeVisible({ timeout: 10000 });
+      await expect(modalB.locator('.verification-status')).toContainText('CHANGED', { timeout: 10000 });
+      await expect(modalB.locator('.safety-warning')).toContainText(formatFp(bobViewOfAlice.fingerprint));
+      await modalB.getByRole('button', { name: 'CLOSE' }).click();
+      await expect(modalB).toBeHidden({ timeout: 5000 });
+
+      // Dismiss clears the banner.
+      await pageB.locator('.fingerprint-warning-banner button', { hasText: 'Dismiss' }).click();
+      await expect(pageB.locator('.fingerprint-warning-banner')).toBeHidden({ timeout: 10000 });
     } finally {
       await contextA.close().catch(() => {});
       await contextB.close().catch(() => {});

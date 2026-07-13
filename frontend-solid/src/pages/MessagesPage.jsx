@@ -6,6 +6,8 @@ import vaultService from '../services/mls/vaultService';
 import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import { onMlsMessage, onMlsWelcome } from '../services/socket';
 import { DeviceLinkModal } from '../components/vault/DeviceLinkModal';
+import { SafetyNumberModal } from '../components/vault/SafetyNumberModal';
+import messagingStore from '../store/messagingStore';
 import { activateOnKey } from '../utils/keyboard';
 
 const normalizeRows = (payload) => {
@@ -254,6 +256,46 @@ export default function MessagesPage() {
   const usernameFor = (userId) => usernames()[Number(userId)] || `User ${userId || 'unknown'}`;
 
   const isGroupChat = (groupId) => Boolean(groupId) && !coreCryptoClient.isDirectMessage(String(groupId));
+
+  // ---- Safety numbers / TOFU verification (DMs only) ----
+  const [safetyNumbersOpen, setSafetyNumbersOpen] = createSignal(false);
+  const [peerVerification, setPeerVerification] = createSignal(null); // 'verified' | 'unverified' | 'changed' | null
+
+  const dmPeerId = () => {
+    const groupId = String(selectedGroup() || '');
+    if (!groupId || isGroupChat(groupId)) return null;
+    const self = String(currentUserId() || '');
+    const peer = coreCryptoClient.getDmParticipantIds(groupId).find((id) => String(id) !== self);
+    return peer ? Number(peer) : null;
+  };
+
+  const refreshPeerVerification = async () => {
+    const peer = dmPeerId();
+    if (!peer || isLocked()) {
+      setPeerVerification(null);
+      return;
+    }
+    try {
+      setPeerVerification(await coreCryptoClient.getContactVerificationStatus(peer));
+    } catch {
+      setPeerVerification(null);
+    }
+  };
+
+  createEffect(() => {
+    // Track selection, lock state, and warnings so key-change events
+    // recolor the badge live.
+    void selectedGroup();
+    void isLocked();
+    void messagingStore.fingerprintWarnings;
+    void refreshPeerVerification();
+  });
+
+  const peerWarning = () => {
+    const peer = dmPeerId();
+    if (!peer) return null;
+    return (messagingStore.fingerprintWarnings || []).find((w) => Number(w.userId) === peer) || null;
+  };
 
   // Member list comes from local MLS group state (authoritative once joined).
   const refreshGroupMembers = (groupId) => {
@@ -974,6 +1016,32 @@ export default function MessagesPage() {
                     })()}
                   </h3>
                   <div class="encryption-status mls-active">MLS conversation</div>
+                  <Show when={!isGroupChat(selectedGroup()) && dmPeerId()}>
+                    <div class="safety-numbers-controls">
+                      <Show when={peerVerification()}>
+                        <span
+                          class="verification-badge"
+                          classList={{
+                            verified: peerVerification() === 'verified',
+                            warning: peerVerification() === 'changed',
+                            unverified: peerVerification() === 'unverified'
+                          }}
+                        >
+                          {peerVerification() === 'verified' ? '✓ Verified'
+                            : peerVerification() === 'changed' ? '⚠ Key changed'
+                            : 'Not verified'}
+                        </span>
+                      </Show>
+                      <button
+                        type="button"
+                        class="btn-safety-numbers"
+                        title="Safety numbers"
+                        onClick={() => setSafetyNumbersOpen(true)}
+                      >
+                        Safety number
+                      </button>
+                    </div>
+                  </Show>
                   <Show when={isGroupChat(selectedGroup()) && groupMembers().length > 0}>
                     <div class="group-members">
                       {groupMembers().map((memberId) => usernameFor(memberId)).join(', ')}
@@ -1017,6 +1085,30 @@ export default function MessagesPage() {
                   </select>
                 </label>
               </div>
+
+              <Show when={peerWarning()}>
+                <div class="fingerprint-warning-banner">
+                  <span class="fingerprint-warning-text">
+                    ⚠ {usernameFor(dmPeerId())}'s encryption key has changed. Verify before trusting.
+                  </span>
+                  <span class="fingerprint-warning-actions">
+                    <button
+                      type="button"
+                      class="post-action"
+                      onClick={() => setSafetyNumbersOpen(true)}
+                    >
+                      Review
+                    </button>
+                    <button
+                      type="button"
+                      class="post-action"
+                      onClick={() => messagingStore.dismissFingerprintWarning(dmPeerId())}
+                    >
+                      Dismiss
+                    </button>
+                  </span>
+                </div>
+              </Show>
 
               <div class="messages-list">
                 <Show when={loadingMessages()}>
@@ -1160,6 +1252,15 @@ export default function MessagesPage() {
         <p class="error">{error()}</p>
       </Show>
       <DeviceLinkModal onSuccess={handleDeviceLinkSuccess} onCancel={handleDeviceLinkCancel} />
+      <Show when={safetyNumbersOpen() && dmPeerId()}>
+        <SafetyNumberModal
+          groupId={String(selectedGroup())}
+          contactUserId={dmPeerId()}
+          contactName={usernameFor(dmPeerId())}
+          onClose={() => setSafetyNumbersOpen(false)}
+          onStatusChange={() => void refreshPeerVerification()}
+        />
+      </Show>
     </section>
   );
 }

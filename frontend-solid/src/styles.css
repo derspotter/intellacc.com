@@ -5314,6 +5314,55 @@ select {
 
 /* ==================== Safety Numbers / TOFU Verification ==================== */
 
+.safety-numbers-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.btn-safety-numbers {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+
+.btn-safety-numbers:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.verification-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--border-radius, 2px);
+}
+
+/* Fingerprint Warning Banner (full-width) */
+.fingerprint-warning-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--warning-bg, rgba(245, 158, 11, 0.15));
+  color: var(--warning, #b45309);
+  border: 1px solid var(--warning, #f59e0b);
+  font-size: 0.85rem;
+}
+
+.fingerprint-warning-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
 /* Safety Numbers Modal */
 
 /* Fingerprint Display */
