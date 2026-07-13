@@ -40,6 +40,10 @@ async function apiFetch(path, { token, ...init } = {}) {
   return { response, body, text };
 }
 
+// bcryptjs hash of PASSWORD ('password123'). Embedded so direct inserts work
+// on any database (including fresh CI databases with no seeded users).
+const PASSWORD_HASH = '$2a$10$AHSbnIxxu17GCY2xBCD3QuiYD2oKP/E.IJg8R1LySkS60FJehrEiG';
+
 async function createUser(label) {
   const unique = `${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
   const user = {
@@ -48,31 +52,34 @@ async function createUser(label) {
     password: PASSWORD
   };
 
+  // Insert an approved test user directly instead of registering through
+  // /api/users: in production the registration endpoint emails the approver
+  // (REGISTRATION_APPROVER_EMAIL) for EVERY signup, so helper-driven test
+  // users were spamming a real inbox on each E2E run. Registration/approval
+  // behavior itself is covered by dedicated specs and backend tests.
+  // Set E2E_REGISTER_VIA_API=1 to exercise the real endpoint deliberately.
+  if (process.env.E2E_REGISTER_VIA_API === '1') {
+    return createUserViaApi(user);
+  }
+
+  const insertedId = dbQuery(`
+    INSERT INTO users (username, email, password_hash, is_approved, approved_at, created_at, updated_at)
+    VALUES ('${user.username}', '${user.email}', '${PASSWORD_HASH}', TRUE, NOW(), NOW(), NOW())
+    RETURNING id;
+  `);
+  // psql output includes the "INSERT 0 1" command tag on a second line.
+  user.id = Number(String(insertedId).split('\n')[0]);
+  if (!user.id) {
+    throw new Error(`Direct-insert failed for ${user.username}`);
+  }
+  return finishLogin(user);
+}
+
+async function createUserViaApi(user) {
   const { response, body, text } = await apiFetch('/api/users', {
     method: 'POST',
     body: JSON.stringify(user)
   });
-  if (response.status === 429) {
-    // Registration queue full: a REAL pending signup occupies the approval
-    // queue (REGISTRATION_APPROVAL_MAX_PENDING). Never approve/delete it from
-    // tests — insert an approved test user directly instead, cloning the
-    // bcrypt hash of the seeded user1 account (same PASSWORD).
-    const hash = dbQuery(`SELECT password_hash FROM users WHERE email = 'user1@example.com' LIMIT 1;`);
-    if (!hash) {
-      throw new Error('Registration queue full and user1@example.com missing; run tests/e2e/reset-test-users.sh');
-    }
-    const insertedId = dbQuery(`
-      INSERT INTO users (username, email, password_hash, is_approved, approved_at, created_at, updated_at)
-      VALUES ('${user.username}', '${user.email}', '${hash}', TRUE, NOW(), NOW(), NOW())
-      RETURNING id;
-    `);
-    // psql output includes the "INSERT 0 1" command tag on a second line.
-    user.id = Number(String(insertedId).split('\n')[0]);
-    if (!user.id) {
-      throw new Error(`Direct-insert fallback failed for ${user.username}`);
-    }
-    return finishLogin(user);
-  }
   if (!response.ok) {
     throw new Error(`Registration failed for ${user.username} (${response.status}): ${text}`);
   }
