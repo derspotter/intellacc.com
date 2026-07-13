@@ -269,8 +269,10 @@ exports.handlePaypalWebhook = async (req, res) => {
             return res.status(400).json({ error: 'Invalid PayPal webhook payload' });
         }
 
+        console.log('[VerificationController] PayPal webhook received:', event.event_type, event.id);
         const verified = await paypalVerificationService.verifyWebhookSignature(req.headers, event);
         if (!verified) {
+            console.warn('[VerificationController] PayPal webhook signature verification FAILED:', event.id);
             return res.status(400).json({ error: 'PayPal webhook signature verification failed' });
         }
 
