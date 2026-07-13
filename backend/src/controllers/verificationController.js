@@ -6,6 +6,7 @@ const db = require('../db');
 const emailVerificationService = require('../services/emailVerificationService');
 const phoneVerificationService = require('../services/phoneVerificationService');
 const paymentVerificationService = require('../services/paymentVerificationService');
+const paypalVerificationService = require('../services/paypalVerificationService');
 
 /**
  * Send verification email
@@ -102,7 +103,8 @@ exports.getVerificationStatus = async (req, res) => {
             payment_verified: status.payment_verified,
             provider_capabilities: {
                 phone: phoneProviderStatus,
-                payment: paymentProviderStatus
+                payment: paymentProviderStatus,
+                payment_paypal: paypalVerificationService.getProviderStatus()
             },
             unlocks: tierUnlocks[status.tier] || [],
             next_tier: status.tier < maxTier ? {
@@ -219,6 +221,73 @@ exports.createPaymentSetup = async (req, res) => {
     } catch (err) {
         console.error('[VerificationController] Payment setup error:', err);
         res.status(400).json({ error: err.message || 'Failed to create payment verification' });
+    }
+};
+
+/**
+ * Create PayPal payment verification session (Tier 3 alternative)
+ * POST /api/verification/paypal/setup
+ */
+exports.createPaypalSetup = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const result = await paypalVerificationService.createVerificationSession(userId);
+        res.json(result);
+    } catch (err) {
+        console.error('[VerificationController] PayPal setup error:', err);
+        res.status(400).json({ error: err.message || 'Failed to create PayPal verification' });
+    }
+};
+
+/**
+ * Confirm an approved PayPal setup token (called on return from approval)
+ * POST /api/verification/paypal/confirm
+ */
+exports.confirmPaypalSetup = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { setupTokenId } = req.body;
+        if (!setupTokenId) {
+            return res.status(400).json({ error: 'setupTokenId is required' });
+        }
+        const result = await paypalVerificationService.confirmSetupToken(userId, setupTokenId);
+        res.json(result);
+    } catch (err) {
+        console.error('[VerificationController] PayPal confirm error:', err);
+        res.status(400).json({ error: err.message || 'PayPal verification failed' });
+    }
+};
+
+/**
+ * PayPal webhook handler
+ * POST /api/webhooks/paypal
+ */
+exports.handlePaypalWebhook = async (req, res) => {
+    try {
+        const event = req.body;
+        if (!event || typeof event !== 'object' || !event.event_type) {
+            return res.status(400).json({ error: 'Invalid PayPal webhook payload' });
+        }
+
+        const verified = await paypalVerificationService.verifyWebhookSignature(req.headers, event);
+        if (!verified) {
+            return res.status(400).json({ error: 'PayPal webhook signature verification failed' });
+        }
+
+        if (event.event_type === 'VAULT.PAYMENT-TOKEN.CREATED') {
+            const result = await paypalVerificationService.handlePaymentTokenCreated(event.resource, event.id);
+            return res.json({
+                received: true,
+                status: result.status,
+                already_verified: result.alreadyVerified || false
+            });
+        }
+
+        console.log('[VerificationController] Unhandled PayPal webhook event:', event.event_type);
+        res.json({ received: true, ignored: true, event_type: event.event_type });
+    } catch (err) {
+        console.error('[VerificationController] PayPal webhook error:', err);
+        res.status(400).json({ error: err.message || 'Webhook error' });
     }
 };
 

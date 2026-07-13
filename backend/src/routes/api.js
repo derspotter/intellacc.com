@@ -167,7 +167,10 @@ router.post('/verification/phone/confirm', authenticateJWT, verificationControll
 
 // Payment Verification Routes (Tier 3)
 router.post('/verification/payment/setup', authenticateJWT, verificationController.createPaymentSetup);
+router.post('/verification/paypal/setup', authenticateJWT, verificationController.createPaypalSetup);
+router.post('/verification/paypal/confirm', authenticateJWT, verificationController.confirmPaypalSetup);
 router.post('/webhooks/stripe', verificationController.handleStripeWebhook);
+router.post('/webhooks/paypal', verificationController.handlePaypalWebhook);
 
 const isProduction = process.env.NODE_ENV === 'production';
 const passwordResetRateLimit = rateLimit({

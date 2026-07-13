@@ -1,5 +1,7 @@
-import { createSignal, onCleanup, Show } from 'solid-js';
+import { createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { api } from '../../services/api';
+
+const PAYPAL_PENDING_KEY = 'paypal_verification_setup_token';
 
 let stripeJsPromise = null;
 
@@ -33,7 +35,7 @@ const loadStripeJs = () => {
   return stripeJsPromise;
 };
 
-export default function PaymentVerification({ onSuccess } = {}) {
+export default function PaymentVerification({ onSuccess, paypalAvailable } = {}) {
   const [status, setStatus] = createSignal('idle');
   const [error, setError] = createSignal('');
   const [paymentContainer, setPaymentContainer] = createSignal(null);
@@ -41,6 +43,39 @@ export default function PaymentVerification({ onSuccess } = {}) {
   let stripeInstance = null;
   let elementsInstance = null;
   let paymentElement = null;
+
+  // PayPal vault flow: redirect out for approval, confirm on return. The
+  // pending setup token survives the round trip in sessionStorage.
+  const startPaypal = async () => {
+    setStatus('loading');
+    setError('');
+    try {
+      const result = await api.verification.createPaypalSetup();
+      if (!result?.approveUrl || !result?.setupTokenId) {
+        throw new Error('PayPal verification is not configured');
+      }
+      sessionStorage.setItem(PAYPAL_PENDING_KEY, result.setupTokenId);
+      window.location.href = result.approveUrl;
+    } catch (err) {
+      setError(err?.data?.error || err?.message || 'Failed to start PayPal verification');
+      setStatus('error');
+    }
+  };
+
+  onMount(async () => {
+    const pendingToken = sessionStorage.getItem(PAYPAL_PENDING_KEY);
+    if (!pendingToken) return;
+    sessionStorage.removeItem(PAYPAL_PENDING_KEY);
+    setStatus('processing');
+    try {
+      await api.verification.confirmPaypalSetup(pendingToken);
+      setStatus('success');
+      onSuccess?.();
+    } catch (err) {
+      setError(err?.data?.error || err?.message || 'PayPal approval was not completed');
+      setStatus('error');
+    }
+  });
 
   const setupPayment = async () => {
     setStatus('loading');
@@ -160,9 +195,22 @@ export default function PaymentVerification({ onSuccess } = {}) {
               </button>
             </>
           ) : (
-            <button type="button" class="button button-primary" onClick={setupPayment} disabled={status() === 'loading'}>
-              Start payment verification
-            </button>
+            <>
+              <button type="button" class="button button-primary" onClick={setupPayment} disabled={status() === 'loading'}>
+                Start payment verification
+              </button>
+              <Show when={paypalAvailable}>
+                <button
+                  type="button"
+                  class="button button-secondary paypal-verify-btn"
+                  style="margin-left: 0.5rem;"
+                  onClick={startPaypal}
+                  disabled={status() === 'loading'}
+                >
+                  Verify with PayPal
+                </button>
+              </Show>
+            </>
           )}
           <Show when={error()}>
             <p class="error-message" style="margin-top: 1rem;">{error()}</p>

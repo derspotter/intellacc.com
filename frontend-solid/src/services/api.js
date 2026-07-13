@@ -981,7 +981,9 @@ export const api = {
     resendEmailVerification: () => request('/verification/email/resend', { method: 'POST' }),
     startPhoneVerification: (phoneNumber) => request('/verification/phone/start', { method: 'POST', body: { phoneNumber } }),
     confirmPhoneVerification: (phoneNumber, code) => request('/verification/phone/confirm', { method: 'POST', body: { phoneNumber, code } }),
-    createPaymentSetup: () => request('/verification/payment/setup', { method: 'POST' })
+    createPaymentSetup: () => request('/verification/payment/setup', { method: 'POST' }),
+    createPaypalSetup: () => request('/verification/paypal/setup', { method: 'POST' }),
+    confirmPaypalSetup: (setupTokenId) => request('/verification/paypal/confirm', { method: 'POST', body: { setupTokenId } })
   },
 
   // Admin moderation endpoints

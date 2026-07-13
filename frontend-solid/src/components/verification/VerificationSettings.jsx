@@ -93,7 +93,10 @@ export default function VerificationSettings() {
 
     if (next === 3) {
       const paymentAvailability = status()?.provider_capabilities?.payment;
-      if (paymentAvailability && paymentAvailability.available === false) {
+      const paypalAvailability = status()?.provider_capabilities?.payment_paypal;
+      const stripeAvailable = !paymentAvailability || paymentAvailability.available !== false;
+      const paypalAvailable = paypalAvailability?.available === true;
+      if (!stripeAvailable && !paypalAvailable) {
         return (
           <div class="verification-blocked">
             <div class="blocked-icon"></div>
@@ -105,7 +108,7 @@ export default function VerificationSettings() {
           </div>
         );
       }
-      return <PaymentVerification onSuccess={refreshStatus} />;
+      return <PaymentVerification onSuccess={refreshStatus} paypalAvailable={paypalAvailable} />;
     }
 
     return (

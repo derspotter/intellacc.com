@@ -55,6 +55,19 @@ const createEvent = async () => {
 describe('Tiered verification routes and middleware', () => {
   const users = [];
 
+  beforeAll(() => {
+    // The production container carries real provider env (Stripe/PayPal
+    // keys + webhook credentials since 2026-07-13). These suites exercise
+    // the unconfigured code paths — e.g. unsigned webhook payloads must be
+    // ignored, not signature-rejected — so drop the env for this process.
+    delete process.env.STRIPE_WEBHOOK_SECRET;
+    delete process.env.STRIPE_SECRET_KEY;
+    delete process.env.STRIPE_PUBLISHABLE_KEY;
+    delete process.env.PAYPAL_CLIENT_ID;
+    delete process.env.PAYPAL_CLIENT_SECRET;
+    delete process.env.PAYPAL_WEBHOOK_ID;
+  });
+
   afterAll(async () => {
     await cleanupUsers(users);
     if (createdEvents.length > 0) {
