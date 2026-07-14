@@ -2,13 +2,18 @@ import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { api } from '../../services/api';
 import MarketEventCard from './MarketEventCard';
 import OutcomeMarketCard from './OutcomeMarketCard';
+import DistributionMarketCard from './DistributionMarketCard';
 import { formatProbability, safeNumber } from './marketCardShared';
 
 const TRADES_LIMIT = 200;
 const ACTIVITY_COUNT = 15;
 
+// Both multi-outcome market types skip the binary probability-history chart
+// (market_updates has no per-outcome/per-bin time series for either).
 const isMultiOutcome = (eventItem) =>
   ['multiple_choice', 'numeric'].includes(eventItem?.event_type);
+const isNumeric = (eventItem) => eventItem?.event_type === 'numeric';
+const isMultipleChoice = (eventItem) => eventItem?.event_type === 'multiple_choice';
 
 const formatDate = (value) => {
   const parsed = new Date(value);
@@ -210,17 +215,29 @@ export default function MarketDetailView(props) {
 
         <div class="market-detail-trade">
           <Show
-            when={isMultiOutcome(event())}
+            when={isNumeric(event())}
             fallback={
-              <MarketEventCard
-                event={event()}
-                onTrade={handleTradeRefresh}
-                onVerificationNotice={props.onVerificationNotice}
-                hideTitle={true}
-              />
+              <Show
+                when={isMultipleChoice(event())}
+                fallback={
+                  <MarketEventCard
+                    event={event()}
+                    onTrade={handleTradeRefresh}
+                    onVerificationNotice={props.onVerificationNotice}
+                    hideTitle={true}
+                  />
+                }
+              >
+                <OutcomeMarketCard
+                  event={event()}
+                  onTrade={handleTradeRefresh}
+                  onVerificationNotice={props.onVerificationNotice}
+                  hideTitle={true}
+                />
+              </Show>
             }
           >
-            <OutcomeMarketCard
+            <DistributionMarketCard
               event={event()}
               onTrade={handleTradeRefresh}
               onVerificationNotice={props.onVerificationNotice}

@@ -3627,6 +3627,128 @@ body.dark-mode .weekly-assignment-badge.pending {
   color: var(--secondary-text);
 }
 
+/* Distribution (numeric) market card */
+.distribution-market-card .distribution-card-chart-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0.5rem;
+}
+
+.distribution-card-chart {
+  flex: 1;
+  min-width: 0;
+  height: 200px;
+  display: block;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background-color: var(--card-bg);
+}
+
+.distribution-card-refresh {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.6rem;
+}
+
+.distribution-card-market-area {
+  fill: var(--info-color);
+  fill-opacity: 0.25;
+  stroke: none;
+}
+
+.distribution-card-target-line {
+  fill: none;
+  stroke: var(--success-color);
+  stroke-width: 2;
+}
+
+.distribution-card-preview-line {
+  fill: none;
+  stroke: var(--info-color);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+}
+
+.distribution-card-position-overlay {
+  fill: var(--secondary-text);
+  fill-opacity: 0.55;
+}
+
+.distribution-card-handle-guide {
+  stroke: var(--border-color);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.distribution-card-handle-guide-center {
+  stroke: var(--text-color);
+  stroke-opacity: 0.6;
+}
+
+.distribution-card-copy {
+  margin: 0.15rem 0;
+  font-size: 0.9rem;
+}
+
+.distribution-card-handles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0.75rem 0 0.5rem;
+}
+
+.distribution-card-handles .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.distribution-card-handles label {
+  font-size: 0.8rem;
+  color: var(--secondary-text);
+}
+
+.distribution-card-handle-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background-color: var(--blue-bg);
+  color: var(--text-color);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.distribution-card-presets {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.distribution-card-quote {
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.distribution-card-quote-loading {
+  font-style: italic;
+}
+
+.distribution-card-position {
+  margin: 1rem 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .distribution-card-handles {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Responsive Design for Event Card */
 @media (max-width: 768px) {
 

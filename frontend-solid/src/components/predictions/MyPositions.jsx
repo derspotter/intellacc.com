@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import { getUserPositions } from '../../services/api';
 import MarketEventCard from './MarketEventCard';
 import OutcomeMarketCard from './OutcomeMarketCard';
+import DistributionMarketCard from './DistributionMarketCard';
 import { isAuthenticated, getCurrentUserId } from '../../services/auth';
 import { activateOnKey } from '../../utils/keyboard';
 
@@ -34,8 +35,8 @@ const normalizeRows = (payload) => {
   return [];
 };
 
-const isMultiOutcome = (eventItem) =>
-  ['multiple_choice', 'numeric'].includes(eventItem?.event_type);
+const isNumeric = (eventItem) => eventItem?.event_type === 'numeric';
+const isMultipleChoice = (eventItem) => eventItem?.event_type === 'multiple_choice';
 
 export default function MyPositions(props) {
   const [userPositions, setUserPositions] = createSignal([]);
@@ -259,18 +260,30 @@ export default function MyPositions(props) {
                     <Show when={!isResolved() && expandedPositionIds().has(rowKey)}>
                       <div class="event-row-expanded">
                         <Show
-                          when={isMultiOutcome(group().event)}
+                          when={isNumeric(group().event)}
                           fallback={
-                            <MarketEventCard
-                              event={group().event}
-                              onTrade={handleTradeRefresh}
-                              onVerificationNotice={props.onVerificationNotice}
-                              hideTitle={true}
-                              authenticated={authed()}
-                            />
+                            <Show
+                              when={isMultipleChoice(group().event)}
+                              fallback={
+                                <MarketEventCard
+                                  event={group().event}
+                                  onTrade={handleTradeRefresh}
+                                  onVerificationNotice={props.onVerificationNotice}
+                                  hideTitle={true}
+                                  authenticated={authed()}
+                                />
+                              }
+                            >
+                              <OutcomeMarketCard
+                                event={group().event}
+                                onTrade={handleTradeRefresh}
+                                onVerificationNotice={props.onVerificationNotice}
+                                hideTitle={true}
+                              />
+                            </Show>
                           }
                         >
-                          <OutcomeMarketCard
+                          <DistributionMarketCard
                             event={group().event}
                             onTrade={handleTradeRefresh}
                             onVerificationNotice={props.onVerificationNotice}

@@ -710,7 +710,32 @@ export const api = {
       request(`/events/${eventId}/update-outcome`, { method: 'POST', body: { stake, outcome_id } }),
 
     sellOutcome: (eventId, { outcome_id, amount }) =>
-      request(`/events/${eventId}/sell-outcome`, { method: 'POST', body: { outcome_id, amount } })
+      request(`/events/${eventId}/sell-outcome`, { method: 'POST', body: { outcome_id, amount } }),
+
+    // Numeric (dense-bin) markets: quote/trade/sell a target distribution.
+    // budget_ledger/target are the engine's native units (integer ledger,
+    // array of 50 floats) — callers convert RP<->ledger via distributionMath.
+    getNumericQuote: (eventId, { budgetLedger, target }) =>
+      request(
+        `/events/${eventId}/numeric-quote?budget_ledger=${encodeURIComponent(budgetLedger)}&target=${encodeURIComponent(target.join(','))}`
+      ),
+
+    numericTrade: (eventId, { target, budgetLedger, maxCostLedger, marketVersion }) =>
+      request(`/events/${eventId}/numeric-trade`, {
+        method: 'POST',
+        body: {
+          target,
+          budget_ledger: budgetLedger,
+          max_cost_ledger: maxCostLedger,
+          market_version: marketVersion
+        }
+      }),
+
+    numericSell: (eventId, { marketVersion }) =>
+      request(`/events/${eventId}/numeric-sell`, {
+        method: 'POST',
+        body: { market_version: marketVersion }
+      })
   },
 
   // Predictions endpoints
@@ -1135,6 +1160,13 @@ export const sellEventShares = (eventId, { share_type, amount }) =>
   });
 
 export const getUserPositions = (userId) => api.users.getPositions(userId);
+
+export const getNumericQuote = (eventId, { budgetLedger, target }) =>
+  api.events.getNumericQuote(eventId, { budgetLedger, target });
+export const placeNumericTrade = (eventId, { target, budgetLedger, maxCostLedger, marketVersion }) =>
+  api.events.numericTrade(eventId, { target, budgetLedger, maxCostLedger, marketVersion });
+export const sellNumericPosition = (eventId, { marketVersion }) =>
+  api.events.numericSell(eventId, { marketVersion });
 
 export const getPredictions = () => api.predictions.getAll();
 
