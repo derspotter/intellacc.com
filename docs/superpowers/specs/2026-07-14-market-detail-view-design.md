@@ -64,8 +64,10 @@ Receives `marketId` (string) and `onVerificationNotice`.
    `isMultiOutcome` switch as `EventsList` today). `onTrade` refetches event +
    trades so the header, curve, and activity feed all update.
 6. **Recent activity** — the 15 most recent trades from the same response: user,
-   direction (YES/NO), stake amount, price move (before → after), timestamp.
-   Binary events only (same data limitation as the curve).
+   direction (YES/NO, or the outcome label for multi-outcome trades — the
+   endpoint merges both trade tables), stake amount, price move
+   (before → after), timestamp. The curve's binary-only limitation does not
+   apply here.
 
 ### States
 
