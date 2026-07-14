@@ -800,4 +800,85 @@ router.post("/events/:eventId/sell-outcome", authenticateJWT, requirePhoneVerifi
     }
 });
 
+router.get("/events/:eventId/numeric-quote", authenticateJWT, async (req, res) => {
+    try {
+        const { eventId } = req.params;
+        const eventIdNumber = Number(eventId);
+        if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
+            return res.status(400).json({ message: 'Invalid event id' });
+        }
+
+        const query = new URLSearchParams();
+        if (req.query.budget_ledger !== undefined) {
+            query.set('budget_ledger', req.query.budget_ledger);
+        }
+        if (req.query.target !== undefined) {
+            query.set('target', req.query.target);
+        }
+
+        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/numeric-quote?${query.toString()}`, {
+            headers: predictionEngineHeaders
+        });
+        const data = await response.json();
+        return res.status(response.status).json(data);
+    } catch (error) {
+        console.error('Numeric quote proxy error:', error);
+        return res.status(500).json({ error: 'Failed to fetch numeric quote' });
+    }
+});
+
+router.post("/events/:eventId/numeric-trade", authenticateJWT, requirePhoneVerified, requireScope('market:trade'), idempotent, async (req, res) => {
+    const { eventId } = req.params;
+    const eventIdNumber = Number(eventId);
+    if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
+        return res.status(400).json({ message: 'Invalid event id' });
+    }
+
+    try {
+        const userId = req.user.id;
+        const { target, budget_ledger, max_cost_ledger, market_version } = req.body || {};
+
+        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/numeric-trade`, {
+            method: 'POST',
+            headers: predictionEngineHeaders,
+            body: JSON.stringify({
+                user_id: userId,
+                target,
+                budget_ledger,
+                max_cost_ledger,
+                market_version
+            })
+        });
+        const data = await response.json();
+        return res.status(response.status).json(data);
+    } catch (error) {
+        console.error('Numeric trade proxy error:', error);
+        return res.status(500).json({ error: 'Failed to execute numeric trade' });
+    }
+});
+
+router.post("/events/:eventId/numeric-sell", authenticateJWT, requirePhoneVerified, requireScope('market:trade'), async (req, res) => {
+    const { eventId } = req.params;
+    const eventIdNumber = Number(eventId);
+    if (!Number.isInteger(eventIdNumber) || eventIdNumber <= 0) {
+        return res.status(400).json({ message: 'Invalid event id' });
+    }
+
+    try {
+        const userId = req.user.id;
+        const { market_version } = req.body || {};
+
+        const response = await fetch(`http://prediction-engine:3001/events/${eventId}/numeric-sell`, {
+            method: 'POST',
+            headers: predictionEngineHeaders,
+            body: JSON.stringify({ user_id: userId, market_version })
+        });
+        const data = await response.json();
+        return res.status(response.status).json(data);
+    } catch (error) {
+        console.error('Numeric sell proxy error:', error);
+        return res.status(500).json({ error: 'Failed to sell numeric position' });
+    }
+});
+
 module.exports = router;

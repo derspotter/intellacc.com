@@ -851,6 +851,8 @@ exports.deleteAccount = async (req, res) => {
     await client.query('DELETE FROM device_linking_tokens WHERE user_id = $1', [userId]);
     await client.query('DELETE FROM user_devices WHERE user_id = $1', [userId]);
     await client.query('DELETE FROM user_master_keys WHERE user_id = $1', [userId]);
+    await client.query('DELETE FROM distribution_trades WHERE user_id = $1', [userId]);
+    await client.query('DELETE FROM numeric_position_basis WHERE user_id = $1', [userId]);
 
     await client.query('SELECT clear_user_mls_data($1)', [userId]);
     await client.query('UPDATE mls_groups SET created_by = NULL WHERE created_by = $1', [userId]);

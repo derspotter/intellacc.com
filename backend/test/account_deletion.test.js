@@ -86,6 +86,25 @@ describe('Account deletion', () => {
     );
     const postId = postRes.rows[0].id;
 
+    const numericEventRes = await db.query(
+      `INSERT INTO events (title, details, closing_date, event_type)
+       VALUES ($1, $2, NOW() + INTERVAL '7 days', 'numeric') RETURNING id`,
+      [`Account deletion numeric fixture ${Date.now()}`, 'test']
+    );
+    const numericEventId = numericEventRes.rows[0].id;
+
+    await db.query(
+      `INSERT INTO distribution_trades
+        (user_id, event_id, total_cost_ledger, pre_market_version, post_market_version)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [user.id, numericEventId, 50000000, 0, 1]
+    );
+    await db.query(
+      `INSERT INTO numeric_position_basis (user_id, event_id, basis_ledger)
+       VALUES ($1, $2, $3)`,
+      [user.id, numericEventId, 50000000]
+    );
+
     const devicePublicId = crypto.randomUUID();
     await db.query(
       'INSERT INTO user_devices (user_id, device_public_id, name, is_primary) VALUES ($1, $2, $3, $4)',
@@ -126,6 +145,14 @@ describe('Account deletion', () => {
 
     const attachments = await db.query('SELECT 1 FROM attachments WHERE owner_id = $1', [user.id]);
     expect(attachments.rows.length).toBe(0);
+
+    const distributionTrades = await db.query('SELECT 1 FROM distribution_trades WHERE user_id = $1', [user.id]);
+    expect(distributionTrades.rows.length).toBe(0);
+
+    const numericPositionBasis = await db.query('SELECT 1 FROM numeric_position_basis WHERE user_id = $1', [user.id]);
+    expect(numericPositionBasis.rows.length).toBe(0);
+
+    await db.query('DELETE FROM events WHERE id = $1', [numericEventId]);
 
     const postRow = await db.query(
       'SELECT image_url, image_attachment_id FROM posts WHERE id = $1',
