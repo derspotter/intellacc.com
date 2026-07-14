@@ -489,6 +489,33 @@ async fn fetch_outcome_state_rows(
         .collect())
 }
 
+/// Guard against trading a distribution (numeric) market through the
+/// categorical outcome/bucket endpoints. Gated on the *presence* of a
+/// `numeric_market_config` row, NOT on `event_type`: legacy events typed
+/// 'numeric' that predate the distribution-trading schema (and have no
+/// config row) must keep trading via this outcome/bucket path. Events that
+/// do have a config row are traded exclusively through the numeric
+/// (`numeric_trade`/`numeric_sell`) endpoints, which read/write the same
+/// `event_outcome_states.q_value` vector using `b_numeric` instead of
+/// `events.liquidity_b` — running both market makers against one q vector
+/// is a money pump and corrupts the staked ledger.
+async fn ensure_not_numeric_market(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event_id: i32,
+) -> Result<()> {
+    let has_numeric_config: Option<i32> =
+        sqlx::query_scalar("SELECT 1 FROM numeric_market_config WHERE event_id = $1")
+            .bind(event_id)
+            .fetch_optional(tx.as_mut())
+            .await?;
+    if has_numeric_config.is_some() {
+        return Err(anyhow!(
+            "This market trades as a distribution — use the numeric trading interface"
+        ));
+    }
+    Ok(())
+}
+
 pub async fn update_market_outcome(
     pool: &PgPool,
     config: &Config,
@@ -549,6 +576,7 @@ async fn update_market_outcome_transaction(
             "Use legacy binary update endpoint for binary markets"
         ));
     }
+    ensure_not_numeric_market(tx, update.event_id).await?;
 
     let liquidity_b: f64 = event_row.get("liquidity_b");
     let mut outcomes = fetch_outcome_state_rows(tx, update.event_id).await?;
@@ -1004,6 +1032,7 @@ async fn sell_outcome_shares_transaction(
     if event_type == "binary" {
         return Err(anyhow!("Use legacy binary sell endpoint for binary markets"));
     }
+    ensure_not_numeric_market(tx, event_id).await?;
 
     // Hold period: outcome buys journal into market_outcome_updates.
     if config.market.enable_hold_period {
