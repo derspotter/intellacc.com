@@ -1,5 +1,6 @@
 import { Show, createSignal, createMemo } from 'solid-js';
 import EventsList from '../components/predictions/EventsList';
+import MarketDetailView from '../components/predictions/MarketDetailView';
 import MyPositions from '../components/predictions/MyPositions';
 import LeaderboardCard from '../components/predictions/LeaderboardCard';
 import MarketQuestionHub from '../components/predictions/MarketQuestionHub';
@@ -38,8 +39,8 @@ export default function PredictionsPage(props) {
   };
 
   // The hash segment after `predictions/` is either a reserved tab keyword,
-  // a numeric market id (deep-link to expand on the Markets tab), or empty.
-  // Empty defaults to Positions for logged-in users (anonymous users have no
+  // a numeric market id (full detail view of that market), or empty. Empty
+  // defaults to Positions for logged-in users (anonymous users have no
   // positions, so they default to Markets).
   const activeTab = createMemo(() => {
     const param = String(props.marketId || '').trim().toLowerCase();
@@ -48,7 +49,7 @@ export default function PredictionsPage(props) {
     if (param === 'admin' && isAdmin()) return 'admin';
     if (param === 'markets') return 'markets';
     if (param === 'positions') return 'positions';
-    if (/^\d+$/.test(param)) return 'markets';
+    if (/^\d+$/.test(param)) return 'detail';
     return isAuthenticated() ? 'positions' : 'markets';
   });
 
@@ -75,7 +76,7 @@ export default function PredictionsPage(props) {
         <Show when={isAuthenticated()}>
           <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'positions' ? 'on' : ''}`} aria-selected={activeTab() === 'positions'} onClick={() => goToTab('positions')}>Positions</button>
         </Show>
-        <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'markets' ? 'on' : ''}`} aria-selected={activeTab() === 'markets'} onClick={() => goToTab('markets')}>Markets</button>
+        <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'markets' || activeTab() === 'detail' ? 'on' : ''}`} aria-selected={activeTab() === 'markets' || activeTab() === 'detail'} onClick={() => goToTab('markets')}>Markets</button>
         <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'submit' ? 'on' : ''}`} aria-selected={activeTab() === 'submit'} onClick={() => goToTab('submit')}>Submit</button>
         <button type="button" role="tab" class={`predictions-tab ${activeTab() === 'leaderboard' ? 'on' : ''}`} aria-selected={activeTab() === 'leaderboard'} onClick={() => goToTab('leaderboard')}>Leaderboard</button>
         <Show when={isAdmin()}>
@@ -98,6 +99,13 @@ export default function PredictionsPage(props) {
               />
             </div>
           </div>
+        </Show>
+
+        <Show when={activeTab() === 'detail'}>
+          <MarketDetailView
+            marketId={targetedMarketId()}
+            onVerificationNotice={handleVerificationNotice}
+          />
         </Show>
 
         <Show when={activeTab() === 'submit'}>

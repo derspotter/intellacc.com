@@ -678,6 +678,10 @@ export const api = {
     getById: (eventId) =>
       request(`/events/${eventId}`),
 
+    // Recent trades for a market (newest first): { event_id, trades, count }.
+    getTrades: (eventId, limit = 200) =>
+      request(`/events/${eventId}/trades?limit=${limit}`),
+
     create: (eventData) =>
       request('/events', { method: 'POST', body: eventData }),
 

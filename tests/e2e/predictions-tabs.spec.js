@@ -49,9 +49,12 @@ test.describe('predictions tabs', () => {
     await expect(rows.nth(3).locator('.event-row-expanded')).toBeVisible();
   });
 
-  test('numeric deep-link stays on the Markets tab', async ({ page }) => {
+  test('numeric deep-link opens the market detail view', async ({ page }) => {
     await page.goto(`${BASE}/#predictions/999999999`, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByText('Open Questions')).toBeVisible();
+    await expect(page.locator('.market-detail')).toBeVisible();
+    await expect(page.getByText('Market not found')).toBeVisible();
+    // Markets tab stays highlighted while inside a market.
+    await expect(page.getByRole('tab', { name: 'Markets' })).toHaveAttribute('aria-selected', 'true');
   });
 
   test('category dropdown filters the list and All categories resets it', async ({ page }) => {

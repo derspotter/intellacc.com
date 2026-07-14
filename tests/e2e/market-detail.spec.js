@@ -1,0 +1,125 @@
+// E2E: market detail view. `#predictions/<id>` renders the selected market in
+// full (header, description, trading card, activity) instead of the list.
+const { test, expect } = require('@playwright/test');
+const { execSync } = require('child_process');
+
+const BASE = process.env.E2E_BASE_URL || 'http://localhost:4174';
+
+const psql = (sql) =>
+  execSync(
+    `docker exec intellacc_db psql -U intellacc_user -d intellaccdb -qtAc "${sql.replace(/"/g, '\\"')}"`,
+    { encoding: 'utf8' }
+  ).trim();
+
+test.describe('market detail view', () => {
+  const stamp = Date.now();
+  const titles = {
+    binary: `E2E detail binary ${stamp}`,
+    quiet: `E2E detail quiet ${stamp}`,
+    multi: `E2E detail multi ${stamp}`
+  };
+  let userId;
+  const eventIds = {};
+
+  test.beforeAll(() => {
+    userId = Number(psql(`SELECT id FROM users WHERE email = 'user1@example.com'`));
+    // Trading (Task 4) requires Tier 2; restored in afterAll.
+    psql(`UPDATE users SET verification_tier = 2 WHERE id = ${userId}`);
+
+    eventIds.binary = Number(psql(
+      `INSERT INTO events (title, details, closing_date, event_type, liquidity_b, market_prob)
+       VALUES ('${titles.binary}', 'Detailed description for the E2E detail spec.',
+               NOW() + INTERVAL '7 days', 'binary', 5000, 0.62) RETURNING id`
+    ));
+    // Two seeded trades: powers the activity feed and (Task 2) the curve.
+    psql(
+      `INSERT INTO market_updates
+         (user_id, event_id, prev_prob, new_prob, stake_amount, shares_acquired, share_type, hold_until, created_at)
+       VALUES
+         (${userId}, ${eventIds.binary}, 0.50, 0.55, 50, 90, 'yes', NOW(), NOW() - INTERVAL '3 hours'),
+         (${userId}, ${eventIds.binary}, 0.55, 0.62, 60, 100, 'yes', NOW(), NOW() - INTERVAL '1 hour')`
+    );
+
+    // Binary market with no trades: no activity feed, no curve.
+    eventIds.quiet = Number(psql(
+      `INSERT INTO events (title, closing_date, event_type, liquidity_b)
+       VALUES ('${titles.quiet}', NOW() + INTERVAL '7 days', 'binary', 5000) RETURNING id`
+    ));
+
+    // Multi-outcome market: detail view renders, curve stays hidden (Task 2).
+    eventIds.multi = Number(psql(
+      `INSERT INTO events (title, closing_date, event_type, liquidity_b)
+       VALUES ('${titles.multi}', NOW() + INTERVAL '7 days', 'multiple_choice', 5000) RETURNING id`
+    ));
+    const o1 = Number(psql(
+      `INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order)
+       VALUES (${eventIds.multi}, 'choice_1', 'Alpha', 0) RETURNING id`
+    ));
+    const o2 = Number(psql(
+      `INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order)
+       VALUES (${eventIds.multi}, 'choice_2', 'Beta', 1) RETURNING id`
+    ));
+    psql(
+      `INSERT INTO event_outcome_states (event_id, outcome_id, q_value, prob)
+       VALUES (${eventIds.multi}, ${o1}, 0, 0.5), (${eventIds.multi}, ${o2}, 0, 0.5)`
+    );
+  });
+
+  test.afterAll(() => {
+    const ids = Object.values(eventIds).filter(Boolean).join(',');
+    if (ids) {
+      psql(`DELETE FROM market_updates WHERE event_id IN (${ids})`);
+      psql(`DELETE FROM events WHERE id IN (${ids})`); // cascades outcome rows
+    }
+    psql(`UPDATE users SET verification_tier = 1 WHERE id = ${userId}`);
+  });
+
+  const login = async (page) => {
+    await page.goto(`${BASE}/#login`);
+    await page.getByLabel(/email/i).fill('user1@example.com');
+    await page.getByLabel(/password/i).fill('password123');
+    await page.getByRole('button', { name: /sign in/i }).click();
+    await page.waitForURL(/#(home|feed)/, { timeout: 15000 });
+  };
+
+  test('deep link renders the market in full (logged out)', async ({ page }) => {
+    await page.goto(`${BASE}/#predictions/${eventIds.binary}`, { waitUntil: 'domcontentloaded' });
+
+    const detail = page.locator('.market-detail');
+    await expect(detail).toBeVisible({ timeout: 20000 });
+
+    // The old accordion list must NOT render alongside the detail view.
+    await expect(page.locator('.events-list-card')).toHaveCount(0);
+
+    // Markets tab reads as active while inside a market.
+    await expect(page.getByRole('tab', { name: 'Markets' })).toHaveAttribute('aria-selected', 'true');
+
+    await expect(detail.locator('.market-detail-title')).toHaveText(titles.binary);
+    await expect(detail.locator('.market-detail-prob')).toContainText('62.0%');
+    await expect(detail.locator('.market-detail-description'))
+      .toContainText('Detailed description for the E2E detail spec.');
+    await expect(detail.locator('.market-detail-back')).toBeVisible();
+
+    // Seeded trades appear as recent activity.
+    const rows = detail.locator('.market-detail-trade-row');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first()).toContainText('user1');
+    await expect(rows.first()).toContainText('55.0% → 62.0%');
+
+    // Trading card renders (anonymous variant is fine — just present).
+    await expect(detail.locator('.event-card')).toBeVisible();
+  });
+
+  test('market with no trades shows no activity section', async ({ page }) => {
+    await page.goto(`${BASE}/#predictions/${eventIds.quiet}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.market-detail-title')).toHaveText(titles.quiet, { timeout: 20000 });
+    await expect(page.locator('.market-detail-activity')).toHaveCount(0);
+  });
+
+  test('unknown id shows market not found with a way back', async ({ page }) => {
+    await page.goto(`${BASE}/#predictions/999999999`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.market-detail')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText('Market not found')).toBeVisible();
+    await expect(page.locator('.market-detail-back')).toBeVisible();
+  });
+});

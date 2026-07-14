@@ -4532,6 +4532,90 @@ body.dark-mode .belief-slider::-moz-range-thumb {
   padding: 0.75rem;
 }
 
+/* Market detail view (#predictions/<id>) */
+.market-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  box-shadow: var(--box-shadow);
+}
+
+.market-detail-back {
+  align-self: flex-start;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.market-detail-back:hover {
+  text-decoration: underline;
+}
+
+.market-detail-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.market-detail-title {
+  margin: 0;
+}
+
+.market-detail-prob {
+  font-size: 1.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.market-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.market-detail-description {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.market-detail-activity h3 {
+  margin: 0 0 0.5rem;
+}
+
+.market-detail-activity ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.market-detail-trade-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.85rem;
+}
+
+.market-detail-trade-row:last-child {
+  border-bottom: none;
+}
+
+.market-detail-trade-row .trade-direction {
+  font-weight: 700;
+}
+
+.market-detail-trade-row .trade-time {
+  margin-left: auto;
+  opacity: 0.7;
+}
+
 .back-button {
   align-self: flex-start;
 }
