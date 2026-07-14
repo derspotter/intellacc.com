@@ -263,14 +263,24 @@ async fn sync_mc_resolutions(
 }
 
 /// Case-insensitive, whitespace-trimmed match of a provider's winning-option
-/// label against our `event_outcomes` rows. Returns the matching outcome id,
-/// or None if no row's label matches after normalization.
+/// label against our `event_outcomes` rows. Returns the matching outcome id
+/// only when exactly one row's label matches after normalization; if zero or
+/// more than one row match, returns None so an ambiguous label fails safe
+/// (the caller's existing warn+skip path applies) instead of silently
+/// settling against whichever row happened to come first.
 fn match_outcome_label(outcomes: &[(i64, String)], resolution_label: &str) -> Option<i64> {
     let target = resolution_label.trim().to_lowercase();
-    outcomes
+    let mut matches = outcomes
         .iter()
-        .find(|(_, label)| label.trim().to_lowercase() == target)
-        .map(|(id, _)| *id)
+        .filter(|(_, label)| label.trim().to_lowercase() == target)
+        .map(|(id, _)| *id);
+
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        None
+    } else {
+        Some(first)
+    }
 }
 
 enum Verdict {
@@ -449,5 +459,19 @@ mod tests {
     fn match_outcome_label_no_match_returns_none() {
         assert_eq!(match_outcome_label(&outcomes(), "Maybe"), None);
         assert_eq!(match_outcome_label(&[], "Yes"), None);
+    }
+
+    #[test]
+    fn match_outcome_label_ambiguous_returns_none() {
+        // Two active outcomes normalize (trim+lowercase) to the same label.
+        // Settling against "whichever comes first" would silently pick an
+        // arbitrary winner, so this must fail safe like an unmatched label.
+        let ambiguous = vec![
+            (10, "Team A".to_string()),
+            (11, "team a".to_string()),
+            (12, "No".to_string()),
+        ];
+        assert_eq!(match_outcome_label(&ambiguous, "Team A"), None);
+        assert_eq!(match_outcome_label(&ambiguous, "no"), Some(12));
     }
 }
