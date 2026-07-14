@@ -316,6 +316,17 @@ exports.setEventOutcomes = asyncHandler(async (req, res) => {
   });
 });
 
+// User-facing topic names for an event row, as a `topics` array column.
+// Shared by the listing and the by-id endpoint so both carry the same shape.
+const TOPICS_COLUMN = `
+      COALESCE(
+        (SELECT array_agg(t.name ORDER BY t.name)
+         FROM event_topics et
+         JOIN topics t ON t.id = et.topic_id
+         WHERE et.event_id = events.id AND t.is_user_facing = TRUE),
+        '{}'
+      ) AS topics`;
+
 // Get all available events with optional search
 exports.getEvents = asyncHandler(async (req, res) => {
   const search = req.query.search;
@@ -351,13 +362,7 @@ exports.getEvents = asyncHandler(async (req, res) => {
       q_yes,
       q_no,
       domain,
-      COALESCE(
-        (SELECT array_agg(t.name ORDER BY t.name)
-         FROM event_topics et
-         JOIN topics t ON t.id = et.topic_id
-         WHERE et.event_id = events.id AND t.is_user_facing = TRUE),
-        '{}'
-      ) AS topics
+${TOPICS_COLUMN}
   `;
 
   const where = [];
@@ -455,7 +460,8 @@ exports.getEventById = asyncHandler(async (req, res) => {
         cumulative_stake,
         q_yes,
         q_no,
-        domain
+        domain,
+${TOPICS_COLUMN}
       FROM events
       WHERE id = $1
       LIMIT 1

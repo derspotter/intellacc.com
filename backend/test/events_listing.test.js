@@ -65,4 +65,24 @@ describe('GET /api/events listing', () => {
     expect(byId.statusCode).toBe(200);
     expect(byId.body.id).toBe(hiddenId);
   });
+
+  test('GET /api/events/:id carries the same topics array as the listing', async () => {
+    const eventId = await insertEvent(`topics byid test ${Date.now()}`);
+    const politics = await db.query(`SELECT id, name FROM topics WHERE slug = 'politics'`);
+    await db.query(
+      `INSERT INTO event_topics (event_id, topic_id, source) VALUES ($1, $2, 'llm')`,
+      [eventId, politics.rows[0].id]
+    );
+
+    const res = await request(app).get(`/api/events/${eventId}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.topics).toEqual([politics.rows[0].name]);
+  });
+
+  test('GET /api/events/:id carries an empty topics array when unclassified', async () => {
+    const eventId = await insertEvent(`untopiced byid test ${Date.now()}`);
+    const res = await request(app).get(`/api/events/${eventId}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.topics).toEqual([]);
+  });
 });

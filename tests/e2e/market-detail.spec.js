@@ -31,6 +31,11 @@ test.describe('market detail view', () => {
        VALUES ('${titles.binary}', 'Detailed description for the E2E detail spec.',
                NOW() + INTERVAL '7 days', 'binary', 5000, 0.62) RETURNING id`
     ));
+    // Classified topic: the detail meta must show it, not the 'General' fallback.
+    psql(
+      `INSERT INTO event_topics (event_id, topic_id, source)
+       SELECT ${eventIds.binary}, id, 'llm' FROM topics WHERE slug = 'politics'`
+    );
     // Two seeded trades: powers the activity feed and (Task 2) the curve.
     psql(
       `INSERT INTO market_updates
@@ -96,6 +101,8 @@ test.describe('market detail view', () => {
 
     await expect(detail.locator('.market-detail-title')).toHaveText(titles.binary);
     await expect(detail.locator('.market-detail-prob')).toContainText('62.0%');
+    // Meta shows the classified topic, not the 'General' fallback.
+    await expect(detail.locator('.event-category')).toHaveText('Politics');
     await expect(detail.locator('.market-detail-description'))
       .toContainText('Detailed description for the E2E detail spec.');
     await expect(detail.locator('.market-detail-back')).toBeVisible();
