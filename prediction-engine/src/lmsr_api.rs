@@ -1497,6 +1497,29 @@ async fn numeric_trade_transaction(
         return Err(anyhow!("Insufficient RP balance"));
     }
 
+    // Track the user's own cost basis for this event, independent of any
+    // other trader's activity — this is the exact amount later released on
+    // sell/resolution (see numeric_position_basis migration
+    // 20260714b_numeric_position_basis.sql). Using
+    // SUM(distribution_trades.total_cost_ledger) as a stand-in for this is
+    // wrong under LMSR convexity: if another trader moves the market between
+    // this user's buy and sell, the "equivalent" vector cost changes even
+    // though this user's actual staked amount didn't.
+    sqlx::query(
+        r#"
+        INSERT INTO numeric_position_basis (user_id, event_id, basis_ledger, updated_at)
+        VALUES ($1, $2, $3, NOW())
+        ON CONFLICT (user_id, event_id) DO UPDATE SET
+            basis_ledger = numeric_position_basis.basis_ledger + EXCLUDED.basis_ledger,
+            updated_at = NOW()
+        "#,
+    )
+    .bind(user_id)
+    .bind(event_id)
+    .bind(cost_ledger)
+    .execute(tx.as_mut())
+    .await?;
+
     let outcome_ids: Vec<i64> = outcomes.iter().map(|o| o.outcome_id).collect();
 
     sqlx::query(
@@ -1729,23 +1752,50 @@ async fn numeric_sell_transaction(
     .await?;
 
     // Numeric per-bin staked_ledger is 0 by design (see numeric_trade_transaction);
-    // the real staked money for this position lives in distribution_trades, so
-    // unstake the user's net cost basis for this event here.
-    let net_stake_ledger: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(total_cost_ledger), 0)::BIGINT
-         FROM distribution_trades WHERE user_id = $1 AND event_id = $2",
+    // the real staked money for this position lives in numeric_position_basis,
+    // which was accumulated exactly at buy time — independent of what any
+    // other trader did to the market in between. (The prior implementation
+    // used SUM(distribution_trades.total_cost_ledger) as a proxy for this,
+    // which is wrong under LMSR convexity: the "equivalent" vector cost of
+    // this user's own trades drifts whenever another trader moves q, so it
+    // can over- or under-unstake, leaking or stealing rp_staked_ledger.)
+    let basis_row: Option<i64> = sqlx::query_scalar(
+        "SELECT basis_ledger FROM numeric_position_basis
+         WHERE user_id = $1 AND event_id = $2
+         FOR UPDATE",
     )
     .bind(user_id)
     .bind(event_id)
-    .fetch_one(tx.as_mut())
+    .fetch_optional(tx.as_mut())
     .await?;
-    let unstake_ledger = net_stake_ledger.max(0);
+    let unstake_ledger = match basis_row {
+        Some(basis) => basis,
+        None => {
+            // total_shares > 0 was already checked above, so this is an open
+            // position with no recorded basis — an inconsistent/legacy state.
+            // Do not guess at an unstake amount; fail loudly instead.
+            return Err(anyhow!(
+                "No cost basis recorded for user {} on event {} despite an open numeric position; refusing to guess unstake amount",
+                user_id,
+                event_id
+            ));
+        }
+    };
 
     let rows =
         DbAdapter::update_user_balance_ledger(tx, user_id, payout_ledger, -unstake_ledger).await?;
     if rows == 0 {
         return Err(anyhow!("Failed to update user balance"));
     }
+
+    sqlx::query(
+        "UPDATE numeric_position_basis SET basis_ledger = 0, updated_at = NOW()
+         WHERE user_id = $1 AND event_id = $2",
+    )
+    .bind(user_id)
+    .bind(event_id)
+    .execute(tx.as_mut())
+    .await?;
 
     let new_market_version = market.numeric_market_version + 1;
     sqlx::query("UPDATE numeric_market_config SET numeric_market_version = $1 WHERE event_id = $2")
@@ -1754,7 +1804,10 @@ async fn numeric_sell_transaction(
         .execute(tx.as_mut())
         .await?;
 
-    let cost_rp = crate::lmsr_core::from_ledger_units(-(payout_ledger as i128));
+    // cumulative_stake tracks net RP committed to this market; on sell that's
+    // the basis released (not the payout — a profitable sell's payout can
+    // exceed the basis, which would otherwise drive cumulative_stake negative).
+    let cost_rp = crate::lmsr_core::from_ledger_units(-(unstake_ledger as i128));
     sqlx::query("UPDATE events SET cumulative_stake = cumulative_stake + $1 WHERE id = $2")
         .bind(cost_rp)
         .bind(event_id)
@@ -2024,19 +2077,26 @@ async fn resolve_event_by_outcome_transaction(
     }
 
     // Numeric events keep per-bin staked_ledger at 0 by design (the joint
-    // trade cost lives on distribution_trades, not the outcome-share row —
+    // trade cost lives on numeric_position_basis, not the outcome-share row —
     // see numeric_trade_transaction), so the payout loop above pays winning
     // shares correctly but never unstakes the money that was actually
-    // committed. Unstake each user's net numeric position for this event
+    // committed. Unstake each user's exact recorded basis for this event
     // here, or resolution would leak permanently-staked RP. This is a no-op
-    // for binary/multiple_choice events, which never have distribution_trades
-    // rows.
+    // for binary/multiple_choice events, which never have
+    // numeric_position_basis rows.
+    //
+    // Deliberately NOT SUM(distribution_trades.total_cost_ledger): that sum
+    // is only equal to what a user actually staked when no other trader
+    // moved the market between their trades (LMSR convexity breaks that
+    // equivalence in general), which could under/over-unstake and either
+    // leak RP or steal rp_staked_ledger belonging to the user's other
+    // events. numeric_position_basis is the exact debited amount instead.
     let numeric_positions = sqlx::query(
         r#"
-        SELECT user_id, COALESCE(SUM(total_cost_ledger), 0)::BIGINT AS net_stake_ledger
-        FROM distribution_trades
-        WHERE event_id = $1
-        GROUP BY user_id
+        SELECT user_id, basis_ledger
+        FROM numeric_position_basis
+        WHERE event_id = $1 AND basis_ledger > 0
+        FOR UPDATE
         "#,
     )
     .bind(event_id)
@@ -2045,17 +2105,10 @@ async fn resolve_event_by_outcome_transaction(
 
     for row in numeric_positions {
         let position_user_id: i32 = row.get("user_id");
-        // Defensive clip (mirrors numeric_sell_transaction's unstake calc):
-        // a correctly-operating buy/sell history nets to >= 0, but never let
-        // a rounding artifact flip this negative and credit staked instead
-        // of debiting it.
-        let net_stake_ledger: i64 = row.get::<i64, _>("net_stake_ledger").max(0);
-        if net_stake_ledger == 0 {
-            continue;
-        }
+        let basis_ledger: i64 = row.get("basis_ledger");
+
         let rows_affected =
-            DbAdapter::update_user_balance_ledger(tx, position_user_id, 0, -net_stake_ledger)
-                .await?;
+            DbAdapter::update_user_balance_ledger(tx, position_user_id, 0, -basis_ledger).await?;
         if rows_affected == 0 {
             return Err(anyhow!(
                 "Failed to unstake numeric position for user {} on event {} (would drive rp_staked_ledger negative)",
@@ -2063,6 +2116,14 @@ async fn resolve_event_by_outcome_transaction(
                 event_id
             ));
         }
+        sqlx::query(
+            "UPDATE numeric_position_basis SET basis_ledger = 0, updated_at = NOW()
+             WHERE user_id = $1 AND event_id = $2",
+        )
+        .bind(position_user_id)
+        .bind(event_id)
+        .execute(tx.as_mut())
+        .await?;
     }
 
     sqlx::query("DELETE FROM user_outcome_shares WHERE event_id = $1")
@@ -2578,18 +2639,23 @@ async fn verify_staked_invariant_transaction(
     .fetch_one(tx.as_mut())
     .await?;
 
-    // Additive term: numeric distribution-trade net cost, for still-open
-    // (unresolved) events only. A resolved event's numeric position is
-    // unstaked at resolution time (resolve_event_by_outcome_transaction), so
-    // its distribution_trades history must stop contributing here once the
-    // event resolves — filtering to `e.outcome IS NULL` keeps this true both
-    // pre- and post-resolution.
+    // Additive term: numeric position cost basis, for still-open (unresolved)
+    // events only. A resolved event's numeric position is unstaked (basis
+    // zeroed) at resolution time (resolve_event_by_outcome_transaction), and
+    // numeric_sell_transaction zeroes it on a full-position sell, so this
+    // term is naturally 0 for closed-out or resolved positions without
+    // needing the `e.outcome IS NULL` filter to do that work — the filter is
+    // kept anyway as defense in depth. This uses numeric_position_basis
+    // (the exact amount actually debited from this user), not
+    // SUM(distribution_trades.total_cost_ledger) (a proxy that drifts under
+    // LMSR convexity whenever another trader moved the market between this
+    // user's trades — see numeric_trade_transaction / numeric_sell_transaction).
     let numeric_staked_ledger: i64 = sqlx::query_scalar(
         r#"
-        SELECT COALESCE(SUM(dt.total_cost_ledger), 0)::BIGINT
-        FROM distribution_trades dt
-        JOIN events e ON e.id = dt.event_id
-        WHERE dt.user_id = $1 AND e.outcome IS NULL
+        SELECT COALESCE(SUM(npb.basis_ledger), 0)::BIGINT
+        FROM numeric_position_basis npb
+        JOIN events e ON e.id = npb.event_id
+        WHERE npb.user_id = $1 AND e.outcome IS NULL
         "#,
     )
     .bind(user_id)
