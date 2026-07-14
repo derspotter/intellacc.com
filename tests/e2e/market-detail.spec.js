@@ -122,4 +122,26 @@ test.describe('market detail view', () => {
     await expect(page.getByText('Market not found')).toBeVisible();
     await expect(page.locator('.market-detail-back')).toBeVisible();
   });
+
+  test('binary market with trades shows the probability curve', async ({ page }) => {
+    await page.goto(`${BASE}/#predictions/${eventIds.binary}`, { waitUntil: 'domcontentloaded' });
+    const chart = page.locator('.market-detail-chart');
+    await expect(chart).toBeVisible({ timeout: 20000 });
+    await expect(chart.locator('svg polyline.chart-line')).toHaveCount(1);
+    // Step line: seed anchor (0.50) + 2 trades + now → at least 4 vertices.
+    const points = await chart.locator('polyline.chart-line').getAttribute('points');
+    expect(points.split(' ').length).toBeGreaterThanOrEqual(4);
+  });
+
+  test('markets without enough history show no curve', async ({ page }) => {
+    // Fewer than 2 trades → no chart.
+    await page.goto(`${BASE}/#predictions/${eventIds.quiet}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.market-detail-title')).toHaveText(titles.quiet, { timeout: 20000 });
+    await expect(page.locator('.market-detail-chart')).toHaveCount(0);
+
+    // Multi-outcome → no chart either (per-outcome history not exposed).
+    await page.goto(`${BASE}/#predictions/${eventIds.multi}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.market-detail-title')).toHaveText(titles.multi, { timeout: 20000 });
+    await expect(page.locator('.market-detail-chart')).toHaveCount(0);
+  });
 });

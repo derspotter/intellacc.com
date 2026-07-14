@@ -75,6 +75,55 @@ export default function MarketDetailView(props) {
 
   const activity = createMemo(() => trades().slice(0, ACTIVITY_COUNT));
 
+  // Probability history as an SVG step line. Binary markets only —
+  // market_updates has no per-outcome history for multi-outcome events.
+  const CHART_W = 640;
+  const CHART_H = 180;
+  const CHART_PAD = 10;
+
+  const chartPoints = createMemo(() => {
+    const row = event();
+    if (!row || isMultiOutcome(row)) return null;
+
+    const history = trades()
+      .filter((trade) => trade.market_type !== 'multi_outcome')
+      .map((trade) => ({
+        t: Date.parse(trade.timestamp),
+        p: Number(trade.price_after),
+        before: Number(trade.price_before)
+      }))
+      .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.p))
+      .sort((a, b) => a.t - b.t);
+    if (history.length < 2) return null;
+
+    // Anchor at the earliest trade's starting price, extend to now at the
+    // current market probability.
+    const series = [
+      { t: history[0].t, p: history[0].before },
+      ...history.map(({ t, p }) => ({ t, p })),
+      { t: Date.now(), p: Number(row.market_prob ?? 0.5) }
+    ];
+
+    const t0 = series[0].t;
+    const span = Math.max(series[series.length - 1].t - t0, 1);
+    const toX = (t) => CHART_PAD + ((t - t0) / span) * (CHART_W - 2 * CHART_PAD);
+    const toY = (p) => CHART_PAD + (1 - Math.min(Math.max(p, 0), 1)) * (CHART_H - 2 * CHART_PAD);
+
+    // Step line: hold each probability until the next trade.
+    const coords = [];
+    let prevY = null;
+    for (const point of series) {
+      const x = toX(point.t);
+      const y = toY(point.p);
+      if (prevY !== null) coords.push(`${x.toFixed(1)},${prevY}`);
+      prevY = y.toFixed(1);
+      coords.push(`${x.toFixed(1)},${prevY}`);
+    }
+    return coords.join(' ');
+  });
+
+  const gridY = (p) => CHART_PAD + (1 - p) * (CHART_H - 2 * CHART_PAD);
+
   const categoryLabel = () =>
     (event()?.topics || []).length > 0
       ? event().topics.join(' · ')
@@ -118,6 +167,30 @@ export default function MarketDetailView(props) {
 
         <Show when={String(event().details || '').trim()}>
           <div class="market-detail-description">{event().details}</div>
+        </Show>
+
+        <Show when={chartPoints()}>
+          <div class="market-detail-chart">
+            <h3>Probability history</h3>
+            <div class="market-detail-chart-body">
+              <div class="chart-y-labels" aria-hidden="true">
+                <span>100%</span>
+                <span>50%</span>
+                <span>0%</span>
+              </div>
+              <svg
+                viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+                preserveAspectRatio="none"
+                role="img"
+                aria-label="Market probability over time"
+              >
+                <line class="chart-grid" x1={CHART_PAD} y1={gridY(0.75)} x2={CHART_W - CHART_PAD} y2={gridY(0.75)} />
+                <line class="chart-grid" x1={CHART_PAD} y1={gridY(0.5)} x2={CHART_W - CHART_PAD} y2={gridY(0.5)} />
+                <line class="chart-grid" x1={CHART_PAD} y1={gridY(0.25)} x2={CHART_W - CHART_PAD} y2={gridY(0.25)} />
+                <polyline class="chart-line" points={chartPoints()} />
+              </svg>
+            </div>
+          </div>
         </Show>
 
         <div class="market-detail-trade">

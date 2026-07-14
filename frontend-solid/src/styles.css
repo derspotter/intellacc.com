@@ -4616,6 +4616,44 @@ body.dark-mode .belief-slider::-moz-range-thumb {
   opacity: 0.7;
 }
 
+.market-detail-chart h3 {
+  margin: 0 0 0.5rem;
+}
+
+.market-detail-chart-body {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.market-detail-chart svg {
+  flex: 1;
+  min-width: 0;
+  height: 180px;
+  display: block;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+}
+
+.market-detail-chart .chart-grid {
+  stroke: var(--border-color);
+  stroke-width: 1;
+}
+
+.market-detail-chart .chart-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.market-detail-chart .chart-y-labels {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
 .back-button {
   align-self: flex-start;
 }
