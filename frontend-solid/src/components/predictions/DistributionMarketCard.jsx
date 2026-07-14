@@ -265,6 +265,7 @@ export default function DistributionMarketCard(props) {
   };
 
   const fetchQuote = async () => {
+    const seq = ++quoteSeq;
     if (!isLoggedIn() || marketLoadState() !== 'ready' || !isOpen()) {
       return bailQuote();
     }
@@ -276,7 +277,6 @@ export default function DistributionMarketCard(props) {
     if (target.length === 0) {
       return bailQuote();
     }
-    const seq = ++quoteSeq;
     setQuoteError('');
     try {
       const result = await getNumericQuote(eventId(), {
