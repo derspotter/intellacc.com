@@ -147,4 +147,55 @@ describe('GET /users/:id/positions with multi-outcome holdings', () => {
     const untradedRow = rows.find((r) => Number(r.event_id) === untradedEventId);
     expect(untradedRow).toBeUndefined();
   });
+
+  test('recently-resolved numeric market surfaces via distribution_trades alone', async () => {
+    // Numeric (distribution) trades journal into distribution_trades, not
+    // market_updates/market_outcome_updates. Settlement deletes
+    // user_outcome_shares, so without the distribution_trades disjunct in the
+    // resolved-branch EXISTS clause, a resolved numeric market the user only
+    // ever traded via numeric-trade would silently vanish from MyPositions.
+    const user = await makeUser('positions_resolved_distribution');
+    cleanup.users.add(user.id);
+
+    const resolvedEvent = await db.query(
+      `INSERT INTO events (title, details, closing_date, event_type, outcome, resolved_at)
+       VALUES ('Resolved numeric via distribution_trades', 'x', NOW() - INTERVAL '1 day', 'numeric', '42.0', NOW())
+       RETURNING id`
+    );
+    const resolvedEventId = resolvedEvent.rows[0].id;
+    cleanup.events.add(resolvedEventId);
+    // Trade-history row only — no user_outcome_shares (settlement deleted it),
+    // and no market_updates/market_outcome_updates row (this user only ever
+    // traded the distribution).
+    await db.query(
+      `INSERT INTO distribution_trades
+         (user_id, event_id, total_cost_ledger, alpha, target_distribution, pre_market_version, post_market_version, hold_until, created_at)
+       VALUES ($1, $2, 5000000, 0.5, $3, 0, 1, NULL, NOW() - INTERVAL '2 days')`,
+      [user.id, resolvedEventId, JSON.stringify({ bin_0: 1.0 })]
+    );
+
+    // Control: a resolved numeric market the user never traded must NOT appear.
+    const untradedEvent = await db.query(
+      `INSERT INTO events (title, details, closing_date, event_type, outcome, resolved_at)
+       VALUES ('Resolved numeric untraded', 'x', NOW() - INTERVAL '1 day', 'numeric', '7.0', NOW())
+       RETURNING id`
+    );
+    const untradedEventId = untradedEvent.rows[0].id;
+    cleanup.events.add(untradedEventId);
+
+    const res = await request(app)
+      .get(`/api/users/${user.id}/positions`)
+      .set('Authorization', `Bearer ${user.token}`);
+
+    expect(res.statusCode).toBe(200);
+    const rows = res.body;
+
+    const resolvedRow = rows.find((r) => Number(r.event_id) === resolvedEventId);
+    expect(resolvedRow).toBeDefined();
+    expect(resolvedRow.position_kind).toBe('resolved');
+    expect(resolvedRow.outcome).toBe('42.0');
+
+    const untradedRow = rows.find((r) => Number(r.event_id) === untradedEventId);
+    expect(untradedRow).toBeUndefined();
+  });
 });

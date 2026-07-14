@@ -263,6 +263,10 @@ class WeeklyAssignmentService {
           UNION ALL
           SELECT user_id, event_id, stake_amount, stake_amount_ledger, created_at
           FROM market_outcome_updates
+          UNION ALL
+          SELECT user_id, event_id, NULL::double precision AS stake_amount, total_cost_ledger AS stake_amount_ledger, created_at
+          FROM distribution_trades
+          WHERE total_cost_ledger > 0
         ) mu
           ON wua.user_id = mu.user_id
           AND wua.event_id = mu.event_id
@@ -555,6 +559,10 @@ class WeeklyAssignmentService {
           UNION ALL
           SELECT user_id, event_id, stake_amount, stake_amount_ledger, created_at
           FROM market_outcome_updates
+          UNION ALL
+          SELECT user_id, event_id, NULL::double precision AS stake_amount, total_cost_ledger AS stake_amount_ledger, created_at
+          FROM distribution_trades
+          WHERE total_cost_ledger > 0
         ) mu
           ON u.id = mu.user_id
           AND COALESCE(wua.event_id, u.weekly_assigned_event_id) = mu.event_id

@@ -1366,6 +1366,7 @@ exports.getUserPositions = async (req, res) => {
         AND (
           EXISTS (SELECT 1 FROM market_updates mu WHERE mu.user_id = $1 AND mu.event_id = e.id)
           OR EXISTS (SELECT 1 FROM market_outcome_updates mou WHERE mou.user_id = $1 AND mou.event_id = e.id)
+          OR EXISTS (SELECT 1 FROM distribution_trades dt WHERE dt.user_id = $1 AND dt.event_id = e.id)
         )
 
       ORDER BY last_updated DESC

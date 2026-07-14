@@ -13,7 +13,8 @@ const cleanup = {
   users: new Set(),
   events: new Set(),
   eventOutcomes: new Set(),
-  marketOutcomeUpdates: new Set()
+  marketOutcomeUpdates: new Set(),
+  distributionTrades: new Set()
 };
 
 const createUser = async ({ email, username, password, rpBalanceLedger = 0 }) => {
@@ -34,6 +35,19 @@ const createMultipleChoiceEvent = async ({ title, closingDate }) => {
     `INSERT INTO events
        (title, closing_date, created_at, updated_at, market_prob, liquidity_b, cumulative_stake, q_yes, q_no, event_type)
      VALUES ($1, $2, NOW(), NOW(), 0.5, 5000, 0, 0, 0, 'multiple_choice')
+     RETURNING id`,
+    [title, closingDate]
+  );
+  const id = result.rows[0].id;
+  cleanup.events.add(id);
+  return id;
+};
+
+const createNumericEvent = async ({ title, closingDate }) => {
+  const result = await db.query(
+    `INSERT INTO events
+       (title, closing_date, created_at, updated_at, market_prob, liquidity_b, cumulative_stake, q_yes, q_no, event_type)
+     VALUES ($1, $2, NOW(), NOW(), 0.5, 5000, 0, 0, 0, 'numeric')
      RETURNING id`,
     [title, closingDate]
   );
@@ -72,6 +86,20 @@ const insertMarketOutcomeUpdate = async ({ userId, eventId, outcomeId, stakeAmou
   return result.rows[0].id;
 };
 
+const insertDistributionTrade = async ({ userId, eventId, totalCostRp, createdAt }) => {
+  const totalCostLedger = Math.round(totalCostRp * 1_000_000);
+
+  const result = await db.query(
+    `INSERT INTO distribution_trades
+       (user_id, event_id, total_cost_ledger, alpha, target_distribution, pre_market_version, post_market_version, hold_until, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id`,
+    [userId, eventId, totalCostLedger, 1.0, JSON.stringify([1]), 0, 1, null, createdAt]
+  );
+  cleanup.distributionTrades.add(result.rows[0].id);
+  return result.rows[0].id;
+};
+
 const upsertWeeklyAssignment = async ({
   userId,
   weekYear,
@@ -105,6 +133,9 @@ describe('Weekly assignment completion counts multi-outcome trades', () => {
   afterAll(async () => {
     if (cleanup.marketOutcomeUpdates.size) {
       await db.query('DELETE FROM market_outcome_updates WHERE id = ANY($1::int[])', [Array.from(cleanup.marketOutcomeUpdates)]);
+    }
+    if (cleanup.distributionTrades.size) {
+      await db.query('DELETE FROM distribution_trades WHERE id = ANY($1::bigint[])', [Array.from(cleanup.distributionTrades)]);
     }
     if (cleanup.eventOutcomes.size) {
       await db.query('DELETE FROM event_outcomes WHERE id = ANY($1::int[])', [Array.from(cleanup.eventOutcomes)]);
@@ -298,5 +329,120 @@ describe('Weekly assignment completion counts multi-outcome trades', () => {
     expect(statusRes.body.assignment.event_id).toBe(eventId);
     expect(statusRes.body.assignment.has_stake).toBe(true);
     expect(Number(statusRes.body.assignment.stake_amount)).toBeGreaterThanOrEqual(2);
+  });
+
+  test('process-completed marks a user complete for a numeric distribution trade journaled in distribution_trades', async () => {
+    const timestamp = Date.now();
+    const adminEmail = `weekly_distribution_admin_${timestamp}@example.com`;
+    const adminPassword = 'testpass123';
+    const adminId = await createUser({
+      email: adminEmail,
+      username: `weekly_distribution_admin_${timestamp}`,
+      password: adminPassword,
+      rpBalanceLedger: 1_000_000_000
+    });
+    await db.query('UPDATE users SET role = $1 WHERE id = $2', ['admin', adminId]);
+
+    const eligibleUserId = await createUser({
+      email: `weekly_distribution_eligible_${timestamp}@example.com`,
+      username: `weekly_distribution_eligible_${timestamp}`,
+      password: 'testpass123',
+      rpBalanceLedger: 1_000_000_000 // 1000 RP -> required 10 RP
+    });
+
+    const ineligibleUserId = await createUser({
+      email: `weekly_distribution_ineligible_${timestamp}@example.com`,
+      username: `weekly_distribution_ineligible_${timestamp}`,
+      password: 'testpass123',
+      rpBalanceLedger: 1_000_000_000 // 1000 RP -> required 10 RP
+    });
+
+    const eventId = await createNumericEvent({
+      title: `Weekly Distribution Completion Event ${timestamp}`,
+      closingDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000)
+    });
+
+    const previousWeek = await getWeek('get_previous_week');
+
+    await db.query(`
+      UPDATE users
+      SET weekly_assigned_event_id = $1,
+          weekly_assignment_week = $2,
+          weekly_assignment_completed = false,
+          weekly_assignment_completed_at = NULL
+      WHERE id = ANY($3::int[])
+    `, [eventId, previousWeek, [eligibleUserId, ineligibleUserId]]);
+
+    await upsertWeeklyAssignment({
+      userId: eligibleUserId,
+      weekYear: previousWeek,
+      eventId,
+      requiredStakeLedger: 10_000_000,
+      completed: false
+    });
+
+    await upsertWeeklyAssignment({
+      userId: ineligibleUserId,
+      weekYear: previousWeek,
+      eventId,
+      requiredStakeLedger: 10_000_000,
+      completed: false
+    });
+
+    const previousWeekStart = await db.query('SELECT date_trunc(\'week\', NOW() - INTERVAL \'1 week\') AS start');
+    const createdAt = new Date(new Date(previousWeekStart.rows[0].start).getTime() + 60 * 60 * 1000);
+
+    // Eligible user trades the assigned numeric (distribution) event; this journals into
+    // distribution_trades (not market_updates/market_outcome_updates) and must still satisfy
+    // the 1% requirement. Regression coverage for the C2 fix in weeklyAssignmentService.js.
+    await insertDistributionTrade({
+      userId: eligibleUserId,
+      eventId,
+      totalCostRp: 15, // meets 10 RP requirement
+      createdAt
+    });
+
+    // Ineligible user stakes below the requirement.
+    await insertDistributionTrade({
+      userId: ineligibleUserId,
+      eventId,
+      totalCostRp: 5, // below 10 RP requirement
+      createdAt
+    });
+
+    const loginRes = await request(app)
+      .post('/api/login')
+      .send({ email: adminEmail, password: adminPassword });
+
+    const adminToken = loginRes.body.token;
+    expect(adminToken).toBeDefined();
+
+    const res = await request(app)
+      .post('/api/weekly/process-completed')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.week).toBe(previousWeek);
+
+    const userRes = await db.query(
+      `SELECT id, weekly_assignment_completed
+       FROM users
+       WHERE id = ANY($1::int[])
+       ORDER BY id`,
+      [[eligibleUserId, ineligibleUserId]]
+    );
+
+    const eligible = userRes.rows.find((row) => row.id === eligibleUserId);
+    const ineligible = userRes.rows.find((row) => row.id === ineligibleUserId);
+
+    expect(eligible.weekly_assignment_completed).toBe(true);
+    expect(ineligible.weekly_assignment_completed).toBe(false);
+
+    const assignmentRes = await db.query(
+      `SELECT completed FROM weekly_user_assignments WHERE user_id = $1 AND week_year = $2`,
+      [eligibleUserId, previousWeek]
+    );
+    expect(assignmentRes.rows[0].completed).toBe(true);
   });
 });

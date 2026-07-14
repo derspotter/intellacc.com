@@ -137,6 +137,16 @@ const queryHybrid = async ({
         AND e.closing_date > NOW()
         AND e.embedding IS NOT NULL
         AND 1 - (e.embedding <=> $1::vector) >= $4
+        AND e.hidden_at IS NULL
+        AND (
+          e.event_type = 'binary'
+          OR EXISTS (
+            SELECT 1 FROM event_outcomes eo
+            WHERE eo.event_id = e.id AND eo.is_active = TRUE
+            GROUP BY eo.event_id
+            HAVING COUNT(*) >= 2
+          )
+        )
         ${domainFilter}
       ORDER BY e.embedding <=> $1::vector
       LIMIT 60
@@ -152,6 +162,16 @@ const queryHybrid = async ({
       JOIN q ON TRUE
       WHERE e.outcome IS NULL
         AND e.closing_date > NOW()
+        AND e.hidden_at IS NULL
+        AND (
+          e.event_type = 'binary'
+          OR EXISTS (
+            SELECT 1 FROM event_outcomes eo
+            WHERE eo.event_id = e.id AND eo.is_active = TRUE
+            GROUP BY eo.event_id
+            HAVING COUNT(*) >= 2
+          )
+        )
         ${domainFilter}
         AND q.q IS NOT NULL
         AND ${searchExpression} @@ q.q
