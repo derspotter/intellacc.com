@@ -173,7 +173,10 @@ pub fn probabilities(q: &[f64], b: f64) -> Vec<f64> {
 /// One cost difference for a whole vector move; both terms via stable LSE
 /// (each `cost_multi` call uses max-shift log-sum-exp internally).
 pub fn apply_vector_cost(q: &[f64], delta_q: &[f64], b: f64) -> f64 {
-    debug_assert_eq!(
+    // Money path: this must never silently zip-truncate a mismatched-length
+    // delta_q against q (which would understate/overstate the real cost), so
+    // this is an always-on assert rather than a debug-only one.
+    assert_eq!(
         q.len(),
         delta_q.len(),
         "q and delta_q must have the same length"

@@ -1190,6 +1190,616 @@ async fn sell_outcome_shares_transaction(
     })
 }
 
+// ---------------------------------------------------------------------
+// Numeric markets: 50-bin dense-vector LMSR trading (Task 6 / B3).
+//
+// Money-path mandates (from the math review, binding):
+//  1. budget_ledger <= 0 is rejected (400); an execution whose final
+//     cost_ledger rounds to 0 is rejected too (dust trades mint free shares
+//     — minimum effective stake is 1 ledger unit).
+//  3. target vectors are validated at this boundary (exact bin_count,
+//     finite, >= 0, sum > 0) — we never let the core's floor-and-renormalize
+//     silently repair bad input.
+//  4. p fed to the math is always `probabilities()` of the q vector loaded
+//     under the row lock — never the stored `prob` column.
+//  5. One authoritative cost: at execute time, under the lock, the quote is
+//     recomputed fresh (same alpha-solve on fresh p) and that ledger-rounded
+//     figure is the only number used for the debit / distribution_trades
+//     row / cumulative_stake delta.
+//  6. The 40*b log-odds span clamp surfaces as a plain-English 400 at the
+//     endpoint layer (see `numeric_error_response` in main.rs).
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../shared/types/NumericQuoteResult.ts")]
+pub struct NumericQuoteResult {
+    pub alpha: f64,
+    pub cost_ledger: i64,
+    pub market_version: i64,
+    pub post_distribution: Vec<f64>,
+    pub deltas: Vec<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../shared/types/NumericTradeResult.ts")]
+pub struct NumericTradeResult {
+    pub event_id: i32,
+    pub trade_id: i64,
+    pub alpha: f64,
+    pub cost_ledger: i64,
+    pub market_version: i64,
+    pub post_distribution: Vec<f64>,
+    pub deltas: Vec<f64>,
+}
+
+/// Outcome of a numeric-trade attempt. The two rejection variants are
+/// *expected* control flow (stale optimistic-concurrency version, or the
+/// freshly-recomputed cost exceeding the caller's cap) — they carry a fresh
+/// quote back to the caller rather than being encoded as an `Err`, since
+/// they are not exceptional/programmer errors.
+pub enum NumericTradeOutcome {
+    Executed(NumericTradeResult),
+    StaleVersion(NumericQuoteResult),
+    CostExceeded(NumericQuoteResult),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../shared/types/NumericSellResult.ts")]
+pub struct NumericSellResult {
+    pub event_id: i32,
+    pub trade_id: i64,
+    pub payout_ledger: i64,
+    pub market_version: i64,
+}
+
+pub enum NumericSellOutcome {
+    Executed(NumericSellResult),
+    StaleVersion { market_version: i64 },
+}
+
+struct NumericMarketRow {
+    bin_count: i32,
+    b_numeric: f64,
+    numeric_market_version: i64,
+    is_resolved: bool,
+    is_closed: bool,
+}
+
+const NUMERIC_MARKET_ROW_QUERY: &str = r#"
+    SELECT
+        c.bin_count,
+        c.b_numeric,
+        c.numeric_market_version,
+        (e.outcome IS NOT NULL) AS is_resolved,
+        COALESCE(e.closing_date <= NOW(), false) AS is_closed
+    FROM numeric_market_config c
+    JOIN events e ON e.id = c.event_id
+    WHERE c.event_id = $1
+"#;
+
+fn row_to_numeric_market(row: sqlx::postgres::PgRow) -> NumericMarketRow {
+    NumericMarketRow {
+        bin_count: row.get("bin_count"),
+        b_numeric: row.get("b_numeric"),
+        numeric_market_version: row.get("numeric_market_version"),
+        is_resolved: row.get("is_resolved"),
+        is_closed: row.get("is_closed"),
+    }
+}
+
+/// Read-only fetch for the quote endpoint (no lock — an informational
+/// snapshot; freshness is only mandatory at execute time, under the lock).
+async fn fetch_numeric_market_row_pool(pool: &PgPool, event_id: i32) -> Result<NumericMarketRow> {
+    let row = sqlx::query(NUMERIC_MARKET_ROW_QUERY)
+        .bind(event_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| anyhow!("No numeric market configured for this event"))?;
+    Ok(row_to_numeric_market(row))
+}
+
+/// Locking fetch for trade/sell — `FOR UPDATE` on the joined query locks
+/// both the `events` and `numeric_market_config` rows, mirroring the
+/// existing single-table `FOR UPDATE` pattern used by the categorical
+/// buy/sell paths.
+async fn fetch_numeric_market_row_locked(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event_id: i32,
+) -> Result<NumericMarketRow> {
+    let query = format!("{NUMERIC_MARKET_ROW_QUERY} FOR UPDATE");
+    let row = sqlx::query(&query)
+        .bind(event_id)
+        .fetch_optional(tx.as_mut())
+        .await?
+        .ok_or_else(|| anyhow!("No numeric market configured for this event"))?;
+    Ok(row_to_numeric_market(row))
+}
+
+async fn fetch_outcome_q_values_pool(pool: &PgPool, event_id: i32) -> Result<Vec<f64>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT COALESCE(eos.q_value, 0.0) AS q_value
+        FROM event_outcomes eo
+        LEFT JOIN event_outcome_states eos
+          ON eos.event_id = eo.event_id AND eos.outcome_id = eo.id
+        WHERE eo.event_id = $1
+          AND eo.is_active = TRUE
+        ORDER BY eo.sort_order ASC, eo.id ASC
+        "#,
+    )
+    .bind(event_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.get("q_value")).collect())
+}
+
+/// Mandate 3: validate the target distribution at the API boundary — exact
+/// bin_count entries, all finite, all >= 0, sum > 0. Rejecting here means we
+/// never rely on `target_deltas`'s floor-and-renormalize to repair bad input.
+fn validate_target(target: &[f64], bin_count: usize) -> Result<()> {
+    if target.len() != bin_count {
+        return Err(anyhow!(
+            "target must have exactly {} entries, got {}",
+            bin_count,
+            target.len()
+        ));
+    }
+    if target.iter().any(|v| !v.is_finite()) {
+        return Err(anyhow!("target entries must all be finite"));
+    }
+    if target.iter().any(|v| *v < 0.0) {
+        return Err(anyhow!("target entries must all be >= 0"));
+    }
+    let sum: f64 = target.iter().sum();
+    if !(sum > 0.0) {
+        return Err(anyhow!("target must sum to a positive value"));
+    }
+    Ok(())
+}
+
+/// GET /events/:id/numeric-quote — read-only quote for a target distribution
+/// and budget. Never locks, never writes.
+pub async fn get_numeric_quote(
+    pool: &PgPool,
+    event_id: i32,
+    budget_ledger: i64,
+    target: Vec<f64>,
+) -> Result<NumericQuoteResult> {
+    if budget_ledger <= 0 {
+        return Err(anyhow!("budget_ledger must be positive"));
+    }
+
+    let market = fetch_numeric_market_row_pool(pool, event_id).await?;
+    let bin_count = market.bin_count as usize;
+    validate_target(&target, bin_count)?;
+
+    let q = fetch_outcome_q_values_pool(pool, event_id).await?;
+    if q.len() != bin_count {
+        return Err(anyhow!(
+            "Numeric market outcome count ({}) does not match configured bin_count ({})",
+            q.len(),
+            bin_count
+        ));
+    }
+
+    // Mandate 4: p is always derived fresh from q, never a stored prob float.
+    let p = crate::lmsr_multi_core::probabilities(&q, market.b_numeric);
+    let (alpha, cost_ledger, delta_q) =
+        crate::lmsr_multi_core::solve_alpha_for_budget(&p, &target, market.b_numeric, budget_ledger)?;
+
+    let q_after: Vec<f64> = q.iter().zip(delta_q.iter()).map(|(qi, di)| qi + di).collect();
+    let post_distribution = crate::lmsr_multi_core::probabilities(&q_after, market.b_numeric);
+
+    Ok(NumericQuoteResult {
+        alpha,
+        cost_ledger,
+        market_version: market.numeric_market_version,
+        post_distribution,
+        deltas: delta_q,
+    })
+}
+
+/// POST /events/:id/numeric-trade
+pub async fn numeric_trade(
+    pool: &PgPool,
+    user_id: i32,
+    event_id: i32,
+    target: Vec<f64>,
+    budget_ledger: i64,
+    max_cost_ledger: i64,
+    market_version: i64,
+) -> Result<NumericTradeOutcome> {
+    if budget_ledger <= 0 {
+        return Err(anyhow!("budget_ledger must be positive"));
+    }
+    if max_cost_ledger <= 0 {
+        return Err(anyhow!("max_cost_ledger must be positive"));
+    }
+
+    with_optimistic_tx!(pool, tx, {
+        numeric_trade_transaction(
+            &mut tx,
+            user_id,
+            event_id,
+            &target,
+            budget_ledger,
+            max_cost_ledger,
+            market_version,
+        )
+        .await
+    })
+}
+
+async fn numeric_trade_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: i32,
+    event_id: i32,
+    target: &[f64],
+    budget_ledger: i64,
+    max_cost_ledger: i64,
+    market_version: i64,
+) -> Result<NumericTradeOutcome> {
+    let market = fetch_numeric_market_row_locked(tx, event_id).await?;
+    if market.is_resolved {
+        return Err(anyhow!(ERR_MARKET_RESOLVED));
+    }
+    if market.is_closed {
+        return Err(anyhow!(ERR_MARKET_CLOSED));
+    }
+
+    let bin_count = market.bin_count as usize;
+    validate_target(target, bin_count)?;
+
+    let outcomes = fetch_outcome_state_rows(tx, event_id).await?;
+    if outcomes.len() != bin_count {
+        return Err(anyhow!(
+            "Numeric market outcome count ({}) does not match configured bin_count ({})",
+            outcomes.len(),
+            bin_count
+        ));
+    }
+
+    let q: Vec<f64> = outcomes.iter().map(|o| o.q_value).collect();
+    // Mandate 4: fresh p from the locked q vector, never the stored prob column.
+    let p = crate::lmsr_multi_core::probabilities(&q, market.b_numeric);
+
+    // Mandate 5: the one authoritative quote, recomputed fresh under the lock.
+    let (alpha, cost_ledger, delta_q) =
+        crate::lmsr_multi_core::solve_alpha_for_budget(&p, target, market.b_numeric, budget_ledger)?;
+
+    let q_after: Vec<f64> = q.iter().zip(delta_q.iter()).map(|(qi, di)| qi + di).collect();
+    let post_distribution = crate::lmsr_multi_core::probabilities(&q_after, market.b_numeric);
+
+    let fresh_quote = NumericQuoteResult {
+        alpha,
+        cost_ledger,
+        market_version: market.numeric_market_version,
+        post_distribution: post_distribution.clone(),
+        deltas: delta_q.clone(),
+    };
+
+    if market_version != market.numeric_market_version {
+        return Ok(NumericTradeOutcome::StaleVersion(fresh_quote));
+    }
+    if cost_ledger > max_cost_ledger {
+        return Ok(NumericTradeOutcome::CostExceeded(fresh_quote));
+    }
+    // Mandate 1: a trade whose ledger-rounded cost is 0 would mint shares
+    // for free — refuse rather than execute it.
+    if cost_ledger == 0 {
+        return Err(anyhow!(
+            "Trade cost rounds to zero ledger units (minimum effective stake is 1 ledger unit); increase budget_ledger"
+        ));
+    }
+
+    let has_sufficient_funds = DbAdapter::deduct_user_cost_ledger(tx, user_id, cost_ledger).await?;
+    if !has_sufficient_funds {
+        return Err(anyhow!("Insufficient RP balance"));
+    }
+
+    let outcome_ids: Vec<i64> = outcomes.iter().map(|o| o.outcome_id).collect();
+
+    sqlx::query(
+        r#"
+        INSERT INTO event_outcome_states (event_id, outcome_id, q_value, prob, updated_at)
+        SELECT $1, t.outcome_id, t.q_value, t.prob, NOW()
+        FROM UNNEST($2::bigint[], $3::double precision[], $4::double precision[])
+            AS t(outcome_id, q_value, prob)
+        ON CONFLICT (event_id, outcome_id) DO UPDATE SET
+            q_value = EXCLUDED.q_value,
+            prob = EXCLUDED.prob,
+            updated_at = NOW()
+        "#,
+    )
+    .bind(event_id)
+    .bind(&outcome_ids)
+    .bind(&q_after)
+    .bind(&post_distribution)
+    .execute(tx.as_mut())
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO user_outcome_shares (user_id, event_id, outcome_id, shares, staked_ledger, version, updated_at)
+        SELECT $1, $2, t.outcome_id, t.delta, 0, 1, NOW()
+        FROM UNNEST($3::bigint[], $4::double precision[]) AS t(outcome_id, delta)
+        ON CONFLICT (user_id, event_id, outcome_id) DO UPDATE SET
+            shares = user_outcome_shares.shares + EXCLUDED.shares,
+            version = user_outcome_shares.version + 1,
+            updated_at = NOW()
+        "#,
+    )
+    .bind(user_id)
+    .bind(event_id)
+    .bind(&outcome_ids)
+    .bind(&delta_q)
+    .execute(tx.as_mut())
+    .await?;
+
+    let new_market_version = market.numeric_market_version + 1;
+    sqlx::query("UPDATE numeric_market_config SET numeric_market_version = $1 WHERE event_id = $2")
+        .bind(new_market_version)
+        .bind(event_id)
+        .execute(tx.as_mut())
+        .await?;
+
+    // Brief: "update events.market_prob = NULL-safe no-op (binary column,
+    // leave as-is) and cumulative_stake += cost" — market_prob is
+    // deliberately left untouched here; only cumulative_stake moves.
+    let cost_rp = crate::lmsr_core::from_ledger_units(cost_ledger as i128);
+    sqlx::query("UPDATE events SET cumulative_stake = cumulative_stake + $1 WHERE id = $2")
+        .bind(cost_rp)
+        .bind(event_id)
+        .execute(tx.as_mut())
+        .await?;
+
+    let target_json = serde_json::to_value(target)?;
+    let trade_id: i64 = sqlx::query_scalar(
+        r#"
+        INSERT INTO distribution_trades
+            (user_id, event_id, total_cost_ledger, alpha, target_distribution,
+             pre_market_version, post_market_version, hold_until)
+        VALUES
+            ($1, $2, $3, $4, $5, $6, $7, NULL)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(event_id)
+    .bind(cost_ledger)
+    .bind(alpha)
+    .bind(target_json)
+    .bind(market.numeric_market_version)
+    .bind(new_market_version)
+    .fetch_one(tx.as_mut())
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO distribution_trade_legs (trade_id, outcome_id, shares_delta)
+        SELECT $1, t.outcome_id, t.delta
+        FROM UNNEST($2::bigint[], $3::double precision[]) AS t(outcome_id, delta)
+        "#,
+    )
+    .bind(trade_id)
+    .bind(&outcome_ids)
+    .bind(&delta_q)
+    .execute(tx.as_mut())
+    .await?;
+
+    Ok(NumericTradeOutcome::Executed(NumericTradeResult {
+        event_id,
+        trade_id,
+        alpha,
+        cost_ledger,
+        market_version: new_market_version,
+        post_distribution,
+        deltas: delta_q,
+    }))
+}
+
+/// POST /events/:id/numeric-sell — full-position close: Δq = -shares.
+pub async fn numeric_sell(
+    pool: &PgPool,
+    user_id: i32,
+    event_id: i32,
+    market_version: i64,
+) -> Result<NumericSellOutcome> {
+    with_optimistic_tx!(pool, tx, {
+        numeric_sell_transaction(&mut tx, user_id, event_id, market_version).await
+    })
+}
+
+async fn numeric_sell_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: i32,
+    event_id: i32,
+    market_version: i64,
+) -> Result<NumericSellOutcome> {
+    let market = fetch_numeric_market_row_locked(tx, event_id).await?;
+    if market.is_resolved {
+        return Err(anyhow!(ERR_MARKET_RESOLVED));
+    }
+    if market.is_closed {
+        return Err(anyhow!(ERR_MARKET_CLOSED));
+    }
+    if market_version != market.numeric_market_version {
+        return Ok(NumericSellOutcome::StaleVersion {
+            market_version: market.numeric_market_version,
+        });
+    }
+
+    // Consistent lock order with the categorical sell path: event/config row
+    // first (above), user position rows second.
+    let position_rows = sqlx::query(
+        "SELECT outcome_id, shares
+         FROM user_outcome_shares
+         WHERE user_id = $1 AND event_id = $2
+         FOR UPDATE",
+    )
+    .bind(user_id)
+    .bind(event_id)
+    .fetch_all(tx.as_mut())
+    .await?;
+
+    let bin_count = market.bin_count as usize;
+    let outcomes = fetch_outcome_state_rows(tx, event_id).await?;
+    if outcomes.len() != bin_count {
+        return Err(anyhow!(
+            "Numeric market outcome count ({}) does not match configured bin_count ({})",
+            outcomes.len(),
+            bin_count
+        ));
+    }
+
+    let index_of: std::collections::HashMap<i64, usize> = outcomes
+        .iter()
+        .enumerate()
+        .map(|(idx, o)| (o.outcome_id, idx))
+        .collect();
+    let mut holdings = vec![0.0f64; outcomes.len()];
+    for row in &position_rows {
+        let outcome_id: i64 = row.get("outcome_id");
+        let shares: f64 = row.get("shares");
+        if let Some(&idx) = index_of.get(&outcome_id) {
+            holdings[idx] = shares;
+        }
+    }
+
+    let total_shares: f64 = holdings.iter().sum();
+    if total_shares <= 0.0 {
+        return Err(anyhow!("No numeric position to sell for this event"));
+    }
+
+    let q: Vec<f64> = outcomes.iter().map(|o| o.q_value).collect();
+    // Δq = -shares vector, exactly (never derived from client input), so
+    // `holding + Δq == 0` exactly for every bin.
+    let delta_q: Vec<f64> = holdings.iter().map(|h| -h).collect();
+
+    let cost = crate::lmsr_multi_core::apply_vector_cost(&q, &delta_q, market.b_numeric);
+    if !cost.is_finite() {
+        return Err(anyhow!(
+            "Failed to compute numeric sell payout: non-finite cost"
+        ));
+    }
+    // LMSR cost is monotone increasing in each q_i, so removing mass can only
+    // credit money back (cost <= 0); `.max(0.0)` is a defensive float-noise
+    // guard, not expected to ever trigger in practice.
+    let payout = (-cost).max(0.0);
+    let payout_ledger = i64::try_from(
+        to_ledger_units(payout).map_err(|e| anyhow!("Invalid numeric sell payout: {}", e))?,
+    )
+    .map_err(|_| anyhow!("payout_ledger out of i64 range"))?;
+
+    let q_after: Vec<f64> = q.iter().zip(delta_q.iter()).map(|(qi, di)| qi + di).collect();
+    let outcome_ids: Vec<i64> = outcomes.iter().map(|o| o.outcome_id).collect();
+    let post_distribution = crate::lmsr_multi_core::probabilities(&q_after, market.b_numeric);
+
+    sqlx::query(
+        r#"
+        INSERT INTO event_outcome_states (event_id, outcome_id, q_value, prob, updated_at)
+        SELECT $1, t.outcome_id, t.q_value, t.prob, NOW()
+        FROM UNNEST($2::bigint[], $3::double precision[], $4::double precision[])
+            AS t(outcome_id, q_value, prob)
+        ON CONFLICT (event_id, outcome_id) DO UPDATE SET
+            q_value = EXCLUDED.q_value,
+            prob = EXCLUDED.prob,
+            updated_at = NOW()
+        "#,
+    )
+    .bind(event_id)
+    .bind(&outcome_ids)
+    .bind(&q_after)
+    .bind(&post_distribution)
+    .execute(tx.as_mut())
+    .await?;
+
+    // Canonicalize to exact 0 (per brief: "enforce holding + Δq >= -1e-9
+    // then canonicalize to exact 0") rather than trusting float subtraction.
+    sqlx::query(
+        "UPDATE user_outcome_shares
+         SET shares = 0,
+             version = version + 1,
+             updated_at = NOW()
+         WHERE user_id = $1 AND event_id = $2",
+    )
+    .bind(user_id)
+    .bind(event_id)
+    .execute(tx.as_mut())
+    .await?;
+
+    // Numeric per-bin staked_ledger is 0 by design (see numeric_trade_transaction);
+    // the real staked money for this position lives in distribution_trades, so
+    // unstake the user's net cost basis for this event here.
+    let net_stake_ledger: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(total_cost_ledger), 0)::BIGINT
+         FROM distribution_trades WHERE user_id = $1 AND event_id = $2",
+    )
+    .bind(user_id)
+    .bind(event_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+    let unstake_ledger = net_stake_ledger.max(0);
+
+    let rows =
+        DbAdapter::update_user_balance_ledger(tx, user_id, payout_ledger, -unstake_ledger).await?;
+    if rows == 0 {
+        return Err(anyhow!("Failed to update user balance"));
+    }
+
+    let new_market_version = market.numeric_market_version + 1;
+    sqlx::query("UPDATE numeric_market_config SET numeric_market_version = $1 WHERE event_id = $2")
+        .bind(new_market_version)
+        .bind(event_id)
+        .execute(tx.as_mut())
+        .await?;
+
+    let cost_rp = crate::lmsr_core::from_ledger_units(-(payout_ledger as i128));
+    sqlx::query("UPDATE events SET cumulative_stake = cumulative_stake + $1 WHERE id = $2")
+        .bind(cost_rp)
+        .bind(event_id)
+        .execute(tx.as_mut())
+        .await?;
+
+    let trade_id: i64 = sqlx::query_scalar(
+        r#"
+        INSERT INTO distribution_trades
+            (user_id, event_id, total_cost_ledger, alpha, target_distribution,
+             pre_market_version, post_market_version, hold_until)
+        VALUES
+            ($1, $2, $3, NULL, NULL, $4, $5, NULL)
+        RETURNING id
+        "#,
+    )
+    .bind(user_id)
+    .bind(event_id)
+    .bind(-payout_ledger)
+    .bind(market.numeric_market_version)
+    .bind(new_market_version)
+    .fetch_one(tx.as_mut())
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO distribution_trade_legs (trade_id, outcome_id, shares_delta)
+        SELECT $1, t.outcome_id, t.delta
+        FROM UNNEST($2::bigint[], $3::double precision[]) AS t(outcome_id, delta)
+        "#,
+    )
+    .bind(trade_id)
+    .bind(&outcome_ids)
+    .bind(&delta_q)
+    .execute(tx.as_mut())
+    .await?;
+
+    Ok(NumericSellOutcome::Executed(NumericSellResult {
+        event_id,
+        trade_id,
+        payout_ledger,
+        market_version: new_market_version,
+    }))
+}
+
 // Kelly criterion suggestion
 pub fn kelly_suggestion(
     config: &Config,
@@ -1411,6 +2021,48 @@ async fn resolve_event_by_outcome_transaction(
         .map_err(|_| anyhow!("payout_ledger out of i64 range"))?;
 
         DbAdapter::update_user_balance_ledger(tx, user_id, payout_ledger, -staked_ledger).await?;
+    }
+
+    // Numeric events keep per-bin staked_ledger at 0 by design (the joint
+    // trade cost lives on distribution_trades, not the outcome-share row —
+    // see numeric_trade_transaction), so the payout loop above pays winning
+    // shares correctly but never unstakes the money that was actually
+    // committed. Unstake each user's net numeric position for this event
+    // here, or resolution would leak permanently-staked RP. This is a no-op
+    // for binary/multiple_choice events, which never have distribution_trades
+    // rows.
+    let numeric_positions = sqlx::query(
+        r#"
+        SELECT user_id, COALESCE(SUM(total_cost_ledger), 0)::BIGINT AS net_stake_ledger
+        FROM distribution_trades
+        WHERE event_id = $1
+        GROUP BY user_id
+        "#,
+    )
+    .bind(event_id)
+    .fetch_all(tx.as_mut())
+    .await?;
+
+    for row in numeric_positions {
+        let position_user_id: i32 = row.get("user_id");
+        // Defensive clip (mirrors numeric_sell_transaction's unstake calc):
+        // a correctly-operating buy/sell history nets to >= 0, but never let
+        // a rounding artifact flip this negative and credit staked instead
+        // of debiting it.
+        let net_stake_ledger: i64 = row.get::<i64, _>("net_stake_ledger").max(0);
+        if net_stake_ledger == 0 {
+            continue;
+        }
+        let rows_affected =
+            DbAdapter::update_user_balance_ledger(tx, position_user_id, 0, -net_stake_ledger)
+                .await?;
+        if rows_affected == 0 {
+            return Err(anyhow!(
+                "Failed to unstake numeric position for user {} on event {} (would drive rp_staked_ledger negative)",
+                position_user_id,
+                event_id
+            ));
+        }
     }
 
     sqlx::query("DELETE FROM user_outcome_shares WHERE event_id = $1")
@@ -1908,12 +2560,43 @@ async fn verify_staked_invariant_transaction(
             .fetch_one(tx.as_mut())
             .await?;
 
-    let total_staked_ledger: i64 = sqlx::query_scalar(
+    let binary_staked_ledger: i64 = sqlx::query_scalar(
         "SELECT COALESCE(SUM(total_staked_ledger), 0)::BIGINT FROM user_shares WHERE user_id = $1",
     )
     .bind(user_id)
     .fetch_one(tx.as_mut())
     .await?;
+
+    // Additive term: multiple_choice/numeric per-outcome staked_ledger.
+    // Numeric bins keep this at 0 by design (their joint cost lives on
+    // distribution_trades instead — see numeric_trade_transaction), so this
+    // term only actually contributes for multiple_choice positions.
+    let outcome_staked_ledger: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(staked_ledger), 0)::BIGINT FROM user_outcome_shares WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+
+    // Additive term: numeric distribution-trade net cost, for still-open
+    // (unresolved) events only. A resolved event's numeric position is
+    // unstaked at resolution time (resolve_event_by_outcome_transaction), so
+    // its distribution_trades history must stop contributing here once the
+    // event resolves — filtering to `e.outcome IS NULL` keeps this true both
+    // pre- and post-resolution.
+    let numeric_staked_ledger: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COALESCE(SUM(dt.total_cost_ledger), 0)::BIGINT
+        FROM distribution_trades dt
+        JOIN events e ON e.id = dt.event_id
+        WHERE dt.user_id = $1 AND e.outcome IS NULL
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+
+    let total_staked_ledger = binary_staked_ledger + outcome_staked_ledger + numeric_staked_ledger;
 
     let is_valid = user_staked_ledger == total_staked_ledger;
     let diff_ledger = (user_staked_ledger as i128 - total_staked_ledger as i128).abs();
@@ -1936,6 +2619,9 @@ async fn verify_staked_invariant_transaction(
         "details": {
             "user_staked_ledger": user_staked_ledger,
             "shares_staked_ledger": total_staked_ledger,
+            "binary_staked_ledger": binary_staked_ledger,
+            "outcome_staked_ledger": outcome_staked_ledger,
+            "numeric_staked_ledger": numeric_staked_ledger,
             "user_staked": user_staked,
             "shares_staked": shares_staked,
             "difference_ledger": diff_ledger

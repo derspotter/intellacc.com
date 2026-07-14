@@ -204,6 +204,18 @@ async fn main() -> anyhow::Result<()> {
             post(sell_outcome_shares_endpoint),
         )
         .route(
+            "/events/:id/numeric-quote",
+            get(numeric_quote_endpoint),
+        )
+        .route(
+            "/events/:id/numeric-trade",
+            post(numeric_trade_endpoint),
+        )
+        .route(
+            "/events/:id/numeric-sell",
+            post(numeric_sell_endpoint),
+        )
+        .route(
             "/events/:id/market-resolve",
             post(resolve_market_event_endpoint),
         )
@@ -260,6 +272,9 @@ async fn main() -> anyhow::Result<()> {
     println!("  GET /events/:id/kelly - Get Kelly criterion suggestion");
     println!("  POST /events/:id/sell - Sell shares back to market");
     println!("  POST /events/:id/sell-outcome - Sell shares of an N-outcome market outcome");
+    println!("  GET /events/:id/numeric-quote - Read-only quote for a numeric-market target distribution");
+    println!("  POST /events/:id/numeric-trade - Trade toward a target distribution on a numeric market");
+    println!("  POST /events/:id/numeric-sell - Sell a user's entire numeric-market position");
     println!("  POST /events/:id/market-resolve - Resolve market event");
     println!("  GET /events/:id/shares - Get user's shares for event");
     println!("  POST /lmsr/verify-balance-invariant - Verify balance invariant");
@@ -1125,6 +1140,264 @@ async fn sell_outcome_shares_endpoint(
             }
             Err(internal_error(&format!("Outcome sell error: {}", msg)))
         }
+    }
+}
+
+// ============================================================================
+// NUMERIC MARKET ENDPOINTS (50-bin dense-vector LMSR trading)
+// ============================================================================
+
+/// Parse the `target` query/body param into `Vec<f64>`. Shape validation
+/// (exact bin_count, finite, >= 0, sum > 0) happens in lmsr_api once the
+/// market's configured bin_count is known; this only parses the wire format.
+fn parse_target_query_param(
+    params: &HashMap<String, String>,
+) -> Result<Vec<f64>, (axum::http::StatusCode, Json<Value>)> {
+    let raw = params
+        .get("target")
+        .ok_or_else(|| bad_request_error("Missing target: comma-separated floats required"))?;
+    let mut target = Vec::new();
+    for part in raw.split(',') {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            return Err(bad_request_error(
+                "Invalid target: empty entry in comma-separated list",
+            ));
+        }
+        let value: f64 = trimmed
+            .parse()
+            .map_err(|_| bad_request_error("Invalid target: all entries must be numbers"))?;
+        target.push(value);
+    }
+    Ok(target)
+}
+
+/// Shared error-message mapping for the numeric market endpoints (400 vs 500).
+/// The two "expected rejection" cases (stale market_version, cost exceeding
+/// max_cost_ledger) never reach here — they come back as typed `Ok(..)`
+/// variants from lmsr_api and are mapped to 409 directly by each handler.
+fn numeric_error_response(e: &anyhow::Error) -> (axum::http::StatusCode, Json<Value>) {
+    let msg = e.to_string();
+    let msg_lower = msg.to_lowercase();
+    if msg_lower.contains("market resolved") {
+        return bad_request_error("Market resolved");
+    }
+    if msg_lower.contains("market closed") {
+        return bad_request_error("Market closed");
+    }
+    // Mandate 6: the 40*b log-odds span clamp maps to a human-readable 400.
+    if msg_lower.contains("log-odds span") {
+        return bad_request_error(
+            "Market too extreme or target too concentrated for the current liquidity; reduce the requested move",
+        );
+    }
+    if msg_lower.contains("insufficient rp balance") {
+        return bad_request_error("Insufficient RP balance");
+    }
+    if msg_lower.contains("no numeric market configured")
+        || msg_lower.contains("bin_count")
+        || msg_lower.contains("target must")
+        || msg_lower.contains("target entries")
+        || msg_lower.contains("budget_ledger must")
+        || msg_lower.contains("max_cost_ledger must")
+        || msg_lower.contains("rounds to zero")
+        || msg_lower.contains("no numeric position")
+    {
+        return bad_request_error(&msg);
+    }
+    internal_error(&format!("Numeric market error: {}", msg))
+}
+
+// Read-only quote for a target distribution + budget on a numeric market.
+async fn numeric_quote_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    Query(params): Query<HashMap<String, String>>,
+) -> ApiResult<Value> {
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+
+    let budget_ledger = params
+        .get("budget_ledger")
+        .and_then(|s| s.parse::<i64>().ok())
+        .ok_or_else(|| {
+            bad_request_error("Missing or invalid budget_ledger: must be an integer")
+        })?;
+    if budget_ledger <= 0 {
+        return Err(bad_request_error("Invalid budget_ledger: must be positive"));
+    }
+
+    let target = parse_target_query_param(&params)?;
+
+    match lmsr_api::get_numeric_quote(&app_state.db, event_id, budget_ledger, target).await {
+        Ok(quote) => Ok(Json(json!(quote))),
+        Err(e) => Err(numeric_error_response(&e)),
+    }
+}
+
+// Trade toward a target distribution on a numeric market.
+async fn numeric_trade_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+
+    let user_id = payload
+        .get("user_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| {
+            bad_request_error("Missing or invalid user_id: must be a positive integer")
+        })? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
+
+    let target_values = payload
+        .get("target")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| bad_request_error("Missing or invalid target: must be an array of numbers"))?;
+    let mut target = Vec::with_capacity(target_values.len());
+    for entry in target_values {
+        let value = entry
+            .as_f64()
+            .ok_or_else(|| bad_request_error("Invalid target: all entries must be numbers"))?;
+        target.push(value);
+    }
+
+    let budget_ledger = payload
+        .get("budget_ledger")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| {
+            bad_request_error("Missing or invalid budget_ledger: must be an integer")
+        })?;
+    if budget_ledger <= 0 {
+        return Err(bad_request_error("Invalid budget_ledger: must be positive"));
+    }
+
+    let max_cost_ledger = payload
+        .get("max_cost_ledger")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| {
+            bad_request_error("Missing or invalid max_cost_ledger: must be an integer")
+        })?;
+    if max_cost_ledger <= 0 {
+        return Err(bad_request_error(
+            "Invalid max_cost_ledger: must be positive",
+        ));
+    }
+
+    let market_version = payload
+        .get("market_version")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| {
+            bad_request_error("Missing or invalid market_version: must be an integer")
+        })?;
+    if market_version < 0 {
+        return Err(bad_request_error(
+            "Invalid market_version: must be non-negative",
+        ));
+    }
+
+    match lmsr_api::numeric_trade(
+        &app_state.db,
+        user_id,
+        event_id,
+        target,
+        budget_ledger,
+        max_cost_ledger,
+        market_version,
+    )
+    .await
+    {
+        Ok(lmsr_api::NumericTradeOutcome::Executed(result)) => {
+            invalidate_and_broadcast(
+                &app_state,
+                "numeric_market_traded",
+                json!({
+                    "event_id": event_id,
+                    "user_id": user_id,
+                    "cost_ledger": result.cost_ledger,
+                    "market_version": result.market_version
+                }),
+            );
+            Ok(Json(json!(result)))
+        }
+        Ok(lmsr_api::NumericTradeOutcome::StaleVersion(quote)) => Err((
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "market_version is stale; retry with the fresh quote",
+                "quote": quote
+            })),
+        )),
+        Ok(lmsr_api::NumericTradeOutcome::CostExceeded(quote)) => Err((
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "recomputed cost exceeds max_cost_ledger; retry with the fresh quote",
+                "quote": quote
+            })),
+        )),
+        Err(e) => Err(numeric_error_response(&e)),
+    }
+}
+
+// Sell a user's entire numeric-market position.
+async fn numeric_sell_endpoint(
+    State(app_state): State<AppState>,
+    Path(event_id): Path<i32>,
+    ExtractJson(payload): ExtractJson<serde_json::Value>,
+) -> ApiResult<Value> {
+    if event_id <= 0 {
+        return Err(bad_request_error("Invalid event_id: must be positive"));
+    }
+
+    let user_id = payload
+        .get("user_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| {
+            bad_request_error("Missing or invalid user_id: must be a positive integer")
+        })? as i32;
+    if user_id <= 0 {
+        return Err(bad_request_error("Invalid user_id: must be positive"));
+    }
+
+    let market_version = payload
+        .get("market_version")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| {
+            bad_request_error("Missing or invalid market_version: must be an integer")
+        })?;
+    if market_version < 0 {
+        return Err(bad_request_error(
+            "Invalid market_version: must be non-negative",
+        ));
+    }
+
+    match lmsr_api::numeric_sell(&app_state.db, user_id, event_id, market_version).await {
+        Ok(lmsr_api::NumericSellOutcome::Executed(result)) => {
+            invalidate_and_broadcast(
+                &app_state,
+                "numeric_market_sold",
+                json!({
+                    "event_id": event_id,
+                    "user_id": user_id,
+                    "payout_ledger": result.payout_ledger,
+                    "market_version": result.market_version
+                }),
+            );
+            Ok(Json(json!(result)))
+        }
+        Ok(lmsr_api::NumericSellOutcome::StaleVersion { market_version }) => Err((
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "market_version is stale; retry with the current version",
+                "market_version": market_version
+            })),
+        )),
+        Err(e) => Err(numeric_error_response(&e)),
     }
 }
 

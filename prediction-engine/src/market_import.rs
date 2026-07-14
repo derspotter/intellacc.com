@@ -413,7 +413,14 @@ async fn seed_outcomes_if_missing(
     market: &ImportedMarket,
 ) -> Result<()> {
     let event_type = normalize_event_type(&market.event_type);
-    if event_type != "multiple_choice" && event_type != "numeric" {
+    // Numeric questions never populate `market.outcomes` (Task 1: outcomes
+    // stay empty for numeric, bins are seeded here instead), so they need
+    // their own path rather than falling into the multiple_choice branch
+    // below (which requires >= 2 pre-supplied outcomes).
+    if event_type == "numeric" {
+        return seed_numeric_bins_if_missing(pool, event_id, market).await;
+    }
+    if event_type != "multiple_choice" {
         return Ok(());
     }
     if market.outcomes.len() < 2 {
@@ -504,6 +511,169 @@ async fn seed_outcomes_if_missing(
         .execute(tx.as_mut())
         .await?;
     }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Number of equal-width bins seeded for a Phase B numeric market.
+const NUMERIC_BIN_COUNT: usize = 50;
+
+/// Seed a 50-bin LMSR market for a numeric event, if (and only if) its shape
+/// is one Phase B actually supports: a closed range with no zero_point
+/// (log/logit transform), both bounds closed, unresolved, and not already
+/// configured. Any other numeric shape (open bounds, a zero_point, a missing
+/// range) is skipped silently and the event stays hidden from listings per
+/// Task 2 — this is intentional, not an error, since Metaculus sends numeric
+/// shapes Phase B does not attempt to bin.
+async fn seed_numeric_bins_if_missing(
+    pool: &PgPool,
+    event_id: i32,
+    market: &ImportedMarket,
+) -> Result<()> {
+    if market.numeric_zero_point.is_some() {
+        return Ok(());
+    }
+    if market.numeric_open_lower || market.numeric_open_upper {
+        return Ok(());
+    }
+    let (Some(range_min), Some(range_max)) =
+        (market.numeric_range_min, market.numeric_range_max)
+    else {
+        return Ok(());
+    };
+    if !range_min.is_finite() || !range_max.is_finite() || range_max <= range_min {
+        return Ok(());
+    }
+
+    // Already configured (bins previously seeded) — leave untouched.
+    let existing_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint FROM event_outcomes WHERE event_id = $1 AND is_active = TRUE",
+    )
+    .bind(event_id)
+    .fetch_one(pool)
+    .await?;
+    if existing_count > 0 {
+        return Ok(());
+    }
+
+    let event_row = sqlx::query("SELECT outcome FROM events WHERE id = $1")
+        .bind(event_id)
+        .fetch_optional(pool)
+        .await?;
+    let Some(row) = event_row else {
+        return Ok(());
+    };
+    let resolved_outcome: Option<String> = row.get("outcome");
+    if resolved_outcome.is_some() {
+        return Ok(());
+    }
+
+    let bins = crate::lmsr_multi_core::linear_bins(
+        range_min,
+        range_max,
+        NUMERIC_BIN_COUNT,
+        market.numeric_unit.as_deref(),
+    );
+    if bins.len() != NUMERIC_BIN_COUNT {
+        // linear_bins returns an empty Vec (never panics) for degenerate
+        // input; treat that defensively as "unsupported shape, skip".
+        return Ok(());
+    }
+
+    let subsidy_rp: f64 = env::var("NUMERIC_MAX_SUBSIDY_RP")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(3466.0);
+    let b_numeric = subsidy_rp / (NUMERIC_BIN_COUNT as f64).ln();
+
+    let default_prob = 1.0 / NUMERIC_BIN_COUNT as f64;
+
+    let mut tx = pool.begin().await?;
+
+    sqlx::query(
+        r#"
+        UPDATE events
+        SET event_type = 'numeric',
+            resolution_outcome_id = NULL,
+            market_prob = $1,
+            q_yes = 0.0,
+            q_no = 0.0,
+            updated_at = NOW()
+        WHERE id = $2
+        "#,
+    )
+    .bind(default_prob)
+    .bind(event_id)
+    .execute(tx.as_mut())
+    .await?;
+
+    // Defensive: mirror the multiple_choice branch's clean-slate behavior in
+    // case a previous partial/aborted seed left rows behind.
+    sqlx::query("DELETE FROM event_outcome_states WHERE event_id = $1")
+        .bind(event_id)
+        .execute(tx.as_mut())
+        .await?;
+    sqlx::query("DELETE FROM event_outcomes WHERE event_id = $1")
+        .bind(event_id)
+        .execute(tx.as_mut())
+        .await?;
+
+    for (idx, (lower, upper, label)) in bins.iter().enumerate() {
+        let outcome_key = format!("bin_{idx}");
+        let outcome_id: i64 = sqlx::query_scalar(
+            r#"
+            INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id
+            "#,
+        )
+        .bind(event_id)
+        .bind(&outcome_key)
+        .bind(label)
+        .bind(idx as i32)
+        .bind(lower)
+        .bind(upper)
+        .fetch_one(tx.as_mut())
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO event_outcome_states (event_id, outcome_id, q_value, prob, updated_at)
+            VALUES ($1, $2, 0.0, $3, NOW())
+            ON CONFLICT (event_id, outcome_id)
+            DO UPDATE SET
+                q_value = EXCLUDED.q_value,
+                prob = EXCLUDED.prob,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(event_id)
+        .bind(outcome_id)
+        .bind(default_prob)
+        .execute(tx.as_mut())
+        .await?;
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO numeric_market_config
+            (event_id, range_min, range_max, zero_point, open_lower_bound, open_upper_bound,
+             unit, bin_count, transform, binning_version, b_numeric, numeric_market_version)
+        VALUES
+            ($1, $2, $3, NULL, FALSE, FALSE, $4, $5, 'linear', 1, $6, 0)
+        ON CONFLICT (event_id) DO NOTHING
+        "#,
+    )
+    .bind(event_id)
+    .bind(range_min)
+    .bind(range_max)
+    .bind(&market.numeric_unit)
+    .bind(NUMERIC_BIN_COUNT as i32)
+    .bind(b_numeric)
+    .execute(tx.as_mut())
+    .await?;
 
     tx.commit().await?;
     Ok(())
