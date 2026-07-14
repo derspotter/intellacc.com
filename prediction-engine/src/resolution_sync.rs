@@ -7,8 +7,14 @@
 // v1 scope: binary events on manifold / metaculus / polymarket, plus
 // multiple_choice events on manifold / metaculus (label-matched against
 // event_outcomes, settled through lmsr_api::resolve_event_by_outcome_id).
-// Numeric and voided/annulled markets are counted but skipped — numeric
-// needs bin mapping (Task 7), voided needs a refund path.
+// numeric events (Task 7): resolved value mapped to its winning bin
+// (lower_bound <= v < upper_bound, final bin inclusive on upper) via
+// pick_winning_bin, settled through the same resolve_event_by_outcome_id.
+// Numeric markets are Metaculus-only today and Metaculus's resolution field
+// is unreadable at our token's access level (see sync_numeric_resolutions),
+// so this currently finds zero live candidates — the machinery is in place
+// for when/if that changes. Voided/annulled markets are counted but
+// skipped — that needs a refund path.
 
 use anyhow::Result;
 use reqwest::Client;
@@ -32,6 +38,11 @@ pub struct ResolutionStats {
     pub mc_checked: u32,
     pub mc_resolved: u32,
     pub mc_no_label_match: u32,
+    // numeric sub-counts (rolled into the totals above too, same convention
+    // as the mc_* fields).
+    pub numeric_checked: u32,
+    pub numeric_resolved: u32,
+    pub numeric_no_bin_match: u32,
 }
 
 impl ResolutionStats {
@@ -45,6 +56,9 @@ impl ResolutionStats {
             "mc_checked": self.mc_checked,
             "mc_resolved": self.mc_resolved,
             "mc_no_label_match": self.mc_no_label_match,
+            "numeric_checked": self.numeric_checked,
+            "numeric_resolved": self.numeric_resolved,
+            "numeric_no_bin_match": self.numeric_no_bin_match,
         })
     }
 }
@@ -130,11 +144,13 @@ pub async fn sync_resolutions(pool: &PgPool) -> Result<ResolutionStats> {
     }
 
     sync_mc_resolutions(pool, &client, &mut stats).await?;
+    sync_numeric_resolutions(pool, &client, &mut stats).await?;
 
     println!(
-        "🔎 Resolution sync done: {} checked, {} resolved, {} still open, {} unsupported, {} errors ({} MC checked, {} MC resolved, {} MC no-label-match)",
+        "🔎 Resolution sync done: {} checked, {} resolved, {} still open, {} unsupported, {} errors ({} MC checked, {} MC resolved, {} MC no-label-match; {} numeric checked, {} numeric resolved, {} numeric no-bin-match)",
         stats.checked, stats.resolved, stats.still_open, stats.unsupported, stats.errors,
-        stats.mc_checked, stats.mc_resolved, stats.mc_no_label_match
+        stats.mc_checked, stats.mc_resolved, stats.mc_no_label_match,
+        stats.numeric_checked, stats.numeric_resolved, stats.numeric_no_bin_match
     );
     Ok(stats)
 }
@@ -251,6 +267,146 @@ async fn sync_mc_resolutions(
                 stats.errors += 1;
                 println!(
                     "⚠️ MC resolution lookup failed ({}: {}): {}",
+                    source, external_id, err
+                );
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(REQUEST_DELAY_MS)).await;
+    }
+
+    Ok(())
+}
+
+// Numeric resolution pass. Same shape as the binary/MC loops above, but the
+// provider verdict carries a winning *value* (f64) instead of a bool/label,
+// which pick_winning_bin maps to the event_outcomes row whose bin contains
+// it, then settles through the same lmsr_api::resolve_event_by_outcome_id
+// the MC pass uses (it already does the numeric-safe distribution_trades
+// unstake as of Task 6 — no need to duplicate that here).
+async fn sync_numeric_resolutions(
+    pool: &PgPool,
+    client: &Client,
+    stats: &mut ResolutionStats,
+) -> Result<()> {
+    let rows = sqlx::query(
+        "SELECT e.id, s.source, s.external_id
+         FROM events e
+         JOIN event_external_sources s ON s.event_id = e.id
+         WHERE e.outcome IS NULL
+           AND e.closing_date <= NOW()
+           AND e.event_type = 'numeric'
+           -- Verified live 2026-07-14 (Task 7): sampled 19 resolved numeric
+           -- posts from /api/posts/?statuses=resolved plus a direct detail
+           -- fetch of one of them (post 44351 / question 44362) -
+           -- question.resolution is null in every case at our token's
+           -- access level, the same restriction already documented above
+           -- for binary and multiple_choice questions. Skip polling
+           -- metaculus here for the same reason: it would only crowd the
+           -- oldest-first batch. Numeric markets are Metaculus-only today
+           -- anyway (manifold's PSEUDO_NUMERIC rows never populate
+           -- numeric_range_min/max on import - see market_import.rs's
+           -- fetch_manifold_markets - so they never become
+           -- event_type='numeric'), so this filter currently leaves the
+           -- batch empty. Re-enable/extend if a source exposes numeric
+           -- resolutions.
+           AND s.source != 'metaculus'
+         ORDER BY e.closing_date ASC
+         LIMIT $1",
+    )
+    .bind(BATCH_LIMIT)
+    .fetch_all(pool)
+    .await?;
+
+    println!(
+        "🔎 Numeric resolution sync: checking {} past-close unresolved numeric events",
+        rows.len()
+    );
+
+    for row in rows {
+        let event_id: i32 = row.get("id");
+        let source: String = row.get("source");
+        let external_id: String = row.get("external_id");
+        stats.checked += 1;
+        stats.numeric_checked += 1;
+
+        let verdict = match source.as_str() {
+            "metaculus" => metaculus_numeric_resolution(client, &external_id).await,
+            _ => {
+                stats.unsupported += 1;
+                continue;
+            }
+        };
+
+        match verdict {
+            Ok(NumericVerdict::Resolved(value)) => {
+                let bins = sqlx::query(
+                    "SELECT id, lower_bound, upper_bound FROM event_outcomes
+                     WHERE event_id = $1 AND is_active = TRUE
+                     ORDER BY sort_order ASC, id ASC",
+                )
+                .bind(event_id)
+                .fetch_all(pool)
+                .await?
+                .into_iter()
+                .map(|r| {
+                    (
+                        r.get::<i64, _>("id"),
+                        r.get::<Option<f64>, _>("lower_bound"),
+                        r.get::<Option<f64>, _>("upper_bound"),
+                    )
+                })
+                .collect::<Vec<_>>();
+
+                match pick_winning_bin(&bins, value) {
+                    Some(outcome_id) => {
+                        match crate::lmsr_api::resolve_event_by_outcome_id(
+                            pool,
+                            event_id,
+                            outcome_id,
+                            Some(value),
+                        )
+                        .await
+                        {
+                            Ok(()) => {
+                                stats.resolved += 1;
+                                stats.numeric_resolved += 1;
+                                println!(
+                                    "✅ Resolved numeric event {} ({}: {}) -> outcome {} (value {})",
+                                    event_id, source, external_id, outcome_id, value
+                                );
+                            }
+                            Err(err) => {
+                                stats.errors += 1;
+                                println!(
+                                    "⚠️ Numeric settle failed for event {}: {}",
+                                    event_id, err
+                                );
+                            }
+                        }
+                    }
+                    None => {
+                        stats.numeric_no_bin_match += 1;
+                        tracing::warn!(
+                            event_id,
+                            resolution_value = value,
+                            source = %source,
+                            external_id = %external_id,
+                            "Numeric resolution sync: no event_outcomes bin contains provider's resolved value"
+                        );
+                        println!(
+                            "⚠️ No matching bin for numeric event {} ({}: {}), resolved value {} - leaving for admin",
+                            event_id, source, external_id, value
+                        );
+                    }
+                }
+            }
+            Ok(NumericVerdict::StillOpen) => stats.still_open += 1,
+            Ok(NumericVerdict::Unsupported) => stats.unsupported += 1,
+            Err(err) => {
+                stats.errors += 1;
+                println!(
+                    "⚠️ Numeric resolution lookup failed ({}: {}): {}",
                     source, external_id, err
                 );
             }
@@ -419,6 +575,78 @@ async fn metaculus_mc_resolution(client: &Client, external_id: &str) -> Result<M
     }
 }
 
+enum NumericVerdict {
+    // Provider's resolved value, verbatim (before bin-mapping).
+    Resolved(f64),
+    StillOpen,
+    // Resolved on the provider but not a plain numeric value (Metaculus
+    // annulled/ambiguous, or any other non-numeric resolution string).
+    Unsupported,
+}
+
+async fn metaculus_numeric_resolution(client: &Client, external_id: &str) -> Result<NumericVerdict> {
+    let token = env::var("METACULUS_API_TOKEN")
+        .map_err(|_| anyhow::anyhow!("METACULUS_API_TOKEN not set"))?;
+    let url = format!("https://www.metaculus.com/api/posts/{}/", external_id);
+    let body: Value = client
+        .get(&url)
+        .header("Authorization", format!("Token {}", token))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    // Kept for parity/forward compatibility, but the SQL query above
+    // excludes metaculus from the numeric batch: verified live 2026-07-14
+    // (Task 7) that question.resolution is null here too, at our token's
+    // access level, for genuinely resolved numeric posts (sampled 19,
+    // cross-checked one via the detail endpoint).
+    match body["question"]["resolution"].as_str() {
+        None => Ok(NumericVerdict::StillOpen),
+        Some("annulled") | Some("ambiguous") => Ok(NumericVerdict::Unsupported),
+        Some(raw) => match raw.parse::<f64>() {
+            Ok(value) if value.is_finite() => Ok(NumericVerdict::Resolved(value)),
+            _ => Ok(NumericVerdict::Unsupported),
+        },
+    }
+}
+
+/// Winning bin for a resolved numeric market's value: the `event_outcomes`
+/// row (already ordered by `sort_order ASC, id ASC`, matching
+/// `lmsr_api::resolve_numeric_event`'s own bin lookup) whose
+/// `[lower_bound, upper_bound)` contains `value` — except the *last* row in
+/// that ordering, which is closed on the upper end too, so `value ==
+/// range_max` resolves into the final bin instead of falling off the edge.
+/// A bin with a missing bound is treated as unbounded on that side (numeric
+/// bins always populate both in practice, but this mirrors
+/// `resolve_numeric_event`'s own defensive `.unwrap_or(true)`). Out-of-range
+/// or non-finite values, an empty bin list, and ambiguous matches
+/// (overlapping bins - shouldn't exist for well-formed data) all fail safe
+/// to `None`, the same "warn + skip" contract `match_outcome_label` uses for
+/// MC.
+fn pick_winning_bin(bins: &[(i64, Option<f64>, Option<f64>)], value: f64) -> Option<i64> {
+    if !value.is_finite() || bins.is_empty() {
+        return None;
+    }
+    let last_idx = bins.len() - 1;
+
+    let mut matches = bins.iter().enumerate().filter_map(|(idx, (id, lower, upper))| {
+        let lower_ok = lower.map(|v| value >= v).unwrap_or(true);
+        let upper_ok = upper
+            .map(|v| if idx == last_idx { value <= v } else { value < v })
+            .unwrap_or(true);
+        (lower_ok && upper_ok).then_some(*id)
+    });
+
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        None
+    } else {
+        Some(first)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,5 +701,78 @@ mod tests {
         ];
         assert_eq!(match_outcome_label(&ambiguous, "Team A"), None);
         assert_eq!(match_outcome_label(&ambiguous, "no"), Some(12));
+    }
+
+    // Three contiguous, non-overlapping bins: [0,10), [10,20), [20,30] -
+    // the last one closed on both ends, matching linear_bins'/
+    // seed_numeric_bins_if_missing's real shape.
+    fn bins() -> Vec<(i64, Option<f64>, Option<f64>)> {
+        vec![
+            (1, Some(0.0), Some(10.0)),
+            (2, Some(10.0), Some(20.0)),
+            (3, Some(20.0), Some(30.0)),
+        ]
+    }
+
+    #[test]
+    fn pick_winning_bin_range_min_goes_to_first_bin() {
+        assert_eq!(pick_winning_bin(&bins(), 0.0), Some(1));
+    }
+
+    #[test]
+    fn pick_winning_bin_interior_value_goes_to_its_bin() {
+        assert_eq!(pick_winning_bin(&bins(), 5.0), Some(1));
+        assert_eq!(pick_winning_bin(&bins(), 15.0), Some(2));
+        assert_eq!(pick_winning_bin(&bins(), 25.0), Some(3));
+    }
+
+    #[test]
+    fn pick_winning_bin_exact_boundary_goes_to_the_higher_bin() {
+        // lower_bound <= v < upper_bound: a value exactly on the shared edge
+        // between two bins belongs to the bin whose *lower* bound equals it,
+        // not the one whose upper bound equals it.
+        assert_eq!(pick_winning_bin(&bins(), 10.0), Some(2));
+        assert_ne!(pick_winning_bin(&bins(), 10.0), Some(1));
+        assert_eq!(pick_winning_bin(&bins(), 20.0), Some(3));
+        assert_ne!(pick_winning_bin(&bins(), 20.0), Some(2));
+    }
+
+    #[test]
+    fn pick_winning_bin_range_max_is_inclusive_on_the_final_bin() {
+        // Only the last bin is closed on its upper end - v == range_max
+        // resolves instead of falling off the edge.
+        assert_eq!(pick_winning_bin(&bins(), 30.0), Some(3));
+    }
+
+    #[test]
+    fn pick_winning_bin_out_of_range_returns_none() {
+        assert_eq!(pick_winning_bin(&bins(), -0.001), None);
+        assert_eq!(pick_winning_bin(&bins(), 30.001), None);
+    }
+
+    #[test]
+    fn pick_winning_bin_unparseable_or_non_finite_returns_none() {
+        assert_eq!(pick_winning_bin(&bins(), f64::NAN), None);
+        assert_eq!(pick_winning_bin(&bins(), f64::INFINITY), None);
+        assert_eq!(pick_winning_bin(&bins(), f64::NEG_INFINITY), None);
+    }
+
+    #[test]
+    fn pick_winning_bin_empty_bins_returns_none() {
+        assert_eq!(pick_winning_bin(&[], 5.0), None);
+    }
+
+    #[test]
+    fn pick_winning_bin_ambiguous_overlapping_bins_returns_none() {
+        // Two active bins both claim value 5.0 - shouldn't happen for
+        // well-formed data, but must fail safe (None) rather than silently
+        // picking whichever row came first.
+        let overlapping = vec![
+            (1, Some(0.0), Some(10.0)),
+            (2, Some(3.0), Some(8.0)),
+        ];
+        assert_eq!(pick_winning_bin(&overlapping, 5.0), None);
+        // Outside the overlap, still resolves normally.
+        assert_eq!(pick_winning_bin(&overlapping, 9.0), Some(1));
     }
 }
