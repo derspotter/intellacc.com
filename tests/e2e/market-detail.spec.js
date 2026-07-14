@@ -163,4 +163,24 @@ test.describe('market detail view', () => {
     await expect(page).toHaveURL(/#predictions\/markets$/);
     await expect(page.getByText('Open Questions')).toBeVisible();
   });
+
+  test('placing a trade updates the header and activity feed', async ({ page }) => {
+    await login(page);
+    await page.goto(`${BASE}/#predictions/${eventIds.binary}`);
+
+    const probText = page.locator('.market-detail-prob');
+    await expect(probText).toBeVisible({ timeout: 20000 });
+    const before = await probText.textContent();
+
+    const card = page.locator('.market-detail .event-card');
+    await card.locator('.direction-btn.yes-btn').click();
+    await card.locator('.stake-input').fill('100');
+    await card.getByRole('button', { name: /place stake/i }).click();
+
+    // onTrade refetches event + trades: header prob and activity both move.
+    await expect
+      .poll(async () => probText.textContent(), { timeout: 15000 })
+      .not.toBe(before);
+    await expect(page.locator('.market-detail-trade-row').first()).toContainText('user1');
+  });
 });
