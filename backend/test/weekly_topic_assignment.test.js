@@ -73,4 +73,46 @@ describe('Topic-aware weekly assignment', () => {
     const row = await db.query('SELECT 1 FROM weekly_user_assignments WHERE user_id = $1', [lurker.id]);
     expect(row.rows).toHaveLength(0);
   });
+
+  test('an unconfigured multiple_choice event (no outcomes) is never candidate-eligible, even in-topic', async () => {
+    // Own user/topic sandbox so this doesn't perturb the shared beforeAll fixture's
+    // "assigns the single in-topic event" assertion above.
+    const soloUser = await createUser('weeklysolo');
+    cleanup.userIds.push(soloUser.id);
+
+    const soloTopic = await db.query(
+      `INSERT INTO topics (name, slug, is_user_facing) VALUES ('WeeklySoloTest' || floor(random()*1e9), 'weekly-solo-test-' || floor(random()*1e9), TRUE) RETURNING id`
+    );
+    const soloTopicId = soloTopic.rows[0].id;
+    cleanup.topicIds.push(soloTopicId);
+
+    await db.query('DELETE FROM user_topics WHERE user_id = $1', [soloUser.id]);
+    await db.query(`INSERT INTO user_topics (user_id, topic_id) VALUES ($1, $2)`, [soloUser.id, soloTopicId]);
+
+    const unconfiguredMcEvent = await db.query(
+      `INSERT INTO events (title, closing_date, market_prob, event_type)
+       VALUES ('weekly unconfigured mc event', NOW() + INTERVAL '30 days', 0.5, 'multiple_choice') RETURNING id`
+    );
+    const unconfiguredEventId = unconfiguredMcEvent.rows[0].id;
+    cleanup.eventIds.push(unconfiguredEventId);
+    await db.query(`INSERT INTO event_topics (event_id, topic_id, source) VALUES ($1, $2, 'test')`, [unconfiguredEventId, soloTopicId]);
+
+    await weeklyAssignmentService.assignWeeklyPredictions();
+
+    const assignedRow = await db.query(
+      'SELECT event_id FROM weekly_user_assignments WHERE user_id = $1 ORDER BY id DESC LIMIT 1',
+      [soloUser.id]
+    );
+    if (assignedRow.rows.length) {
+      expect(assignedRow.rows[0].event_id).not.toBe(unconfiguredEventId);
+    }
+
+    // The event must never appear as anyone's assignment, since it's excluded
+    // from candidate selection entirely (not just deprioritized for this user).
+    const anyAssignment = await db.query(
+      'SELECT 1 FROM weekly_user_assignments WHERE event_id = $1',
+      [unconfiguredEventId]
+    );
+    expect(anyAssignment.rows).toHaveLength(0);
+  });
 });

@@ -371,6 +371,18 @@ ${TOPICS_COLUMN}
   // Junk-flagged events never appear in listings (still reachable by id).
   where.push('hidden_at IS NULL');
 
+  // Untradeable dead ends: non-binary events (multiple_choice/numeric/date/discrete)
+  // that lack a configured outcome set never appear in listings (still reachable by id).
+  where.push(`(
+    event_type = 'binary'
+    OR EXISTS (
+      SELECT 1 FROM event_outcomes eo
+      WHERE eo.event_id = events.id AND eo.is_active = TRUE
+      GROUP BY eo.event_id
+      HAVING COUNT(*) >= 2
+    )
+  )`);
+
   if (search && search.trim()) {
     params.push(`%${search.trim()}%`);
     where.push(`title ILIKE $${params.length}`);

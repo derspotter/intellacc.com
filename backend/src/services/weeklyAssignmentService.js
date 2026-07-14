@@ -102,6 +102,17 @@ class WeeklyAssignmentService {
           WHERE e.closing_date > NOW() + INTERVAL '7 days'
           AND e.outcome IS NULL
           AND e.market_prob IS NOT NULL  -- Only events with initialized markets
+          -- Untradeable dead ends: non-binary events with no configured outcome set
+          -- (same predicate as the public listing in predictionsController.getEvents).
+          AND (
+            e.event_type = 'binary'
+            OR EXISTS (
+              SELECT 1 FROM event_outcomes eo
+              WHERE eo.event_id = e.id AND eo.is_active = TRUE
+              GROUP BY eo.event_id
+              HAVING COUNT(*) >= 2
+            )
+          )
           GROUP BY e.id, e.title, e.closing_date, e.market_prob
           HAVING COUNT(p.id) < 50  -- Don't assign events with too many predictions
         ),
