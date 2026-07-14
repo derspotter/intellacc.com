@@ -144,6 +144,255 @@ pub fn sell_payout(outcome_idx: usize, q: &[f64], b: f64, amount: f64) -> Result
     Ok(payout)
 }
 
+// ---------------------------------------------------------------------
+// Dense-bin vector trade core (numeric markets bundle math).
+//
+// See docs/superpowers/specs/2026-07-14-numeric-markets-design.md
+// ("Bundle math") and the Codex consult (`...-codex-consult.md` §3) for the
+// derivation. Given current market mass p, user target mass u, liquidity b:
+//   d_i = b*ln(u_i/p_i)
+//   exact (alpha=1) buy-only bundle: Δq_i = d_i - min_j d_j, cost = -min_i d_i
+//   alpha-scaled bundle: Δq_i(alpha) = alpha*(d_i - min_j d_j), cost
+//     S(alpha) = -alpha*min_i d_i + b*ln Σ_i p_i^(1-alpha) u_i^alpha
+// ---------------------------------------------------------------------
+
+/// C(q) = b * ln(sum exp(q_i/b)), computed via log-sum-exp with max-shift.
+///
+/// Thin alias over the existing `cost` helper above (used by
+/// multiple-choice trading) so both callers share one LSE implementation
+/// rather than duplicating it.
+pub fn cost_multi(q: &[f64], b: f64) -> f64 {
+    cost(q, b)
+}
+
+/// Current probabilities. Thin alias over the existing `probs` helper.
+pub fn probabilities(q: &[f64], b: f64) -> Vec<f64> {
+    probs(q, b)
+}
+
+/// One cost difference for a whole vector move; both terms via stable LSE
+/// (each `cost_multi` call uses max-shift log-sum-exp internally).
+pub fn apply_vector_cost(q: &[f64], delta_q: &[f64], b: f64) -> f64 {
+    debug_assert_eq!(
+        q.len(),
+        delta_q.len(),
+        "q and delta_q must have the same length"
+    );
+    let q_after: Vec<f64> = q
+        .iter()
+        .zip(delta_q.iter())
+        .map(|(qi, di)| qi + di)
+        .collect();
+    cost_multi(&q_after, b) - cost_multi(q, b)
+}
+
+/// Maximum allowed log-odds span (max_i d_i - min_i d_i) before a bundle
+/// request is refused: beyond this the implied per-bin move is
+/// astronomically large (ratios of e^40 or more) and is almost certainly a
+/// degenerate/adversarial input rather than a meaningful trade. See
+/// docs/superpowers/specs/2026-07-14-numeric-markets-codex-consult.md §2
+/// ("Reject or clamp market log-odds spans beyond roughly 40b").
+pub const MAX_LOG_ODDS_SPAN_B_MULTIPLE: f64 = 40.0;
+
+/// d_i = b*ln(u_i/p_i); u floored at 1e-9 and renormalized first.
+///
+/// **Signature deviation from the Task 5 brief** (documented, per the
+/// brief's own allowance): this returns `Result<Vec<f64>>` rather than a
+/// bare `Vec<f64>` so it can reject inputs whose implied log-odds span
+/// exceeds `MAX_LOG_ODDS_SPAN_B_MULTIPLE * b` instead of silently handing
+/// back a degenerate delta. `bundle_cost` and `solve_alpha_for_budget`
+/// call this internally and propagate the `Result` for the same reason;
+/// their signatures gain `Result<..>` wrappers too.
+pub fn target_deltas(p: &[f64], u: &[f64], b: f64) -> Result<Vec<f64>> {
+    if p.len() != u.len() {
+        return Err(anyhow!("p and u must have the same length"));
+    }
+    if p.len() < 2 {
+        return Err(anyhow!("target_deltas needs at least 2 outcomes"));
+    }
+    if !b.is_finite() || b <= 0.0 {
+        return Err(anyhow!("b must be positive and finite"));
+    }
+    if p.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+        return Err(anyhow!("all p_i must be finite and positive"));
+    }
+    if u.iter().any(|v| !v.is_finite()) {
+        return Err(anyhow!("all u_i must be finite"));
+    }
+
+    // Floor at 1e-9 and renormalize, per spec, so a fully-zeroed target bin
+    // never produces ln(0).
+    let floored: Vec<f64> = u.iter().map(|v| v.max(1e-9)).collect();
+    let sum: f64 = floored.iter().sum();
+    if !sum.is_finite() || sum <= 0.0 {
+        return Err(anyhow!("u renormalization failed: non-positive sum"));
+    }
+
+    let d: Vec<f64> = p
+        .iter()
+        .zip(floored.iter())
+        .map(|(pi, ui)| b * ((ui / sum) / pi).ln())
+        .collect();
+
+    if d.iter().any(|v| !v.is_finite()) {
+        return Err(anyhow!("target_deltas: computed a non-finite d_i"));
+    }
+
+    let max_d = d.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let min_d = d.iter().cloned().fold(f64::INFINITY, f64::min);
+    let span = max_d - min_d;
+    if span > MAX_LOG_ODDS_SPAN_B_MULTIPLE * b {
+        return Err(anyhow!(
+            "log-odds span {:.3} exceeds clamp of {}*b ({:.3})",
+            span,
+            MAX_LOG_ODDS_SPAN_B_MULTIPLE,
+            MAX_LOG_ODDS_SPAN_B_MULTIPLE * b
+        ));
+    }
+
+    Ok(d)
+}
+
+/// Buy-only exact bundle: d_i - min(d). Cost equals -min(d) (see
+/// `bundle_cost(.., alpha=1.0)` / tests).
+pub fn exact_bundle(d: &[f64]) -> Vec<f64> {
+    let min_d = d.iter().cloned().fold(f64::INFINITY, f64::min);
+    d.iter().map(|di| di - min_d).collect()
+}
+
+/// S(alpha) as in spec; monotone increasing in alpha on [0,1], S(0)=0,
+/// S(1) = -min_i d_i.
+///
+/// Computed in log-domain (t_i = ln(p_i) + alpha*d_i/b, since
+/// p_i^(1-alpha)*u_i^alpha = p_i * (u_i/p_i)^alpha = exp(ln(p_i) +
+/// alpha*d_i/b)) via stable max-shifted log-sum-exp, so it never overflows
+/// even for large |d_i| or alpha near 1.
+pub fn bundle_cost(p: &[f64], u: &[f64], b: f64, alpha: f64) -> Result<f64> {
+    if !(-1e-9..=1.0 + 1e-9).contains(&alpha) {
+        return Err(anyhow!("alpha must be in [0,1], got {alpha}"));
+    }
+    let d = target_deltas(p, u, b)?;
+    let min_d = d.iter().cloned().fold(f64::INFINITY, f64::min);
+
+    let t: Vec<f64> = p
+        .iter()
+        .zip(d.iter())
+        .map(|(pi, di)| pi.ln() + alpha * di / b)
+        .collect();
+    let max_t = t.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let sum_exp: f64 = t.iter().map(|ti| (ti - max_t).exp()).sum();
+    let log_sum = max_t + sum_exp.ln();
+
+    let s = -alpha * min_d + b * log_sum;
+    if !s.is_finite() {
+        return Err(anyhow!("bundle_cost: computed a non-finite result"));
+    }
+    Ok(s)
+}
+
+/// Largest alpha in [0,1] with round_to_ledger(bundle_cost) <= budget_ledger.
+/// Bisection, 64 iterations, returns (alpha, cost_ledger, delta_q). Ledger
+/// rounding reuses `lmsr_core::to_ledger_units` (round-half-away-from-zero
+/// to `LEDGER_SCALE`) rather than duplicating rounding logic here.
+pub fn solve_alpha_for_budget(
+    p: &[f64],
+    u: &[f64],
+    b: f64,
+    budget_ledger: i64,
+) -> Result<(f64, i64, Vec<f64>)> {
+    let d = target_deltas(p, u, b)?;
+    let min_d = d.iter().cloned().fold(f64::INFINITY, f64::min);
+
+    let ledger_cost_at = |alpha: f64| -> Result<i64> {
+        let s = bundle_cost(p, u, b, alpha)?;
+        let ledger = crate::lmsr_core::to_ledger_units(s).map_err(|e| anyhow!(e))?;
+        i64::try_from(ledger).map_err(|_| anyhow!("bundle cost ledger value overflows i64"))
+    };
+
+    // Cap at alpha=1 (never buy complete sets / overshoot the target).
+    let ledger_at_1 = ledger_cost_at(1.0)?;
+    if ledger_at_1 <= budget_ledger {
+        let delta_q: Vec<f64> = d.iter().map(|di| di - min_d).collect();
+        return Ok((1.0, ledger_at_1, delta_q));
+    }
+
+    // Invariant maintained across the loop: ledger_cost_at(lo) <= budget_ledger
+    // (true at lo=0.0, since S(0)=0 whenever budget_ledger >= 0) and
+    // ledger_cost_at(hi) > budget_ledger (true at hi=1.0, checked above).
+    let mut lo = 0.0f64;
+    let mut hi = 1.0f64;
+    for _ in 0..64 {
+        let mid = 0.5 * (lo + hi);
+        let ledger_mid = ledger_cost_at(mid)?;
+        if ledger_mid <= budget_ledger {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+
+    let alpha = lo;
+    let cost_ledger = ledger_cost_at(alpha)?;
+    let delta_q: Vec<f64> = d.iter().map(|di| alpha * (di - min_d)).collect();
+    Ok((alpha, cost_ledger, delta_q))
+}
+
+/// `bin_count` equal-width bins over `[range_min, range_max]`; returns
+/// `(lower, upper, label)` per bin. Labels are "lo–hi" (optionally suffixed
+/// with `unit`), trimmed to sensible precision (integral bounds print with
+/// no decimals; fractional bounds are formatted to 6 decimal places and
+/// trailing zeros trimmed, which also absorbs float noise from repeated
+/// bin-width addition).
+pub fn linear_bins(
+    range_min: f64,
+    range_max: f64,
+    bin_count: usize,
+    unit: Option<&str>,
+) -> Vec<(f64, f64, String)> {
+    if bin_count == 0
+        || !range_min.is_finite()
+        || !range_max.is_finite()
+        || range_max <= range_min
+    {
+        return Vec::new();
+    }
+    let width = (range_max - range_min) / bin_count as f64;
+    (0..bin_count)
+        .map(|i| {
+            let lo = range_min + width * i as f64;
+            // Last bin's upper bound is the exact range_max, not an
+            // accumulated-float-error approximation of it.
+            let hi = if i + 1 == bin_count {
+                range_max
+            } else {
+                range_min + width * (i + 1) as f64
+            };
+            let label = format_bin_label(lo, hi, unit);
+            (lo, hi, label)
+        })
+        .collect()
+}
+
+fn format_bin_number(x: f64) -> String {
+    if x.fract() == 0.0 && x.abs() < 1e15 {
+        return format!("{}", x as i64);
+    }
+    let s = format!("{:.6}", x);
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn format_bin_label(lo: f64, hi: f64, unit: Option<&str>) -> String {
+    let base = format!(
+        "{}\u{2013}{}",
+        format_bin_number(lo),
+        format_bin_number(hi)
+    );
+    match unit {
+        Some(u) if !u.is_empty() => format!("{base} {u}"),
+        _ => base,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +433,334 @@ mod tests {
         assert!(sell_payout(0, &q, 5000.0, -1.0).is_err(), "negative amount");
         assert!(sell_payout(0, &q, 5000.0, f64::NAN).is_err(), "NaN amount");
         assert!(sell_payout(0, &q, 0.0, 1.0).is_err(), "bad liquidity");
+    }
+}
+
+/// Tests for the Task 5 dense-bin vector-trade math (`target_deltas`,
+/// `exact_bundle`, `bundle_cost`, `solve_alpha_for_budget`, `linear_bins`,
+/// plus the `cost_multi`/`probabilities`/`apply_vector_cost` helpers they
+/// build on). Randomness is seeded (`StdRng::seed_from_u64`) so runs are
+/// deterministic and reproducible.
+#[cfg(test)]
+mod vector_trade_tests {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
+
+    fn seeded_rng(seed: u64) -> StdRng {
+        StdRng::seed_from_u64(seed)
+    }
+
+    /// A random point on the (n-1)-simplex: positive, sums to 1.
+    fn random_simplex(rng: &mut impl Rng, n: usize) -> Vec<f64> {
+        let w: Vec<f64> = (0..n).map(|_| rng.gen_range(0.01f64..1.0)).collect();
+        let sum: f64 = w.iter().sum();
+        w.into_iter().map(|wi| wi / sum).collect()
+    }
+
+    /// q_i = b*ln(p_i) reproduces probabilities(q, b) == p exactly (softmax
+    /// of ln(p_i) is p_i / sum(p) = p_i since p already sums to 1), giving a
+    /// concrete market state for an arbitrary target probability vector.
+    fn q_from_p(p: &[f64], b: f64) -> Vec<f64> {
+        p.iter().map(|pi| b * pi.ln()).collect()
+    }
+
+    fn to_ledger_units_i64(x: f64) -> i64 {
+        i64::try_from(crate::lmsr_core::to_ledger_units(x).unwrap()).unwrap()
+    }
+
+    // "apply_vector_cost(q, exact_bundle(d), b) ≈ -min(d) (1e-9 rel) for
+    // random p,u (seeded loop, 1000 draws, n=50)."
+    #[test]
+    fn exact_bundle_cost_matches_apply_vector_cost() {
+        let mut rng = seeded_rng(1);
+        let n = 50;
+        let b = 5000.0;
+        for draw in 0..1000 {
+            let p = random_simplex(&mut rng, n);
+            let u = random_simplex(&mut rng, n);
+            let q = q_from_p(&p, b);
+
+            let d = target_deltas(&p, &u, b).expect("generic simplex draws must not hit the span clamp");
+            let delta = exact_bundle(&d);
+            let cost = apply_vector_cost(&q, &delta, b);
+
+            let min_d = d.iter().cloned().fold(f64::INFINITY, f64::min);
+            let expected = -min_d;
+            let diff = (cost - expected).abs();
+            assert!(
+                diff <= 1e-9 * expected.abs().max(1.0),
+                "draw {draw}: cost {cost} vs expected {expected} (diff {diff})"
+            );
+        }
+    }
+
+    // "New probabilities after exact bundle ≈ u (1e-9)."
+    #[test]
+    fn exact_bundle_moves_probabilities_to_target() {
+        let mut rng = seeded_rng(2);
+        let n = 50;
+        let b = 5000.0;
+        for draw in 0..200 {
+            let p = random_simplex(&mut rng, n);
+            let u = random_simplex(&mut rng, n);
+            let q = q_from_p(&p, b);
+
+            let d = target_deltas(&p, &u, b).unwrap();
+            let delta = exact_bundle(&d);
+            let q_after: Vec<f64> = q.iter().zip(delta.iter()).map(|(qi, di)| qi + di).collect();
+            let p_after = probabilities(&q_after, b);
+
+            for (i, (pa, ui)) in p_after.iter().zip(u.iter()).enumerate() {
+                assert!(
+                    (pa - ui).abs() < 1e-9,
+                    "draw {draw}, bin {i}: p_after {pa} vs target {ui}"
+                );
+            }
+        }
+    }
+
+    // "bundle_cost monotone in α; S(0)=0; S(1)=−min d."
+    #[test]
+    fn bundle_cost_is_monotone_and_matches_endpoints() {
+        let mut rng = seeded_rng(3);
+        let n = 20;
+        let b = 3000.0;
+        for draw in 0..200 {
+            let p = random_simplex(&mut rng, n);
+            let u = random_simplex(&mut rng, n);
+            let d = target_deltas(&p, &u, b).unwrap();
+            let min_d = d.iter().cloned().fold(f64::INFINITY, f64::min);
+
+            let s0 = bundle_cost(&p, &u, b, 0.0).unwrap();
+            assert!(s0.abs() < 1e-7, "draw {draw}: S(0) should be ~0, got {s0}");
+
+            let s1 = bundle_cost(&p, &u, b, 1.0).unwrap();
+            assert!(
+                (s1 - (-min_d)).abs() < 1e-6,
+                "draw {draw}: S(1) {s1} vs -min(d) {}",
+                -min_d
+            );
+
+            let alphas = [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0];
+            let mut prev = f64::NEG_INFINITY;
+            for &a in &alphas {
+                let s = bundle_cost(&p, &u, b, a).unwrap();
+                assert!(
+                    s + 1e-9 >= prev,
+                    "draw {draw}: bundle_cost must be monotone increasing: {s} < {prev} at alpha {a}"
+                );
+                prev = s;
+            }
+        }
+    }
+
+    // "solve_alpha_for_budget: cost_ledger ≤ budget; α maximal (α+ε would
+    // exceed); budget ≥ S(1) → α=1 exactly."
+    #[test]
+    fn solve_alpha_for_budget_respects_budget_and_is_maximal() {
+        let mut rng = seeded_rng(4);
+        let n = 20;
+        let b = 3000.0;
+        for draw in 0..200 {
+            let p = random_simplex(&mut rng, n);
+            let u = random_simplex(&mut rng, n);
+            let d = target_deltas(&p, &u, b).unwrap();
+            let expected_full_delta = exact_bundle(&d);
+
+            let s1 = bundle_cost(&p, &u, b, 1.0).unwrap();
+            let ledger1 = to_ledger_units_i64(s1);
+
+            // Budget covers the full move: alpha must land exactly on 1.0.
+            let (alpha_full, cost_full, delta_full) =
+                solve_alpha_for_budget(&p, &u, b, ledger1 + 1_000_000).unwrap();
+            assert_eq!(alpha_full, 1.0, "draw {draw}: budget >= S(1) must give alpha == 1 exactly");
+            assert_eq!(cost_full, ledger1, "draw {draw}: full-move cost_ledger should equal round_to_ledger(S(1))");
+            for (i, (a, e)) in delta_full.iter().zip(expected_full_delta.iter()).enumerate() {
+                assert!((a - e).abs() < 1e-9, "draw {draw}, bin {i}: delta_q mismatch at alpha=1");
+            }
+
+            // Constrained budget: respected, and maximal (nudging alpha up
+            // by a small epsilon breaks the budget).
+            let budget = (ledger1 as f64 * 0.4) as i64;
+            if budget > 0 {
+                let (alpha, cost_ledger, _delta) = solve_alpha_for_budget(&p, &u, b, budget).unwrap();
+                assert!(
+                    cost_ledger <= budget,
+                    "draw {draw}: cost {cost_ledger} exceeds budget {budget}"
+                );
+                assert!(alpha < 1.0, "draw {draw}: constrained budget should not reach alpha=1");
+
+                let bumped = (alpha + 1e-4).min(1.0);
+                let bumped_ledger = to_ledger_units_i64(bundle_cost(&p, &u, b, bumped).unwrap());
+                assert!(
+                    bumped_ledger > budget,
+                    "draw {draw}: alpha {alpha} should be maximal, but alpha+eps={bumped} still costs {bumped_ledger} <= budget {budget}"
+                );
+            }
+        }
+    }
+
+    // "Permutation independence: shuffling bins and re-solving gives
+    // permuted Δq, identical cost."
+    #[test]
+    fn solve_alpha_for_budget_is_permutation_independent() {
+        let mut rng = seeded_rng(5);
+        let n = 12;
+        let b = 2000.0;
+        let p = random_simplex(&mut rng, n);
+        let u = random_simplex(&mut rng, n);
+        let budget = 500_000_000i64; // 500 RP in ledger units.
+
+        let (alpha1, cost1, delta1) = solve_alpha_for_budget(&p, &u, b, budget).unwrap();
+
+        // A fixed permutation applied consistently to both p and u.
+        let perm: Vec<usize> = (0..n).rev().collect();
+        let p2: Vec<f64> = perm.iter().map(|&i| p[i]).collect();
+        let u2: Vec<f64> = perm.iter().map(|&i| u[i]).collect();
+
+        let (alpha2, cost2, delta2) = solve_alpha_for_budget(&p2, &u2, b, budget).unwrap();
+
+        assert!(
+            (alpha1 - alpha2).abs() < 1e-9,
+            "alpha should be permutation-independent: {alpha1} vs {alpha2}"
+        );
+        assert_eq!(cost1, cost2, "ledger cost should be identical under permutation");
+        for (idx, &orig_idx) in perm.iter().enumerate() {
+            assert!(
+                (delta2[idx] - delta1[orig_idx]).abs() < 1e-9,
+                "delta_q must be permuted consistently at {idx} (from {orig_idx})"
+            );
+        }
+    }
+
+    // "Buy-then-inverse-sell at unchanged state:
+    // apply_vector_cost(q, Δq) + apply_vector_cost(q+Δq, −Δq) == 0 exactly
+    // in f64 terms ≤1e-9, and ≤1 ledger unit after independent roundings."
+    #[test]
+    fn apply_vector_cost_round_trip_is_zero() {
+        let mut rng = seeded_rng(6);
+        let n = 30;
+        let b = 4000.0;
+        for draw in 0..200 {
+            let p = random_simplex(&mut rng, n);
+            let q = q_from_p(&p, b);
+            let delta: Vec<f64> = (0..n).map(|_| rng.gen_range(-50.0f64..50.0)).collect();
+            let q_after: Vec<f64> = q.iter().zip(delta.iter()).map(|(qi, di)| qi + di).collect();
+            let neg_delta: Vec<f64> = delta.iter().map(|d| -d).collect();
+
+            let cost_forward = apply_vector_cost(&q, &delta, b);
+            let cost_back = apply_vector_cost(&q_after, &neg_delta, b);
+
+            assert!(
+                (cost_forward + cost_back).abs() < 1e-9,
+                "draw {draw}: float round trip drift {}",
+                cost_forward + cost_back
+            );
+
+            let ledger_forward = to_ledger_units_i64(cost_forward);
+            let ledger_back = to_ledger_units_i64(cost_back);
+            assert!(
+                (ledger_forward + ledger_back).abs() <= 1,
+                "draw {draw}: ledger round trip drift exceeds 1 unit: {ledger_forward} + {ledger_back}"
+            );
+        }
+    }
+
+    // "Extreme spans: p with 1e-9 floor mass, u concentrated on one bin —
+    // no NaN/inf"
+    #[test]
+    fn extreme_but_within_clamp_span_has_no_nan_or_inf() {
+        let n = 50;
+        let b = 5000.0;
+        let mut p = vec![(1.0 - 1e-9) / (n as f64 - 1.0); n];
+        p[0] = 1e-9;
+        let mut u = vec![1e-9; n];
+        u[0] = 1.0;
+
+        let d = target_deltas(&p, &u, b).expect("this span should be just within the 40*b clamp");
+        assert!(d.iter().all(|v| v.is_finite()), "d must be finite: {d:?}");
+
+        let bundle = exact_bundle(&d);
+        assert!(bundle.iter().all(|v| v.is_finite()), "exact_bundle must be finite");
+
+        let s1 = bundle_cost(&p, &u, b, 1.0).expect("bundle_cost should succeed");
+        assert!(s1.is_finite());
+
+        let (alpha, cost_ledger, delta_q) =
+            solve_alpha_for_budget(&p, &u, b, i64::MAX / 2).expect("solve_alpha_for_budget should succeed");
+        assert!(alpha.is_finite());
+        assert!(delta_q.iter().all(|v| v.is_finite()));
+        let _ = cost_ledger;
+    }
+
+    // "...log-odds span clamp at 40·b rejects with error (Result type ok)."
+    #[test]
+    fn log_odds_span_beyond_clamp_is_rejected() {
+        let n = 50;
+        let b = 1.0;
+        let mut p = vec![(1.0 - 1e-30) / (n as f64 - 1.0); n];
+        p[0] = 1e-30;
+        let mut u = vec![1e-9; n];
+        u[1] = 1.0;
+
+        assert!(
+            target_deltas(&p, &u, b).is_err(),
+            "span should exceed the 40*b clamp and be rejected"
+        );
+        assert!(
+            bundle_cost(&p, &u, b, 1.0).is_err(),
+            "bundle_cost must propagate the same span-clamp error"
+        );
+        assert!(
+            solve_alpha_for_budget(&p, &u, b, 1_000_000).is_err(),
+            "solve_alpha_for_budget must propagate the same span-clamp error"
+        );
+    }
+
+    // "linear_bins(0,10,50,None): 50 bins, first (0,0.2), last (9.8,10),
+    // contiguous, labels sane."
+    #[test]
+    fn linear_bins_produces_contiguous_equal_width_bins() {
+        let bins = linear_bins(0.0, 10.0, 50, None);
+        assert_eq!(bins.len(), 50);
+
+        let (lo0, hi0, label0) = &bins[0];
+        assert!((lo0 - 0.0).abs() < 1e-9);
+        assert!((hi0 - 0.2).abs() < 1e-9);
+        assert_eq!(label0, "0\u{2013}0.2");
+
+        let (lo_last, hi_last, label_last) = &bins[49];
+        assert!((lo_last - 9.8).abs() < 1e-9);
+        assert!((hi_last - 10.0).abs() < 1e-9);
+        assert_eq!(label_last, "9.8\u{2013}10");
+
+        for i in 0..bins.len() - 1 {
+            assert!(
+                (bins[i].1 - bins[i + 1].0).abs() < 1e-9,
+                "bins must be contiguous at index {i}"
+            );
+        }
+        for (lo, hi, label) in &bins {
+            assert!(hi > lo);
+            assert!(!label.is_empty());
+        }
+    }
+
+    #[test]
+    fn linear_bins_appends_optional_unit_suffix() {
+        let bins = linear_bins(0.0, 100.0, 4, Some("kg"));
+        assert_eq!(bins.len(), 4);
+        for (_, _, label) in &bins {
+            assert!(label.ends_with("kg"), "label should end with unit: {label}");
+        }
+        assert_eq!(bins[0].2, "0\u{2013}25 kg");
+    }
+
+    #[test]
+    fn linear_bins_handles_degenerate_input_without_panicking() {
+        assert!(linear_bins(0.0, 10.0, 0, None).is_empty());
+        assert!(linear_bins(10.0, 0.0, 5, None).is_empty());
+        assert!(linear_bins(f64::NAN, 10.0, 5, None).is_empty());
     }
 }
