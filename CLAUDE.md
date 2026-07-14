@@ -90,8 +90,9 @@ docker compose up -d --build prediction-engine
 
 ## E2E Test Users
 ```
-user1@example.com / password123 (ID: 24)
-user2@example.com / password123 (ID: 25)
+user1@example.com / password123
+user2@example.com / password123
+(IDs change when reset-test-users.sh recreates them — look them up by email.)
 ```
 
 ## MLS Identity
