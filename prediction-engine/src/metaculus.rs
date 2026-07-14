@@ -1,5 +1,5 @@
 // Metaculus API integration for fetching prediction questions
-use crate::market_import::{ImportedMarket, MarketImportProvider};
+use crate::market_import::{ImportedMarket, ImportedOutcome, MarketImportProvider};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
@@ -22,6 +22,16 @@ struct MetaculusPost {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+struct MetaculusScaling {
+    #[serde(default)]
+    range_min: Option<f64>,
+    #[serde(default)]
+    range_max: Option<f64>,
+    #[serde(default)]
+    zero_point: Option<f64>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 struct MetaculusQuestion {
     id: i32,
     title: String,
@@ -32,6 +42,22 @@ struct MetaculusQuestion {
     status: String,
     #[serde(default)]
     description: Option<String>,
+    // multiple_choice: list of option labels, in API order.
+    #[serde(default)]
+    options: Option<Vec<String>>,
+    // numeric: range metadata. Verified live 2026-07-14 (post 42366 / question
+    // 42156): scaling.range_min/range_max/zero_point carry the bounds;
+    // open_lower_bound/open_upper_bound/unit are top-level on the question
+    // (Metaculus also nests open_*_bound inside scaling, redundantly - we use
+    // the top-level ones per spec).
+    #[serde(default)]
+    scaling: Option<MetaculusScaling>,
+    #[serde(default)]
+    open_lower_bound: Option<bool>,
+    #[serde(default)]
+    open_upper_bound: Option<bool>,
+    #[serde(default)]
+    unit: Option<String>,
 }
 
 #[derive(Clone)]
@@ -183,6 +209,54 @@ impl MetaculusClient {
             "general".to_string()
         };
 
+        let outcomes = if question.question_type == "multiple_choice" {
+            question
+                .options
+                .as_ref()
+                .map(|opts| {
+                    opts.iter()
+                        .enumerate()
+                        .map(|(idx, label)| ImportedOutcome {
+                            key: format!("choice_{}", idx + 1),
+                            label: label.clone(),
+                            sort_order: idx as i32,
+                            lower_bound: None,
+                            upper_bound: None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        let (
+            numeric_range_min,
+            numeric_range_max,
+            numeric_zero_point,
+            numeric_open_lower,
+            numeric_open_upper,
+            numeric_unit,
+        ) = if question.question_type == "numeric" {
+            let scaling = question.scaling.as_ref();
+            let unit = question
+                .unit
+                .as_ref()
+                .map(|u| u.trim())
+                .filter(|u| !u.is_empty())
+                .map(|u| u.to_string());
+            (
+                scaling.and_then(|s| s.range_min),
+                scaling.and_then(|s| s.range_max),
+                scaling.and_then(|s| s.zero_point),
+                question.open_lower_bound.unwrap_or(false),
+                question.open_upper_bound.unwrap_or(false),
+                unit,
+            )
+        } else {
+            (None, None, None, false, false, None)
+        };
+
         ImportedMarket {
             source: "metaculus".to_string(),
             external_id: question.id.to_string(),
@@ -193,7 +267,13 @@ impl MetaculusClient {
             category,
             event_type: question.question_type.clone(),
             status: question.status.clone(),
-            outcomes: Vec::new(),
+            outcomes,
+            numeric_range_min,
+            numeric_range_max,
+            numeric_zero_point,
+            numeric_open_lower,
+            numeric_open_upper,
+            numeric_unit,
         }
     }
 
@@ -464,4 +544,107 @@ pub async fn manual_sync(pool: &PgPool) -> Result<usize> {
 pub async fn manual_category_sync(pool: &PgPool, categories: Vec<&str>) -> Result<usize> {
     let client = MetaculusClient::new();
     client.sync_categories(pool, categories).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Trimmed to the fields MetaculusQuestion deserializes; live-verified
+    // 2026-07-14 against https://www.metaculus.com/api/posts/44539/
+    // (question 44697, multiple_choice).
+    const MC_QUESTION_JSON: &str = r#"{
+        "id": 44697,
+        "title": "Who will be the 2026 Democratic nominee for U.S. Senator from Maine?",
+        "type": "multiple_choice",
+        "status": "open",
+        "options": ["Troy Jackson", "Nirav Shah", "Jordan Wood", "David Costello", "Shenna Bellows", "Valli Geiger", "Dan Kleban", "Janet Mills", "Other"],
+        "scaling": {"range_min": null, "range_max": null, "zero_point": null},
+        "unit": "",
+        "open_lower_bound": false,
+        "open_upper_bound": false
+    }"#;
+
+    // Live-verified 2026-07-14 against
+    // https://www.metaculus.com/api/posts/42366/ (question 42156, numeric).
+    const NUMERIC_QUESTION_JSON: &str = r#"{
+        "id": 42156,
+        "title": "What will be the Economist Democracy Index for Iran in 2026?",
+        "type": "numeric",
+        "status": "open",
+        "options": null,
+        "scaling": {"range_min": 0, "range_max": 10, "zero_point": null},
+        "unit": "",
+        "open_lower_bound": false,
+        "open_upper_bound": false
+    }"#;
+
+    fn make_post(question_json: &str) -> (MetaculusQuestion, MetaculusPost) {
+        let question: MetaculusQuestion = serde_json::from_str(question_json)
+            .expect("fixture should deserialize into MetaculusQuestion");
+        let post = MetaculusPost {
+            categories: Vec::new(),
+            question: Some(question.clone()),
+        };
+        (question, post)
+    }
+
+    fn client() -> MetaculusClient {
+        MetaculusClient {
+            client: Client::new(),
+            base_url: "https://www.metaculus.com/api".to_string(),
+        }
+    }
+
+    #[test]
+    fn multiple_choice_post_populates_outcomes() {
+        let (question, post) = make_post(MC_QUESTION_JSON);
+        let market = client().convert_to_imported_market(&question, &post);
+
+        assert_eq!(market.outcomes.len(), 9);
+        assert_eq!(market.outcomes[0].key, "choice_1");
+        assert_eq!(market.outcomes[0].label, "Troy Jackson");
+        assert_eq!(market.outcomes[0].sort_order, 0);
+        assert_eq!(market.outcomes[8].key, "choice_9");
+        assert_eq!(market.outcomes[8].label, "Other");
+        assert_eq!(market.outcomes[8].sort_order, 8);
+        assert!(market.outcomes.iter().all(|o| o.lower_bound.is_none()));
+        assert!(market.outcomes.iter().all(|o| o.upper_bound.is_none()));
+
+        // No numeric metadata leaks onto a multiple_choice market.
+        assert_eq!(market.numeric_range_min, None);
+        assert_eq!(market.numeric_range_max, None);
+        assert_eq!(market.numeric_zero_point, None);
+        assert!(!market.numeric_open_lower);
+        assert!(!market.numeric_open_upper);
+        assert_eq!(market.numeric_unit, None);
+    }
+
+    #[test]
+    fn numeric_post_populates_range_metadata_and_no_outcomes() {
+        let (question, post) = make_post(NUMERIC_QUESTION_JSON);
+        let market = client().convert_to_imported_market(&question, &post);
+
+        // Phase B seeds bins, not options - numeric markets get no outcomes here.
+        assert!(market.outcomes.is_empty());
+
+        assert_eq!(market.numeric_range_min, Some(0.0));
+        assert_eq!(market.numeric_range_max, Some(10.0));
+        assert_eq!(market.numeric_zero_point, None);
+        assert!(!market.numeric_open_lower);
+        assert!(!market.numeric_open_upper);
+        assert_eq!(market.numeric_unit, None);
+    }
+
+    #[test]
+    fn numeric_unit_is_none_when_blank_but_some_when_present() {
+        let mut question: MetaculusQuestion = serde_json::from_str(NUMERIC_QUESTION_JSON).unwrap();
+        question.unit = Some("  USD  ".to_string());
+        let post = MetaculusPost {
+            categories: Vec::new(),
+            question: Some(question.clone()),
+        };
+        let market = client().convert_to_imported_market(&question, &post);
+        assert_eq!(market.numeric_unit, Some("USD".to_string()));
+    }
 }

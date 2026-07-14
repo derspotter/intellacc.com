@@ -20,6 +20,14 @@ pub struct ImportedMarket {
     pub event_type: String,
     pub status: String,
     pub outcomes: Vec<ImportedOutcome>,
+    // Numeric range metadata (Phase B consumes these to seed 50-bin LMSR
+    // markets); populated only for numeric questions, defaulted elsewhere.
+    pub numeric_range_min: Option<f64>,
+    pub numeric_range_max: Option<f64>,
+    pub numeric_zero_point: Option<f64>,
+    pub numeric_open_lower: bool,
+    pub numeric_open_upper: bool,
+    pub numeric_unit: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1066,6 +1074,12 @@ async fn fetch_manifold_markets(max_markets: Option<usize>) -> Result<Vec<Import
                 event_type,
                 status: "open".to_string(),
                 outcomes,
+                numeric_range_min: None,
+                numeric_range_max: None,
+                numeric_zero_point: None,
+                numeric_open_lower: false,
+                numeric_open_upper: false,
+                numeric_unit: None,
             });
         }
 
@@ -1151,6 +1165,12 @@ async fn fetch_polymarket_markets(max_markets: Option<usize>) -> Result<Vec<Impo
                 event_type: "binary".to_string(),
                 status: "open".to_string(),
                 outcomes: Vec::new(),
+                numeric_range_min: None,
+                numeric_range_max: None,
+                numeric_zero_point: None,
+                numeric_open_lower: false,
+                numeric_open_upper: false,
+                numeric_unit: None,
             });
         }
 
@@ -1240,6 +1260,12 @@ async fn fetch_kalshi_markets(max_markets: Option<usize>) -> Result<Vec<Imported
                 event_type: "binary".to_string(),
                 status: "open".to_string(),
                 outcomes: Vec::new(),
+                numeric_range_min: None,
+                numeric_range_max: None,
+                numeric_zero_point: None,
+                numeric_open_lower: false,
+                numeric_open_upper: false,
+                numeric_unit: None,
             });
         }
 
