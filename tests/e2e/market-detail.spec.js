@@ -181,6 +181,8 @@ test.describe('market detail view', () => {
     await expect
       .poll(async () => probText.textContent(), { timeout: 15000 })
       .not.toBe(before);
+    // Feed refetched: 2 seeded trades + the one just placed.
+    await expect(page.locator('.market-detail-trade-row')).toHaveCount(3);
     await expect(page.locator('.market-detail-trade-row').first()).toContainText('user1');
   });
 });
