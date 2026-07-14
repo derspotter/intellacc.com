@@ -2,7 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal } from 'solid-js';
 import { api } from '../../services/api';
 import MarketEventCard from './MarketEventCard';
 import OutcomeMarketCard from './OutcomeMarketCard';
-import { formatProbability } from './marketCardShared';
+import { formatProbability, safeNumber } from './marketCardShared';
 
 const TRADES_LIMIT = 200;
 const ACTIVITY_COUNT = 15;
@@ -33,13 +33,22 @@ export default function MarketDetailView(props) {
   const [loading, setLoading] = createSignal(true);
   const [notFound, setNotFound] = createSignal(false);
 
+  // Request-ordering guard: browser back/forward between two market ids can
+  // re-run the effect (or trigger a trade refresh) while a previous loadAll
+  // is still in flight. Each call captures the sequence number at its start
+  // and every state write (plus the effect's finally) bails if a newer call
+  // has since started, so a stale response can never clobber a fresher one.
+  let loadSeq = 0;
+
   const loadAll = async (id) => {
+    const seq = ++loadSeq;
     let row = null;
     try {
       row = await api.events.getById(id);
     } catch {
       row = null;
     }
+    if (seq !== loadSeq) return;
     if (!row?.id) {
       setNotFound(true);
       setEvent(null);
@@ -50,8 +59,10 @@ export default function MarketDetailView(props) {
     setEvent(row);
     try {
       const response = await api.events.getTrades(id, TRADES_LIMIT);
+      if (seq !== loadSeq) return;
       setTrades(Array.isArray(response?.trades) ? response.trades : []);
     } catch {
+      if (seq !== loadSeq) return;
       setTrades([]);
     }
   };
@@ -59,12 +70,16 @@ export default function MarketDetailView(props) {
   createEffect(() => {
     const id = String(props.marketId || '').trim();
     if (!/^\d+$/.test(id)) {
+      loadSeq += 1;
       setNotFound(true);
       setLoading(false);
       return;
     }
     setLoading(true);
-    void loadAll(id).finally(() => setLoading(false));
+    const seq = loadSeq + 1;
+    void loadAll(id).finally(() => {
+      if (seq === loadSeq) setLoading(false);
+    });
   });
 
   const handleTradeRefresh = () => {
@@ -101,7 +116,7 @@ export default function MarketDetailView(props) {
     const series = [
       { t: history[0].t, p: history[0].before },
       ...history.map(({ t, p }) => ({ t, p })),
-      { t: Date.now(), p: Number(row.market_prob ?? 0.5) }
+      { t: Math.max(Date.now(), history[history.length - 1].t), p: Number(row.market_prob ?? 0.5) }
     ];
 
     const t0 = series[0].t;
@@ -223,7 +238,7 @@ export default function MarketDetailView(props) {
                   <li class="market-detail-trade-row">
                     <span class="trade-user">{trade.user}</span>
                     <span class="trade-direction">{trade.direction}</span>
-                    <span class="trade-amount">{`${Number(trade.amount).toFixed(2)} RP`}</span>
+                    <span class="trade-amount">{`${safeNumber(trade.amount).toFixed(2)} RP`}</span>
                     <span class="trade-move">
                       {`${formatProbability(trade.price_before)} → ${formatProbability(trade.price_after)}`}
                     </span>

@@ -143,6 +143,9 @@ test.describe('market detail view', () => {
     await page.goto(`${BASE}/#predictions/${eventIds.multi}`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('.market-detail-title')).toHaveText(titles.multi, { timeout: 20000 });
     await expect(page.locator('.market-detail-chart')).toHaveCount(0);
+
+    // Multi-outcome trading card still renders (only the chart is suppressed).
+    await expect(page.locator('.market-detail .outcome-market-card')).toBeVisible();
   });
 
   test('clicking a market in the list opens its detail view, back returns', async ({ page }) => {
