@@ -308,6 +308,10 @@ export default function DistributionMarketCard(props) {
     marketLoadState();
     // Mark the current quote() stale for the whole debounce+fetch window,
     // not just the network round trip — see the comment on fetchQuote.
+    // Bumping the sequence here (not only in fetchQuote) also invalidates any
+    // response already in flight the instant the inputs change, so a late
+    // arrival can never re-enable Trade against edited handles.
+    quoteSeq += 1;
     setQuoteLoading(true);
     if (quoteTimer) clearTimeout(quoteTimer);
     quoteTimer = setTimeout(() => void fetchQuote(), QUOTE_DEBOUNCE_MS);
