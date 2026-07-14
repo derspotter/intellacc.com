@@ -144,4 +144,23 @@ test.describe('market detail view', () => {
     await expect(page.locator('.market-detail-title')).toHaveText(titles.multi, { timeout: 20000 });
     await expect(page.locator('.market-detail-chart')).toHaveCount(0);
   });
+
+  test('clicking a market in the list opens its detail view, back returns', async ({ page }) => {
+    await page.goto(`${BASE}/#predictions/markets`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.events-filters input[type="text"]', { timeout: 20000 });
+    await page.locator('.events-filters input[type="text"]').fill(titles.binary);
+
+    const row = page.locator('.event-list-item', { hasText: titles.binary });
+    await expect(row).toBeVisible({ timeout: 10000 });
+    await row.locator('.event-list-item-row').click();
+
+    await expect(page).toHaveURL(new RegExp(`#predictions/${eventIds.binary}$`));
+    await expect(page.locator('.market-detail-title')).toHaveText(titles.binary);
+    // Nothing expands inline anymore.
+    await expect(page.locator('.events-list-card')).toHaveCount(0);
+
+    await page.locator('.market-detail-back').click();
+    await expect(page).toHaveURL(/#predictions\/markets$/);
+    await expect(page.getByText('Open Questions')).toBeVisible();
+  });
 });

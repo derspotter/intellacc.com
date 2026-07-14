@@ -70,26 +70,15 @@ test.describe('keyboard shortcuts', () => {
 });
 
 test.describe('keyboard row operation', () => {
-  test('market row expands with Enter and collapses with Escape', async ({ page }) => {
+  test('market row opens the detail view with Enter', async ({ page }) => {
     await login(page);
     await page.goto(`${BASE}/#predictions/markets`);
     await page.waitForSelector('.events-simple-list li');
-    // Skip the weekly-assignment row: it auto-expands (and re-expands whenever
-    // nothing else is open) independent of keyboard interaction, so it isn't
-    // a stable target for asserting Enter/Escape toggle behavior.
-    const targetLi = page.locator('.events-simple-list li:not(.weekly)').first();
-    const firstRow = targetLi.locator('.event-list-item-row').first();
+    const firstRow = page.locator('.event-list-item-row').first();
     await firstRow.focus();
     await page.keyboard.press('Enter');
-    await expect(targetLi.locator('.event-row-expanded')).toBeVisible();
-    await expect(firstRow).toHaveAttribute('aria-expanded', 'true');
-    await page.keyboard.press('Escape');
-    await expect(targetLi.locator('.event-row-expanded')).toHaveCount(0);
-    // Focus stays on the row after collapsing.
-    const stillFocused = await page.evaluate(() =>
-      document.activeElement?.classList.contains('event-list-item-row')
-    );
-    expect(stillFocused).toBe(true);
+    await expect(page).toHaveURL(/#predictions\/\d+$/);
+    await expect(page.locator('.market-detail')).toBeVisible();
   });
 
   test('post comment toggle opens and closes comments from the keyboard', async ({ page }) => {
@@ -142,10 +131,11 @@ test.describe('list and pane navigation', () => {
     await login(page);
     await page.goto(`${BASE}/#predictions/markets`);
     await page.waitForSelector('.events-simple-list li');
-    // Click a market row itself (not the body at a fixed coordinate) — the
-    // filters/search header above the list shifts height with content, so a
-    // fixed (x, y) risks landing on the category-filter <select> instead.
-    await page.locator('.event-list-item-row').first().click();
+    // Focus a market row itself (not click, and not the body at a fixed
+    // coordinate) — the filters/search header above the list shifts height
+    // with content, so a fixed (x, y) risks landing on the category-filter
+    // <select> instead, and clicking now navigates away to the detail view.
+    await page.locator('.event-list-item-row').first().focus();
     await page.keyboard.press('ArrowLeft');
     const inSidebar = await page.evaluate(() =>
       document.activeElement?.closest('.sidebar') !== null

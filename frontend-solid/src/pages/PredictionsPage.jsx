@@ -8,7 +8,6 @@ import AdminEventManagement from '../components/predictions/AdminEventManagement
 import AdminMarketResolution from '../components/predictions/AdminMarketResolution';
 import AdminTools from '../components/predictions/AdminTools';
 import RPBalance from '../components/predictions/RPBalance';
-import { createEvent } from '../services/api';
 import { isAdmin, isAuthenticated } from '../services/auth';
 
 const VERIFICATION_NOTICE_KEY = 'verificationNotice';
@@ -17,15 +16,6 @@ export default function PredictionsPage(props) {
   const [verificationNotice, setVerificationNotice] = createSignal(
     localStorage.getItem(VERIFICATION_NOTICE_KEY) || ''
   );
-
-  const handleCreateEvent = async (payload) => {
-    const { title, details, closing_date: closingDate } = payload || {};
-    if (!isAuthenticated()) {
-      return;
-    }
-
-    return createEvent(title, details, closingDate);
-  };
 
   const handleVerificationNotice = (message = '') => {
     const normalized = String(message || '').trim();
@@ -92,11 +82,7 @@ export default function PredictionsPage(props) {
         <Show when={activeTab() === 'markets'}>
           <div class="predictions-top-grid">
             <div class="events-list-column">
-              <EventsList
-                targetedMarketId={targetedMarketId()}
-                createEvent={handleCreateEvent}
-                onVerificationNotice={handleVerificationNotice}
-              />
+              <EventsList />
             </div>
           </div>
         </Show>

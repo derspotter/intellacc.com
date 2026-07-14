@@ -1,7 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import { getUserPositions, api } from '../../services/api';
-import MarketEventCard from './MarketEventCard';
-import OutcomeMarketCard from './OutcomeMarketCard';
 import { isAuthenticated, getCurrentUserId } from '../../services/auth';
 import { activateOnKey } from '../../utils/keyboard';
 
@@ -43,10 +41,7 @@ const appendUniqueById = (current, next) => {
   return [...current, ...next.filter((item) => !seen.has(String(item.id)))];
 };
 
-const isMultiOutcome = (eventItem) =>
-  ['multiple_choice', 'numeric'].includes(eventItem?.event_type);
-
-export default function EventsList(props) {
+export default function EventsList() {
   const [events, setEvents] = createSignal([]);
   const [total, setTotal] = createSignal(0);
   const [hasMore, setHasMore] = createSignal(false);
@@ -57,9 +52,6 @@ export default function EventsList(props) {
   const [searchQuery, setSearchQuery] = createSignal('');
   const [filter, setFilter] = createSignal('open');
   const [categoryFilter, setCategoryFilter] = createSignal('');
-  const [expandedIds, setExpandedIds] = createSignal(new Set());
-
-  const isExpanded = (id) => expandedIds().has(String(id));
 
   const [userPositions, setUserPositions] = createSignal([]);
   const [positionsLoading, setPositionsLoading] = createSignal(false);
@@ -73,7 +65,6 @@ export default function EventsList(props) {
   const [loadedPositionsUserId, setLoadedPositionsUserId] = createSignal('');
 
   let searchTimeout;
-  let lastTargetedSelectionFetchKey = '';
 
   const authed = () => isAuthenticated();
 
@@ -132,58 +123,6 @@ export default function EventsList(props) {
     if (loading() || loadingMore() || !hasMore()) return;
     await loadEvents({ reset: false });
   };
-
-  const applyTargetedSelection = () => {
-    const marketId = String(props.targetedMarketId || '').trim();
-    if (!marketId) return false;
-
-    const targetEvent = events().find((eventItem) => String(eventItem.id) === marketId);
-    if (!targetEvent) return false;
-
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      next.add(String(targetEvent.id));
-      return next;
-    });
-    lastTargetedSelectionFetchKey = '';
-    return true;
-  };
-
-  createEffect(() => {
-    const marketId = String(props.targetedMarketId || '').trim();
-    events(); // subscribe to events changes
-    loading(); // subscribe to loading state
-
-    if (!marketId) {
-      lastTargetedSelectionFetchKey = '';
-      return;
-    }
-
-    if (applyTargetedSelection()) {
-      return;
-    }
-
-    if (loading()) {
-      return;
-    }
-
-    const fetchKey = marketId;
-    if (lastTargetedSelectionFetchKey === fetchKey) {
-      return;
-    }
-
-    // Deep-linked market may be outside the loaded page window — fetch it
-    // directly and add it to the list.
-    lastTargetedSelectionFetchKey = fetchKey;
-    void api.events
-      .getById(marketId)
-      .then((eventRow) => {
-        if (!eventRow?.id) return;
-        setEvents((current) => appendUniqueById(current, [eventRow]));
-        applyTargetedSelection();
-      })
-      .catch(() => {});
-  });
 
   const loadUserPositions = async () => {
     if (!authed()) {
@@ -294,30 +233,10 @@ export default function EventsList(props) {
     void loadEvents({ reset: true });
   };
 
-  // Independent toggles (multiple rows may be open). Expanding a row never
-  // collapses another, so the clicked question never moves — controls fold in
-  // below it, strictly in place. This is the only behaviour that guarantees no
-  // movement; one-at-a-time would slam the clicked row up by the closing
-  // card's height when that card is above it near the top of the page.
-  const handleEventClick = (eventItem) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      const key = String(eventItem.id);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  // Selecting a market opens its full detail view (#predictions/<id>).
+  const openMarket = (eventItem) => {
+    window.location.hash = `predictions/${eventItem.id}`;
   };
-
-  // Auto-expand the weekly assignment once it loads, unless something is
-  // already expanded or a deep-link is targeting a specific market.
-  createEffect(() => {
-    const assignment = weeklyAssignment();
-    const assignedId = assignment?.event?.id;
-    if (assignedId && expandedIds().size === 0 && !props.targetedMarketId) {
-      setExpandedIds(new Set([String(assignedId)]));
-    }
-  });
 
   const refreshSelected = async () => {
     // Refresh everything the user has loaded so far in one request.
@@ -325,10 +244,6 @@ export default function EventsList(props) {
     if (authed()) {
       await loadUserPositions();
     }
-  };
-
-  const handleTradeRefresh = () => {
-    void refreshSelected();
   };
 
   const handleSearchInput = (value) => {
@@ -485,16 +400,15 @@ export default function EventsList(props) {
                     const prob = () => Number(marketItem.market_prob ?? 0.5);
                     return (
                       <li
-                        class={`event-list-item ${isExpanded(marketItem.id) ? 'expanded' : ''} ${marketItem.outcome ? 'resolved' : ''} ${isWeekly() ? 'weekly' : ''}`}
+                        class={`event-list-item ${marketItem.outcome ? 'resolved' : ''} ${isWeekly() ? 'weekly' : ''}`}
                       >
                         <div
                           class="event-list-item-row"
                           data-kb-row
                           role="button"
                           tabindex="0"
-                          aria-expanded={isExpanded(marketItem.id)}
-                          onClick={() => handleEventClick(marketItem)}
-                          onKeyDown={activateOnKey(() => handleEventClick(marketItem))}
+                          onClick={() => openMarket(marketItem)}
+                          onKeyDown={activateOnKey(() => openMarket(marketItem))}
                         >
                           <div class="event-list-item-header">
                             <span class="event-title">{marketItem.title}</span>
@@ -519,29 +433,6 @@ export default function EventsList(props) {
                             {marketItem.outcome ? <span class="event-resolved">Resolved</span> : null}
                           </div>
                         </div>
-                        <Show when={isExpanded(marketItem.id)}>
-                          <div class="event-row-expanded">
-                            <Show
-                              when={isMultiOutcome(marketItem)}
-                              fallback={
-                                <MarketEventCard
-                                  event={marketItem}
-                                  onTrade={handleTradeRefresh}
-                                  onVerificationNotice={props.onVerificationNotice}
-                                  hideTitle={true}
-                                  authenticated={authed()}
-                                />
-                              }
-                            >
-                              <OutcomeMarketCard
-                                event={marketItem}
-                                onTrade={handleTradeRefresh}
-                                onVerificationNotice={props.onVerificationNotice}
-                                hideTitle={true}
-                              />
-                            </Show>
-                          </div>
-                        </Show>
                       </li>
                     );
                   }}
