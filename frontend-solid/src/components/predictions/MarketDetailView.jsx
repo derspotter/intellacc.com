@@ -171,11 +171,15 @@ export default function MarketDetailView(props) {
         <header class="market-detail-header">
           <div class="market-detail-title-row">
             <h2 class="market-detail-title">{event().title}</h2>
-            <span class="market-detail-prob">{formatProbability(event().market_prob)}</span>
+            <Show when={!isNumeric(event())}>
+              <span class="market-detail-prob">{formatProbability(event().market_prob)}</span>
+            </Show>
           </div>
-          <div class="event-prob-bar" aria-hidden="true">
-            <div class="event-prob-bar-fill" style={{ width: `${Math.round(prob() * 100)}%` }} />
-          </div>
+          <Show when={!isNumeric(event())}>
+            <div class="event-prob-bar" aria-hidden="true">
+              <div class="event-prob-bar-fill" style={{ width: `${Math.round(prob() * 100)}%` }} />
+            </div>
+          </Show>
           <div class="market-detail-meta">
             <span class="event-category">{categoryLabel()}</span>
             <span class="event-date">{`Closes: ${formatDate(event().closing_date)}`}</span>

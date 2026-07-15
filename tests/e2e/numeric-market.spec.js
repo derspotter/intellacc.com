@@ -122,6 +122,10 @@ test.describe('numeric market distribution trading', () => {
     await expect(card.locator('.distribution-card-handle-input')).toHaveCount(3);
     await expect(card.locator('.login-prompt')).toBeVisible();
     await expect(card.locator('.distribution-card-budget-input')).toHaveCount(0);
+
+    // Numeric markets must not show the meaningless binary % header.
+    await expect(page.locator('.market-detail-prob')).toHaveCount(0);
+    await expect(page.locator('.market-detail-header .event-prob-bar')).toHaveCount(0);
   });
 
   test('logged in: quote appears within budget, trade executes, curve changes, position appears', async ({ page }) => {
