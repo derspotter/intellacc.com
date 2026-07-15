@@ -314,6 +314,29 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
 
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS market_outcome_updates (
+            id BIGSERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            outcome_id BIGINT NOT NULL REFERENCES event_outcomes(id) ON DELETE CASCADE,
+            prev_prob DOUBLE PRECISION NOT NULL,
+            new_prob DOUBLE PRECISION NOT NULL,
+            stake_amount DOUBLE PRECISION NOT NULL CHECK (stake_amount > 0),
+            stake_amount_ledger BIGINT NOT NULL DEFAULT 0 CHECK (stake_amount_ledger >= 0),
+            shares_acquired DOUBLE PRECISION NOT NULL CHECK (shares_acquired > 0),
+            hold_until TIMESTAMPTZ NOT NULL,
+            referral_post_id INTEGER,
+            referral_click_id INTEGER,
+            had_prior_position BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
         CREATE TABLE IF NOT EXISTS event_outcome_states (
             event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
             outcome_id BIGINT NOT NULL REFERENCES event_outcomes(id) ON DELETE CASCADE,
@@ -1769,6 +1792,57 @@ mod tests {
         crate::lmsr_api::get_numeric_quote(pool, event_id, 1_000_000, target)
             .await
             .expect("quote on open market must succeed");
+
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_market_state_exposes_numeric_market_version() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('numeric version probe', NOW() + INTERVAL '7 days', 'numeric') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO numeric_market_config (event_id, range_min, range_max, bin_count, b_numeric, numeric_market_version)
+             VALUES ($1, 0, 4, 4, 886.0, 7)",
+        )
+        .bind(event_id)
+        .execute(pool)
+        .await?;
+        // two active outcomes so the non-binary branch has rows to serialize
+        for i in 0..2i32 {
+            sqlx::query(
+                "INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(event_id)
+            .bind(format!("bin_{i}"))
+            .bind(format!("{i}-{}", i + 1))
+            .bind(i)
+            .bind(i as f64)
+            .bind((i + 1) as f64)
+            .execute(pool)
+            .await?;
+        }
+
+        let state = crate::lmsr_api::get_market_state(pool, event_id).await?;
+        assert_eq!(state["numeric_market_version"].as_i64(), Some(7));
+
+        // Binary events report null.
+        let binary_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('binary probe', NOW() + INTERVAL '7 days', 'binary') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        let state = crate::lmsr_api::get_market_state(pool, binary_id).await?;
+        assert!(state["numeric_market_version"].is_null());
 
         cleanup_test_database(test_db.pool, &test_db.db_name).await?;
         Ok(())

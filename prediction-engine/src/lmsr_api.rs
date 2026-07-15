@@ -2269,7 +2269,12 @@ pub async fn get_market_state(pool: &PgPool, event_id: i32) -> Result<serde_json
             (
                 COALESCE((SELECT COUNT(*) FROM market_updates mu WHERE mu.event_id = e.id), 0)
                 + COALESCE((SELECT COUNT(*) FROM market_outcome_updates mou WHERE mou.event_id = e.id), 0)
-            ) AS total_trades
+            ) AS total_trades,
+            (
+                SELECT c.numeric_market_version
+                FROM numeric_market_config c
+                WHERE c.event_id = e.id
+            ) AS numeric_market_version
          FROM events e
          WHERE e.id = $1",
     )
@@ -2395,6 +2400,7 @@ pub async fn get_market_state(pool: &PgPool, event_id: i32) -> Result<serde_json
                 "liquidity_b": row.get::<f64, _>("liquidity_b"),
                 "unique_traders": row.get::<i64, _>("unique_traders"),
                 "total_trades": row.get::<i64, _>("total_trades"),
+                "numeric_market_version": row.get::<Option<i64>, _>("numeric_market_version"),
                 "outcomes": outcomes
             }))
         }
