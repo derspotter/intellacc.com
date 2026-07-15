@@ -81,6 +81,20 @@ export default function DistributionMarketCard(props) {
   let lastEventId = '';
   let quoteTimer = null;
   let quoteSeq = 0;
+  // Request-ordering guards for loadMarketState/loadPositions, same pattern
+  // as fetchQuote's quoteSeq / MarketDetailView's loadSeq: each load
+  // captures its own sequence number at the top and every set* after an
+  // await bails if a newer call of the same kind has since started. Two
+  // independent counters (not one shared one) because loadMarketState and
+  // loadPositions are fired concurrently (not awaited) from the
+  // event-change effect below — sharing a single counter would make each
+  // call's own increment spuriously invalidate the other's in-flight
+  // request. Without this, a slow response for a market you've navigated
+  // away from (reachable via detail-view back/forward between two numeric
+  // markets) can land after a faster response for the new market and
+  // overwrite its bins/positions with stale data.
+  let marketSeq = 0;
+  let positionsSeq = 0;
 
   const closeMessages = () => {
     setError('');
@@ -106,9 +120,11 @@ export default function DistributionMarketCard(props) {
 
   const loadMarketState = async () => {
     if (!eventId()) return;
+    const seq = ++marketSeq;
     setMarketLoadState('loading');
     try {
       const state = await getMarketState(eventId());
+      if (seq !== marketSeq) return;
       const rows = Array.isArray(state?.outcomes) ? state.outcomes : [];
       if (rows.length < 2) {
         setBins([]);
@@ -128,6 +144,7 @@ export default function DistributionMarketCard(props) {
         baseSpread = { low: p10, center: p50, high: p90 };
       }
     } catch (err) {
+      if (seq !== marketSeq) return;
       setBins([]);
       setMarketLoadState('error');
     }
@@ -138,10 +155,13 @@ export default function DistributionMarketCard(props) {
       setPositionShares([]);
       return;
     }
+    const seq = ++positionsSeq;
     try {
       const result = await api.events.getShares(eventId());
+      if (seq !== positionsSeq) return;
       setPositionShares(Array.isArray(result?.outcome_shares) ? result.outcome_shares : []);
     } catch (err) {
+      if (seq !== positionsSeq) return;
       if (err instanceof ApiError && err.status === 403) {
         setVerificationMessage(err.message, { requiredTier: err.data?.required_tier });
       }
@@ -454,6 +474,13 @@ export default function DistributionMarketCard(props) {
       handlesInitialized = false;
       setQuote(null);
       setSessionSpentRp(0);
+      // Invalidate anything already in flight for the previous event before
+      // kicking off fresh loads, so a slow response for the market we just
+      // navigated away from (e.g. the isLoggedIn() branch below never
+      // firing loadPositions again) can't land later and clobber state that
+      // belongs to nextId.
+      marketSeq += 1;
+      positionsSeq += 1;
       void loadMarketState();
       if (isLoggedIn()) {
         void loadPositions();
