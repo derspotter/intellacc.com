@@ -167,6 +167,42 @@ test.describe('my positions section', () => {
     await expect(card.locator('p.success')).toContainText(/bought .* shares of/i);
   });
 
+  test('numeric position shows one distribution meta line, not per-bin labels', async ({ page }) => {
+    const title = `E2E pos numeric ${stamp}`;
+    const evId = Number(psql(
+      `INSERT INTO events (title, closing_date, event_type)
+       VALUES ('${title}', NOW() + INTERVAL '7 days', 'numeric') RETURNING id`
+    ));
+    eventIds.numeric = evId;
+    psql(`INSERT INTO numeric_market_config (event_id, range_min, range_max, bin_count, b_numeric)
+          VALUES (${evId}, 0, 4, 4, 886.0)`);
+    const binIds = [];
+    for (let i = 0; i < 4; i++) {
+      binIds.push(Number(psql(
+        `INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound)
+         VALUES (${evId}, 'bin_${i}', '${i}-${i + 1}', ${i}, ${i}, ${i + 1}) RETURNING id`
+      )));
+    }
+    psql(`INSERT INTO user_outcome_shares (user_id, event_id, outcome_id, shares, staked_ledger)
+          VALUES (${userId}, ${evId}, ${binIds[1]}, 2.0, 0), (${userId}, ${evId}, ${binIds[2]}, 4.0, 0)`);
+
+    await page.goto(`${BASE}/#login`);
+    await page.getByLabel(/email/i).fill('user1@example.com');
+    await page.getByLabel(/password/i).fill('password123');
+    await page.getByRole('button', { name: /sign in/i }).click();
+    await page.waitForURL(/#(home|feed)/, { timeout: 15000 });
+
+    await page.goto(`${BASE}/#predictions`);
+    const section = page.locator('.my-positions-card');
+    await expect(section).toBeVisible({ timeout: 20000 });
+
+    const row = section.locator('.event-list-item', { hasText: title });
+    await expect(row).toBeVisible();
+    await expect(row.locator('.event-category')).toHaveText('Distribution · 2 bins · 6.0 sh');
+    await expect(row.locator('.event-prob')).toHaveCount(0);
+    await expect(row.locator('.event-prob-bar')).toHaveCount(0);
+  });
+
   test('logged out shows no section', async ({ page }) => {
     await page.goto(`${BASE}/#predictions`);
     await page.waitForSelector('.events-simple-list li', { timeout: 20000 });

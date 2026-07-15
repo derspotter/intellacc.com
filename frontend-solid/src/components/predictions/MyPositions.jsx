@@ -108,15 +108,24 @@ export default function MyPositions(props) {
           hidden: !!row.hidden_at,
           resolvedAt: row.resolved_at,
           resolutionLabel: row.resolution_outcome_label,
-          outcomes: []
+          outcomes: [],
+          numericBins: 0,
+          numericShares: 0
         });
       }
       const group = byId.get(key);
-      if (row.outcome_label && Number(row.outcome_shares) > 0) {
-        group.outcomes.push({ label: row.outcome_label, shares: Number(row.outcome_shares) });
+      if (group.event.event_type === 'numeric') {
+        if (row.outcome_label && Number(row.outcome_shares) > 0) {
+          group.numericBins += 1;
+          group.numericShares += Number(row.outcome_shares);
+        }
+      } else {
+        if (row.outcome_label && Number(row.outcome_shares) > 0) {
+          group.outcomes.push({ label: row.outcome_label, shares: Number(row.outcome_shares) });
+        }
+        if (Number(row.yes_shares) > 0) group.outcomes.push({ label: 'YES', shares: Number(row.yes_shares) });
+        if (Number(row.no_shares) > 0) group.outcomes.push({ label: 'NO', shares: Number(row.no_shares) });
       }
-      if (Number(row.yes_shares) > 0) group.outcomes.push({ label: 'YES', shares: Number(row.yes_shares) });
-      if (Number(row.no_shares) > 0) group.outcomes.push({ label: 'NO', shares: Number(row.no_shares) });
     }
     const groups = [...byId.values()];
     const open = groups
@@ -235,16 +244,31 @@ export default function MyPositions(props) {
                     >
                       <div class="event-list-item-header">
                         <span class="event-title">{group().event.title}</span>
-                        <span class="event-prob">{formatProbability(group().event.market_prob || 0.5)}</span>
+                        <Show when={!isNumeric(group().event)}>
+                          <span class="event-prob">{formatProbability(group().event.market_prob || 0.5)}</span>
+                        </Show>
                       </div>
-                      <div class="event-prob-bar" aria-hidden="true">
-                        <div class="event-prob-bar-fill" style={{ width: `${Math.round(prob() * 100)}%` }} />
-                      </div>
+                      <Show when={!isNumeric(group().event)}>
+                        <div class="event-prob-bar" aria-hidden="true">
+                          <div class="event-prob-bar-fill" style={{ width: `${Math.round(prob() * 100)}%` }} />
+                        </div>
+                      </Show>
                       <div class="event-list-item-meta">
-                        <Show when={group().outcomes.length > 0}>
-                          <span class="event-category">
-                            {group().outcomes.map((o) => `${o.label} ×${o.shares.toFixed(1)}`).join(' · ')}
-                          </span>
+                        <Show
+                          when={!isNumeric(group().event)}
+                          fallback={
+                            <Show when={group().numericBins > 0}>
+                              <span class="event-category">
+                                {`Distribution · ${group().numericBins} bins · ${group().numericShares.toFixed(1)} sh`}
+                              </span>
+                            </Show>
+                          }
+                        >
+                          <Show when={group().outcomes.length > 0}>
+                            <span class="event-category">
+                              {group().outcomes.map((o) => `${o.label} ×${o.shares.toFixed(1)}`).join(' · ')}
+                            </span>
+                          </Show>
                         </Show>
                         <Show when={!isResolved()}>
                           <span class="event-date">{`Closes: ${formatDate(group().event.closing_date)}`}</span>
