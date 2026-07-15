@@ -516,6 +516,32 @@ async fn ensure_not_numeric_market(
     Ok(())
 }
 
+/// Guard against resolving a multiple-choice market through the legacy
+/// binary (`outcome: bool`) resolve path. Multiple-choice markets trade
+/// exclusively through `user_outcome_shares` / `event_outcome_states`
+/// (see `resolve_event_by_outcome_transaction`); the binary path only
+/// reads and pays out the `user_shares` table, so running it against an
+/// MC event would mark the event resolved while stranding every
+/// outcome position. Gated on having 2+ active `event_outcomes` rows —
+/// the same >=2 bucket/outcome requirement enforced at market-creation
+/// time — rather than on `event_type`, for the same reason
+/// `ensure_not_numeric_market` gates on config presence.
+async fn ensure_not_multi_outcome_market(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event_id: i32,
+) -> Result<()> {
+    let active_outcomes: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM event_outcomes WHERE event_id = $1 AND is_active = TRUE",
+    )
+    .bind(event_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+    if active_outcomes >= 2 {
+        return Err(anyhow!("multi-outcome market — resolve by outcome id"));
+    }
+    Ok(())
+}
+
 pub async fn update_market_outcome(
     pool: &PgPool,
     config: &Config,
@@ -1983,6 +2009,32 @@ async fn resolve_event_transaction(
     event_id: i32,
     outcome: bool,
 ) -> Result<()> {
+    // Lock the event row first so a concurrent resolve can't race, and so we
+    // can reject events that don't actually settle through the binary
+    // user_shares ledger this path pays out of. This mirrors the
+    // "SELECT ... FOR UPDATE" + not-already-resolved check already used by
+    // resolve_event_by_outcome_transaction.
+    let market_exists: Option<i32> =
+        sqlx::query_scalar("SELECT id FROM events WHERE id = $1 AND outcome IS NULL FOR UPDATE")
+            .bind(event_id)
+            .fetch_optional(tx.as_mut())
+            .await?;
+    if market_exists.is_none() {
+        return Err(anyhow!("Event not found or already resolved"));
+    }
+    // Numeric (distribution) markets trade via event_outcome_states/q_value
+    // and pay out user_outcome_shares, not user_shares — reject them here
+    // the same way the outcome/bucket endpoints reject binary markets, with
+    // a message that points at the correct resolution path.
+    ensure_not_numeric_market(tx, event_id).await.map_err(|_| {
+        anyhow!("numeric market — resolve with a numeric value via the numeric resolution path")
+    })?;
+    // Multiple-choice markets also trade exclusively through
+    // user_outcome_shares (see event_outcomes below). The legacy binary
+    // path only ever reads/pays user_shares, so resolving an MC event here
+    // would mark it resolved while stranding every outcome position.
+    ensure_not_multi_outcome_market(tx, event_id).await?;
+
     // Get all user positions with side-specific stake data in single query
     // FOR UPDATE prevents race conditions during resolution (e.g., concurrent sell operations)
     let user_shares = sqlx::query(
