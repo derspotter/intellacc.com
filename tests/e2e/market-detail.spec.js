@@ -2,6 +2,7 @@
 // full (header, description, trading card, activity) instead of the list.
 const { test, expect } = require('@playwright/test');
 const { execSync } = require('child_process');
+const { refundEventStakes } = require('./helpers/stakeRefund');
 
 const BASE = process.env.E2E_BASE_URL || 'http://localhost:4174';
 
@@ -73,6 +74,7 @@ test.describe('market detail view', () => {
   test.afterAll(() => {
     const ids = Object.values(eventIds).filter(Boolean).join(',');
     if (ids) {
+      refundEventStakes(psql, ids);
       psql(`DELETE FROM market_updates WHERE event_id IN (${ids})`);
       psql(`DELETE FROM events WHERE id IN (${ids})`); // cascades outcome rows
     }

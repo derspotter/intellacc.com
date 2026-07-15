@@ -3,6 +3,7 @@
 // plus recently resolved markets, and drop stale resolutions.
 const { test, expect } = require('@playwright/test');
 const { execSync } = require('child_process');
+const { refundEventStakes } = require('./helpers/stakeRefund');
 
 const BASE = process.env.E2E_BASE_URL || 'http://localhost:4174';
 
@@ -78,11 +79,7 @@ test.describe('my positions section', () => {
     if (ids) {
       // Refund whatever the in-test buy staked before the cascade wipes the
       // share rows (same leak-proofing as multi-outcome-trading.spec.js).
-      psql(`UPDATE users u
-            SET rp_balance_ledger = rp_balance_ledger + s.staked_ledger,
-                rp_staked_ledger = rp_staked_ledger - s.staked_ledger
-            FROM user_outcome_shares s
-            WHERE s.event_id IN (${ids}) AND s.user_id = u.id AND s.staked_ledger > 0`);
+      refundEventStakes(psql, ids);
       psql(`DELETE FROM market_outcome_updates WHERE event_id IN (${ids})`);
       psql(`DELETE FROM market_updates WHERE event_id IN (${ids})`);
       psql(`DELETE FROM events WHERE id IN (${ids})`); // cascades share rows

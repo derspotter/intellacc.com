@@ -6,6 +6,7 @@
 // the shared E2E users).
 const { test, expect } = require('@playwright/test');
 const { execSync } = require('child_process');
+const { refundEventStakes } = require('./helpers/stakeRefund');
 
 const BASE = process.env.E2E_BASE_URL || 'http://localhost:4174';
 
@@ -100,7 +101,10 @@ test.describe('numeric market distribution trading', () => {
     // Delete events first: numeric_market_config, event_outcomes,
     // event_outcome_states, distribution_trades(+legs), numeric_position_basis
     // and user_outcome_shares all cascade off events.id. The disposable user
-    // is deleted whole afterward (no balance restoration needed).
+    // is deleted whole afterward (no balance restoration needed) but this
+    // refund is belt-and-braces in case the spec ever switches to a shared
+    // account.
+    refundEventStakes(psql, [eventId, mcEventId].filter(Boolean).join(','));
     if (eventId) psqlExec(`DELETE FROM events WHERE id = ${eventId}`);
     if (mcEventId) psqlExec(`DELETE FROM events WHERE id = ${mcEventId}`);
     if (userId) psqlExec(`DELETE FROM users WHERE id = ${userId}`);

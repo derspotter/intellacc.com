@@ -3,6 +3,7 @@
 // select event -> pick outcome -> buy -> price shifts -> sell -> position gone.
 const { test, expect } = require('@playwright/test');
 const { execSync } = require('child_process');
+const { refundEventStakes } = require('./helpers/stakeRefund');
 
 const BASE = process.env.E2E_BASE_URL || 'http://localhost:4174';
 
@@ -46,11 +47,7 @@ test.describe('multi-outcome trading', () => {
       // Refund any position left by a failed run before deleting the event —
       // the cascade wipes user_outcome_shares but NOT users.rp_staked_ledger,
       // so a bare DELETE leaks staked RP on the test account.
-      psql(`UPDATE users u
-            SET rp_balance_ledger = rp_balance_ledger + s.staked_ledger,
-                rp_staked_ledger = rp_staked_ledger - s.staked_ledger
-            FROM user_outcome_shares s
-            WHERE s.event_id = ${eventId} AND s.user_id = u.id AND s.staked_ledger > 0`);
+      refundEventStakes(psql, String(eventId));
       psql(`DELETE FROM events WHERE id = ${eventId}`);
     }
     psql(`UPDATE users SET verification_tier = 1 WHERE email = 'user1@example.com'`);

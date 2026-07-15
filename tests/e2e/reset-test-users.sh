@@ -44,6 +44,21 @@ CREATE TEMP TABLE tmp_test_user_ids AS
     'bob_test@example.com'
   );
 
+-- Reconcile rp_staked_ledger against actual open positions: past spec runs
+-- deleted events without refunding, leaving orphaned staked RP.
+UPDATE users u
+SET
+  rp_balance_ledger = rp_balance_ledger + (u.rp_staked_ledger - expected.total),
+  rp_staked_ledger = expected.total
+FROM (
+  SELECT t.id,
+    COALESCE((SELECT SUM(staked_yes_ledger + staked_no_ledger) FROM user_shares s WHERE s.user_id = t.id), 0)
+    + COALESCE((SELECT SUM(staked_ledger) FROM user_outcome_shares o WHERE o.user_id = t.id), 0)
+    + COALESCE((SELECT SUM(basis_ledger) FROM numeric_position_basis b WHERE b.user_id = t.id), 0) AS total
+  FROM tmp_test_user_ids t
+) expected
+WHERE u.id = expected.id AND u.rp_staked_ledger > expected.total;
+
 -- Clear device linking tokens FIRST (has FK to user_devices)
 DELETE FROM device_linking_tokens WHERE user_id IN (SELECT id FROM tmp_test_user_ids);
 -- Clear user devices
