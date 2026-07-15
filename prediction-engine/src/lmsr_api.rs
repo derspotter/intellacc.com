@@ -2801,20 +2801,31 @@ async fn verify_post_resolution_invariant_transaction(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     event_id: i32,
 ) -> Result<serde_json::Value> {
-    // Check if event is resolved
-    let outcome: Option<String> = sqlx::query_scalar("SELECT outcome FROM events WHERE id = $1")
-        .bind(event_id)
-        .fetch_optional(tx.as_mut())
-        .await?;
+    // Check if event is resolved. Note the double Option: the outer Option
+    // distinguishes "no such event row" (fetch_optional) from the inner
+    // Option, which is the nullable `outcome` column itself (every
+    // unresolved event has outcome = NULL). Collapsing these into a single
+    // Option::<String> here previously crashed this function with a decode
+    // error the moment it was invoked against an actual unresolved event.
+    let outcome_row: Option<Option<String>> =
+        sqlx::query_scalar("SELECT outcome FROM events WHERE id = $1")
+            .bind(event_id)
+            .fetch_optional(tx.as_mut())
+            .await?;
 
-    let is_resolved = match outcome {
-        Some(ref outcome_str) => outcome_str.starts_with("resolved_"),
+    let outcome: Option<String> = match outcome_row {
+        Some(outcome) => outcome,
         None => {
             return Ok(serde_json::json!({
                 "valid": false,
                 "message": "Event not found"
             }))
         }
+    };
+
+    let is_resolved = match outcome {
+        Some(ref outcome_str) => outcome_str.starts_with("resolved_"),
+        None => false,
     };
 
     if !is_resolved {
@@ -2831,7 +2842,25 @@ async fn verify_post_resolution_invariant_transaction(
             .fetch_one(tx.as_mut())
             .await?;
 
-    let shares_cleared = remaining_shares == 0;
+    // Check that no user_outcome_shares rows (multiple-choice markets) remain
+    let remaining_outcome_shares: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_outcome_shares WHERE event_id = $1 AND shares > 0",
+    )
+    .bind(event_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+
+    // Check that no numeric_position_basis rows (numeric markets) remain
+    let remaining_numeric_basis: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM numeric_position_basis WHERE event_id = $1 AND basis_ledger > 0",
+    )
+    .bind(event_id)
+    .fetch_one(tx.as_mut())
+    .await?;
+
+    let shares_cleared = remaining_shares == 0
+        && remaining_outcome_shares == 0
+        && remaining_numeric_basis == 0;
 
     // For rp_staked stability check, we'd need to track pre/post resolution states
     // For now, just verify shares are cleared
@@ -2839,7 +2868,10 @@ async fn verify_post_resolution_invariant_transaction(
     let message = if shares_cleared {
         "Post-resolution invariant verified: user_shares cleared".to_string()
     } else {
-        format!("Post-resolution invariant violated: {} user_shares rows still exist for resolved event", remaining_shares)
+        format!(
+            "Post-resolution invariant violated: {} user_shares, {} user_outcome_shares, {} numeric_position_basis rows still exist for resolved event",
+            remaining_shares, remaining_outcome_shares, remaining_numeric_basis
+        )
     };
 
     Ok(serde_json::json!({
@@ -2849,7 +2881,9 @@ async fn verify_post_resolution_invariant_transaction(
             "event_id": event_id,
             "outcome": outcome,
             "is_resolved": is_resolved,
-            "remaining_shares": remaining_shares
+            "remaining_shares": remaining_shares,
+            "remaining_outcome_shares": remaining_outcome_shares,
+            "remaining_numeric_basis": remaining_numeric_basis
         }
     }))
 }

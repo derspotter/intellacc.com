@@ -350,6 +350,41 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    // Stand-ins for the per-outcome / numeric-position ledger tables the
+    // post-resolution invariant (verify_post_resolution_invariant_transaction)
+    // checks in every real environment. Mirrors production minus indexes.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS user_outcome_shares (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            outcome_id BIGINT NOT NULL REFERENCES event_outcomes(id) ON DELETE CASCADE,
+            shares DOUBLE PRECISION NOT NULL DEFAULT 0.0 CHECK (shares >= 0.0),
+            staked_ledger BIGINT NOT NULL DEFAULT 0 CHECK (staked_ledger >= 0),
+            realized_pnl_ledger BIGINT NOT NULL DEFAULT 0,
+            version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, event_id, outcome_id)
+        )
+    "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS numeric_position_basis (
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            basis_ledger BIGINT NOT NULL DEFAULT 0 CHECK (basis_ledger >= 0),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (user_id, event_id)
+        )
+    "#,
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
@@ -1843,6 +1878,67 @@ mod tests {
         .await?;
         let state = crate::lmsr_api::get_market_state(pool, binary_id).await?;
         assert!(state["numeric_market_version"].is_null());
+
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_post_resolution_invariant_covers_outcome_tables() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+
+        let user_id: i32 = sqlx::query_scalar(
+            "INSERT INTO users (username, email) VALUES ('inv_user', 'inv@test') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type, outcome, resolved_at)
+             VALUES ('resolved mc', NOW() - INTERVAL '1 day', 'multiple_choice', 'resolved_choice_1', NOW()) RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        let outcome_id: i64 = sqlx::query_scalar(
+            "INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order) VALUES ($1, 'choice_1', 'Alpha', 0) RETURNING id",
+        )
+        .bind(event_id)
+        .fetch_one(pool)
+        .await?;
+
+        // Clean state: invariant holds.
+        let result = crate::lmsr_api::verify_post_resolution_invariant(pool, event_id).await?;
+        assert_eq!(result["valid"].as_bool(), Some(true), "clean resolved event: {result}");
+
+        // Stranded outcome shares: invariant must fail.
+        sqlx::query(
+            "INSERT INTO user_outcome_shares (user_id, event_id, outcome_id, shares) VALUES ($1, $2, $3, 4.0)",
+        )
+        .bind(user_id).bind(event_id).bind(outcome_id)
+        .execute(pool)
+        .await?;
+        let result = crate::lmsr_api::verify_post_resolution_invariant(pool, event_id).await?;
+        assert_eq!(result["valid"].as_bool(), Some(false), "stranded outcome shares: {result}");
+        sqlx::query("DELETE FROM user_outcome_shares WHERE event_id = $1").bind(event_id).execute(pool).await?;
+
+        // Non-zero numeric basis: invariant must fail.
+        sqlx::query(
+            "INSERT INTO numeric_position_basis (user_id, event_id, basis_ledger) VALUES ($1, $2, 5000000)",
+        )
+        .bind(user_id).bind(event_id)
+        .execute(pool)
+        .await?;
+        let result = crate::lmsr_api::verify_post_resolution_invariant(pool, event_id).await?;
+        assert_eq!(result["valid"].as_bool(), Some(false), "non-zero basis: {result}");
+
+        // Unresolved event: still valid=true / not-applicable (regression pin).
+        let open_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type) VALUES ('open', NOW() + INTERVAL '1 day', 'binary') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        let result = crate::lmsr_api::verify_post_resolution_invariant(pool, open_id).await?;
+        assert_eq!(result["valid"].as_bool(), Some(true), "unresolved: {result}");
 
         cleanup_test_database(test_db.pool, &test_db.db_name).await?;
         Ok(())
