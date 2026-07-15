@@ -197,7 +197,25 @@ pub fn apply_vector_cost(q: &[f64], delta_q: &[f64], b: f64) -> f64 {
 /// ("Reject or clamp market log-odds spans beyond roughly 40b").
 pub const MAX_LOG_ODDS_SPAN_B_MULTIPLE: f64 = 40.0;
 
-/// d_i = b*ln(u_i/p_i); u floored at 1e-9 and renormalized first.
+/// Floor applied to each target mass `u_i` before renormalizing, so a
+/// fully-zeroed target bin never produces `ln(0)`. Must stay in sync with
+/// `distributionMath.js`'s `fitDistribution` floor on the frontend, which
+/// previews the same target vector before it's sent to the engine.
+///
+/// Raised from 1e-9 to 1e-6 (see
+/// docs/superpowers/specs/2026-07-14-numeric-markets-codex-consult.md and
+/// task-10-report.md "Fix: Codex post-ship review"): at 1e-9, a full-alpha
+/// trade concentrating mass into one bin sets every other bin's *prior*
+/// probability to ~1e-9 (since alpha=1 moves p to floor-and-renormalize(u)
+/// exactly). A subsequent full-alpha trade in the opposite direction then
+/// pairs a ~1 target against a ~1e-9 prior (and vice versa), producing a
+/// log-odds span of ~2*ln(1/1e-9) ≈ 41.4*b — just over the 40*b clamp — so
+/// every quote against that market 400s forever. At 1e-6 the same
+/// worst-case reversal spans ~2*ln(1/1e-6) ≈ 27.6*b, safely under the
+/// clamp with ~12*b of headroom.
+pub const TARGET_MASS_FLOOR: f64 = 1e-6;
+
+/// d_i = b*ln(u_i/p_i); u floored at TARGET_MASS_FLOOR and renormalized first.
 ///
 /// **Signature deviation from the Task 5 brief** (documented, per the
 /// brief's own allowance): this returns `Result<Vec<f64>>` rather than a
@@ -223,9 +241,9 @@ pub fn target_deltas(p: &[f64], u: &[f64], b: f64) -> Result<Vec<f64>> {
         return Err(anyhow!("all u_i must be finite"));
     }
 
-    // Floor at 1e-9 and renormalize, per spec, so a fully-zeroed target bin
-    // never produces ln(0).
-    let floored: Vec<f64> = u.iter().map(|v| v.max(1e-9)).collect();
+    // Floor at TARGET_MASS_FLOOR and renormalize, per spec, so a
+    // fully-zeroed target bin never produces ln(0).
+    let floored: Vec<f64> = u.iter().map(|v| v.max(TARGET_MASS_FLOOR)).collect();
     let sum: f64 = floored.iter().sum();
     if !sum.is_finite() || sum <= 0.0 {
         return Err(anyhow!("u renormalization failed: non-positive sum"));
@@ -719,6 +737,69 @@ mod vector_trade_tests {
             solve_alpha_for_budget(&p, &u, b, 1_000_000).is_err(),
             "solve_alpha_for_budget must propagate the same span-clamp error"
         );
+    }
+
+    // Regression for the floor/clamp interaction bug fixed alongside
+    // TARGET_MASS_FLOOR going from 1e-9 to 1e-6 (see that constant's doc
+    // comment and task-10-report.md "Fix: Codex post-ship review"): a
+    // narrow full-alpha trade that concentrates all mass into one bin sets
+    // every other bin's *prior* probability to the target floor (alpha=1
+    // moves p to floor-and-renormalize(u) exactly). An immediate,
+    // opposite-direction narrow full-alpha trade must still be quotable —
+    // at the old 1e-9 floor this pairing produced a ~41.4*b log-odds span
+    // and 400'd forever; at 1e-6 it's ~27.6*b, safely under the 40*b clamp.
+    #[test]
+    fn full_alpha_reversal_after_floor_still_quotes() {
+        let n = 10;
+        let b = 100.0;
+        let p0 = vec![1.0 / n as f64; n];
+
+        // First trade: a narrow full-alpha buy concentrating everything
+        // into bin 0. Every other bin's target mass is zero, so it gets
+        // floored to TARGET_MASS_FLOOR by target_deltas/bundle_cost.
+        let mut u_first = vec![0.0; n];
+        u_first[0] = 1.0;
+        target_deltas(&p0, &u_first, b).expect("first (concentrating) trade should quote");
+        bundle_cost(&p0, &u_first, b, 1.0).expect("first trade alpha=1 cost must be finite");
+
+        // Simulate the resulting market state: at alpha=1 the new prior is
+        // exactly floor-and-renormalize(u_first) (see target_deltas doc
+        // comment / exact_bundle_moves_probabilities_to_target).
+        let sum_first: f64 = u_first.iter().map(|v: &f64| v.max(TARGET_MASS_FLOOR)).sum();
+        let p1: Vec<f64> = u_first
+            .iter()
+            .map(|v| v.max(TARGET_MASS_FLOOR) / sum_first)
+            .collect();
+        assert!((p1.iter().sum::<f64>() - 1.0).abs() < 1e-9, "p1 must renormalize to 1");
+        assert!(
+            p1[1..].iter().all(|&v| (v - TARGET_MASS_FLOOR / sum_first).abs() < 1e-15),
+            "every non-winning bin should have been floored"
+        );
+
+        // Second trade: reverse direction, concentrating into bin 1 — a
+        // bin that was just floored to TARGET_MASS_FLOOR by the first
+        // trade. This is the pathological pairing the floor raise fixes.
+        let mut u_second = vec![0.0; n];
+        u_second[1] = 1.0;
+
+        let d_second = target_deltas(&p1, &u_second, b)
+            .expect("opposite-direction full-alpha reversal must still quote after the floor fix");
+        assert!(d_second.iter().all(|v| v.is_finite()));
+
+        let max_d = d_second.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min_d = d_second.iter().cloned().fold(f64::INFINITY, f64::min);
+        let span = max_d - min_d;
+        assert!(
+            span < MAX_LOG_ODDS_SPAN_B_MULTIPLE * b,
+            "reversal span {span} should be safely under the {}*b clamp",
+            MAX_LOG_ODDS_SPAN_B_MULTIPLE
+        );
+
+        let (alpha, cost_ledger, delta_q) = solve_alpha_for_budget(&p1, &u_second, b, i64::MAX / 2)
+            .expect("solve_alpha_for_budget should succeed for the reversal");
+        assert!(alpha.is_finite());
+        assert!(delta_q.iter().all(|v| v.is_finite()));
+        let _ = cost_ledger;
     }
 
     // "linear_bins(0,10,50,None): 50 bins, first (0,0.2), last (9.8,10),

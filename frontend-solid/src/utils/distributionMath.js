@@ -75,9 +75,16 @@ export function computeSigmas(low, center, high, rangeMin, rangeMax) {
  * order (as returned by the market-state endpoint).
  *
  * Mass outside [rangeMin, rangeMax] (the split-normal's tails) is simply not
- * counted — bins are floored at 1e-9 and the whole vector is renormalized to
- * sum to 1, per the design brief.
+ * counted — bins are floored at TARGET_MASS_FLOOR and the whole vector is
+ * renormalized to sum to 1, per the design brief.
  */
+// Must match TARGET_MASS_FLOOR in prediction-engine/src/lmsr_multi_core.rs —
+// this previews the same target vector the engine floors server-side.
+// Raised from 1e-9 to 1e-6: see that constant's doc comment for why (a
+// full-alpha trade at the old floor could push the market's log-odds span
+// past the 40*b clamp on a subsequent opposite-direction trade).
+const TARGET_MASS_FLOOR = 1e-6;
+
 export function fitDistribution({ low, center, high, rangeMin, rangeMax, bins }) {
   if (!Array.isArray(bins) || bins.length === 0) return [];
   const { sigmaLeft, sigmaRight } = computeSigmas(low, center, high, rangeMin, rangeMax);
@@ -88,11 +95,11 @@ export function fitDistribution({ low, center, high, rangeMin, rangeMax, bins })
     return Math.max(cdfUpper - cdfLower, 0);
   });
 
-  const floored = raw.map((v) => (Number.isFinite(v) ? Math.max(v, 1e-9) : 1e-9));
+  const floored = raw.map((v) => (Number.isFinite(v) ? Math.max(v, TARGET_MASS_FLOOR) : TARGET_MASS_FLOOR));
   const sum = floored.reduce((a, b) => a + b, 0);
   if (!Number.isFinite(sum) || sum <= 0) {
-    // Should be unreachable (floor guarantees sum >= bins.length * 1e-9), but
-    // never hand back NaN/Inf to the caller — fall back to uniform.
+    // Should be unreachable (floor guarantees sum >= bins.length * TARGET_MASS_FLOOR),
+    // but never hand back NaN/Inf to the caller — fall back to uniform.
     return bins.map(() => 1 / bins.length);
   }
   return floored.map((v) => v / sum);
