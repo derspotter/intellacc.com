@@ -242,21 +242,12 @@ async fn sync_mc_resolutions(
                     }
                     None => {
                         stats.mc_no_label_match += 1;
-                        // Also println! (not just tracing::warn!): this binary
-                        // never installs a tracing subscriber (see main.rs),
-                        // so tracing events are otherwise silently dropped and
-                        // an admin would never learn a manual resolve is
-                        // needed.
                         tracing::warn!(
                             event_id,
                             resolution_label = %label,
                             source = %source,
                             external_id = %external_id,
                             "MC resolution sync: no event_outcomes row matches provider's winning label"
-                        );
-                        println!(
-                            "⚠️ No matching outcome for MC event {} ({}: {}), winning label {:?} - leaving for admin",
-                            event_id, source, external_id, label
                         );
                     }
                 }
@@ -393,10 +384,6 @@ async fn sync_numeric_resolutions(
                             source = %source,
                             external_id = %external_id,
                             "Numeric resolution sync: no event_outcomes bin contains provider's resolved value"
-                        );
-                        println!(
-                            "⚠️ No matching bin for numeric event {} ({}: {}), resolved value {} - leaving for admin",
-                            event_id, source, external_id, value
                         );
                     }
                 }

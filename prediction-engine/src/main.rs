@@ -114,6 +114,14 @@ async fn main() -> anyhow::Result<()> {
     // Load environment variables from .env file
     dotenv::dotenv().ok();
 
+    // Install tracing subscriber for structured logging
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     println!("🦀 Starting Prediction Engine...");
 
     // Load configuration from environment
