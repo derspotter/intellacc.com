@@ -2024,11 +2024,10 @@ async fn resolve_event_transaction(
     }
     // Numeric (distribution) markets trade via event_outcome_states/q_value
     // and pay out user_outcome_shares, not user_shares — reject them here
-    // the same way the outcome/bucket endpoints reject binary markets, with
-    // a message that points at the correct resolution path.
-    ensure_not_numeric_market(tx, event_id).await.map_err(|_| {
-        anyhow!("numeric market — resolve with a numeric value via the numeric resolution path")
-    })?;
+    // the same way the outcome/bucket endpoints reject binary markets. No
+    // map_err: rewriting the helper's error here would also swallow genuine
+    // DB failures (e.g. a missing table) into a misleading rejection.
+    ensure_not_numeric_market(tx, event_id).await?;
     // Multiple-choice markets also trade exclusively through
     // user_outcome_shares (see event_outcomes below). The legacy binary
     // path only ever reads/pays user_shares, so resolving an MC event here

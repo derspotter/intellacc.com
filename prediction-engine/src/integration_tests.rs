@@ -268,6 +268,50 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    // Minimal stand-ins for the multi-outcome / numeric-market tables the
+    // backend migrations create in every real environment. The resolve and
+    // trade guards (ensure_not_numeric_market / ensure_not_multi_outcome_market)
+    // query these; without the tables those queries error and every binary
+    // resolve fails. Empty tables = "not numeric, not multi-outcome".
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS event_outcomes (
+            id BIGSERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id),
+            outcome_key TEXT NOT NULL,
+            label TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            lower_bound DOUBLE PRECISION,
+            upper_bound DOUBLE PRECISION,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE
+        )
+    "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS numeric_market_config (
+            event_id INTEGER PRIMARY KEY REFERENCES events(id),
+            range_min DOUBLE PRECISION NOT NULL,
+            range_max DOUBLE PRECISION NOT NULL,
+            zero_point DOUBLE PRECISION,
+            open_lower_bound BOOLEAN NOT NULL DEFAULT FALSE,
+            open_upper_bound BOOLEAN NOT NULL DEFAULT FALSE,
+            unit TEXT,
+            bin_count INTEGER NOT NULL,
+            transform TEXT NOT NULL DEFAULT 'linear',
+            binning_version INTEGER NOT NULL DEFAULT 1,
+            b_numeric DOUBLE PRECISION NOT NULL,
+            numeric_market_version BIGINT NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    "#,
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
