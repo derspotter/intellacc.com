@@ -1425,6 +1425,12 @@ pub async fn get_numeric_quote(
     }
 
     let market = fetch_numeric_market_row_pool(pool, event_id).await?;
+    if market.is_resolved {
+        return Err(anyhow!(ERR_MARKET_RESOLVED));
+    }
+    if market.is_closed {
+        return Err(anyhow!(ERR_MARKET_CLOSED));
+    }
     let bin_count = market.bin_count as usize;
     validate_target(&target, bin_count)?;
 

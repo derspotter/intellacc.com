@@ -312,6 +312,21 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS event_outcome_states (
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            outcome_id BIGINT NOT NULL REFERENCES event_outcomes(id) ON DELETE CASCADE,
+            q_value DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+            prob DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (event_id, outcome_id)
+        )
+    "#,
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
@@ -1680,6 +1695,81 @@ mod tests {
         }
 
         println!("✅ Numerical stability under stress PASSED");
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_numeric_quote_rejects_closed_and_resolved() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('closed numeric market', NOW() - INTERVAL '1 hour', 'numeric') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO numeric_market_config (event_id, range_min, range_max, bin_count, b_numeric)
+             VALUES ($1, 0, 4, 4, 886.0)",
+        )
+        .bind(event_id)
+        .execute(pool)
+        .await?;
+        for i in 0..4i32 {
+            let outcome_id: i64 = sqlx::query_scalar(
+                "INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            )
+            .bind(event_id)
+            .bind(format!("bin_{i}"))
+            .bind(format!("{i}-{}", i + 1))
+            .bind(i)
+            .bind(i as f64)
+            .bind((i + 1) as f64)
+            .fetch_one(pool)
+            .await?;
+            sqlx::query(
+                "INSERT INTO event_outcome_states (event_id, outcome_id, q_value, prob)
+                 VALUES ($1, $2, 0, 0.25)",
+            )
+            .bind(event_id)
+            .bind(outcome_id)
+            .execute(pool)
+            .await?;
+        }
+
+        let target = vec![0.25f64; 4];
+
+        // Closed (past closing_date, unresolved) must be rejected.
+        let err = crate::lmsr_api::get_numeric_quote(pool, event_id, 1_000_000, target.clone())
+            .await
+            .expect_err("quote on closed market must fail");
+        assert!(err.to_string().contains("Market closed"), "got: {err}");
+
+        // Resolved (outcome set) must be rejected even if closing_date is future.
+        sqlx::query(
+            "UPDATE events SET outcome = 'resolved_bin_2', closing_date = NOW() + INTERVAL '1 day'
+             WHERE id = $1",
+        )
+        .bind(event_id)
+        .execute(pool)
+        .await?;
+        let err = crate::lmsr_api::get_numeric_quote(pool, event_id, 1_000_000, target.clone())
+            .await
+            .expect_err("quote on resolved market must fail");
+        assert!(err.to_string().contains("Market resolved"), "got: {err}");
+
+        // Control: open + unresolved must still quote successfully.
+        sqlx::query("UPDATE events SET outcome = NULL WHERE id = $1")
+            .bind(event_id)
+            .execute(pool)
+            .await?;
+        crate::lmsr_api::get_numeric_quote(pool, event_id, 1_000_000, target)
+            .await
+            .expect("quote on open market must succeed");
+
         cleanup_test_database(test_db.pool, &test_db.db_name).await?;
         Ok(())
     }
