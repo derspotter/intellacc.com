@@ -241,6 +241,7 @@ export default function MarketEventCard(props) {
       await loadUserPosition();
       setStakeAmount('');
       emitSuccess('Trade submitted. Market refreshed.');
+      window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
       await onTrade()?.(eventId());
     } catch (error) {
       if (error instanceof ApiError && error.status === 403) {
@@ -298,6 +299,7 @@ export default function MarketEventCard(props) {
       emitSuccess(
         `Successfully sold ${amountValue.toFixed(2)} ${shareType.toUpperCase()} shares for ${safeNumber(result?.payout).toFixed(2)} RP`
       );
+      window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
       await onTrade()?.(eventId());
     } catch (error) {
       if (error instanceof ApiError && error.status === 403) {
@@ -359,6 +361,7 @@ export default function MarketEventCard(props) {
 
       await loadUserPosition();
       emitSuccess(`Sold all shares. Estimated payout ${totalPayout.toFixed(2)} RP`);
+      window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
       await onTrade()?.(eventId());
     } catch (error) {
       if (error instanceof ApiError && error.status === 403) {

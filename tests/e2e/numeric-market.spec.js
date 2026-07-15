@@ -136,6 +136,12 @@ test.describe('numeric market distribution trading', () => {
 
     const marketAreaBefore = await card.locator('.distribution-card-market-area').getAttribute('d');
 
+    // Header RP balance ("Available", the first horizontal stat) must refresh
+    // immediately on trade success, without a page reload.
+    const rpAvailable = page.locator('.user-stats-horizontal .stat-item').first().locator('.stat-main');
+    await expect(rpAvailable).toBeVisible({ timeout: 10000 });
+    const rpBefore = await rpAvailable.textContent();
+
     await card.locator('.distribution-card-budget-input').fill('50');
     await expect(card.locator('.distribution-card-quote')).toBeVisible({ timeout: 5000 });
 
@@ -149,6 +155,8 @@ test.describe('numeric market distribution trading', () => {
 
     const marketAreaAfter = await card.locator('.distribution-card-market-area').getAttribute('d');
     expect(marketAreaAfter).not.toEqual(marketAreaBefore);
+
+    await expect(rpAvailable).not.toHaveText(rpBefore, { timeout: 5000 });
   });
 
   test('sell restores balance within 1 RP and clears the position', async ({ page }) => {

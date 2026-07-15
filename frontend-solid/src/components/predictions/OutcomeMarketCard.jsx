@@ -181,6 +181,7 @@ export default function OutcomeMarketCard(props) {
       await loadPositions();
       setStakeAmount('');
       emitSuccess(`Bought ${safeNumber(result?.shares_acquired).toFixed(2)} shares of "${formatOutcomeLabel(outcome)}".`);
+      window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
       await onTrade()?.(eventId());
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
@@ -230,6 +231,7 @@ export default function OutcomeMarketCard(props) {
       applyTradeResult(result);
       await loadPositions();
       emitSuccess(`Sold ${held.toFixed(2)} shares for ${safeNumber(result?.payout).toFixed(2)} RP.`);
+      window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
       await onTrade()?.(eventId());
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {

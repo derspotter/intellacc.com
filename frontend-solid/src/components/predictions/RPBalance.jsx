@@ -91,11 +91,13 @@ export default function RPBalance({ horizontal = false }) {
 
   onMount(() => {
     window.addEventListener('solid-auth-changed', handleAuthChange);
+    window.addEventListener('rp-balance-refresh', loadBalance);
     handleAuthChange();
   });
 
   onCleanup(() => {
     window.removeEventListener('solid-auth-changed', handleAuthChange);
+    window.removeEventListener('rp-balance-refresh', loadBalance);
   });
 
   if (horizontal) {

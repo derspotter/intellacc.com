@@ -390,6 +390,7 @@ export default function DistributionMarketCard(props) {
       emitSuccess(
         `Traded for ${ledgerToRp(result.cost_ledger).toFixed(2)} RP (moved ${Math.round(result.alpha * 100)}% toward your target).`
       );
+      window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
       await loadMarketState();
       await loadPositions();
       await fetchQuote();
@@ -440,6 +441,7 @@ export default function DistributionMarketCard(props) {
       });
       setSessionSpentRp(0);
       emitSuccess(`Sold your position for ${ledgerToRp(result.payout_ledger).toFixed(2)} RP.`);
+      window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
       await loadMarketState();
       await loadPositions();
       await fetchQuote();
