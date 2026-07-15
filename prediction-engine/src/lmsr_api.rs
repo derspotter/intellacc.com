@@ -10,6 +10,7 @@ use chrono::{DateTime, Duration, Utc};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::{Error as SqlxError, Executor, PgPool, Row};
+use std::collections::BTreeMap;
 use std::time::Duration as StdDuration;
 use tokio::time::sleep;
 use tracing::debug;
@@ -2143,7 +2144,9 @@ async fn resolve_event_by_outcome_transaction(
     .fetch_all(tx.as_mut())
     .await?;
 
-    for row in rows {
+    // (user_id) -> (balance_delta, staked_delta), aggregated across bins and basis.
+    let mut deltas: BTreeMap<i32, (i64, i64)> = BTreeMap::new();
+    for row in &rows {
         let user_id: i32 = row.get("user_id");
         let row_outcome_id: i64 = row.get("outcome_id");
         let shares: f64 = row.get("shares");
@@ -2159,7 +2162,15 @@ async fn resolve_event_by_outcome_transaction(
         )
         .map_err(|_| anyhow!("payout_ledger out of i64 range"))?;
 
-        DbAdapter::update_user_balance_ledger(tx, user_id, payout_ledger, -staked_ledger).await?;
+        let entry = deltas.entry(user_id).or_insert((0, 0));
+        entry.0 = entry
+            .0
+            .checked_add(payout_ledger)
+            .ok_or_else(|| anyhow!("balance delta overflow"))?;
+        entry.1 = entry
+            .1
+            .checked_sub(staked_ledger)
+            .ok_or_else(|| anyhow!("staked delta overflow"))?;
     }
 
     // Numeric events keep per-bin staked_ledger at 0 by design (the joint
@@ -2189,28 +2200,38 @@ async fn resolve_event_by_outcome_transaction(
     .fetch_all(tx.as_mut())
     .await?;
 
-    for row in numeric_positions {
-        let position_user_id: i32 = row.get("user_id");
+    for row in &numeric_positions {
+        let user_id: i32 = row.get("user_id");
         let basis_ledger: i64 = row.get("basis_ledger");
-
-        let rows_affected =
-            DbAdapter::update_user_balance_ledger(tx, position_user_id, 0, -basis_ledger).await?;
-        if rows_affected == 0 {
-            return Err(anyhow!(
-                "Failed to unstake numeric position for user {} on event {} (would drive rp_staked_ledger negative)",
-                position_user_id,
-                event_id
-            ));
-        }
-        sqlx::query(
-            "UPDATE numeric_position_basis SET basis_ledger = 0, updated_at = NOW()
-             WHERE user_id = $1 AND event_id = $2",
-        )
-        .bind(position_user_id)
-        .bind(event_id)
-        .execute(tx.as_mut())
-        .await?;
+        let entry = deltas.entry(user_id).or_insert((0, 0));
+        entry.1 = entry
+            .1
+            .checked_sub(basis_ledger)
+            .ok_or_else(|| anyhow!("staked delta overflow"))?;
     }
+
+    let user_ids: Vec<i32> = deltas.keys().copied().collect();
+    let balance_deltas: Vec<i64> = deltas.values().map(|d| d.0).collect();
+    let staked_deltas: Vec<i64> = deltas.values().map(|d| d.1).collect();
+    let affected =
+        DbAdapter::update_user_balances_ledger_batch(tx, &user_ids, &balance_deltas, &staked_deltas)
+            .await?;
+    if affected != user_ids.len() as u64 {
+        return Err(anyhow!(
+            "settlement balance update applied to {} of {} users on event {} — aborting resolution",
+            affected,
+            user_ids.len(),
+            event_id
+        ));
+    }
+
+    sqlx::query(
+        "UPDATE numeric_position_basis SET basis_ledger = 0, updated_at = NOW()
+         WHERE event_id = $1 AND basis_ledger > 0",
+    )
+    .bind(event_id)
+    .execute(tx.as_mut())
+    .await?;
 
     sqlx::query("DELETE FROM user_outcome_shares WHERE event_id = $1")
         .bind(event_id)

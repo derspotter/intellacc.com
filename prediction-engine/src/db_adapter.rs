@@ -86,6 +86,38 @@ impl DbAdapter {
         Ok(rows_affected)
     }
 
+    /// Batched variant of update_user_balance_ledger: one UPDATE for many users.
+    /// The three slices are parallel arrays. Preserves the same per-row
+    /// non-negative guards; returns rows_affected so callers can detect
+    /// rows the guards rejected.
+    pub async fn update_user_balances_ledger_batch(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        user_ids: &[i32],
+        balance_deltas: &[i64],
+        staked_deltas: &[i64],
+    ) -> Result<u64> {
+        if user_ids.is_empty() {
+            return Ok(0);
+        }
+        let rows_affected = sqlx::query(
+            "UPDATE users u SET
+                rp_balance_ledger = u.rp_balance_ledger + t.balance_delta,
+                rp_staked_ledger  = u.rp_staked_ledger  + t.staked_delta
+             FROM UNNEST($1::int[], $2::bigint[], $3::bigint[])
+                  AS t(user_id, balance_delta, staked_delta)
+             WHERE u.id = t.user_id
+               AND (u.rp_balance_ledger + t.balance_delta) >= 0
+               AND (u.rp_staked_ledger  + t.staked_delta) >= 0",
+        )
+        .bind(user_ids)
+        .bind(balance_deltas)
+        .bind(staked_deltas)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected();
+        Ok(rows_affected)
+    }
+
     /// Deduct cost from user balance using ledger units (bypasses f64 conversion)
     pub async fn deduct_user_cost_ledger(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,

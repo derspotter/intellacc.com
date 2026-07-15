@@ -185,6 +185,7 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
             id SERIAL PRIMARY KEY,
             username VARCHAR(50) UNIQUE NOT NULL,
             email VARCHAR(100) UNIQUE NOT NULL,
+            password_hash VARCHAR(255) NOT NULL DEFAULT 'test_hash',
             rp_balance_ledger BIGINT DEFAULT 1000000000,
             rp_staked_ledger BIGINT DEFAULT 0,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -214,7 +215,9 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
             q_no DOUBLE PRECISION DEFAULT 0.0,
             cumulative_stake DOUBLE PRECISION DEFAULT 0.0,
             event_type VARCHAR(32) NOT NULL DEFAULT 'binary',
-            resolved_at TIMESTAMP WITH TIME ZONE
+            resolved_at TIMESTAMP WITH TIME ZONE,
+            numerical_outcome DECIMAL(15,6),
+            resolution_outcome_id BIGINT
         )
     "#,
     )
@@ -1939,6 +1942,84 @@ mod tests {
         .await?;
         let result = crate::lmsr_api::verify_post_resolution_invariant(pool, open_id).await?;
         assert_eq!(result["valid"].as_bool(), Some(true), "unresolved: {result}");
+
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_numeric_settlement_pays_out_and_clears_positions() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        // Event with 4 bins [0,1) [1,2) [2,3) [3,4]; resolution value 2.5 -> bin_2 wins.
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('settle numeric', NOW() - INTERVAL '1 hour', 'numeric') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO numeric_market_config (event_id, range_min, range_max, bin_count, b_numeric)
+             VALUES ($1, 0, 4, 4, 886.0)",
+        )
+        .bind(event_id)
+        .execute(pool)
+        .await?;
+        let mut outcome_ids = Vec::new();
+        for i in 0..4i32 {
+            let oid: i64 = sqlx::query_scalar(
+                "INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            )
+            .bind(event_id).bind(format!("bin_{i}")).bind(format!("{i}-{}", i + 1))
+            .bind(i).bind(i as f64).bind((i + 1) as f64)
+            .fetch_one(pool).await?;
+            outcome_ids.push(oid);
+        }
+
+        // Two users. u1 holds 3.0 shares of the winning bin + 2.0 of a losing bin,
+        // basis 4_000_000 (4 RP). u2 holds 1.5 shares of a losing bin, basis 1_000_000.
+        // Balances start at 100 RP; staked mirrors basis (numeric staking model:
+        // user_outcome_shares.staked_ledger stays 0, stake lives in the basis table).
+        let u1: i32 = sqlx::query_scalar(
+            "INSERT INTO users (username, email, password_hash, rp_balance_ledger, rp_staked_ledger)
+             VALUES ('settle_u1', 's1@test', 'x', 100000000, 4000000) RETURNING id",
+        ).fetch_one(pool).await?;
+        let u2: i32 = sqlx::query_scalar(
+            "INSERT INTO users (username, email, password_hash, rp_balance_ledger, rp_staked_ledger)
+             VALUES ('settle_u2', 's2@test', 'x', 100000000, 1000000) RETURNING id",
+        ).fetch_one(pool).await?;
+        for (uid, oid, shares) in [(u1, outcome_ids[2], 3.0f64), (u1, outcome_ids[0], 2.0), (u2, outcome_ids[1], 1.5)] {
+            sqlx::query(
+                "INSERT INTO user_outcome_shares (user_id, event_id, outcome_id, shares, staked_ledger)
+                 VALUES ($1, $2, $3, $4, 0)",
+            ).bind(uid).bind(event_id).bind(oid).bind(shares).execute(pool).await?;
+        }
+        sqlx::query("INSERT INTO numeric_position_basis (user_id, event_id, basis_ledger) VALUES ($1, $2, 4000000), ($3, $2, 1000000)")
+            .bind(u1).bind(event_id).bind(u2).execute(pool).await?;
+
+        crate::lmsr_api::resolve_numeric_event(pool, event_id, 2.5).await?;
+
+        // u1: +3.0 shares * 1 RP payout = +3_000_000 balance; staked -4_000_000 -> 0.
+        let (b1, s1): (i64, i64) = sqlx::query_as(
+            "SELECT rp_balance_ledger, rp_staked_ledger FROM users WHERE id = $1",
+        ).bind(u1).fetch_one(pool).await?;
+        assert_eq!(b1, 103_000_000);
+        assert_eq!(s1, 0);
+        // u2: no payout; staked released.
+        let (b2, s2): (i64, i64) = sqlx::query_as(
+            "SELECT rp_balance_ledger, rp_staked_ledger FROM users WHERE id = $1",
+        ).bind(u2).fetch_one(pool).await?;
+        assert_eq!(b2, 100_000_000);
+        assert_eq!(s2, 0);
+        // Positions cleared.
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_outcome_shares WHERE event_id = $1")
+            .bind(event_id).fetch_one(pool).await?;
+        assert_eq!(remaining, 0);
+        let basis: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(basis_ledger), 0)::BIGINT FROM numeric_position_basis WHERE event_id = $1",
+        ).bind(event_id).fetch_one(pool).await?;
+        assert_eq!(basis, 0);
 
         cleanup_test_database(test_db.pool, &test_db.db_name).await?;
         Ok(())
