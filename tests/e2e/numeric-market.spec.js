@@ -165,6 +165,12 @@ test.describe('numeric market distribution trading', () => {
     const card = page.locator('.distribution-market-card');
     await expect(card.locator('.distribution-card-position')).toBeVisible({ timeout: 10000 });
 
+    // Clearing the budget input nulls the trade quote, but Sell only needs
+    // the market's version — it must stay enabled.
+    await page.locator('.distribution-card-budget-input').fill('');
+    const sellButton = page.getByRole('button', { name: /sell all/i });
+    await expect(sellButton).toBeEnabled({ timeout: 5000 });
+
     page.on('dialog', (dialog) => dialog.accept());
     await card.getByRole('button', { name: /sell/i }).click();
     await expect(card.locator('.distribution-card-position')).not.toBeVisible({ timeout: 10000 });

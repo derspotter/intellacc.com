@@ -66,6 +66,7 @@ export default function DistributionMarketCard(props) {
   const [quote, setQuote] = createSignal(null); // {alpha, cost_ledger, market_version, post_distribution, deltas}
   const [quoteLoading, setQuoteLoading] = createSignal(false);
   const [quoteError, setQuoteError] = createSignal('');
+  const [marketVersion, setMarketVersion] = createSignal(null);
 
   const [positionShares, setPositionShares] = createSignal([]); // [{outcome_id, label, shares, staked_ledger}]
   const [busyAction, setBusyAction] = createSignal('');
@@ -115,6 +116,14 @@ export default function DistributionMarketCard(props) {
     setTradeMessage(value);
   };
 
+  // Remaps the engine's internal span-clamp wording to trader-facing copy.
+  const friendlyTradeError = (message) => {
+    if (typeof message === 'string' && message.includes('too extreme or target too concentrated')) {
+      return "Your target is too concentrated for this market's liquidity — widen your P10–P90 range or reduce the trade size.";
+    }
+    return message;
+  };
+
   const rangeMin = () => (bins()[0] ? Number(bins()[0].lower_bound) : 0);
   const rangeMax = () => (bins().length ? Number(bins()[bins().length - 1].upper_bound) : 1);
 
@@ -129,9 +138,11 @@ export default function DistributionMarketCard(props) {
       if (rows.length < 2) {
         setBins([]);
         setMarketLoadState('unconfigured');
+        setMarketVersion(null);
         return;
       }
       setBins(rows);
+      setMarketVersion(state?.numeric_market_version ?? null);
       setMarketLoadState('ready');
       if (!handlesInitialized) {
         handlesInitialized = true;
@@ -147,6 +158,7 @@ export default function DistributionMarketCard(props) {
       if (seq !== marketSeq) return;
       setBins([]);
       setMarketLoadState('error');
+      setMarketVersion(null);
     }
   };
 
@@ -171,6 +183,11 @@ export default function DistributionMarketCard(props) {
 
   const hasPosition = () => positionShares().some((row) => safeNumber(row.shares) > 0);
   const totalShares = () => positionShares().reduce((acc, row) => acc + safeNumber(row.shares), 0);
+  // Selling only needs a market_version, not a live trade quote — clearing
+  // the budget input nulls quote() but must not disable Sell. Prefer the
+  // quote's version when one is loaded (freshest), falling back to the
+  // version from the last market-state load.
+  const sellVersion = () => quote()?.market_version ?? marketVersion();
 
   // Marginal-price estimate (shares x current per-bin prob), same
   // approximation OutcomeMarketCard uses for its "Position Value" stat —
@@ -311,7 +328,7 @@ export default function DistributionMarketCard(props) {
       if (err instanceof ApiError && err.status === 403) {
         setVerificationMessage(err.message, { requiredTier: err.data?.required_tier });
       } else {
-        setQuoteError(err?.message || 'Failed to fetch quote.');
+        setQuoteError(friendlyTradeError(err?.message) || 'Failed to fetch quote.');
       }
     } finally {
       if (seq === quoteSeq) setQuoteLoading(false);
@@ -404,7 +421,7 @@ export default function DistributionMarketCard(props) {
           requiredTier: err.data?.required_tier
         });
       } else {
-        setError(err?.message || 'Failed to place trade.');
+        setError(friendlyTradeError(err?.message) || 'Failed to place trade.');
       }
     } finally {
       setBusyAction('');
@@ -420,11 +437,8 @@ export default function DistributionMarketCard(props) {
       setError('No position to sell.');
       return;
     }
-    const activeQuote = quote();
-    if (!activeQuote) {
-      setError('Waiting for market data — try again in a moment.');
-      return;
-    }
+    const version = sellVersion();
+    if (version == null) return;
     const ok = window.confirm(
       `Confirm sale:\n\n` +
       `Sell your entire position (${totalShares().toFixed(2)} shares)\n` +
@@ -437,7 +451,7 @@ export default function DistributionMarketCard(props) {
     setBusyAction('sell');
     try {
       const result = await sellNumericPosition(eventId(), {
-        marketVersion: activeQuote.market_version
+        marketVersion: version
       });
       setSessionSpentRp(0);
       emitSuccess(`Sold your position for ${ledgerToRp(result.payout_ledger).toFixed(2)} RP.`);
@@ -691,7 +705,7 @@ export default function DistributionMarketCard(props) {
               type="button"
               class="button secondary"
               onClick={() => void handleSell()}
-              disabled={!!busyAction() || !quote() || !isOpen()}
+              disabled={!!busyAction() || !isOpen() || totalShares() <= 0 || sellVersion() == null}
             >
               {busyAction() === 'sell' ? 'Selling...' : `Sell all (${totalShares().toFixed(2)} sh)`}
             </button>
