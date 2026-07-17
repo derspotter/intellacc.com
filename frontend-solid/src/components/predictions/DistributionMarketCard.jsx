@@ -16,8 +16,9 @@ import {
   isPhoneVerificationMessage
 } from './marketCardShared';
 import {
-  fitDistribution,
-  quantileFromBins,
+  makeTransform,
+  fitDistributionFromState,
+  quantileFromState,
   applySpreadPreset,
   rpToLedger,
   ledgerToRp
@@ -27,11 +28,18 @@ const CHART_W = 640;
 const CHART_H = 200;
 const PAD_X = 10;
 const PAD_Y = 10;
+const TAIL_W = 20;
+const TAIL_GAP = 6;
+const AXIS_H = 14;
 const QUOTE_DEBOUNCE_MS = 400;
 const DEFAULT_BUDGET_RP = '10';
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 const fmt = (value) => (Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '0.00');
+const fmtTick = (v) =>
+  Number.isFinite(Number(v))
+    ? new Intl.NumberFormat('en', { notation: 'compact', maximumSignificantDigits: 3 }).format(Number(v))
+    : '';
 
 // Trading card for numeric (dense-bin) markets: a hand-rolled SVG showing the
 // market's current probability mass, a user-editable target distribution
@@ -53,6 +61,7 @@ export default function DistributionMarketCard(props) {
   const isOpen = () => !isClosed();
 
   const [bins, setBins] = createSignal([]);
+  const [numericConfig, setNumericConfig] = createSignal(null);
   const [marketLoadState, setMarketLoadState] = createSignal('loading'); // loading | ready | error | unconfigured
 
   const [low, setLow] = createSignal(0);
@@ -124,8 +133,22 @@ export default function DistributionMarketCard(props) {
     return message;
   };
 
-  const rangeMin = () => (bins()[0] ? Number(bins()[0].lower_bound) : 0);
-  const rangeMax = () => (bins().length ? Number(bins()[bins().length - 1].upper_bound) : 1);
+  const inboundBins = () => bins().filter((b) => (b.bucket_kind || 'inbound') === 'inbound');
+  const tailLow = () => bins().find((b) => b.bucket_kind === 'lower_tail') || null;
+  const tailHigh = () => bins().find((b) => b.bucket_kind === 'upper_tail') || null;
+  const transform = createMemo(() => {
+    const ib = inboundBins();
+    return (
+      makeTransform(numericConfig()) ||
+      makeTransform({
+        range_min: ib[0] ? Number(ib[0].lower_bound) : 0,
+        range_max: ib.length ? Number(ib[ib.length - 1].upper_bound) : 1,
+        zero_point: null
+      })
+    );
+  });
+  const rangeMin = () => transform()?.rangeMin ?? 0;
+  const rangeMax = () => transform()?.rangeMax ?? 1;
 
   const loadMarketState = async () => {
     if (!eventId()) return;
@@ -137,18 +160,20 @@ export default function DistributionMarketCard(props) {
       const rows = Array.isArray(state?.outcomes) ? state.outcomes : [];
       if (rows.length < 2) {
         setBins([]);
+        setNumericConfig(null);
         setMarketLoadState('unconfigured');
         setMarketVersion(null);
         return;
       }
       setBins(rows);
+      setNumericConfig(state?.numeric_config ?? null);
       setMarketVersion(state?.numeric_market_version ?? null);
       setMarketLoadState('ready');
       if (!handlesInitialized) {
         handlesInitialized = true;
-        const p10 = quantileFromBins(rows, 0.10);
-        const p50 = quantileFromBins(rows, 0.50);
-        const p90 = quantileFromBins(rows, 0.90);
+        const p10 = quantileFromState(rows, state?.numeric_config ?? null, 0.10);
+        const p50 = quantileFromState(rows, state?.numeric_config ?? null, 0.50);
+        const p90 = quantileFromState(rows, state?.numeric_config ?? null, 0.90);
         setLow(p10);
         setCenter(p50);
         setHigh(p90);
@@ -157,6 +182,7 @@ export default function DistributionMarketCard(props) {
     } catch (err) {
       if (seq !== marketSeq) return;
       setBins([]);
+      setNumericConfig(null);
       setMarketLoadState('error');
       setMarketVersion(null);
     }
@@ -201,21 +227,19 @@ export default function DistributionMarketCard(props) {
   // Target distribution from the three handles, via the pure math util.
   const targetU = createMemo(() => {
     if (bins().length === 0) return [];
-    return fitDistribution({
-      low: low(),
-      center: center(),
-      high: high(),
-      rangeMin: rangeMin(),
-      rangeMax: rangeMax(),
-      bins: bins()
+    return fitDistributionFromState({
+      low: low(), center: center(), high: high(),
+      rows: bins(), config: numericConfig()
     });
   });
 
   // --- SVG geometry (viewBox 640x200) --------------------------------------
-  const toX = (value) => {
-    const span = Math.max(rangeMax() - rangeMin(), Number.EPSILON);
-    return PAD_X + ((value - rangeMin()) / span) * (CHART_W - 2 * PAD_X);
-  };
+  // plotLeft/plotRight collapse to PAD_X on linear markets with no open tails
+  // (no gutter), matching the pre-Task-8 layout exactly.
+  const plotLeft = () => PAD_X + (tailLow() ? TAIL_W + TAIL_GAP : 0);
+  const plotRight = () => CHART_W - PAD_X - (tailHigh() ? TAIL_W + TAIL_GAP : 0);
+  const toX = (t) => plotLeft() + clamp(t, 0, 1) * (plotRight() - plotLeft());
+  const baselineY = () => CHART_H - PAD_Y - AXIS_H;
 
   const yMax = createMemo(() => {
     const marketMax = bins().reduce((m, b) => Math.max(m, safeNumber(b.prob)), 0);
@@ -226,33 +250,37 @@ export default function DistributionMarketCard(props) {
 
   const toY = (mass) => {
     const clamped = clamp(safeNumber(mass), 0, yMax());
-    return CHART_H - PAD_Y - (clamped / yMax()) * (CHART_H - 2 * PAD_Y);
+    return baselineY() - (clamped / yMax()) * (baselineY() - PAD_Y);
   };
 
   // Step-shaped path helpers: a "market mass" / "target" / "preview" curve is
   // one point per bin edge, held flat across each bin (never sampled at bin
   // centers) so the picture matches what u_i actually represents: mass over
   // an interval, not a density sampled at a point.
+  // values stays aligned with the full bins() order (inbound + tails); tails
+  // are excluded from the step curve but still consume their index.
   const stepPoints = (values) => {
-    const b = bins();
+    const rows = bins();
+    const n = inboundBins().length;
+    if (n === 0) return [];
     const pts = [];
-    b.forEach((bin, i) => {
-      const x0 = toX(Number(bin.lower_bound)).toFixed(2);
-      const x1 = toX(Number(bin.upper_bound)).toFixed(2);
-      const y = toY(values[i]).toFixed(2);
+    let i = 0;
+    rows.forEach((row, idx) => {
+      if ((row.bucket_kind || 'inbound') !== 'inbound') return;
+      const x0 = toX(i / n).toFixed(2);
+      const x1 = toX((i + 1) / n).toFixed(2);
+      const y = toY(values[idx]).toFixed(2);
       pts.push(`${x0},${y}`, `${x1},${y}`);
+      i += 1;
     });
     return pts;
   };
 
   const areaPath = (values) => {
-    const b = bins();
-    if (b.length === 0) return '';
-    const baseline = toY(0).toFixed(2);
+    if (inboundBins().length === 0) return '';
+    const baseline = baselineY().toFixed(2);
     const pts = stepPoints(values);
-    const firstX = toX(Number(b[0].lower_bound)).toFixed(2);
-    const lastX = toX(Number(b[b.length - 1].upper_bound)).toFixed(2);
-    return `M ${firstX},${baseline} L ${pts.join(' L ')} L ${lastX},${baseline} Z`;
+    return `M ${toX(0).toFixed(2)},${baseline} L ${pts.join(' L ')} L ${toX(1).toFixed(2)},${baseline} Z`;
   };
 
   const linePath = (values) => {
@@ -275,15 +303,22 @@ export default function DistributionMarketCard(props) {
     if (!hasPosition()) return [];
     const byId = new Map(positionShares().map((row) => [String(row.outcome_id), safeNumber(row.shares)]));
     const maxShare = Math.max(...positionShares().map((row) => safeNumber(row.shares)), 1e-9);
-    return bins()
-      .map((bin) => ({ bin, shares: byId.get(String(bin.outcome_id)) || 0 }))
-      .filter((t) => t.shares > 0)
-      .map((t) => {
-        const x0 = toX(Number(t.bin.lower_bound));
-        const x1 = toX(Number(t.bin.upper_bound));
-        const height = 4 + (t.shares / maxShare) * 16;
-        return { x: x0, width: Math.max(x1 - x0 - 1, 1), height };
-      });
+    const n = inboundBins().length;
+    if (n === 0) return [];
+    const out = [];
+    let i = 0;
+    bins().forEach((bin) => {
+      if ((bin.bucket_kind || 'inbound') !== 'inbound') return;
+      const idx = i;
+      i += 1;
+      const shares = byId.get(String(bin.outcome_id)) || 0;
+      if (shares <= 0) return;
+      const x0 = toX(idx / n);
+      const x1 = toX((idx + 1) / n);
+      const height = 4 + (shares / maxShare) * 16;
+      out.push({ x: x0, width: Math.max(x1 - x0 - 1, 1), height });
+    });
+    return out;
   });
 
   // --- Quote (debounced 400ms) ----------------------------------------------
@@ -555,7 +590,7 @@ export default function DistributionMarketCard(props) {
                   <rect
                     class="distribution-card-position-overlay"
                     x={tick.x}
-                    y={CHART_H - PAD_Y - tick.height}
+                    y={baselineY() - tick.height}
                     width={tick.width}
                     height={tick.height}
                   />
@@ -563,16 +598,89 @@ export default function DistributionMarketCard(props) {
               </For>
               <line
                 class="distribution-card-handle-guide"
-                x1={toX(low())} x2={toX(low())} y1={PAD_Y} y2={CHART_H - PAD_Y}
+                x1={toX(transform()?.toInternal(low()) ?? 0)} x2={toX(transform()?.toInternal(low()) ?? 0)} y1={PAD_Y} y2={baselineY()}
               />
               <line
                 class="distribution-card-handle-guide distribution-card-handle-guide-center"
-                x1={toX(center())} x2={toX(center())} y1={PAD_Y} y2={CHART_H - PAD_Y}
+                x1={toX(transform()?.toInternal(center()) ?? 0)} x2={toX(transform()?.toInternal(center()) ?? 0)} y1={PAD_Y} y2={baselineY()}
               />
               <line
                 class="distribution-card-handle-guide"
-                x1={toX(high())} x2={toX(high())} y1={PAD_Y} y2={CHART_H - PAD_Y}
+                x1={toX(transform()?.toInternal(high()) ?? 0)} x2={toX(transform()?.toInternal(high()) ?? 0)} y1={PAD_Y} y2={baselineY()}
               />
+
+              {/* axis tick labels — nominal values at nice t positions */}
+              <For each={[0, 0.25, 0.5, 0.75, 1]}>
+                {(t) => (
+                  <text class="distribution-card-axis-label" x={toX(t)} y={CHART_H - 3} text-anchor="middle">
+                    {fmtTick(transform()?.toNominal(t))}
+                  </text>
+                )}
+              </For>
+
+              {/* tail edge bars: market prob as a filled bar, target mass as a line */}
+              <Show when={tailLow()}>
+                <rect
+                  class="distribution-card-tail-bar"
+                  x={PAD_X}
+                  y={toY(safeNumber(tailLow().prob))}
+                  width={TAIL_W}
+                  height={Math.max(baselineY() - toY(safeNumber(tailLow().prob)), 0.5)}
+                />
+                <text class="distribution-card-tail-pct" x={PAD_X + TAIL_W / 2} y={toY(safeNumber(tailLow().prob)) - 3} text-anchor="middle">
+                  {`${(safeNumber(tailLow().prob) * 100).toFixed(0)}%`}
+                </text>
+                <text class="distribution-card-axis-label" x={PAD_X + TAIL_W / 2} y={CHART_H - 3} text-anchor="middle">
+                  {`<${fmtTick(rangeMin())}`}
+                </text>
+                <Show when={targetU().length === bins().length}>
+                  <line
+                    class="distribution-card-target-line"
+                    x1={PAD_X} x2={PAD_X + TAIL_W}
+                    y1={toY(targetU()[bins().indexOf(tailLow())])}
+                    y2={toY(targetU()[bins().indexOf(tailLow())])}
+                  />
+                </Show>
+                <Show when={(quote()?.post_distribution || []).length === bins().length}>
+                  <line
+                    class="distribution-card-preview-line"
+                    x1={PAD_X} x2={PAD_X + TAIL_W}
+                    y1={toY(safeNumber(quote().post_distribution[bins().indexOf(tailLow())]))}
+                    y2={toY(safeNumber(quote().post_distribution[bins().indexOf(tailLow())]))}
+                  />
+                </Show>
+              </Show>
+              <Show when={tailHigh()}>
+                <rect
+                  class="distribution-card-tail-bar"
+                  x={CHART_W - PAD_X - TAIL_W}
+                  y={toY(safeNumber(tailHigh().prob))}
+                  width={TAIL_W}
+                  height={Math.max(baselineY() - toY(safeNumber(tailHigh().prob)), 0.5)}
+                />
+                <text class="distribution-card-tail-pct" x={CHART_W - PAD_X - TAIL_W / 2} y={toY(safeNumber(tailHigh().prob)) - 3} text-anchor="middle">
+                  {`${(safeNumber(tailHigh().prob) * 100).toFixed(0)}%`}
+                </text>
+                <text class="distribution-card-axis-label" x={CHART_W - PAD_X - TAIL_W / 2} y={CHART_H - 3} text-anchor="middle">
+                  {`>${fmtTick(rangeMax())}`}
+                </text>
+                <Show when={targetU().length === bins().length}>
+                  <line
+                    class="distribution-card-target-line"
+                    x1={CHART_W - PAD_X - TAIL_W} x2={CHART_W - PAD_X}
+                    y1={toY(targetU()[bins().indexOf(tailHigh())])}
+                    y2={toY(targetU()[bins().indexOf(tailHigh())])}
+                  />
+                </Show>
+                <Show when={(quote()?.post_distribution || []).length === bins().length}>
+                  <line
+                    class="distribution-card-preview-line"
+                    x1={CHART_W - PAD_X - TAIL_W} x2={CHART_W - PAD_X}
+                    y1={toY(safeNumber(quote().post_distribution[bins().indexOf(tailHigh())]))}
+                    y2={toY(safeNumber(quote().post_distribution[bins().indexOf(tailHigh())]))}
+                  />
+                </Show>
+              </Show>
             </svg>
             <button type="button" class="button secondary distribution-card-refresh" onClick={() => void handleRefresh()}>
               Refresh

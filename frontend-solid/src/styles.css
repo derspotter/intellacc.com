@@ -3686,6 +3686,22 @@ body.dark-mode .weekly-assignment-badge.pending {
   stroke-opacity: 0.6;
 }
 
+.distribution-card-tail-bar {
+  fill: var(--info-color);
+  opacity: 0.55;
+}
+
+.distribution-card-tail-pct {
+  font-size: 10px;
+  fill: currentColor;
+}
+
+.distribution-card-axis-label {
+  font-size: 9px;
+  fill: currentColor;
+  opacity: 0.65;
+}
+
 .distribution-card-copy {
   margin: 0.15rem 0;
   font-size: 0.9rem;

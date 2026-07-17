@@ -68,64 +68,12 @@ export function computeSigmas(low, center, high, rangeMin, rangeMax) {
   return { sigmaLeft, sigmaRight };
 }
 
-/**
- * Fit a split-normal to (low, center, high) = (P10, P50, P90) and integrate
- * its CDF over each bin's [lower_bound, upper_bound) edges to get a
- * probability mass per bin. Bins must be given in ascending, contiguous
- * order (as returned by the market-state endpoint).
- *
- * Mass outside [rangeMin, rangeMax] (the split-normal's tails) is simply not
- * counted — bins are floored at TARGET_MASS_FLOOR and the whole vector is
- * renormalized to sum to 1, per the design brief.
- */
 // Must match TARGET_MASS_FLOOR in prediction-engine/src/lmsr_multi_core.rs —
 // this previews the same target vector the engine floors server-side.
 // Raised from 1e-9 to 1e-6: see that constant's doc comment for why (a
 // full-alpha trade at the old floor could push the market's log-odds span
 // past the 40*b clamp on a subsequent opposite-direction trade).
 const TARGET_MASS_FLOOR = 1e-6;
-
-export function fitDistribution({ low, center, high, rangeMin, rangeMax, bins }) {
-  if (!Array.isArray(bins) || bins.length === 0) return [];
-  const { sigmaLeft, sigmaRight } = computeSigmas(low, center, high, rangeMin, rangeMax);
-
-  const raw = bins.map(({ lower_bound, upper_bound }) => {
-    const cdfUpper = splitNormalCdf(Number(upper_bound), center, sigmaLeft, sigmaRight);
-    const cdfLower = splitNormalCdf(Number(lower_bound), center, sigmaLeft, sigmaRight);
-    return Math.max(cdfUpper - cdfLower, 0);
-  });
-
-  const floored = raw.map((v) => (Number.isFinite(v) ? Math.max(v, TARGET_MASS_FLOOR) : TARGET_MASS_FLOOR));
-  const sum = floored.reduce((a, b) => a + b, 0);
-  if (!Number.isFinite(sum) || sum <= 0) {
-    // Should be unreachable (floor guarantees sum >= bins.length * TARGET_MASS_FLOOR),
-    // but never hand back NaN/Inf to the caller — fall back to uniform.
-    return bins.map(() => 1 / bins.length);
-  }
-  return floored.map((v) => v / sum);
-}
-
-/**
- * Quantile (0..1) of a discrete per-bin distribution, via linear
- * interpolation within the bin whose cumulative mass first reaches q. Used
- * to initialize the low/center/high handles from the market's current
- * quartiles (P10/P50/P90) rather than starting the editor blank.
- */
-export function quantileFromBins(bins, q) {
-  if (!Array.isArray(bins) || bins.length === 0) return 0;
-  let cumulative = 0;
-  for (const bin of bins) {
-    const mass = Math.max(Number(bin.prob) || 0, 0);
-    if (cumulative + mass >= q) {
-      const lower = Number(bin.lower_bound);
-      const upper = Number(bin.upper_bound);
-      const frac = mass > 0 ? (q - cumulative) / mass : 0;
-      return lower + frac * (upper - lower);
-    }
-    cumulative += mass;
-  }
-  return Number(bins[bins.length - 1].upper_bound);
-}
 
 /**
  * Preset narrow/medium/wide handle placements. Scales the *original*
