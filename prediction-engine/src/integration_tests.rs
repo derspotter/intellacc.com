@@ -286,6 +286,7 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
             sort_order INTEGER NOT NULL DEFAULT 0,
             lower_bound DOUBLE PRECISION,
             upper_bound DOUBLE PRECISION,
+            bucket_kind TEXT NOT NULL DEFAULT 'inbound',
             is_active BOOLEAN NOT NULL DEFAULT TRUE
         )
     "#,
