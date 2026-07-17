@@ -30,6 +30,7 @@ mod lmsr_core;
 mod lmsr_multi_core;
 mod market_import;
 mod metaculus; // Configuration management
+mod numeric_transform;
 mod resolution_sync;
 
 #[cfg(test)]
