@@ -18,7 +18,8 @@ test('owner pins and unpins a market on the Markets tab', async ({ page }) => {
   await apiFetch('/api/users/me/topics', { method: 'PUT', token: owner.token, body: JSON.stringify({ topicIds: topics.slice(0, 3).map((t) => t.id) }) });
   const g = (await apiFetch('/api/groups', { method: 'POST', token: owner.token, body: JSON.stringify({ name: `Markets UI ${Date.now()}`, description: '', topic_id: topics[0].id }) })).body.group;
   const title = `ZZPINME ${Date.now()}`;
-  eventId = Number(dbQuery(`INSERT INTO events (title, details, closing_date, event_type, category) VALUES ('${title}','d',NOW()+INTERVAL '30 days','binary','test') RETURNING id`)[0].id);
+  // dbQuery returns raw psql text ("<id>\nINSERT 0 1"), not rows — take the first line.
+  eventId = Number(dbQuery(`INSERT INTO events (title, details, closing_date, event_type, category) VALUES ('${title}','d',NOW()+INTERVAL '30 days','binary','test') RETURNING id`).split('\n')[0]);
 
   await page.addInitScript((t) => localStorage.setItem('token', t), owner.token);
   await page.goto(`${SOLID_URL}/#group/${g.slug}`, { waitUntil: 'networkidle' });

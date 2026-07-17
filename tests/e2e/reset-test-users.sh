@@ -8,7 +8,7 @@
 
 PASSWORD='password123'
 
-docker exec intellacc_db psql -U intellacc_user -d intellaccdb -c "
+docker exec intellacc_db psql -U intellacc_user -d intellaccdb -v ON_ERROR_STOP=1 -c "
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 INSERT INTO users (username, email, password_hash, created_at, updated_at)

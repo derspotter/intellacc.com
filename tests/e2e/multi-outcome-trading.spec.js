@@ -60,13 +60,19 @@ test.describe('multi-outcome trading', () => {
     await page.getByRole('button', { name: /sign in/i }).click();
     await page.waitForURL(/#(home|feed)/, { timeout: 15000 });
 
-    await page.goto(`${BASE}/#predictions`);
+    // #predictions defaults to the Positions tab; the search box lives on Markets.
+    await page.goto(`${BASE}/#predictions/markets`);
     await page.getByPlaceholder(/search/i).fill(title);
     await page.getByText(title, { exact: false }).first().click();
 
     const card = page.locator('.outcome-market-card');
     await expect(card).toBeVisible({ timeout: 10000 });
     await expect(card.locator('.outcome-row')).toHaveCount(2);
+
+    // MC detail keeps the binary % header (only numeric hides it) — pins the
+    // isNumeric gate in MarketDetailView against widening to multi-outcome.
+    await expect(page.locator('.market-detail-prob')).toHaveCount(1);
+    await expect(page.locator('.market-detail-header .event-prob-bar')).toHaveCount(1);
 
     const alphaRow = card.locator('.outcome-row', { hasText: 'Alpha' });
     await expect(alphaRow.locator('.outcome-prob')).toHaveText(/50\.0%/);
