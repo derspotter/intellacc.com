@@ -1319,6 +1319,17 @@ struct NumericMarketRow {
     numeric_market_version: i64,
     is_resolved: bool,
     is_closed: bool,
+    open_lower_bound: bool,
+    open_upper_bound: bool,
+}
+
+impl NumericMarketRow {
+    /// Inbound bins + tail outcomes; the length every q/target vector must have.
+    fn expected_outcome_count(&self) -> usize {
+        self.bin_count as usize
+            + self.open_lower_bound as usize
+            + self.open_upper_bound as usize
+    }
 }
 
 const NUMERIC_MARKET_ROW_QUERY: &str = r#"
@@ -1326,6 +1337,8 @@ const NUMERIC_MARKET_ROW_QUERY: &str = r#"
         c.bin_count,
         c.b_numeric,
         c.numeric_market_version,
+        c.open_lower_bound,
+        c.open_upper_bound,
         (e.outcome IS NOT NULL) AS is_resolved,
         COALESCE(e.closing_date <= NOW(), false) AS is_closed
     FROM numeric_market_config c
@@ -1340,6 +1353,8 @@ fn row_to_numeric_market(row: sqlx::postgres::PgRow) -> NumericMarketRow {
         numeric_market_version: row.get("numeric_market_version"),
         is_resolved: row.get("is_resolved"),
         is_closed: row.get("is_closed"),
+        open_lower_bound: row.get("open_lower_bound"),
+        open_upper_bound: row.get("open_upper_bound"),
     }
 }
 
@@ -1390,13 +1405,14 @@ async fn fetch_outcome_q_values_pool(pool: &PgPool, event_id: i32) -> Result<Vec
 }
 
 /// Mandate 3: validate the target distribution at the API boundary — exact
-/// bin_count entries, all finite, all >= 0, sum > 0. Rejecting here means we
-/// never rely on `target_deltas`'s floor-and-renormalize to repair bad input.
-fn validate_target(target: &[f64], bin_count: usize) -> Result<()> {
-    if target.len() != bin_count {
+/// outcome-count entries (inbound bins + any open tails), all finite, all
+/// >= 0, sum > 0. Rejecting here means we never rely on `target_deltas`'s
+/// floor-and-renormalize to repair bad input.
+fn validate_target(target: &[f64], outcome_count: usize) -> Result<()> {
+    if target.len() != outcome_count {
         return Err(anyhow!(
             "target must have exactly {} entries, got {}",
-            bin_count,
+            outcome_count,
             target.len()
         ));
     }
@@ -1432,15 +1448,15 @@ pub async fn get_numeric_quote(
     if market.is_closed {
         return Err(anyhow!(ERR_MARKET_CLOSED));
     }
-    let bin_count = market.bin_count as usize;
-    validate_target(&target, bin_count)?;
+    let outcome_count = market.expected_outcome_count();
+    validate_target(&target, outcome_count)?;
 
     let q = fetch_outcome_q_values_pool(pool, event_id).await?;
-    if q.len() != bin_count {
+    if q.len() != outcome_count {
         return Err(anyhow!(
-            "Numeric market outcome count ({}) does not match configured bin_count ({})",
+            "Numeric market outcome count ({}) does not match configured outcome count ({})",
             q.len(),
-            bin_count
+            outcome_count
         ));
     }
 
@@ -1509,15 +1525,15 @@ async fn numeric_trade_transaction(
         return Err(anyhow!(ERR_MARKET_CLOSED));
     }
 
-    let bin_count = market.bin_count as usize;
-    validate_target(target, bin_count)?;
+    let outcome_count = market.expected_outcome_count();
+    validate_target(target, outcome_count)?;
 
     let outcomes = fetch_outcome_state_rows(tx, event_id).await?;
-    if outcomes.len() != bin_count {
+    if outcomes.len() != outcome_count {
         return Err(anyhow!(
-            "Numeric market outcome count ({}) does not match configured bin_count ({})",
+            "Numeric market outcome count ({}) does not match configured outcome count ({})",
             outcomes.len(),
-            bin_count
+            outcome_count
         ));
     }
 
@@ -1727,13 +1743,13 @@ async fn numeric_sell_transaction(
     .fetch_all(tx.as_mut())
     .await?;
 
-    let bin_count = market.bin_count as usize;
+    let outcome_count = market.expected_outcome_count();
     let outcomes = fetch_outcome_state_rows(tx, event_id).await?;
-    if outcomes.len() != bin_count {
+    if outcomes.len() != outcome_count {
         return Err(anyhow!(
-            "Numeric market outcome count ({}) does not match configured bin_count ({})",
+            "Numeric market outcome count ({}) does not match configured outcome count ({})",
             outcomes.len(),
-            bin_count
+            outcome_count
         ));
     }
 

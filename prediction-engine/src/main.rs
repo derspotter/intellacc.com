@@ -1157,8 +1157,9 @@ async fn sell_outcome_shares_endpoint(
 // ============================================================================
 
 /// Parse the `target` query/body param into `Vec<f64>`. Shape validation
-/// (exact bin_count, finite, >= 0, sum > 0) happens in lmsr_api once the
-/// market's configured bin_count is known; this only parses the wire format.
+/// (exact outcome count, finite, >= 0, sum > 0) happens in lmsr_api once the
+/// market's configured outcome count (inbound bins + open tails) is known;
+/// this only parses the wire format.
 fn parse_target_query_param(
     params: &HashMap<String, String>,
 ) -> Result<Vec<f64>, (axum::http::StatusCode, Json<Value>)> {
@@ -1205,6 +1206,7 @@ fn numeric_error_response(e: &anyhow::Error) -> (axum::http::StatusCode, Json<Va
     }
     if msg_lower.contains("no numeric market configured")
         || msg_lower.contains("bin_count")
+        || msg_lower.contains("outcome count")
         || msg_lower.contains("target must")
         || msg_lower.contains("target entries")
         || msg_lower.contains("budget_ledger must")

@@ -1837,6 +1837,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_numeric_quote_accepts_tail_outcome_vector() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('quote tails', NOW() + INTERVAL '30 days', 'numeric') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        // Task 3's helper: log market, both bounds open -> 52 outcomes.
+        let market = numeric_test_market(Some(1.0), Some(10000.0), Some(0.0), true, true);
+        crate::market_import::seed_numeric_bins_if_missing(pool, event_id, &market).await?;
+
+        let target = vec![1.0 / 52.0; 52];
+        let quote = crate::lmsr_api::get_numeric_quote(pool, event_id, 5_000_000, target).await?;
+        assert!(quote.cost_ledger >= 0);
+        assert_eq!(quote.post_distribution.len(), 52);
+
+        // A 50-length target against the 52-outcome market must be rejected.
+        let short = vec![1.0 / 50.0; 50];
+        let err = crate::lmsr_api::get_numeric_quote(pool, event_id, 5_000_000, short)
+            .await
+            .expect_err("length mismatch must fail");
+        assert!(err.to_string().contains("exactly 52"), "{err}");
+
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_market_state_exposes_numeric_market_version() -> Result<()> {
         let test_db = setup_test_database().await?;
         let pool = &test_db.pool;
