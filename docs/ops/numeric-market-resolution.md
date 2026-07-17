@@ -39,6 +39,11 @@ check above represent stuck user money.
 
 Open `external_url` (Metaculus/Manifold) and read the resolved value there.
 
+Open-bounded markets (config `open_lower_bound`/`open_upper_bound`) have
+`tail_low`/`tail_high` outcomes: a resolved value below/above the range
+settles into the tail automatically — `PATCH` with the actual
+`numerical_outcome` value as usual, never clamp it into the range.
+
 ## 3. Resolve
 
 Preferred — through the backend (admin JWT; logs, idempotency guard):
