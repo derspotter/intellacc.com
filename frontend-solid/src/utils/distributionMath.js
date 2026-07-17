@@ -138,3 +138,118 @@ export function applySpreadPreset({ center, baseLow, baseCenter, baseHigh, facto
   const rightSpread = (baseHigh - baseCenter) * factor;
   return { low: center - leftSpread, high: center + rightSpread };
 }
+
+/**
+ * Transform between nominal values and Metaculus's internal coordinate
+ * t in [0,1]. zero_point == null means linear. Formulas are verbatim from
+ * Metaculus utils/the_math/formulas.py (see the 2026-07-17 design spec) —
+ * with d = (range_max - zero_point) / (range_min - zero_point).
+ * Returns null for missing or degenerate configs (caller falls back).
+ */
+export function makeTransform(config) {
+  if (!config) return null;
+  const rangeMin = Number(config.range_min);
+  const rangeMax = Number(config.range_max);
+  const zeroPoint = config.zero_point == null ? null : Number(config.zero_point);
+  const span = rangeMax - rangeMin;
+  if (!Number.isFinite(rangeMin) || !Number.isFinite(rangeMax) || !(span > 0)) return null;
+  if (zeroPoint == null) {
+    return {
+      rangeMin,
+      rangeMax,
+      toInternal: (x) => (x - rangeMin) / span,
+      toNominal: (t) => rangeMin + span * t
+    };
+  }
+  if (!Number.isFinite(zeroPoint)) return null;
+  const d = (rangeMax - zeroPoint) / (rangeMin - zeroPoint);
+  if (!Number.isFinite(d) || d <= 0 || Math.abs(d - 1) < 1e-12) return null;
+  const lnD = Math.log(d);
+  return {
+    rangeMin,
+    rangeMax,
+    toInternal: (x) => (Math.log((x - rangeMin) * (d - 1) + span) - Math.log(span)) / lnD,
+    toNominal: (t) => rangeMin + span * (Math.pow(d, t) - 1) / (d - 1)
+  };
+}
+
+const rowKind = (row) => row?.bucket_kind || 'inbound';
+const inboundOf = (rows) => rows.filter((r) => rowKind(r) === 'inbound');
+
+// Linear fallback transform derived from inbound bin bounds, for stale
+// backends that don't send numeric_config yet (degraded display, not a
+// correctness risk — see the design spec's Error handling section).
+const fallbackTransform = (rows) => {
+  const inbound = inboundOf(rows);
+  if (inbound.length === 0) return null;
+  return makeTransform({
+    range_min: Number(inbound[0].lower_bound),
+    range_max: Number(inbound[inbound.length - 1].upper_bound),
+    zero_point: null
+  });
+};
+
+/**
+ * Split-normal fit in t-space. Returns one mass per row, aligned with the
+ * given rows order (market-state order: inbound bins then tails). Mass below
+ * t=0 / above t=1 goes to the lower/upper tail row when present and is
+ * dropped otherwise; the vector is floored at TARGET_MASS_FLOOR and
+ * renormalized to 1 (identical to the legacy closed-market behavior).
+ */
+export function fitDistributionFromState({ low, center, high, rows, config }) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const tf = makeTransform(config) || fallbackTransform(rows);
+  if (!tf) return rows.map(() => 1 / rows.length);
+  const n = inboundOf(rows).length;
+  if (n === 0) return rows.map(() => 1 / rows.length);
+
+  const tc = tf.toInternal(center);
+  const { sigmaLeft, sigmaRight } = computeSigmas(
+    tf.toInternal(low), tc, tf.toInternal(high), 0, 1
+  );
+  const cdf = (t) => splitNormalCdf(t, tc, sigmaLeft, sigmaRight);
+
+  let inboundIdx = 0;
+  const raw = rows.map((row) => {
+    const kind = rowKind(row);
+    if (kind === 'lower_tail') return Math.max(cdf(0), 0);
+    if (kind === 'upper_tail') return Math.max(1 - cdf(1), 0);
+    const i = inboundIdx;
+    inboundIdx += 1;
+    return Math.max(cdf((i + 1) / n) - cdf(i / n), 0);
+  });
+
+  const floored = raw.map((v) => (Number.isFinite(v) ? Math.max(v, TARGET_MASS_FLOOR) : TARGET_MASS_FLOOR));
+  const sum = floored.reduce((a, b) => a + b, 0);
+  if (!Number.isFinite(sum) || sum <= 0) return rows.map(() => 1 / rows.length);
+  return floored.map((v) => v / sum);
+}
+
+/**
+ * Quantile of the market's current per-row distribution, computed in t-space
+ * (walk order: lower tail, inbound bins, upper tail) and returned as a
+ * nominal value clamped into [rangeMin, rangeMax] — tail mass "lands" on the
+ * nearest range endpoint since tails have no interior coordinates.
+ */
+export function quantileFromState(rows, config, q) {
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+  const tf = makeTransform(config) || fallbackTransform(rows);
+  if (!tf) return 0;
+  const inbound = inboundOf(rows);
+  const n = inbound.length;
+  const lowerTail = rows.find((r) => rowKind(r) === 'lower_tail');
+  const upperTail = rows.find((r) => rowKind(r) === 'upper_tail');
+  const mass = (row) => Math.max(Number(row?.prob) || 0, 0);
+
+  let cumulative = mass(lowerTail || {});
+  if (cumulative >= q) return tf.rangeMin;
+  for (let i = 0; i < n; i++) {
+    const m = mass(inbound[i]);
+    if (cumulative + m >= q) {
+      const frac = m > 0 ? (q - cumulative) / m : 0;
+      return tf.toNominal((i + frac) / n);
+    }
+    cumulative += m;
+  }
+  return upperTail ? tf.rangeMax : tf.toNominal(1);
+}
