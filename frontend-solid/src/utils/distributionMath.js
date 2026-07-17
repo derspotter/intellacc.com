@@ -201,3 +201,57 @@ export function quantileFromState(rows, config, q) {
   }
   return upperTail ? tf.rangeMax : tf.toNominal(1);
 }
+
+/**
+ * ~`target` axis ticks at nice nominal values (1-2-5 progression), returned
+ * as [{ t, value }] with t-space placement for the chart. Log markets get
+ * 1-2-5 mantissa candidates in the zero_point-shifted coordinate, thinned
+ * evenly in log space; linear markets get a standard nice-step ladder.
+ * Degenerate configs return [] (the card simply renders no tick labels).
+ */
+export function niceTicks(config, target = 5) {
+  const tf = makeTransform(config);
+  if (!tf) return [];
+  const { rangeMin, rangeMax } = tf;
+  const zeroPoint = config.zero_point == null ? null : Number(config.zero_point);
+
+  let values;
+  if (zeroPoint != null) {
+    // Work in shifted space s = x - zero_point (same sign across the range,
+    // guaranteed by makeTransform's deriv_ratio validation).
+    const sMin = rangeMin - zeroPoint;
+    const sMax = rangeMax - zeroPoint;
+    const sign = sMin < 0 ? -1 : 1;
+    const lo = Math.min(Math.abs(sMin), Math.abs(sMax));
+    const hi = Math.max(Math.abs(sMin), Math.abs(sMax));
+    const candidates = [];
+    for (let k = Math.floor(Math.log10(lo)); k <= Math.ceil(Math.log10(hi)); k++) {
+      for (const m of [1, 2, 5]) {
+        const s = sign * m * Math.pow(10, k);
+        const x = s + zeroPoint;
+        if (x >= rangeMin && x <= rangeMax) candidates.push(x);
+      }
+    }
+    candidates.sort((a, b) => a - b);
+    if (candidates.length <= target) {
+      values = candidates;
+    } else {
+      values = [];
+      for (let i = 0; i < target; i++) {
+        values.push(candidates[Math.round((i * (candidates.length - 1)) / (target - 1))]);
+      }
+      values = [...new Set(values)];
+    }
+  } else {
+    const span = rangeMax - rangeMin;
+    const rawStep = span / (target - 1);
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const norm = rawStep / mag;
+    const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+    values = [];
+    for (let v = Math.ceil(rangeMin / step) * step; v <= rangeMax + step * 1e-9; v += step) {
+      values.push(Math.abs(v) < step * 1e-9 ? 0 : v);
+    }
+  }
+  return values.map((value) => ({ t: tf.toInternal(value), value }));
+}

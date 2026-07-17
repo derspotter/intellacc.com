@@ -19,6 +19,7 @@ import {
   makeTransform,
   fitDistributionFromState,
   quantileFromState,
+  niceTicks,
   applySpreadPreset,
   rpToLedger,
   ledgerToRp
@@ -136,17 +137,17 @@ export default function DistributionMarketCard(props) {
   const inboundBins = () => bins().filter((b) => (b.bucket_kind || 'inbound') === 'inbound');
   const tailLow = () => bins().find((b) => b.bucket_kind === 'lower_tail') || null;
   const tailHigh = () => bins().find((b) => b.bucket_kind === 'upper_tail') || null;
-  const transform = createMemo(() => {
+  // Linear config derived from inbound bin bounds — used when the market-state
+  // response predates numeric_config (stale bundle/backend).
+  const fallbackConfig = () => {
     const ib = inboundBins();
-    return (
-      makeTransform(numericConfig()) ||
-      makeTransform({
-        range_min: ib[0] ? Number(ib[0].lower_bound) : 0,
-        range_max: ib.length ? Number(ib[ib.length - 1].upper_bound) : 1,
-        zero_point: null
-      })
-    );
-  });
+    return {
+      range_min: ib[0] ? Number(ib[0].lower_bound) : 0,
+      range_max: ib.length ? Number(ib[ib.length - 1].upper_bound) : 1,
+      zero_point: null
+    };
+  };
+  const transform = createMemo(() => makeTransform(numericConfig() || fallbackConfig()));
   const rangeMin = () => transform()?.rangeMin ?? 0;
   const rangeMax = () => transform()?.rangeMax ?? 1;
 
@@ -299,10 +300,14 @@ export default function DistributionMarketCard(props) {
   // Thin "your shares by bin" overlay: small ticks near the baseline, scaled
   // to their own max so a concentrated position never drowns out the market
   // mass / target curves sharing the same axes.
+  const sharesById = () =>
+    new Map(positionShares().map((row) => [String(row.outcome_id), safeNumber(row.shares)]));
+  const maxHeldShare = () => Math.max(...positionShares().map((row) => safeNumber(row.shares)), 1e-9);
+
   const positionTicks = createMemo(() => {
     if (!hasPosition()) return [];
-    const byId = new Map(positionShares().map((row) => [String(row.outcome_id), safeNumber(row.shares)]));
-    const maxShare = Math.max(...positionShares().map((row) => safeNumber(row.shares)), 1e-9);
+    const byId = sharesById();
+    const maxShare = maxHeldShare();
     const n = inboundBins().length;
     if (n === 0) return [];
     const out = [];
@@ -320,6 +325,18 @@ export default function DistributionMarketCard(props) {
     });
     return out;
   });
+
+  // Overlay height (px) for shares held in a tail outcome, scaled to the same
+  // maxHeldShare as the inbound position ticks, or null if none held there.
+  const tailPositionHeight = (tailRow) => {
+    if (!tailRow || !hasPosition()) return null;
+    const shares = sharesById().get(String(tailRow.outcome_id)) || 0;
+    if (shares <= 0) return null;
+    return 4 + (shares / maxHeldShare()) * 16;
+  };
+
+  // Nice 1-2-5 axis ticks (empty until a transform is available).
+  const axisTicks = createMemo(() => niceTicks(numericConfig() || fallbackConfig(), 5));
 
   // --- Quote (debounced 400ms) ----------------------------------------------
   // quoteLoading doubles as "the displayed quote() may not match the current
@@ -609,11 +626,11 @@ export default function DistributionMarketCard(props) {
                 x1={toX(transform()?.toInternal(high()) ?? 0)} x2={toX(transform()?.toInternal(high()) ?? 0)} y1={PAD_Y} y2={baselineY()}
               />
 
-              {/* axis tick labels — nominal values at nice t positions */}
-              <For each={[0, 0.25, 0.5, 0.75, 1]}>
-                {(t) => (
-                  <text class="distribution-card-axis-label" x={toX(t)} y={CHART_H - 3} text-anchor="middle">
-                    {fmtTick(transform()?.toNominal(t))}
+              {/* axis tick labels — nice 1-2-5 nominal values, placed in t-space */}
+              <For each={axisTicks()}>
+                {(tick) => (
+                  <text class="distribution-card-axis-label" x={toX(tick.t)} y={CHART_H - 3} text-anchor="middle">
+                    {fmtTick(tick.value)}
                   </text>
                 )}
               </For>
@@ -630,6 +647,17 @@ export default function DistributionMarketCard(props) {
                 <text class="distribution-card-tail-pct" x={PAD_X + TAIL_W / 2} y={toY(safeNumber(tailLow().prob)) - 3} text-anchor="middle">
                   {`${(safeNumber(tailLow().prob) * 100).toFixed(0)}%`}
                 </text>
+                <Show when={tailPositionHeight(tailLow())}>
+                  {(h) => (
+                    <rect
+                      class="distribution-card-position-overlay"
+                      x={PAD_X}
+                      y={baselineY() - h()}
+                      width={Math.max(TAIL_W - 1, 1)}
+                      height={h()}
+                    />
+                  )}
+                </Show>
                 <text class="distribution-card-axis-label" x={PAD_X + TAIL_W / 2} y={CHART_H - 3} text-anchor="middle">
                   {`<${fmtTick(rangeMin())}`}
                 </text>
@@ -661,6 +689,17 @@ export default function DistributionMarketCard(props) {
                 <text class="distribution-card-tail-pct" x={CHART_W - PAD_X - TAIL_W / 2} y={toY(safeNumber(tailHigh().prob)) - 3} text-anchor="middle">
                   {`${(safeNumber(tailHigh().prob) * 100).toFixed(0)}%`}
                 </text>
+                <Show when={tailPositionHeight(tailHigh())}>
+                  {(h) => (
+                    <rect
+                      class="distribution-card-position-overlay"
+                      x={CHART_W - PAD_X - TAIL_W}
+                      y={baselineY() - h()}
+                      width={Math.max(TAIL_W - 1, 1)}
+                      height={h()}
+                    />
+                  )}
+                </Show>
                 <text class="distribution-card-axis-label" x={CHART_W - PAD_X - TAIL_W / 2} y={CHART_H - 3} text-anchor="middle">
                   {`>${fmtTick(rangeMax())}`}
                 </text>

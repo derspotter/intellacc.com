@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {
   makeTransform,
   fitDistributionFromState,
-  quantileFromState
+  quantileFromState,
+  niceTicks
 } from './distributionMath.js';
 
 const LOG_CFG = { range_min: 1, range_max: 10000, zero_point: 0, open_lower_bound: true, open_upper_bound: true };
@@ -69,4 +70,24 @@ test('quantileFromState inverts a uniform distribution in t-space', () => {
   // clamps into range even when tails hold mass
   rows.push({ outcome_id: 91, bucket_kind: 'upper_tail', lower_bound: 10000, upper_bound: null, prob: 0.5 });
   assert.ok(quantileFromState(rows, LOG_CFG, 0.99) <= 10000);
+});
+
+test('niceTicks picks decades on a pure log market', () => {
+  const ticks = niceTicks(LOG_CFG, 5);
+  assert.deepEqual(ticks.map((t) => t.value), [1, 10, 100, 1000, 10000]);
+  // placement is in t-space: 100 sits at t=0.5 on this market
+  const hundred = ticks.find((t) => t.value === 100);
+  assert.ok(Math.abs(hundred.t - 0.5) < 1e-9);
+});
+
+test('niceTicks picks a nice linear step', () => {
+  assert.deepEqual(niceTicks(LIN_CFG, 5).map((t) => t.value), [0, 1, 2, 3, 4]);
+  // the 7000..14000 prod shape: nice step 2000
+  const ticks = niceTicks({ range_min: 7000, range_max: 14000, zero_point: null }, 5);
+  assert.deepEqual(ticks.map((t) => t.value), [8000, 10000, 12000, 14000]);
+});
+
+test('niceTicks degrades to empty on degenerate config', () => {
+  assert.deepEqual(niceTicks(null, 5), []);
+  assert.deepEqual(niceTicks({ range_min: 5, range_max: 1, zero_point: null }, 5), []);
 });
