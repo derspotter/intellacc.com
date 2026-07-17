@@ -1918,6 +1918,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_market_state_exposes_numeric_config_and_bucket_kind() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('numeric config probe', NOW() + INTERVAL '7 days', 'numeric') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        // Task 3's helper: log market, both bounds open -> 52 outcomes (50 inbound + 2 tails).
+        let market = numeric_test_market(Some(1.0), Some(10000.0), Some(0.0), true, true);
+        crate::market_import::seed_numeric_bins_if_missing(pool, event_id, &market).await?;
+
+        let state = crate::lmsr_api::get_market_state(pool, event_id).await?;
+
+        let cfg = &state["numeric_config"];
+        assert_eq!(cfg["transform"], "log");
+        assert_eq!(cfg["range_min"], 1.0);
+        assert_eq!(cfg["range_max"], 10000.0);
+        assert_eq!(cfg["zero_point"], 0.0);
+        assert_eq!(cfg["open_lower_bound"], true);
+        assert_eq!(cfg["open_upper_bound"], true);
+        assert_eq!(cfg["bin_count"], 50);
+        assert!(cfg["unit"].is_null());
+
+        let outcomes = state["outcomes"].as_array().unwrap();
+        assert_eq!(outcomes.len(), 52);
+        assert_eq!(outcomes[0]["bucket_kind"], "inbound");
+        assert_eq!(outcomes[50]["bucket_kind"], "lower_tail");
+        assert_eq!(outcomes[51]["bucket_kind"], "upper_tail");
+
+        // A binary event's state has numeric_config == null and no numeric_market_config row.
+        let binary_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('binary config probe', NOW() + INTERVAL '7 days', 'binary') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        let binary_state = crate::lmsr_api::get_market_state(pool, binary_id).await?;
+        assert_eq!(binary_state["numeric_config"], serde_json::Value::Null);
+
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_post_resolution_invariant_covers_outcome_tables() -> Result<()> {
         let test_db = setup_test_database().await?;
         let pool = &test_db.pool;

@@ -2329,6 +2329,7 @@ pub async fn get_market_state(pool: &PgPool, event_id: i32) -> Result<serde_json
                     eo.sort_order,
                     eo.lower_bound,
                     eo.upper_bound,
+                    eo.bucket_kind,
                     COALESCE(eos.q_value, 0.0) AS q_value,
                     COALESCE(eos.prob, 0.0) AS prob
                 FROM event_outcomes eo
@@ -2341,6 +2342,27 @@ pub async fn get_market_state(pool: &PgPool, event_id: i32) -> Result<serde_json
             .bind(event_id)
             .fetch_all(pool)
             .await?;
+
+            let numeric_config = sqlx::query(
+                "SELECT range_min, range_max, zero_point, open_lower_bound, open_upper_bound, unit, transform, bin_count
+                 FROM numeric_market_config WHERE event_id = $1",
+            )
+            .bind(event_id)
+            .fetch_optional(pool)
+            .await?
+            .map(|c| {
+                serde_json::json!({
+                    "transform": c.get::<String, _>("transform"),
+                    "zero_point": c.get::<Option<f64>, _>("zero_point"),
+                    "range_min": c.get::<f64, _>("range_min"),
+                    "range_max": c.get::<f64, _>("range_max"),
+                    "open_lower_bound": c.get::<bool, _>("open_lower_bound"),
+                    "open_upper_bound": c.get::<bool, _>("open_upper_bound"),
+                    "unit": c.get::<Option<String>, _>("unit"),
+                    "bin_count": c.get::<i32, _>("bin_count"),
+                })
+            })
+            .unwrap_or(serde_json::Value::Null);
 
             let mut outcomes: Vec<serde_json::Value> = if market_type.eq_ignore_ascii_case("binary")
             {
@@ -2396,7 +2418,8 @@ pub async fn get_market_state(pool: &PgPool, event_id: i32) -> Result<serde_json
                             "prob": outcome_row.get::<f64, _>("prob"),
                             "q_value": outcome_row.get::<f64, _>("q_value"),
                             "lower_bound": outcome_row.get::<Option<f64>, _>("lower_bound"),
-                            "upper_bound": outcome_row.get::<Option<f64>, _>("upper_bound")
+                            "upper_bound": outcome_row.get::<Option<f64>, _>("upper_bound"),
+                            "bucket_kind": outcome_row.get::<String, _>("bucket_kind")
                         })
                     })
                     .collect()
@@ -2432,6 +2455,7 @@ pub async fn get_market_state(pool: &PgPool, event_id: i32) -> Result<serde_json
                 "unique_traders": row.get::<i64, _>("unique_traders"),
                 "total_trades": row.get::<i64, _>("total_trades"),
                 "numeric_market_version": row.get::<Option<i64>, _>("numeric_market_version"),
+                "numeric_config": numeric_config,
                 "outcomes": outcomes
             }))
         }
