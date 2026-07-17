@@ -248,19 +248,19 @@ mod tests {
     }
 
     #[test]
-    fn pick_winning_bin_range_min_goes_to_first_bin() {
+    fn pick_winning_outcome_range_min_goes_to_first_bin() {
         assert_eq!(pick_winning_outcome(&bins(), 0.0), Some(1));
     }
 
     #[test]
-    fn pick_winning_bin_interior_value_goes_to_its_bin() {
+    fn pick_winning_outcome_interior_value_goes_to_its_bin() {
         assert_eq!(pick_winning_outcome(&bins(), 5.0), Some(1));
         assert_eq!(pick_winning_outcome(&bins(), 15.0), Some(2));
         assert_eq!(pick_winning_outcome(&bins(), 25.0), Some(3));
     }
 
     #[test]
-    fn pick_winning_bin_exact_boundary_goes_to_the_higher_bin() {
+    fn pick_winning_outcome_exact_boundary_goes_to_the_higher_bin() {
         // lower_bound <= v < upper_bound: a value exactly on the shared edge
         // between two bins belongs to the bin whose *lower* bound equals it,
         // not the one whose upper bound equals it.
@@ -271,32 +271,32 @@ mod tests {
     }
 
     #[test]
-    fn pick_winning_bin_range_max_is_inclusive_on_the_final_bin() {
+    fn pick_winning_outcome_range_max_is_inclusive_on_the_final_bin() {
         // Only the last bin is closed on its upper end - v == range_max
         // resolves instead of falling off the edge.
         assert_eq!(pick_winning_outcome(&bins(), 30.0), Some(3));
     }
 
     #[test]
-    fn pick_winning_bin_out_of_range_returns_none() {
+    fn pick_winning_outcome_out_of_range_returns_none() {
         assert_eq!(pick_winning_outcome(&bins(), -0.001), None);
         assert_eq!(pick_winning_outcome(&bins(), 30.001), None);
     }
 
     #[test]
-    fn pick_winning_bin_unparseable_or_non_finite_returns_none() {
+    fn pick_winning_outcome_unparseable_or_non_finite_returns_none() {
         assert_eq!(pick_winning_outcome(&bins(), f64::NAN), None);
         assert_eq!(pick_winning_outcome(&bins(), f64::INFINITY), None);
         assert_eq!(pick_winning_outcome(&bins(), f64::NEG_INFINITY), None);
     }
 
     #[test]
-    fn pick_winning_bin_empty_bins_returns_none() {
+    fn pick_winning_outcome_empty_bins_returns_none() {
         assert_eq!(pick_winning_outcome(&[], 5.0), None);
     }
 
     #[test]
-    fn pick_winning_bin_ambiguous_overlapping_bins_returns_none() {
+    fn pick_winning_outcome_ambiguous_overlapping_bins_returns_none() {
         // Two active bins both claim value 5.0 - shouldn't happen for
         // well-formed data, but must fail safe (None) rather than silently
         // picking whichever row came first.

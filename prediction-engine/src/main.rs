@@ -1219,6 +1219,40 @@ fn numeric_error_response(e: &anyhow::Error) -> (axum::http::StatusCode, Json<Va
     internal_error(&format!("Numeric market error: {}", msg))
 }
 
+#[cfg(test)]
+mod numeric_error_response_tests {
+    use super::*;
+    use anyhow::anyhow;
+    use axum::http::StatusCode;
+
+    // Characterization tests: pin that validation-shaped errors map to 400 and
+    // genuinely unexpected errors map to 500. The "outcome count" wording was
+    // introduced when tail outcomes made bin_count != outcome_count — without
+    // this branch a length mismatch would silently 500 instead of 400.
+    #[test]
+    fn outcome_count_mismatch_maps_to_400() {
+        let (status, _) =
+            numeric_error_response(&anyhow!("target must have exactly 52 entries, got 50"));
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = numeric_error_response(&anyhow!(
+            "Numeric market outcome count (52) does not match configured outcome count (50)"
+        ));
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn legacy_bin_count_wording_still_maps_to_400() {
+        let (status, _) = numeric_error_response(&anyhow!("does not match configured bin_count (50)"));
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn unexpected_error_maps_to_500() {
+        let (status, _) = numeric_error_response(&anyhow!("connection reset by peer"));
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+}
+
 // Read-only quote for a target distribution + budget on a numeric market.
 async fn numeric_quote_endpoint(
     State(app_state): State<AppState>,
