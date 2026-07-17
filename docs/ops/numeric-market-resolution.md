@@ -29,6 +29,12 @@ ORDER BY frozen_basis_ledger DESC, e.closing_date;
 
 Priority: anything with `open_positions > 0` or `frozen_basis_ledger > 0`.
 
+Expect noise: as of 2026-07 this query returns ~660 rows, nearly all
+legacy Metaculus/Manifold imports that closed before trading existed —
+zero positions, zero basis, nothing frozen. Those need no action (hide
+them via §5 if they clutter listings). Only rows failing the priority
+check above represent stuck user money.
+
 ## 2. Find the true outcome
 
 Open `external_url` (Metaculus/Manifold) and read the resolved value there.
