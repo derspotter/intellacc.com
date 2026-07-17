@@ -519,30 +519,32 @@ async fn seed_outcomes_if_missing(
 /// Number of equal-width bins seeded for a Phase B numeric market.
 const NUMERIC_BIN_COUNT: usize = 50;
 
-/// Seed a 50-bin LMSR market for a numeric event, if (and only if) its shape
-/// is one Phase B actually supports: a closed range with no zero_point
-/// (log/logit transform), both bounds closed, unresolved, and not already
-/// configured. Any other numeric shape (open bounds, a zero_point, a missing
-/// range) is skipped silently and the event stays hidden from listings per
-/// Task 2 — this is intentional, not an error, since Metaculus sends numeric
-/// shapes Phase B does not attempt to bin.
-async fn seed_numeric_bins_if_missing(
+/// Seed a numeric market's bins (and, since the open-tails/log-numeric
+/// rollout, its tail outcomes) for any shape `NumericTransform::validate`
+/// accepts: closed ranges (linear), zero_point ranges (log), and open lower
+/// and/or upper bounds (extra `tail_low`/`tail_high` outcomes). Unresolved
+/// and not-already-configured, same as before. Only a truly degenerate shape
+/// (e.g. zero_point inside the range, non-finite/inverted bounds, missing
+/// range) is skipped silently, and the event stays hidden from listings —
+/// this is intentional, not an error.
+pub(crate) async fn seed_numeric_bins_if_missing(
     pool: &PgPool,
     event_id: i32,
     market: &ImportedMarket,
 ) -> Result<()> {
-    if market.numeric_zero_point.is_some() {
-        return Ok(());
-    }
-    if market.numeric_open_lower || market.numeric_open_upper {
-        return Ok(());
-    }
     let (Some(range_min), Some(range_max)) =
         (market.numeric_range_min, market.numeric_range_max)
     else {
         return Ok(());
     };
-    if !range_min.is_finite() || !range_max.is_finite() || range_max <= range_min {
+    let transform = crate::numeric_transform::NumericTransform {
+        range_min,
+        range_max,
+        zero_point: market.numeric_zero_point,
+    };
+    // Unsupported/degenerate shape (e.g. zero_point inside the range):
+    // skip silently, same contract as the old filters.
+    if transform.validate().is_err() {
         return Ok(());
     }
 
@@ -569,26 +571,22 @@ async fn seed_numeric_bins_if_missing(
         return Ok(());
     }
 
-    let bins = crate::lmsr_multi_core::linear_bins(
-        range_min,
-        range_max,
-        NUMERIC_BIN_COUNT,
-        market.numeric_unit.as_deref(),
-    );
-    if bins.len() != NUMERIC_BIN_COUNT {
-        // linear_bins returns an empty Vec (never panics) for degenerate
-        // input; treat that defensively as "unsupported shape, skip".
+    let edges = transform.bin_edges_nominal(NUMERIC_BIN_COUNT);
+    if edges.len() != NUMERIC_BIN_COUNT {
         return Ok(());
     }
+
+    let open_lower = market.numeric_open_lower;
+    let open_upper = market.numeric_open_upper;
+    let outcome_count = NUMERIC_BIN_COUNT + open_lower as usize + open_upper as usize;
 
     let subsidy_rp: f64 = env::var("NUMERIC_MAX_SUBSIDY_RP")
         .ok()
         .and_then(|v| v.parse::<f64>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
         .unwrap_or(3466.0);
-    let b_numeric = subsidy_rp / (NUMERIC_BIN_COUNT as f64).ln();
-
-    let default_prob = 1.0 / NUMERIC_BIN_COUNT as f64;
+    let b_numeric = subsidy_rp / (outcome_count as f64).ln();
+    let default_prob = 1.0 / outcome_count as f64;
 
     let mut tx = pool.begin().await?;
 
@@ -620,39 +618,87 @@ async fn seed_numeric_bins_if_missing(
         .execute(tx.as_mut())
         .await?;
 
-    for (idx, (lower, upper, label)) in bins.iter().enumerate() {
-        let outcome_key = format!("bin_{idx}");
+    // One insert helper for outcome + state, used by bins and tails alike.
+    async fn insert_outcome(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        event_id: i32,
+        outcome_key: &str,
+        label: &str,
+        sort_order: i32,
+        lower: Option<f64>,
+        upper: Option<f64>,
+        bucket_kind: &str,
+        default_prob: f64,
+    ) -> Result<()> {
         let outcome_id: i64 = sqlx::query_scalar(
             r#"
-            INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO event_outcomes
+                (event_id, outcome_key, label, sort_order, lower_bound, upper_bound, bucket_kind)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING id
             "#,
         )
         .bind(event_id)
-        .bind(&outcome_key)
+        .bind(outcome_key)
         .bind(label)
-        .bind(idx as i32)
+        .bind(sort_order)
         .bind(lower)
         .bind(upper)
+        .bind(bucket_kind)
         .fetch_one(tx.as_mut())
         .await?;
-
         sqlx::query(
             r#"
             INSERT INTO event_outcome_states (event_id, outcome_id, q_value, prob, updated_at)
             VALUES ($1, $2, 0.0, $3, NOW())
             ON CONFLICT (event_id, outcome_id)
-            DO UPDATE SET
-                q_value = EXCLUDED.q_value,
-                prob = EXCLUDED.prob,
-                updated_at = NOW()
+            DO UPDATE SET q_value = EXCLUDED.q_value, prob = EXCLUDED.prob, updated_at = NOW()
             "#,
         )
         .bind(event_id)
         .bind(outcome_id)
         .bind(default_prob)
         .execute(tx.as_mut())
+        .await?;
+        Ok(())
+    }
+
+    let unit = market.numeric_unit.as_deref();
+    for (idx, (lower, upper)) in edges.iter().enumerate() {
+        let label = crate::lmsr_multi_core::format_bin_label(*lower, *upper, unit);
+        insert_outcome(
+            &mut tx, event_id, &format!("bin_{idx}"), &label, idx as i32,
+            Some(*lower), Some(*upper), "inbound", default_prob,
+        )
+        .await?;
+    }
+
+    let with_unit = |base: String| match unit {
+        Some(u) if !u.is_empty() => format!("{base} {u}"),
+        _ => base,
+    };
+    let mut sort = NUMERIC_BIN_COUNT as i32;
+    if open_lower {
+        let label = with_unit(format!(
+            "< {}",
+            crate::lmsr_multi_core::format_bin_number(range_min)
+        ));
+        insert_outcome(
+            &mut tx, event_id, "tail_low", &label, sort,
+            None, Some(range_min), "lower_tail", default_prob,
+        )
+        .await?;
+        sort += 1;
+    }
+    if open_upper {
+        let label = with_unit(format!(
+            "> {}",
+            crate::lmsr_multi_core::format_bin_number(range_max)
+        ));
+        insert_outcome(
+            &mut tx, event_id, "tail_high", &label, sort,
+            Some(range_max), None, "upper_tail", default_prob,
+        )
         .await?;
     }
 
@@ -662,15 +708,19 @@ async fn seed_numeric_bins_if_missing(
             (event_id, range_min, range_max, zero_point, open_lower_bound, open_upper_bound,
              unit, bin_count, transform, binning_version, b_numeric, numeric_market_version)
         VALUES
-            ($1, $2, $3, NULL, FALSE, FALSE, $4, $5, 'linear', 1, $6, 0)
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9, 2, $10, 0)
         ON CONFLICT (event_id) DO NOTHING
         "#,
     )
     .bind(event_id)
     .bind(range_min)
     .bind(range_max)
+    .bind(market.numeric_zero_point)
+    .bind(open_lower)
+    .bind(open_upper)
     .bind(&market.numeric_unit)
     .bind(NUMERIC_BIN_COUNT as i32)
+    .bind(if market.numeric_zero_point.is_some() { "log" } else { "linear" })
     .bind(b_numeric)
     .execute(tx.as_mut())
     .await?;

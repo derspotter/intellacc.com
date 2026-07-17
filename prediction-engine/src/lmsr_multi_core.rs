@@ -394,7 +394,7 @@ pub fn linear_bins(
         .collect()
 }
 
-fn format_bin_number(x: f64) -> String {
+pub fn format_bin_number(x: f64) -> String {
     if x.fract() == 0.0 && x.abs() < 1e15 {
         return format!("{}", x as i64);
     }
@@ -402,7 +402,7 @@ fn format_bin_number(x: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-fn format_bin_label(lo: f64, hi: f64, unit: Option<&str>) -> String {
+pub fn format_bin_label(lo: f64, hi: f64, unit: Option<&str>) -> String {
     let base = format!(
         "{}\u{2013}{}",
         format_bin_number(lo),

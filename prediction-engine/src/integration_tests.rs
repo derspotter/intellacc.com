@@ -2115,4 +2115,166 @@ mod tests {
         cleanup_test_database(test_db.pool, &test_db.db_name).await?;
         Ok(())
     }
+
+    /// ImportedMarket with only the numeric shape varying — every ImportedMarket
+    /// field is required, so give the rest inert values.
+    fn numeric_test_market(
+        range_min: Option<f64>,
+        range_max: Option<f64>,
+        zero_point: Option<f64>,
+        open_lower: bool,
+        open_upper: bool,
+    ) -> crate::market_import::ImportedMarket {
+        crate::market_import::ImportedMarket {
+            source: "metaculus".to_string(),
+            external_id: "e2e-test".to_string(),
+            external_url: String::new(),
+            title: "seed test".to_string(),
+            description: String::new(),
+            close_time: None,
+            category: "test".to_string(),
+            event_type: "numeric".to_string(),
+            status: "open".to_string(),
+            outcomes: Vec::new(),
+            numeric_range_min: range_min,
+            numeric_range_max: range_max,
+            numeric_zero_point: zero_point,
+            numeric_open_lower: open_lower,
+            numeric_open_upper: open_upper,
+            numeric_unit: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_seeder_creates_log_open_market_with_tails() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('log open numeric', NOW() + INTERVAL '30 days', 'numeric') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+
+        let market = numeric_test_market(Some(1.0), Some(10000.0), Some(0.0), true, true);
+        crate::market_import::seed_numeric_bins_if_missing(pool, event_id, &market).await?;
+
+        let rows: Vec<(String, String, i32, Option<f64>, Option<f64>)> = sqlx::query_as(
+            "SELECT outcome_key, bucket_kind, sort_order, lower_bound, upper_bound
+             FROM event_outcomes WHERE event_id = $1 ORDER BY sort_order",
+        )
+        .bind(event_id)
+        .fetch_all(pool)
+        .await?;
+        assert_eq!(rows.len(), 52);
+        assert_eq!(rows[0].0, "bin_0");
+        assert_eq!(rows[0].3, Some(1.0));
+        assert_eq!(rows[49].4, Some(10000.0));
+        // log spacing: bin 25 starts at 10^(4*25/50) = 100
+        assert!((rows[25].3.unwrap() - 100.0).abs() < 1e-6);
+        assert_eq!((rows[50].0.as_str(), rows[50].1.as_str()), ("tail_low", "lower_tail"));
+        assert_eq!((rows[50].3, rows[50].4), (None, Some(1.0)));
+        assert_eq!((rows[51].0.as_str(), rows[51].1.as_str()), ("tail_high", "upper_tail"));
+        assert_eq!((rows[51].3, rows[51].4), (Some(10000.0), None));
+
+        let (transform, version, b, zp, ol, ou): (String, i32, f64, Option<f64>, bool, bool) = sqlx::query_as(
+            "SELECT transform, binning_version, b_numeric, zero_point, open_lower_bound, open_upper_bound
+             FROM numeric_market_config WHERE event_id = $1",
+        )
+        .bind(event_id)
+        .fetch_one(pool)
+        .await?;
+        assert_eq!(transform, "log");
+        assert_eq!(version, 2);
+        assert!((b - 3466.0 / (52f64).ln()).abs() < 1e-6);
+        assert_eq!(zp, Some(0.0));
+        assert!(ol && ou);
+
+        // uniform initial probs over all 52 outcomes
+        let (n, minp, maxp): (i64, f64, f64) = sqlx::query_as(
+            "SELECT COUNT(*), MIN(prob), MAX(prob) FROM event_outcome_states WHERE event_id = $1",
+        )
+        .bind(event_id)
+        .fetch_one(pool)
+        .await?;
+        assert_eq!(n, 52);
+        assert!((minp - 1.0 / 52.0).abs() < 1e-12 && (maxp - 1.0 / 52.0).abs() < 1e-12);
+
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_seeder_closed_linear_market_unchanged_shape() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('closed linear numeric', NOW() + INTERVAL '30 days', 'numeric') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+
+        let market = numeric_test_market(Some(0.0), Some(4.0), None, false, false);
+        crate::market_import::seed_numeric_bins_if_missing(pool, event_id, &market).await?;
+
+        let rows: Vec<(String, String, Option<f64>, Option<f64>)> = sqlx::query_as(
+            "SELECT outcome_key, bucket_kind, lower_bound, upper_bound
+             FROM event_outcomes WHERE event_id = $1 ORDER BY sort_order",
+        )
+        .bind(event_id)
+        .fetch_all(pool)
+        .await?;
+        assert_eq!(rows.len(), 50, "closed market must have no tail rows");
+        assert!(rows.iter().all(|r| r.1 == "inbound"));
+        assert_eq!(rows[0].2, Some(0.0));
+        assert_eq!(rows[49].3, Some(4.0));
+        // equal-width in nominal space too (identity transform)
+        assert!((rows[0].3.unwrap() - 0.08).abs() < 1e-9);
+
+        let (transform, version, b): (String, i32, f64) = sqlx::query_as(
+            "SELECT transform, binning_version, b_numeric FROM numeric_market_config WHERE event_id = $1",
+        )
+        .bind(event_id)
+        .fetch_one(pool)
+        .await?;
+        assert_eq!(transform, "linear");
+        assert_eq!(version, 2);
+        assert!((b - 3466.0 / (50f64).ln()).abs() < 1e-6);
+
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_seeder_still_skips_invalid_transform() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('bad zero_point', NOW() + INTERVAL '30 days', 'numeric') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+
+        // zero_point INSIDE the range -> deriv_ratio < 0 -> unsupported, skip.
+        let market = numeric_test_market(Some(0.0), Some(10.0), Some(5.0), false, false);
+        crate::market_import::seed_numeric_bins_if_missing(pool, event_id, &market).await?;
+
+        let outcome_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM event_outcomes WHERE event_id = $1")
+                .bind(event_id)
+                .fetch_one(pool)
+                .await?;
+        assert_eq!(outcome_count, 0);
+        let config_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM numeric_market_config WHERE event_id = $1")
+                .bind(event_id)
+                .fetch_one(pool)
+                .await?;
+        assert_eq!(config_count, 0);
+
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
 }
