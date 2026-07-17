@@ -2887,7 +2887,7 @@ async fn verify_post_resolution_invariant_transaction(
     // For now, just verify shares are cleared
 
     let message = if shares_cleared {
-        "Post-resolution invariant verified: user_shares cleared".to_string()
+        "Post-resolution invariant verified: user_shares, user_outcome_shares, and numeric_position_basis cleared".to_string()
     } else {
         format!(
             "Post-resolution invariant violated: {} user_shares, {} user_outcome_shares, {} numeric_position_basis rows still exist for resolved event",

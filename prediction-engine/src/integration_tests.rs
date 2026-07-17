@@ -1909,9 +1909,14 @@ mod tests {
         .fetch_one(pool)
         .await?;
 
-        // Clean state: invariant holds.
+        // Clean state: invariant holds, and the message names every table checked.
         let result = crate::lmsr_api::verify_post_resolution_invariant(pool, event_id).await?;
         assert_eq!(result["valid"].as_bool(), Some(true), "clean resolved event: {result}");
+        let msg = result["message"].as_str().unwrap_or_default();
+        assert!(
+            msg.contains("user_outcome_shares") && msg.contains("numeric_position_basis"),
+            "success message should name all cleared tables: {msg}"
+        );
 
         // Stranded outcome shares: invariant must fail.
         sqlx::query(
@@ -2020,6 +2025,91 @@ mod tests {
             "SELECT COALESCE(SUM(basis_ledger), 0)::BIGINT FROM numeric_position_basis WHERE event_id = $1",
         ).bind(event_id).fetch_one(pool).await?;
         assert_eq!(basis, 0);
+
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_numeric_settlement_aborts_whole_resolution_on_guard_failure() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        // Same market shape as the payout test: 4 bins [0,1)..[3,4], 2.5 -> bin_2 wins.
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('settle abort', NOW() - INTERVAL '1 hour', 'numeric') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO numeric_market_config (event_id, range_min, range_max, bin_count, b_numeric)
+             VALUES ($1, 0, 4, 4, 886.0)",
+        )
+        .bind(event_id)
+        .execute(pool)
+        .await?;
+        let mut outcome_ids = Vec::new();
+        for i in 0..4i32 {
+            let oid: i64 = sqlx::query_scalar(
+                "INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            )
+            .bind(event_id).bind(format!("bin_{i}")).bind(format!("{i}-{}", i + 1))
+            .bind(i).bind(i as f64).bind((i + 1) as f64)
+            .fetch_one(pool).await?;
+            outcome_ids.push(oid);
+        }
+
+        // u1 is a healthy winner. u2's ledger is corrupt: basis says 1 RP staked
+        // on this event but rp_staked_ledger is 0, so releasing the stake would
+        // drive it negative — the batch UPDATE's guard must reject that row and
+        // the whole resolution must abort with no partial payout.
+        let u1: i32 = sqlx::query_scalar(
+            "INSERT INTO users (username, email, password_hash, rp_balance_ledger, rp_staked_ledger)
+             VALUES ('abort_u1', 'a1@test', 'x', 100000000, 4000000) RETURNING id",
+        ).fetch_one(pool).await?;
+        let u2: i32 = sqlx::query_scalar(
+            "INSERT INTO users (username, email, password_hash, rp_balance_ledger, rp_staked_ledger)
+             VALUES ('abort_u2', 'a2@test', 'x', 100000000, 0) RETURNING id",
+        ).fetch_one(pool).await?;
+        for (uid, oid, shares) in [(u1, outcome_ids[2], 3.0f64), (u2, outcome_ids[1], 1.5)] {
+            sqlx::query(
+                "INSERT INTO user_outcome_shares (user_id, event_id, outcome_id, shares, staked_ledger)
+                 VALUES ($1, $2, $3, $4, 0)",
+            ).bind(uid).bind(event_id).bind(oid).bind(shares).execute(pool).await?;
+        }
+        sqlx::query("INSERT INTO numeric_position_basis (user_id, event_id, basis_ledger) VALUES ($1, $2, 4000000), ($3, $2, 1000000)")
+            .bind(u1).bind(event_id).bind(u2).execute(pool).await?;
+
+        let err = crate::lmsr_api::resolve_numeric_event(pool, event_id, 2.5)
+            .await
+            .expect_err("guard-rejected settlement row must fail the resolution");
+        assert!(
+            err.to_string().contains("aborting resolution"),
+            "expected the settlement abort branch, got: {err}"
+        );
+
+        // Nothing may persist from the rolled-back transaction: balances,
+        // positions, basis, and the event's resolution state are untouched.
+        let (b1, s1): (i64, i64) = sqlx::query_as(
+            "SELECT rp_balance_ledger, rp_staked_ledger FROM users WHERE id = $1",
+        ).bind(u1).fetch_one(pool).await?;
+        assert_eq!((b1, s1), (100_000_000, 4_000_000), "winner must not be paid on abort");
+        let (b2, s2): (i64, i64) = sqlx::query_as(
+            "SELECT rp_balance_ledger, rp_staked_ledger FROM users WHERE id = $1",
+        ).bind(u2).fetch_one(pool).await?;
+        assert_eq!((b2, s2), (100_000_000, 0), "corrupt row must be untouched");
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_outcome_shares WHERE event_id = $1")
+            .bind(event_id).fetch_one(pool).await?;
+        assert_eq!(remaining, 2, "positions must survive the rollback");
+        let basis: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(basis_ledger), 0)::BIGINT FROM numeric_position_basis WHERE event_id = $1",
+        ).bind(event_id).fetch_one(pool).await?;
+        assert_eq!(basis, 5_000_000, "basis must survive the rollback");
+        let resolved_at: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT resolved_at::TEXT FROM events WHERE id = $1",
+        ).bind(event_id).fetch_optional(pool).await?;
+        assert_eq!(resolved_at, Some(None), "event must remain unresolved");
 
         cleanup_test_database(test_db.pool, &test_db.db_name).await?;
         Ok(())
