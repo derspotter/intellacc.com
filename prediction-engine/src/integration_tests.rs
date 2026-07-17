@@ -2032,6 +2032,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_numeric_settlement_pays_out_upper_tail_winner() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        // 4 inbound bins [0,1)..[3,4] plus an upper tail; resolution value 7.5 -> tail wins.
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('settle tail', NOW() - INTERVAL '1 hour', 'numeric') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO numeric_market_config
+                (event_id, range_min, range_max, bin_count, b_numeric, open_upper_bound)
+             VALUES ($1, 0, 4, 4, 886.0, TRUE)",
+        )
+        .bind(event_id)
+        .execute(pool)
+        .await?;
+        let mut outcome_ids = Vec::new();
+        for i in 0..4i32 {
+            let oid: i64 = sqlx::query_scalar(
+                "INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound, bucket_kind)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'inbound') RETURNING id",
+            )
+            .bind(event_id).bind(format!("bin_{i}")).bind(format!("{i}-{}", i + 1))
+            .bind(i).bind(i as f64).bind((i + 1) as f64)
+            .fetch_one(pool).await?;
+            outcome_ids.push(oid);
+        }
+        let tail_id: i64 = sqlx::query_scalar(
+            "INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound, bucket_kind)
+             VALUES ($1, 'tail_high', '> 4', 4, 4.0, NULL, 'upper_tail') RETURNING id",
+        )
+        .bind(event_id)
+        .fetch_one(pool)
+        .await?;
+
+        let u1: i32 = sqlx::query_scalar(
+            "INSERT INTO users (username, email, password_hash, rp_balance_ledger, rp_staked_ledger)
+             VALUES ('tail_u1', 't1@test', 'x', 100000000, 4000000) RETURNING id",
+        ).fetch_one(pool).await?;
+        sqlx::query(
+            "INSERT INTO user_outcome_shares (user_id, event_id, outcome_id, shares, staked_ledger)
+             VALUES ($1, $2, $3, 3.0, 0)",
+        ).bind(u1).bind(event_id).bind(tail_id).execute(pool).await?;
+        sqlx::query("INSERT INTO numeric_position_basis (user_id, event_id, basis_ledger) VALUES ($1, $2, 4000000)")
+            .bind(u1).bind(event_id).execute(pool).await?;
+
+        let winner = crate::lmsr_api::resolve_numeric_event(pool, event_id, 7.5).await?;
+        assert_eq!(winner, tail_id, "value above range_max must resolve to the upper tail");
+
+        // 3.0 winning shares * 1 RP payout; stake released.
+        let (b1, s1): (i64, i64) = sqlx::query_as(
+            "SELECT rp_balance_ledger, rp_staked_ledger FROM users WHERE id = $1",
+        ).bind(u1).fetch_one(pool).await?;
+        assert_eq!((b1, s1), (103_000_000, 0));
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_outcome_shares WHERE event_id = $1")
+            .bind(event_id).fetch_one(pool).await?;
+        assert_eq!(remaining, 0);
+
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_numeric_resolution_out_of_range_still_errors_without_tails() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        let event_id: i32 = sqlx::query_scalar(
+            "INSERT INTO events (title, closing_date, event_type)
+             VALUES ('closed no tails', NOW() - INTERVAL '1 hour', 'numeric') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await?;
+        for i in 0..4i32 {
+            sqlx::query(
+                "INSERT INTO event_outcomes (event_id, outcome_key, label, sort_order, lower_bound, upper_bound, bucket_kind)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'inbound')",
+            )
+            .bind(event_id).bind(format!("bin_{i}")).bind(format!("{i}-{}", i + 1))
+            .bind(i).bind(i as f64).bind((i + 1) as f64)
+            .execute(pool).await?;
+        }
+        let err = crate::lmsr_api::resolve_numeric_event(pool, event_id, 7.5)
+            .await
+            .expect_err("out-of-range value on a closed market must fail");
+        assert!(err.to_string().contains("does not fit"), "{err}");
+        cleanup_test_database(test_db.pool, &test_db.db_name).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_numeric_settlement_aborts_whole_resolution_on_guard_failure() -> Result<()> {
         let test_db = setup_test_database().await?;
         let pool = &test_db.pool;

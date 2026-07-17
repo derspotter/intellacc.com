@@ -106,6 +106,49 @@ impl BucketKind {
     }
 }
 
+/// Winning outcome for a resolved nominal value, per the spec's semantics
+/// table: strictly below range -> lower tail, strictly above -> upper tail,
+/// exact endpoints land in the first/last inbound bin, interior values scan
+/// [lower, upper) with the last inbound bin closed on its upper bound.
+/// Ambiguous (overlapping inbound bins) or unmatchable values return None.
+pub fn pick_winning_outcome(
+    rows: &[(i64, BucketKind, Option<f64>, Option<f64>)],
+    value: f64,
+) -> Option<i64> {
+    if !value.is_finite() || rows.is_empty() {
+        return None;
+    }
+    let inbound: Vec<&(i64, BucketKind, Option<f64>, Option<f64>)> =
+        rows.iter().filter(|r| r.1 == BucketKind::Inbound).collect();
+    if inbound.is_empty() {
+        return None;
+    }
+    // Inbound bins always carry bounds for numeric markets (the seeder writes
+    // them); a missing endpoint here is corrupt data — fail safe with None.
+    let range_min = inbound.first()?.2?;
+    let range_max = inbound.last()?.3?;
+    if value < range_min {
+        return rows.iter().find(|r| r.1 == BucketKind::LowerTail).map(|r| r.0);
+    }
+    if value > range_max {
+        return rows.iter().find(|r| r.1 == BucketKind::UpperTail).map(|r| r.0);
+    }
+    let last_idx = inbound.len() - 1;
+    let mut matches = inbound.iter().enumerate().filter_map(|(idx, (id, _, lower, upper))| {
+        let lower_ok = lower.map(|v| value >= v).unwrap_or(true);
+        let upper_ok = upper
+            .map(|v| if idx == last_idx { value <= v } else { value < v })
+            .unwrap_or(true);
+        (lower_ok && upper_ok).then_some(*id)
+    });
+    let first = matches.next()?;
+    if matches.next().is_some() {
+        None // ambiguous — fail safe
+    } else {
+        Some(first)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,5 +234,105 @@ mod tests {
         assert_eq!(BucketKind::parse("inbound"), BucketKind::Inbound);
         assert_eq!(BucketKind::parse("anything-else"), BucketKind::Inbound);
         assert_eq!(BucketKind::LowerTail.as_str(), "lower_tail");
+    }
+
+    // Three contiguous, non-overlapping inbound bins: [0,10), [10,20), [20,30] -
+    // the last one closed on both ends, matching linear_bins'/
+    // seed_numeric_bins_if_missing's real shape. No tails configured.
+    fn bins() -> Vec<(i64, BucketKind, Option<f64>, Option<f64>)> {
+        vec![
+            (1, BucketKind::Inbound, Some(0.0), Some(10.0)),
+            (2, BucketKind::Inbound, Some(10.0), Some(20.0)),
+            (3, BucketKind::Inbound, Some(20.0), Some(30.0)),
+        ]
+    }
+
+    #[test]
+    fn pick_winning_bin_range_min_goes_to_first_bin() {
+        assert_eq!(pick_winning_outcome(&bins(), 0.0), Some(1));
+    }
+
+    #[test]
+    fn pick_winning_bin_interior_value_goes_to_its_bin() {
+        assert_eq!(pick_winning_outcome(&bins(), 5.0), Some(1));
+        assert_eq!(pick_winning_outcome(&bins(), 15.0), Some(2));
+        assert_eq!(pick_winning_outcome(&bins(), 25.0), Some(3));
+    }
+
+    #[test]
+    fn pick_winning_bin_exact_boundary_goes_to_the_higher_bin() {
+        // lower_bound <= v < upper_bound: a value exactly on the shared edge
+        // between two bins belongs to the bin whose *lower* bound equals it,
+        // not the one whose upper bound equals it.
+        assert_eq!(pick_winning_outcome(&bins(), 10.0), Some(2));
+        assert_ne!(pick_winning_outcome(&bins(), 10.0), Some(1));
+        assert_eq!(pick_winning_outcome(&bins(), 20.0), Some(3));
+        assert_ne!(pick_winning_outcome(&bins(), 20.0), Some(2));
+    }
+
+    #[test]
+    fn pick_winning_bin_range_max_is_inclusive_on_the_final_bin() {
+        // Only the last bin is closed on its upper end - v == range_max
+        // resolves instead of falling off the edge.
+        assert_eq!(pick_winning_outcome(&bins(), 30.0), Some(3));
+    }
+
+    #[test]
+    fn pick_winning_bin_out_of_range_returns_none() {
+        assert_eq!(pick_winning_outcome(&bins(), -0.001), None);
+        assert_eq!(pick_winning_outcome(&bins(), 30.001), None);
+    }
+
+    #[test]
+    fn pick_winning_bin_unparseable_or_non_finite_returns_none() {
+        assert_eq!(pick_winning_outcome(&bins(), f64::NAN), None);
+        assert_eq!(pick_winning_outcome(&bins(), f64::INFINITY), None);
+        assert_eq!(pick_winning_outcome(&bins(), f64::NEG_INFINITY), None);
+    }
+
+    #[test]
+    fn pick_winning_bin_empty_bins_returns_none() {
+        assert_eq!(pick_winning_outcome(&[], 5.0), None);
+    }
+
+    #[test]
+    fn pick_winning_bin_ambiguous_overlapping_bins_returns_none() {
+        // Two active bins both claim value 5.0 - shouldn't happen for
+        // well-formed data, but must fail safe (None) rather than silently
+        // picking whichever row came first.
+        let overlapping = vec![
+            (1, BucketKind::Inbound, Some(0.0), Some(10.0)),
+            (2, BucketKind::Inbound, Some(3.0), Some(8.0)),
+        ];
+        assert_eq!(pick_winning_outcome(&overlapping, 5.0), None);
+        // Outside the overlap but still inside the overall (first-lower,
+        // last-upper) range, still resolves normally.
+        assert_eq!(pick_winning_outcome(&overlapping, 1.0), Some(1));
+    }
+
+    fn tailed_rows() -> Vec<(i64, BucketKind, Option<f64>, Option<f64>)> {
+        vec![
+            (1, BucketKind::Inbound, Some(0.0), Some(10.0)),
+            (2, BucketKind::Inbound, Some(10.0), Some(20.0)),
+            (3, BucketKind::LowerTail, None, Some(0.0)),
+            (4, BucketKind::UpperTail, Some(20.0), None),
+        ]
+    }
+    #[test]
+    fn below_range_goes_to_lower_tail() { assert_eq!(pick_winning_outcome(&tailed_rows(), -0.5), Some(3)); }
+    #[test]
+    fn above_range_goes_to_upper_tail() { assert_eq!(pick_winning_outcome(&tailed_rows(), 20.5), Some(4)); }
+    #[test]
+    fn exact_range_min_goes_to_first_inbound_not_tail() { assert_eq!(pick_winning_outcome(&tailed_rows(), 0.0), Some(1)); }
+    #[test]
+    fn exact_range_max_goes_to_last_inbound_not_tail() { assert_eq!(pick_winning_outcome(&tailed_rows(), 20.0), Some(2)); }
+    #[test]
+    fn out_of_range_without_tails_is_none() {
+        let closed = vec![
+            (1, BucketKind::Inbound, Some(0.0), Some(10.0)),
+            (2, BucketKind::Inbound, Some(10.0), Some(20.0)),
+        ];
+        assert_eq!(pick_winning_outcome(&closed, -1.0), None);
+        assert_eq!(pick_winning_outcome(&closed, 21.0), None);
     }
 }

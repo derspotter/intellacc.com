@@ -1965,7 +1965,7 @@ pub async fn resolve_numeric_event(pool: &PgPool, event_id: i32, value: f64) -> 
     with_serializable_tx!(pool, tx, {
         let rows = sqlx::query(
             r#"
-            SELECT id, lower_bound, upper_bound, sort_order
+            SELECT id, lower_bound, upper_bound, bucket_kind, sort_order
             FROM event_outcomes
             WHERE event_id = $1
               AND is_active = TRUE
@@ -1982,27 +1982,21 @@ pub async fn resolve_numeric_event(pool: &PgPool, event_id: i32, value: f64) -> 
             ));
         }
 
-        let mut selected: Option<i64> = None;
-        for (idx, row) in rows.iter().enumerate() {
-            let outcome_id: i64 = row.get("id");
-            let lower: Option<f64> = row.get("lower_bound");
-            let upper: Option<f64> = row.get("upper_bound");
-            let is_last = idx == rows.len() - 1;
-
-            let lower_ok = lower.map(|v| value >= v).unwrap_or(true);
-            let upper_ok = upper
-                .map(|v| if is_last { value <= v } else { value < v })
-                .unwrap_or(true);
-
-            if lower_ok && upper_ok {
-                selected = Some(outcome_id);
-                break;
-            }
-        }
-
-        let winner_outcome_id = selected.ok_or_else(|| {
-            anyhow!("Numeric value does not fit configured buckets for this market")
-        })?;
+        let picker_rows: Vec<(i64, crate::numeric_transform::BucketKind, Option<f64>, Option<f64>)> = rows
+            .iter()
+            .map(|row| {
+                (
+                    row.get::<i64, _>("id"),
+                    crate::numeric_transform::BucketKind::parse(&row.get::<String, _>("bucket_kind")),
+                    row.get::<Option<f64>, _>("lower_bound"),
+                    row.get::<Option<f64>, _>("upper_bound"),
+                )
+            })
+            .collect();
+        let winner_outcome_id = crate::numeric_transform::pick_winning_outcome(&picker_rows, value)
+            .ok_or_else(|| {
+                anyhow!("Numeric value does not fit configured buckets for this market")
+            })?;
 
         resolve_event_by_outcome_transaction(&mut tx, event_id, winner_outcome_id, Some(value))
             .await?;

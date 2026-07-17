@@ -8,8 +8,10 @@
 // multiple_choice events on manifold / metaculus (label-matched against
 // event_outcomes, settled through lmsr_api::resolve_event_by_outcome_id).
 // numeric events (Task 7): resolved value mapped to its winning bin
-// (lower_bound <= v < upper_bound, final bin inclusive on upper) via
-// pick_winning_bin, settled through the same resolve_event_by_outcome_id.
+// (lower_bound <= v < upper_bound, final inbound bin inclusive on upper;
+// out-of-range routes to a tail outcome when one is configured, Task 4) via
+// numeric_transform::pick_winning_outcome, settled through the same
+// resolve_event_by_outcome_id.
 // Numeric markets are Metaculus-only today and Metaculus's resolution field
 // is unreadable at our token's access level (see sync_numeric_resolutions),
 // so this currently finds zero live candidates — the machinery is in place
@@ -271,10 +273,11 @@ async fn sync_mc_resolutions(
 
 // Numeric resolution pass. Same shape as the binary/MC loops above, but the
 // provider verdict carries a winning *value* (f64) instead of a bool/label,
-// which pick_winning_bin maps to the event_outcomes row whose bin contains
-// it, then settles through the same lmsr_api::resolve_event_by_outcome_id
-// the MC pass uses (it already does the numeric-safe distribution_trades
-// unstake as of Task 6 — no need to duplicate that here).
+// which numeric_transform::pick_winning_outcome maps to the event_outcomes
+// row whose bin (or tail) contains it, then settles through the same
+// lmsr_api::resolve_event_by_outcome_id the MC pass uses (it already does
+// the numeric-safe distribution_trades unstake as of Task 6 — no need to
+// duplicate that here).
 async fn sync_numeric_resolutions(
     pool: &PgPool,
     client: &Client,
@@ -332,7 +335,7 @@ async fn sync_numeric_resolutions(
         match verdict {
             Ok(NumericVerdict::Resolved(value)) => {
                 let bins = sqlx::query(
-                    "SELECT id, lower_bound, upper_bound FROM event_outcomes
+                    "SELECT id, lower_bound, upper_bound, bucket_kind FROM event_outcomes
                      WHERE event_id = $1 AND is_active = TRUE
                      ORDER BY sort_order ASC, id ASC",
                 )
@@ -343,13 +346,14 @@ async fn sync_numeric_resolutions(
                 .map(|r| {
                     (
                         r.get::<i64, _>("id"),
+                        crate::numeric_transform::BucketKind::parse(&r.get::<String, _>("bucket_kind")),
                         r.get::<Option<f64>, _>("lower_bound"),
                         r.get::<Option<f64>, _>("upper_bound"),
                     )
                 })
                 .collect::<Vec<_>>();
 
-                match pick_winning_bin(&bins, value) {
+                match crate::numeric_transform::pick_winning_outcome(&bins, value) {
                     Some(outcome_id) => {
                         match crate::lmsr_api::resolve_event_by_outcome_id(
                             pool,
@@ -599,40 +603,6 @@ async fn metaculus_numeric_resolution(client: &Client, external_id: &str) -> Res
     }
 }
 
-/// Winning bin for a resolved numeric market's value: the `event_outcomes`
-/// row (already ordered by `sort_order ASC, id ASC`, matching
-/// `lmsr_api::resolve_numeric_event`'s own bin lookup) whose
-/// `[lower_bound, upper_bound)` contains `value` — except the *last* row in
-/// that ordering, which is closed on the upper end too, so `value ==
-/// range_max` resolves into the final bin instead of falling off the edge.
-/// A bin with a missing bound is treated as unbounded on that side (numeric
-/// bins always populate both in practice, but this mirrors
-/// `resolve_numeric_event`'s own defensive `.unwrap_or(true)`). Out-of-range
-/// or non-finite values, an empty bin list, and ambiguous matches
-/// (overlapping bins - shouldn't exist for well-formed data) all fail safe
-/// to `None`, the same "warn + skip" contract `match_outcome_label` uses for
-/// MC.
-fn pick_winning_bin(bins: &[(i64, Option<f64>, Option<f64>)], value: f64) -> Option<i64> {
-    if !value.is_finite() || bins.is_empty() {
-        return None;
-    }
-    let last_idx = bins.len() - 1;
-
-    let mut matches = bins.iter().enumerate().filter_map(|(idx, (id, lower, upper))| {
-        let lower_ok = lower.map(|v| value >= v).unwrap_or(true);
-        let upper_ok = upper
-            .map(|v| if idx == last_idx { value <= v } else { value < v })
-            .unwrap_or(true);
-        (lower_ok && upper_ok).then_some(*id)
-    });
-
-    let first = matches.next()?;
-    if matches.next().is_some() {
-        None
-    } else {
-        Some(first)
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -690,76 +660,8 @@ mod tests {
         assert_eq!(match_outcome_label(&ambiguous, "no"), Some(12));
     }
 
-    // Three contiguous, non-overlapping bins: [0,10), [10,20), [20,30] -
-    // the last one closed on both ends, matching linear_bins'/
-    // seed_numeric_bins_if_missing's real shape.
-    fn bins() -> Vec<(i64, Option<f64>, Option<f64>)> {
-        vec![
-            (1, Some(0.0), Some(10.0)),
-            (2, Some(10.0), Some(20.0)),
-            (3, Some(20.0), Some(30.0)),
-        ]
-    }
-
-    #[test]
-    fn pick_winning_bin_range_min_goes_to_first_bin() {
-        assert_eq!(pick_winning_bin(&bins(), 0.0), Some(1));
-    }
-
-    #[test]
-    fn pick_winning_bin_interior_value_goes_to_its_bin() {
-        assert_eq!(pick_winning_bin(&bins(), 5.0), Some(1));
-        assert_eq!(pick_winning_bin(&bins(), 15.0), Some(2));
-        assert_eq!(pick_winning_bin(&bins(), 25.0), Some(3));
-    }
-
-    #[test]
-    fn pick_winning_bin_exact_boundary_goes_to_the_higher_bin() {
-        // lower_bound <= v < upper_bound: a value exactly on the shared edge
-        // between two bins belongs to the bin whose *lower* bound equals it,
-        // not the one whose upper bound equals it.
-        assert_eq!(pick_winning_bin(&bins(), 10.0), Some(2));
-        assert_ne!(pick_winning_bin(&bins(), 10.0), Some(1));
-        assert_eq!(pick_winning_bin(&bins(), 20.0), Some(3));
-        assert_ne!(pick_winning_bin(&bins(), 20.0), Some(2));
-    }
-
-    #[test]
-    fn pick_winning_bin_range_max_is_inclusive_on_the_final_bin() {
-        // Only the last bin is closed on its upper end - v == range_max
-        // resolves instead of falling off the edge.
-        assert_eq!(pick_winning_bin(&bins(), 30.0), Some(3));
-    }
-
-    #[test]
-    fn pick_winning_bin_out_of_range_returns_none() {
-        assert_eq!(pick_winning_bin(&bins(), -0.001), None);
-        assert_eq!(pick_winning_bin(&bins(), 30.001), None);
-    }
-
-    #[test]
-    fn pick_winning_bin_unparseable_or_non_finite_returns_none() {
-        assert_eq!(pick_winning_bin(&bins(), f64::NAN), None);
-        assert_eq!(pick_winning_bin(&bins(), f64::INFINITY), None);
-        assert_eq!(pick_winning_bin(&bins(), f64::NEG_INFINITY), None);
-    }
-
-    #[test]
-    fn pick_winning_bin_empty_bins_returns_none() {
-        assert_eq!(pick_winning_bin(&[], 5.0), None);
-    }
-
-    #[test]
-    fn pick_winning_bin_ambiguous_overlapping_bins_returns_none() {
-        // Two active bins both claim value 5.0 - shouldn't happen for
-        // well-formed data, but must fail safe (None) rather than silently
-        // picking whichever row came first.
-        let overlapping = vec![
-            (1, Some(0.0), Some(10.0)),
-            (2, Some(3.0), Some(8.0)),
-        ];
-        assert_eq!(pick_winning_bin(&overlapping, 5.0), None);
-        // Outside the overlap, still resolves normally.
-        assert_eq!(pick_winning_bin(&overlapping, 9.0), Some(1));
-    }
+    // pick_winning_bin's unit tests moved to numeric_transform::tests as
+    // pick_winning_outcome (ported to the shared (id, BucketKind, lower,
+    // upper) signature) when this function was replaced by a direct call to
+    // the shared picker.
 }
