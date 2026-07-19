@@ -255,3 +255,42 @@ export function niceTicks(config, target = 5) {
   }
   return values.map((value) => ({ t: tf.toInternal(value), value }));
 }
+
+/**
+ * Inverse of the card's toX(): a viewBox x-coordinate back to the nominal
+ * value under it. Clicks left/right of the plot (tail gutters, padding)
+ * clamp to the range edges — the P10/P50/P90 handles can't live inside a
+ * tail bucket. Returns null on degenerate geometry or config (caller
+ * ignores the pointer event).
+ */
+export function chartXToNominal(x, { plotLeft, plotRight, config }) {
+  const tf = makeTransform(config);
+  if (!tf) return null;
+  const span = plotRight - plotLeft;
+  if (!Number.isFinite(span) || span <= 0 || !Number.isFinite(Number(x))) return null;
+  const t = Math.min(Math.max((x - plotLeft) / span, 0), 1);
+  return tf.toNominal(t);
+}
+
+/**
+ * Which of the three guide lines a pointer-down at viewBox x should grab.
+ * Ties (overlapping handles) resolve by click side — left grabs 'low',
+ * right grabs 'high', dead-on grabs 'center' — so a collapsed spread can
+ * still be pulled apart on the chart.
+ */
+export function pickNearestHandle(x, { lowX, centerX, highX }) {
+  const dLow = Math.abs(x - lowX);
+  const dCenter = Math.abs(x - centerX);
+  const dHigh = Math.abs(x - highX);
+  const min = Math.min(dLow, dCenter, dHigh);
+  const tied = [
+    dLow === min ? 'low' : null,
+    dCenter === min ? 'center' : null,
+    dHigh === min ? 'high' : null
+  ].filter(Boolean);
+  if (tied.length === 1) return tied[0];
+  const tiedX = tied[0] === 'low' ? lowX : tied[0] === 'center' ? centerX : highX;
+  if (x < tiedX && tied.includes('low')) return 'low';
+  if (x > tiedX && tied.includes('high')) return 'high';
+  return tied.includes('center') ? 'center' : tied[0];
+}

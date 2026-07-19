@@ -22,7 +22,9 @@ import {
   niceTicks,
   applySpreadPreset,
   rpToLedger,
-  ledgerToRp
+  ledgerToRp,
+  chartXToNominal,
+  pickNearestHandle
 } from '../../utils/distributionMath';
 
 const CHART_W = 640;
@@ -414,6 +416,68 @@ export default function DistributionMarketCard(props) {
   const updateCenter = (value) => setCenter(clamp(safeNumber(value, center()), low(), high()));
   const updateHigh = (value) => setHigh(clamp(safeNumber(value, high()), center(), rangeMax()));
 
+  // --- Direct chart interaction ---------------------------------------------
+  // pointerdown grabs the nearest of the three guide lines and moves it to the
+  // pointer; setPointerCapture keeps pointermove routed here for the drag, so
+  // a plain click is just a zero-length drag. Values route through the same
+  // updateLow/updateCenter/updateHigh as the number inputs, which keeps the
+  // low <= center <= high clamping and the debounced quote unchanged.
+  let svgRef;
+  const [dragHandle, setDragHandle] = createSignal(null);
+  const chartInteractive = () => isOpen() && !busyAction() && marketLoadState() === 'ready';
+
+  // Pointer event -> { x: viewBox x, nominal: value under the pointer }, or
+  // null when the geometry/config is degenerate (event is ignored).
+  const pointerTarget = (domEvent) => {
+    const rect = svgRef?.getBoundingClientRect();
+    if (!rect || !(rect.width > 0)) return null;
+    // preserveAspectRatio="none": client x maps linearly onto the viewBox.
+    const x = ((domEvent.clientX - rect.left) / rect.width) * CHART_W;
+    const nominal = chartXToNominal(x, {
+      plotLeft: plotLeft(),
+      plotRight: plotRight(),
+      config: numericConfig() || fallbackConfig()
+    });
+    return nominal == null ? null : { x, nominal };
+  };
+
+  const applyHandleValue = (key, value) => {
+    if (key === 'low') updateLow(value);
+    else if (key === 'center') updateCenter(value);
+    else updateHigh(value);
+  };
+
+  const onChartPointerDown = (domEvent) => {
+    if (!chartInteractive()) return;
+    const tf = transform();
+    const target = pointerTarget(domEvent);
+    if (!tf || !target) return;
+    const key = pickNearestHandle(target.x, {
+      lowX: toX(tf.toInternal(low())),
+      centerX: toX(tf.toInternal(center())),
+      highX: toX(tf.toInternal(high()))
+    });
+    domEvent.preventDefault();
+    setDragHandle(key);
+    applyHandleValue(key, target.nominal);
+    svgRef?.setPointerCapture?.(domEvent.pointerId);
+  };
+
+  const onChartPointerMove = (domEvent) => {
+    const key = dragHandle();
+    if (!key) return;
+    const target = pointerTarget(domEvent);
+    if (target) applyHandleValue(key, target.nominal);
+  };
+
+  const endChartDrag = (domEvent) => {
+    if (!dragHandle()) return;
+    setDragHandle(null);
+    if (svgRef?.hasPointerCapture?.(domEvent.pointerId)) {
+      svgRef.releasePointerCapture(domEvent.pointerId);
+    }
+  };
+
   const applyPreset = (factor) => {
     const { low: nextLow, high: nextHigh } = applySpreadPreset({
       center: center(),
@@ -589,11 +653,17 @@ export default function DistributionMarketCard(props) {
         <Show when={marketLoadState() === 'ready'}>
           <div class="distribution-card-chart-row">
             <svg
+              ref={svgRef}
               class="distribution-card-chart"
+              classList={{ 'distribution-card-chart-interactive': chartInteractive(), 'distribution-card-chart-dragging': !!dragHandle() }}
               viewBox={`0 0 ${CHART_W} ${CHART_H}`}
               preserveAspectRatio="none"
               role="img"
-              aria-label="Market probability distribution"
+              aria-label="Market probability distribution. Click or drag to set your low, center, and high values."
+              onPointerDown={onChartPointerDown}
+              onPointerMove={onChartPointerMove}
+              onPointerUp={endChartDrag}
+              onPointerCancel={endChartDrag}
             >
               <path class="distribution-card-market-area" d={marketAreaPath()} />
               <Show when={targetLinePath()}>
@@ -625,6 +695,19 @@ export default function DistributionMarketCard(props) {
                 class="distribution-card-handle-guide"
                 x1={toX(transform()?.toInternal(high()) ?? 0)} x2={toX(transform()?.toInternal(high()) ?? 0)} y1={PAD_Y} y2={baselineY()}
               />
+              {/* grab knobs atop each guide line, shown while the chart is interactive */}
+              <Show when={chartInteractive()}>
+                <For each={[low, center, high]}>
+                  {(value) => (
+                    <circle
+                      class="distribution-card-handle-knob"
+                      cx={toX(transform()?.toInternal(value()) ?? 0)}
+                      cy={PAD_Y}
+                      r="5"
+                    />
+                  )}
+                </For>
+              </Show>
 
               {/* axis tick labels — nice 1-2-5 nominal values, placed in t-space */}
               <For each={axisTicks()}>

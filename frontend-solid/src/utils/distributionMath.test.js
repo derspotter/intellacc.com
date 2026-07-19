@@ -4,7 +4,9 @@ import {
   makeTransform,
   fitDistributionFromState,
   quantileFromState,
-  niceTicks
+  niceTicks,
+  chartXToNominal,
+  pickNearestHandle
 } from './distributionMath.js';
 
 const LOG_CFG = { range_min: 1, range_max: 10000, zero_point: 0, open_lower_bound: true, open_upper_bound: true };
@@ -90,4 +92,49 @@ test('niceTicks picks a nice linear step', () => {
 test('niceTicks degrades to empty on degenerate config', () => {
   assert.deepEqual(niceTicks(null, 5), []);
   assert.deepEqual(niceTicks({ range_min: 5, range_max: 1, zero_point: null }, 5), []);
+});
+
+test('chartXToNominal inverts the plot geometry on a linear market', () => {
+  const geom = { plotLeft: 10, plotRight: 630, config: LIN_CFG };
+  // midpoint of the plot -> midpoint of the range
+  assert.ok(Math.abs(chartXToNominal(320, geom) - 2) < 1e-9);
+  assert.ok(Math.abs(chartXToNominal(10, geom) - 0) < 1e-9);
+  assert.ok(Math.abs(chartXToNominal(630, geom) - 4) < 1e-9);
+});
+
+test('chartXToNominal follows the log axis on a log market', () => {
+  const geom = { plotLeft: 36, plotRight: 604, config: LOG_CFG };
+  // t=0.5 on this market is nominal 100 (10^(4*0.5))
+  const mid = chartXToNominal((36 + 604) / 2, geom);
+  assert.ok(Math.abs(mid - 100) < 1e-6, `got ${mid}`);
+  const quarter = chartXToNominal(36 + (604 - 36) * 0.25, geom);
+  assert.ok(Math.abs(quarter - 10) < 1e-6, `got ${quarter}`);
+});
+
+test('chartXToNominal clamps tail-gutter clicks to the range edges', () => {
+  const geom = { plotLeft: 36, plotRight: 604, config: LOG_CFG };
+  assert.equal(chartXToNominal(0, geom), 1);      // left gutter -> range_min
+  assert.equal(chartXToNominal(640, geom), 10000); // right gutter -> range_max
+});
+
+test('chartXToNominal returns null on degenerate geometry or config', () => {
+  assert.equal(chartXToNominal(100, { plotLeft: 300, plotRight: 300, config: LIN_CFG }), null);
+  assert.equal(chartXToNominal(100, { plotLeft: 10, plotRight: 630, config: null }), null);
+});
+
+test('pickNearestHandle picks the closest of the three guides', () => {
+  const xs = { lowX: 100, centerX: 300, highX: 500 };
+  assert.equal(pickNearestHandle(120, xs), 'low');
+  assert.equal(pickNearestHandle(290, xs), 'center');
+  assert.equal(pickNearestHandle(640, xs), 'high');
+});
+
+test('pickNearestHandle separates overlapping handles by click side', () => {
+  // all three handles collapsed to one x: clicking left must grab low,
+  // right must grab high, dead-on grabs center — otherwise a collapsed
+  // spread could never be pulled apart on the chart.
+  const xs = { lowX: 300, centerX: 300, highX: 300 };
+  assert.equal(pickNearestHandle(200, xs), 'low');
+  assert.equal(pickNearestHandle(400, xs), 'high');
+  assert.equal(pickNearestHandle(300, xs), 'center');
 });

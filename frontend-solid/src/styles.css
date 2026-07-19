@@ -3686,6 +3686,26 @@ body.dark-mode .weekly-assignment-badge.pending {
   stroke-opacity: 0.6;
 }
 
+/* Direct chart interaction: click/drag moves the nearest handle. touch-action
+   none keeps a phone drag on the chart from scrolling the page instead. */
+.distribution-card-chart-interactive {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.distribution-card-chart-dragging {
+  cursor: grabbing;
+}
+
+.distribution-card-handle-knob {
+  fill: var(--card-bg);
+  stroke: var(--text-color);
+  stroke-opacity: 0.7;
+  stroke-width: 1.5;
+}
+
 .distribution-card-tail-bar {
   fill: var(--info-color);
   opacity: 0.55;

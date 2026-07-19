@@ -132,6 +132,46 @@ test.describe('numeric market distribution trading', () => {
     await expect(page.locator('.market-detail-header .event-prob-bar')).toHaveCount(0);
   });
 
+  test('chart click and drag move the nearest P10/P50/P90 handle', async ({ page }) => {
+    // Handle editing needs no auth (only trading does), so this runs logged out.
+    await page.goto(`${BASE}/#predictions/${eventId}`);
+    const card = page.locator('.distribution-market-card');
+    await expect(card).toBeVisible({ timeout: 10000 });
+    const svg = card.locator('svg.distribution-card-chart');
+    await expect(svg).toBeVisible();
+
+    const centerInput = card.locator('.distribution-card-handle-input').nth(1);
+    const lowInput = card.locator('.distribution-card-handle-input').nth(0);
+    await expect(centerInput).toHaveValue('5.00'); // uniform prior P50 on [0,10]
+
+    const box = await svg.boundingBox();
+    // viewBox is 640x200 with preserveAspectRatio=none; this market has no
+    // tails, so plot spans viewBox x 10..630 over nominal 0..10.
+    const nominalAt = (fx) => ((fx * 640 - 10) / 620) * 10;
+
+    // Click at 55% width: nearest guide is Center (P50 at t=0.5) -> moves it.
+    await svg.click({ position: { x: box.width * 0.55, y: box.height * 0.5 } });
+    let center = Number(await centerInput.inputValue());
+    expect(Math.abs(center - nominalAt(0.55))).toBeLessThan(0.2);
+
+    // Drag from there to 65% width: center follows continuously.
+    await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.5, { steps: 3 });
+    const midDrag = Number(await centerInput.inputValue());
+    expect(Math.abs(midDrag - nominalAt(0.6))).toBeLessThan(0.2);
+    await page.mouse.move(box.x + box.width * 0.65, box.y + box.height * 0.5, { steps: 3 });
+    await page.mouse.up();
+    center = Number(await centerInput.inputValue());
+    expect(Math.abs(center - nominalAt(0.65))).toBeLessThan(0.2);
+
+    // Click near the left edge: grabs Low (P10), leaves Center where it was.
+    await svg.click({ position: { x: box.width * 0.12, y: box.height * 0.5 } });
+    const low = Number(await lowInput.inputValue());
+    expect(Math.abs(low - nominalAt(0.12))).toBeLessThan(0.2);
+    expect(Number(await centerInput.inputValue())).toBe(center);
+  });
+
   test('logged in: quote appears within budget, trade executes, curve changes, position appears', async ({ page }) => {
     await login(page);
     await page.goto(`${BASE}/#predictions/${eventId}`);
