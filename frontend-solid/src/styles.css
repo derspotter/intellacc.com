@@ -3763,6 +3763,23 @@ body.dark-mode .weekly-assignment-badge.pending {
   margin-bottom: 0.75rem;
 }
 
+/* Trade row: a compact budget input with the Trade button aligned to its
+   bottom edge — the global .form-field flex:1 would otherwise stretch the
+   input across the card while the button floats up at label height. */
+.distribution-card-trade-panel .horizontal-row {
+  align-items: flex-end !important;
+}
+
+.distribution-card-trade-panel .form-field {
+  flex: 0 0 auto !important;
+  width: 180px;
+}
+
+.distribution-card-trade-panel .form-actions {
+  margin-top: 0;
+  flex: 0 0 auto;
+}
+
 .distribution-card-quote {
   font-weight: 600;
   color: var(--text-color);
