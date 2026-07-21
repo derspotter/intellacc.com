@@ -1,6 +1,7 @@
 import { For, Show, createSignal, onCleanup } from 'solid-js';
 import { api, followUser, getPostsPage, getPostsPaging, unfollowUser } from '../../../services/api';
 import { isLoggedIn } from '../../../services/tokenService';
+import { createEpochGuard } from '../../../lib/requestEpoch';
 
 export default function SearchView() {
   const [tab, setTab] = createSignal('users'); // 'users' | 'posts'
@@ -9,33 +10,40 @@ export default function SearchView() {
   const [posts, setPosts] = createSignal([]);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal('');
+  const [followBusy, setFollowBusy] = createSignal(new Set());
   let debounceTimer;
-  let searchEpoch = 0;
+  const guard = createEpochGuard();
   onCleanup(() => clearTimeout(debounceTimer));
 
   const run = async () => {
     const q = query().trim();
-    const epoch = ++searchEpoch;
+    const activeTab = tab();
+    const token = guard.begin();
     if (!q) { setUsers([]); setPosts([]); setLoading(false); setError(''); return; }
     setLoading(true);
     setError('');
     try {
-      if (tab() === 'users') {
+      if (activeTab === 'users') {
         const rows = await api.users.search(q);
-        if (epoch !== searchEpoch) return;
+        if (!guard.isCurrent(token)) return;
         setUsers(Array.isArray(rows) ? rows : []);
       } else {
         // Server-side post search does not exist (van parity quirk):
         // fetch the latest page and filter client-side.
         const page = getPostsPaging(await getPostsPage({ limit: 50 }));
-        if (epoch !== searchEpoch) return;
+        if (!guard.isCurrent(token)) return;
         const needle = q.toLowerCase();
         setPosts(page.items.filter(p => String(p.content || '').toLowerCase().includes(needle)));
       }
     } catch (e) {
-      if (epoch === searchEpoch) setError(e?.message || 'SEARCH FAILED');
+      if (guard.isCurrent(token)) {
+        setError(e?.message || 'SEARCH FAILED');
+        // Don't leave the previous query's results under the error banner
+        // (same recovery shape as GroupsView).
+        if (activeTab === 'users') setUsers([]); else setPosts([]);
+      }
     } finally {
-      if (epoch === searchEpoch) setLoading(false);
+      if (guard.isCurrent(token)) setLoading(false);
     }
   };
 
@@ -45,16 +53,31 @@ export default function SearchView() {
     debounceTimer = setTimeout(run, 300);
   };
 
-  const switchTab = (t) => { setTab(t); run(); };
+  const switchTab = (t) => {
+    // Cancel any pending debounced search so the old tab's stale
+    // query doesn't fire after the switch.
+    clearTimeout(debounceTimer);
+    setTab(t);
+    run();
+  };
 
   const toggleFollow = async (u) => {
     if (!isLoggedIn()) { window.location.hash = '#login'; return; }
+    if (followBusy().has(u.id)) return;
+    setFollowBusy((prev) => new Set(prev).add(u.id));
+    // Tie the rollback to the result set currently shown: if a newer search
+    // replaced the rows mid-request, don't write into the new rows.
+    const token = guard.current();
     const wasFollowing = Boolean(u.is_following);
     setUsers((prev) => prev.map(x => x.id === u.id ? { ...x, is_following: !wasFollowing } : x));
     try {
       if (wasFollowing) await unfollowUser(u.id); else await followUser(u.id);
     } catch {
-      setUsers((prev) => prev.map(x => x.id === u.id ? { ...x, is_following: wasFollowing } : x));
+      if (guard.isCurrent(token)) {
+        setUsers((prev) => prev.map(x => x.id === u.id ? { ...x, is_following: wasFollowing } : x));
+      }
+    } finally {
+      setFollowBusy((prev) => { const next = new Set(prev); next.delete(u.id); return next; });
     }
   };
 
@@ -94,8 +117,9 @@ export default function SearchView() {
                   <button
                     type="button"
                     data-testid="search-follow"
+                    disabled={followBusy().has(u.id)}
                     onClick={() => toggleFollow(u)}
-                    class="shrink-0 px-2 py-0.5 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 uppercase text-xxs font-bold"
+                    class="shrink-0 px-2 py-0.5 border border-bb-accent text-bb-accent hover:bg-bb-accent/20 uppercase text-xxs font-bold disabled:opacity-50"
                   >
                     {u.is_following ? '[UNFOLLOW]' : '[FOLLOW]'}
                   </button>
