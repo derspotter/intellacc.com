@@ -59,17 +59,17 @@ function App() {
       if (route === 'predictions' && param) {
         marketStore.ensureMarket(Number(param));
       }
-    } else if (isLoggedIn() && TERMINAL_VIEWS[route] && (!TERMINAL_VIEWS[route].adminOnly || isAdmin())) {
+    } else if (TERMINAL_VIEWS[route] && (!TERMINAL_VIEWS[route].adminOnly || isAdmin())) {
+      // Views mount even while logged out — they render their own sign-in
+      // fallbacks (e.g. NetworkView's "SIGN IN TO EXPLORE THE NETWORK").
       setActiveView({ key: route, param: param || null });
       setAuthRoute(null);
     } else if (AUTH_SCREEN_ROUTES.includes(route)) {
       setActiveView(null);
       setAuthRoute(route);
     } else {
-      // Unknown hash, admin-only view without admin rights, or a view route
-      // while logged out (captured above; would only 401 behind LoginModal):
-      // close any full-screen view so the screen matches the URL; panes stay
-      // as-is.
+      // Unknown hash or admin-only view without admin rights: close any
+      // full-screen view so the screen matches the URL; panes stay as-is.
       setActiveView(null);
       setAuthRoute(null);
     }
