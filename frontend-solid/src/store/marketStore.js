@@ -1,6 +1,7 @@
 import { createStore } from "solid-js/store";
 import { api } from "../services/api";
 import { getToken } from "../services/tokenService";
+import { createEpochGuard } from "../lib/requestEpoch";
 
 const PAGE_SIZE = 100;
 
@@ -16,7 +17,7 @@ const [state, setState] = createStore({
     serverCount: 0
 });
 
-let fetchEpoch = 0;
+const guard = createEpochGuard();
 let activeFetch = null;
 
 const doFetchPage = async ({ reset }) => {
@@ -24,12 +25,12 @@ const doFetchPage = async ({ reset }) => {
         setState({ markets: [], total: 0, hasMore: false, loading: false, loadingMore: false, error: null, serverCount: 0 });
         return;
     }
-    const epoch = ++fetchEpoch;
+    const token = guard.begin();
     const offset = reset ? 0 : state.serverCount;
     setState(reset ? { loading: true, loadingMore: false, error: null } : { loadingMore: true, error: null });
     try {
         const res = await api.events.getPage({ search: state.search, limit: PAGE_SIZE, offset });
-        if (epoch !== fetchEpoch) return; // superseded by a newer request
+        if (!guard.isCurrent(token)) return; // superseded by a newer request
         const items = Array.isArray(res?.items) ? res.items : [];
         setState({
             markets: reset ? items : [...state.markets, ...items.filter(m => !state.markets.some(x => x.id === m.id))],
@@ -40,7 +41,7 @@ const doFetchPage = async ({ reset }) => {
             loadingMore: false
         });
     } catch (err) {
-        if (epoch !== fetchEpoch) return;
+        if (!guard.isCurrent(token)) return;
         console.error("Failed to load markets", err);
         setState({ error: err.message, loading: false, loadingMore: false });
     }
@@ -135,7 +136,7 @@ const ensureMarket = async (id) => {
 };
 
 const clear = () => {
-    fetchEpoch++; // invalidate any in-flight fetch so it can't repopulate cleared state
+    guard.invalidate(); // invalidate any in-flight fetch so it can't repopulate cleared state
     setState({ markets: [], total: 0, hasMore: false, search: '', loading: false, loadingMore: false, error: null, selectedMarketId: null, serverCount: 0 });
 };
 

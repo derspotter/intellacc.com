@@ -1,5 +1,6 @@
 import { For, Show, createSignal, onCleanup, onMount } from 'solid-js';
 import { api, createGroup, joinGroup, leaveGroup, listGroups, searchGroups } from '../../../services/api';
+import { createEpochGuard } from '../../../lib/requestEpoch';
 
 export default function GroupsView() {
   const [topics, setTopics] = createSignal([]);
@@ -19,26 +20,26 @@ export default function GroupsView() {
   const [needsVerify, setNeedsVerify] = createSignal(false);
 
   let debounceTimer;
-  let searchEpoch = 0;
+  const guard = createEpochGuard();
   onCleanup(() => clearTimeout(debounceTimer));
 
   const load = async () => {
     const q = query().trim();
-    const epoch = ++searchEpoch;
+    const token = guard.begin();
     setLoading(true);
     setError('');
     try {
       const res = q
         ? await searchGroups(q, topicFilter())
         : await listGroups({ topic: topicFilter(), sort: sort() });
-      if (epoch !== searchEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setGroups(Array.isArray(res?.groups) ? res.groups : []);
     } catch (e) {
-      if (epoch !== searchEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setError(e?.message || 'FAILED TO LOAD GROUPS');
       setGroups([]);
     } finally {
-      if (epoch === searchEpoch) setLoading(false);
+      if (guard.isCurrent(token)) setLoading(false);
     }
   };
 

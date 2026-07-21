@@ -1,6 +1,7 @@
 import { createStore } from "solid-js/store";
 import { api, getPostsPaging } from "../services/api";
 import { getToken } from "../services/tokenService";
+import { createEpochGuard } from "../lib/requestEpoch";
 
 const PAGE_LIMIT = 20;
 
@@ -15,7 +16,7 @@ const [state, setState] = createStore({
     discoverMode: false
 });
 
-let fetchEpoch = 0;
+const guard = createEpochGuard();
 
 const appendUnique = (current, next) => {
     const seen = new Set(current.map(p => String(p.id)));
@@ -27,7 +28,7 @@ const fetchPage = async ({ reset }) => {
         setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: false, discoverMode: false });
         return;
     }
-    const epoch = ++fetchEpoch;
+    const token = guard.begin();
     if (reset) setState('usingFeed', Boolean(getToken()));
     setState(reset ? { loading: true, error: null } : { loadingMore: true, error: null });
     try {
@@ -49,14 +50,14 @@ const fetchPage = async ({ reset }) => {
         } else {
             response = await api.posts.getPage({ cursor, limit: PAGE_LIMIT });
         }
-        if (epoch !== fetchEpoch) return; // superseded by a newer request
+        if (!guard.isCurrent(token)) return; // superseded by a newer request
         const paging = getPostsPaging(response);
 
         // Empty following-feed on reset: discover fallback (top predictors).
         if (reset && usingFeed && paging.items.length === 0) {
             try {
                 const discover = await api.discover.feed();
-                if (epoch !== fetchEpoch) return;
+                if (!guard.isCurrent(token)) return;
                 const items = Array.isArray(discover?.items) ? discover.items : [];
                 if (items.length > 0) {
                     setState({
@@ -69,7 +70,7 @@ const fetchPage = async ({ reset }) => {
             } catch (err) {
                 console.error('Discover fallback failed', err);
             }
-            if (epoch !== fetchEpoch) return; // superseded while discover was in flight
+            if (!guard.isCurrent(token)) return; // superseded while discover was in flight
         }
 
         setState({
@@ -82,7 +83,7 @@ const fetchPage = async ({ reset }) => {
             loadingMore: false
         });
     } catch (err) {
-        if (epoch !== fetchEpoch) return;
+        if (!guard.isCurrent(token)) return;
         console.error("Failed to load posts", err);
         setState({ error: err.message, loading: false, loadingMore: false });
     }
@@ -177,7 +178,7 @@ const unrepostPost = (postId) => {
 };
 
 const clear = () => {
-    fetchEpoch++; // invalidate any in-flight fetch so it can't repopulate cleared state
+    guard.invalidate(); // invalidate any in-flight fetch so it can't repopulate cleared state
     setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: true, discoverMode: false });
 };
 
