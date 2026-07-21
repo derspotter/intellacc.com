@@ -1,5 +1,52 @@
 # Unified Backlog
-Updated: 2026-07-13 (delta below; last full audit 2026-06-12)
+Updated: 2026-07-21 (delta below; last full audit 2026-06-12)
+
+## 2026-07-21 Delta — terminal-skin parity-ledger backlog burn-down
+- `Done` /groups/search response gaps: topic_name + is_member (route gained
+  optionalAuth — it had none, so is_member could never be true), shared
+  mapGroup shape, parameterized limit (default 10, cap 20) replacing the
+  hardcoded LIMIT 5.
+- `Done` @GUEST username claim: registration + profile username change now
+  reject a case-insensitive reserved set (guest, admin, administrator,
+  system, moderator, mod, root, support, intellacc). Prod DB verified clean
+  of squatters. Display names are NOT covered (possible follow-up).
+- `Done` Group posts in global new_post broadcast: suppressed for posts with
+  a community group. Along the way: post realtime (new_post/new_comment/
+  post_updated) had been silently dead — postController used req.io, which
+  nothing attaches (socketMiddleware exists but was never mounted); emits now
+  resolve io via req.app.get('io') like every other controller.
+- `Done` Vault changePassphrase torn-write (both skins): server master-key
+  update now precedes the local rewrap commit; a server failure leaves the
+  device untouched, a local failure after server success is recoverable by
+  unlocking with the new password.
+- `Done` Panic wipe is real (both skins): vaultService.panicWipe() deletes
+  the whole intellacc_keystore IndexedDB + vault localStorage keys after
+  lockKeys; local-device only, server state untouched.
+- `Done` Terminal-skin deferred minors: stale view closes on unknown hash;
+  bb-active/bb-highlight tokens defined (hover styles were dead classes);
+  routes.js unit tests; shared request-epoch util (ProfileView toggleFollow
+  guard, NotificationsView stuck-reload fix; feedStore/marketStore/GroupsView/
+  GroupView/SearchView/AnalyticsView migrated); PostItem blob-catch clobber
+  guard; optimistic repost count with revert; feed-mix weight normalization
+  (largest-remainder to 100); market count clamp (101/100 cosmetic);
+  SearchView debounce/tab race + error-over-stale-results + follow
+  double-click; NetworkView full-graph degree + direction-aware tie-break;
+  leaderboard fetch dedup (shared service, both skins).
+- `Done` Pane-restore on view close + logged-out deep-link re-apply after
+  login (views still mount pre-auth for their sign-in fallbacks).
+- `Done` SettingsView split into per-section files + shared confirm-timer
+  helper (unmount-safe 4s reset; markup verified identical).
+- `Done` E2E: panic-wipe spec (keystore DB really deleted) and live
+  socket-push notification spec (no polling fallback exists, so green means
+  real socket transport). The push spec exposed raw-JSON overlay rendering —
+  fixed (unwrap {type:'new', notification}, count-only events hidden).
+- `Done` Engine test backlog: numeric-transform |d-1| tolerance-zone
+  boundary tests + near-zero q-vector LMSR coverage (no defects found).
+- Note: full backend jest inside the PROD container now trips
+  environment-dependent failures (password-reset 429 rate limits after
+  repeated runs; verification tests assume dev providers but the container
+  carries live Stripe webhook secret / smsgate config). CI's fresh stack is
+  the honest gate for those suites.
 
 ## 2026-07-12/13 Delta
 - `Done` Legacy E2E quarantine dissolved: device-linking, key-rotation-inspection,
