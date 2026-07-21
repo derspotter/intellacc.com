@@ -70,7 +70,12 @@ export const LoginModal = () => {
         const regEmail = registerEmail().trim();
         const regPassword = registerPassword();
 
-        if (!username || !regEmail || !regPassword) return;
+        // Native `required` misses whitespace-only values; without a message
+        // the REGISTER button would silently do nothing.
+        if (!username || !regEmail || !regPassword) {
+            setError("All fields are required");
+            return;
+        }
 
         setError(null);
         setStage("loading");
