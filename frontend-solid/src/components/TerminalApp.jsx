@@ -13,7 +13,7 @@ import { getActiveSkin, setSkin } from "../services/skinProvider";
 import { updateUiPreferences } from "../services/api";
 import { isAuthenticated, isAdmin } from "../services/auth";
 import { normalizeHashPath } from "../services/routes";
-import { TerminalViewHost, closeTerminalView } from "./terminal/TerminalViewHost";
+import { TerminalViewHost, closeTerminalView, rememberPaneRoute } from "./terminal/TerminalViewHost";
 import { TERMINAL_VIEWS } from "./terminal/views/registry";
 import { AUTH_SCREENS } from "./terminal/views/auth/AuthScreens";
 import TerminalRPBalance from "./terminal/TerminalRPBalance";
@@ -37,26 +37,39 @@ function App() {
   // verify-email) or null. Kept separate from activeView since it renders
   // even for logged-out users (who have no panes to focus yet).
   const [authRoute, setAuthRoute] = createSignal(null);
+  // Deep link hit while logged out (e.g. #settings/vault). Re-applied by the
+  // effect below once isLoggedIn() flips true, then cleared.
+  const [pendingRoute, setPendingRoute] = createSignal(null);
 
   const applyRoute = () => {
     const value = normalizeHashPath(window.location.hash);
     const [route, param] = value.split('/');
+    if (!isLoggedIn() && (TERMINAL_VIEWS[route] || (PANE_ROUTES[route] && param))) {
+      // Remember a deep link (view route or pane route with a param, e.g.
+      // #predictions/5) a logged-out user wanted to reach. Auth screens and
+      // bare pane routes are transit — the auth flow bounces through #home,
+      // which must not overwrite the remembered destination.
+      setPendingRoute(value);
+    }
     if (PANE_ROUTES[route]) {
       setActivePane(PANE_ROUTES[route]);
       setActiveView(null);
       setAuthRoute(null);
+      rememberPaneRoute(value);
       if (route === 'predictions' && param) {
         marketStore.ensureMarket(Number(param));
       }
-    } else if (TERMINAL_VIEWS[route] && (!TERMINAL_VIEWS[route].adminOnly || isAdmin())) {
+    } else if (isLoggedIn() && TERMINAL_VIEWS[route] && (!TERMINAL_VIEWS[route].adminOnly || isAdmin())) {
       setActiveView({ key: route, param: param || null });
       setAuthRoute(null);
     } else if (AUTH_SCREEN_ROUTES.includes(route)) {
       setActiveView(null);
       setAuthRoute(route);
     } else {
-      // Unknown hash (or admin-only view without admin rights): close any
-      // full-screen view so the screen matches the URL; panes stay as-is.
+      // Unknown hash, admin-only view without admin rights, or a view route
+      // while logged out (captured above; would only 401 behind LoginModal):
+      // close any full-screen view so the screen matches the URL; panes stay
+      // as-is.
       setActiveView(null);
       setAuthRoute(null);
     }
@@ -153,6 +166,22 @@ function App() {
 	      setShowNotifications(false);
 	    }
 	  });
+
+  // Re-apply a deep link captured while logged out once the user signs in.
+  // The hash may be unchanged (LoginModal covered the route — no hashchange
+  // fires, so call applyRoute directly) or clobbered by the auth screens
+  // (signup/verify land on #home) — handle both.
+  createEffect(() => {
+    if (!isLoggedIn()) return;
+    const pending = pendingRoute();
+    if (!pending) return;
+    setPendingRoute(null);
+    if (normalizeHashPath(window.location.hash) === pending) {
+      applyRoute();
+    } else {
+      window.location.hash = `#${pending}`;
+    }
+  });
 
   // Focus Trap Logic
   const handleFocusTrap = (e, containerRef) => {

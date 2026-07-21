@@ -2,10 +2,15 @@ import { Show, Suspense } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import { TERMINAL_VIEWS } from './views/registry';
 
-// Full-screen layer over the panes (below the tmux top bar). Closing always
-// routes back to #home so the hash stays the single source of truth.
+// Full-screen layer over the panes (below the tmux top bar). Closing routes
+// back to the last pane route seen this session (recorded by TerminalApp's
+// applyRoute), so Chat -> #settings -> close lands on #messages again. Direct
+// deep links into a view (no prior pane) fall back to #home. Plain module
+// state, not a signal: only read inside event handlers.
+let lastPaneRoute = 'home';
+export const rememberPaneRoute = (value) => { lastPaneRoute = value; };
 export const closeTerminalView = () => {
-  window.location.hash = '#home';
+  window.location.hash = `#${lastPaneRoute}`;
 };
 
 export const TerminalViewHost = (props) => {
