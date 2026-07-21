@@ -1,6 +1,7 @@
 import { createEffect, createSignal, For, Show } from 'solid-js';
 import { getPredictionAnalyticsDashboard } from '../../../services/api';
 import { isAuthenticated } from '../../../services/auth';
+import { createEpochGuard } from '../../../lib/requestEpoch';
 
 const fmtInt = (v) => {
   const n = Number(v);
@@ -38,24 +39,24 @@ export default function AnalyticsView() {
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal('');
 
-  let loadEpoch = 0;
+  const guard = createEpochGuard();
 
   const refresh = () => {
     setLoading(true);
     setError('');
-    const epoch = ++loadEpoch;
+    const token = guard.begin();
     getPredictionAnalyticsDashboard()
       .then((result) => {
-        if (epoch !== loadEpoch) return;
+        if (!guard.isCurrent(token)) return;
         setData(result || {});
       })
       .catch((e) => {
-        if (epoch !== loadEpoch) return;
+        if (!guard.isCurrent(token)) return;
         setError(e?.message || 'FAILED TO LOAD ANALYTICS');
         setData({});
       })
       .finally(() => {
-        if (epoch === loadEpoch) setLoading(false);
+        if (guard.isCurrent(token)) setLoading(false);
       });
   };
 

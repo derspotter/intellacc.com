@@ -12,6 +12,7 @@ import {
 } from '../../../services/api';
 import { getCurrentUserId } from '../../../services/auth';
 import { isLoggedIn } from '../../../services/tokenService';
+import { createEpochGuard } from '../../../lib/requestEpoch';
 
 const fmtRP = (v) => `${(Number(v) || 0).toFixed(2)} RP`;
 
@@ -30,7 +31,7 @@ export default function ProfileView(props) {
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
 
-  let loadEpoch = 0;
+  const guard = createEpochGuard();
 
   const targetId = () => (props.param ? String(props.param) : null);
   const isOwn = () => {
@@ -46,26 +47,26 @@ export default function ProfileView(props) {
     setFollowing(null);
     setNetwork(null);
     setError('');
-    const epoch = ++loadEpoch;
+    const token = guard.begin();
     const load = async () => {
       try {
         const p = id && !isOwn() ? await getUser(id) : await getCurrentUser();
-        if (epoch !== loadEpoch) return;
+        if (!guard.isCurrent(token)) return;
         setProfile(p?.user || p);
         if (isOwn()) {
           getPredictions().then((rows) => {
-            if (epoch !== loadEpoch) return;
+            if (!guard.isCurrent(token)) return;
             const items = Array.isArray(rows) ? rows : (rows?.items || rows?.predictions || []);
             setPredictions(items.slice(0, 5));
           }).catch(() => {});
         } else if (isLoggedIn()) {
           getFollowingStatus(id).then((s) => {
-            if (epoch !== loadEpoch) return;
+            if (!guard.isCurrent(token)) return;
             setFollowing(Boolean(s?.isFollowing));
           }).catch(() => {});
         }
       } catch (e) {
-        if (epoch !== loadEpoch) return;
+        if (!guard.isCurrent(token)) return;
         setError(e?.message || 'FAILED TO LOAD PROFILE');
       }
     };
@@ -75,17 +76,20 @@ export default function ProfileView(props) {
   const toggleFollow = async () => {
     const id = targetId();
     if (!id || busy()) return;
+    // Tie this action to the profile currently loaded: if the route param
+    // changes mid-request, the result must not touch the new profile's state.
+    const token = guard.current();
     setBusy(true);
     try {
       if (following()) {
         await unfollowUser(id);
-        setFollowing(false);
+        if (guard.isCurrent(token)) setFollowing(false);
       } else {
         await followUser(id);
-        setFollowing(true);
+        if (guard.isCurrent(token)) setFollowing(true);
       }
     } catch (e) {
-      setError(e?.message || 'FOLLOW ACTION FAILED');
+      if (guard.isCurrent(token)) setError(e?.message || 'FOLLOW ACTION FAILED');
     } finally {
       setBusy(false);
     }

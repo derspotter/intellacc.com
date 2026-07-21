@@ -7,6 +7,7 @@ import {
   markNotificationRead
 } from '../../../services/api';
 import { registerSocketEventHandler } from '../../../services/socket';
+import { createEpochGuard } from '../../../lib/requestEpoch';
 
 const PAGE = 20;
 
@@ -38,24 +39,33 @@ export default function NotificationsView() {
 
   const normalize = (v) => Array.isArray(v) ? v : (v?.items || v?.notifications || []);
 
+  const guard = createEpochGuard();
+
+  // Every call supersedes any in-flight load (epoch guard) instead of gating
+  // on `loading()` — a boolean gate made recovery reloads (the catch-path
+  // `load(true)` after a failed mark/delete) silently no-op while a load was
+  // in flight, leaving optimistic state out of sync with the server.
   const load = async (reset) => {
-    if (loading()) return;
+    const token = guard.begin();
     setLoading(true);
     setError('');
     try {
       const offset = reset ? 0 : items().length;
       const rows = normalize(await getNotifications({ limit: PAGE, offset }));
+      if (!guard.isCurrent(token)) return;
       setItems(reset ? rows : (prev => {
         const seen = new Set(prev.map(i => String(i.id)));
         return [...prev, ...rows.filter(r => !seen.has(String(r.id)))];
       })(items()));
       setHasMore(rows.length >= PAGE);
       const c = await getUnreadNotificationCount().catch(() => null);
+      if (!guard.isCurrent(token)) return;
       setUnread(Math.max(0, Number(c?.count ?? items().filter(i => !i.read).length) || 0));
     } catch (e) {
+      if (!guard.isCurrent(token)) return;
       setError(e?.message || 'FAILED TO LOAD NOTIFICATIONS');
     } finally {
-      setLoading(false);
+      if (guard.isCurrent(token)) setLoading(false);
     }
   };
 
