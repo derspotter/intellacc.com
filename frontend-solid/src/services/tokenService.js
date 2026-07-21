@@ -42,6 +42,9 @@ if (initialToken) {
         }
         setUserData(payload);
         setIsLoggedIn(true);
+        // The JWT payload only carries userId/role; fetch the full profile so
+        // username survives a page reload (saveToken already does this).
+        refreshProfile();
     } catch (e) {
         console.warn("Invalid token detected, clearing session", e);
         localStorage.removeItem('token');
