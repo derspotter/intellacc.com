@@ -5144,7 +5144,7 @@ select {
   .main-content {
     width: 100%;
     padding: 1rem;
-    margin-bottom: calc(60px + env(safe-area-inset-bottom));
+    margin-bottom: 60px;
     /* Space for bottom nav */
     box-shadow: none;
   }
@@ -5631,11 +5631,11 @@ select {
 @media (max-width: 768px) and (orientation: landscape) {
 
   .wrapper {
-    padding-top: calc(48px + env(safe-area-inset-top));
+    padding-top: 48px;
   }
 
   .main-content {
-    margin-bottom: calc(52px + env(safe-area-inset-bottom));
+    margin-bottom: 52px;
   }
 }
 
@@ -7740,8 +7740,7 @@ body.skin-terminal * {
     left: 0;
     right: 0;
     bottom: 0;
-    height: calc(56px + env(safe-area-inset-bottom));
-    padding-bottom: env(safe-area-inset-bottom);
+    height: 56px;
     background-color: var(--black-bg);
     border-top: 2px solid var(--primary-color);
     z-index: 998;
@@ -7786,7 +7785,38 @@ body.skin-terminal * {
 
   /* Keep content clear of the fixed tab bar. */
   .main-content {
+    margin-bottom: 64px;
+  }
+}
+
+/* Safe-area insets only in installed (standalone) PWA mode, where they are
+   constant. In a mobile BROWSER env(safe-area-inset-bottom) changes as the
+   toolbar hides/shows during scrolling (activated by viewport-fit=cover),
+   which made the fixed tab bar visibly grow/shrink mid-scroll. */
+@media (display-mode: standalone) and (max-width: 1024px) {
+  .mobile-tab-bar {
+    height: calc(56px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .main-content {
     margin-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (display-mode: standalone) and (max-width: 768px) {
+  .main-content {
+    margin-bottom: calc(60px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (display-mode: standalone) and (max-width: 768px) and (orientation: landscape) {
+  .wrapper {
+    padding-top: calc(48px + env(safe-area-inset-top));
+  }
+
+  .main-content {
+    margin-bottom: calc(52px + env(safe-area-inset-bottom));
   }
 }
 

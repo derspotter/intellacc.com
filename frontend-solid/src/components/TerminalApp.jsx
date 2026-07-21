@@ -494,7 +494,7 @@ function App() {
 	      </Show>
 
 	      {/* Top Bar (Tmux Style) */}
-	      <header class="min-h-6 shrink-0 flex items-stretch text-xs font-mono z-20 relative select-none bg-bb-tmux text-bb-bg font-bold overflow-x-auto no-scrollbar whitespace-nowrap max-md:pb-[env(safe-area-inset-bottom)]">
+	      <header class="min-h-6 shrink-0 flex items-stretch text-xs font-mono z-20 relative select-none bg-bb-tmux text-bb-bg font-bold overflow-x-auto no-scrollbar whitespace-nowrap [@media(display-mode:standalone)]:max-md:pb-[env(safe-area-inset-bottom)]">
 	        {/* Left Block. On phones (< md) the low-value segments are hidden so
 	            @username + RP always fit in 390px: the "[INTELLACC] USER:" label,
 	            [VAN] and [LOGOUT] collapse (both remain reachable via [MENU] ->
