@@ -8,8 +8,21 @@ Updated: 2026-07-21 (delta below; last full audit 2026-06-12)
   plain bookmark and iOS push impossible. Also added real install-grade
   icons (192/512 + maskable + apple-touch 180) — the manifest had only ever
   listed the 16-64px favicon.ico, below Chrome's install threshold. Verified
-  live on intellacc.de. Remaining mobile gap: no mobile-viewport E2E beyond
-  mobile-nav-smoke (messaging/vault/trading untested at phone width).
+  live on intellacc.de.
+- `Done` Mobile hardening pass (2026-07-21, 6f8b76a..a884033): audited all
+  routes in both skins at 390x844 with real mobile emulation. Fixed: van
+  predictions tab strip clipped (LEADERBOARD unreachable), home empty-state
+  under the Post button, terminal status bar overflow (username/RP clipped;
+  low-value segments md:-only with a [MENU] palette touch path), username
+  lost after reload in both skins (tokenService init never refreshed the
+  profile), viewport-fit=cover for safe-area insets. Locked in by 14 new
+  mobile E2E tests (mobile-van/mobile-terminal/mobile-messaging specs incl.
+  CDP touch-drag on the distribution chart and the full E2EE DM flow on
+  phone-sized contexts).
+- `Open` Terminal skin numeric-market trade ticket: MarketDetail always
+  renders the binary YES/NO TradeTicket — no distribution branch, so the
+  428 numeric markets get a misleading binary ticket in the terminal skin
+  (van has the proper distribution UI). Found during the mobile pass.
 - `Done` /groups/search response gaps: topic_name + is_member (route gained
   optionalAuth — it had none, so is_member could never be true), shared
   mapGroup shape, parameterized limit (default 10, cap 20) replacing the
