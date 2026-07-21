@@ -13,6 +13,10 @@ const { verifyToken, getUserFromToken } = require('../utils/jwt');
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
 const USER_POST_SEEN_RETENTION_DAYS = 90;
 
+// Socket.IO lives on the app (index.js does app.set('io', io)); req.io only
+// exists if socketMiddleware is mounted, which it currently is not.
+const getIo = (req) => req.app?.get?.('io') || req.io;
+
 const getViewerId = (req) => {
   const rawViewerId = req.user?.id ?? req.user?.userId;
   const parsed = parseInt(rawViewerId, 10);
@@ -420,6 +424,8 @@ exports.createPost = async (req, res) => {
       });
     }
 
+    const io = getIo(req);
+
     // If this is a comment, increment the parent's comment_count and create notifications
     if (parentId) {
       await db.query(
@@ -448,12 +454,12 @@ exports.createPost = async (req, res) => {
       }
 
       // Handle via socket.io for real-time updates
-      if (req.io) {
-        req.io.to(`post:${parentId}`).emit('new_comment', newPost);
+      if (io) {
+        io.to(`post:${parentId}`).emit('new_comment', newPost);
       }
-    } else if (req.io) {
-      // Emit new post event for timeline updates
-      req.io.emit('new_post', newPost);
+    } else if (io && !communityGroupId) {
+      // Emit new post event for timeline updates (group posts stay within the group)
+      io.emit('new_post', newPost);
     }
 
     // ActivityPub federation is best-effort; never block local post creation.
@@ -869,8 +875,9 @@ exports.updatePost = async (req, res) => {
     }
 
     // Emit real-time update if socket.io is available
-    if (req.io) {
-      req.io.emit('post_updated', result.rows[0]);
+    const io = getIo(req);
+    if (io) {
+      io.emit('post_updated', result.rows[0]);
     }
 
     res.status(200).json(result.rows[0]);
