@@ -25,8 +25,13 @@ Updated: 2026-07-21 (delta below; last full audit 2026-06-12)
   market_prob. Now branches like the van detail view, reusing the van cards
   inside a scoped .bb-embed terminal restyle; covered by
   terminal-market-types.spec.js (all three types, desktop + 390px mobile).
-  Minor deferred aesthetic: numeric sell still uses the van card's native
-  window.confirm dialog inside the terminal skin.
+- `Done` Small follow-ups cleared (b9c3a91..3b4e317): numeric sell now uses
+  an inline arm/confirm (shared confirmTimer core) instead of
+  window.confirm in both skins; reserved display names (exact-match,
+  same set as usernames, zero existing squatters); committed E2E for the
+  signup requiresApproval/429/validation branches with fully intercepted
+  network, which also surfaced and fixed a silent no-op on
+  whitespace-only signup fields.
 - `Done` /groups/search response gaps: topic_name + is_member (route gained
   optionalAuth — it had none, so is_member could never be true), shared
   mapGroup shape, parameterized limit (default 10, cap 20) replacing the
