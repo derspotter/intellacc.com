@@ -36,7 +36,7 @@ export default function TerminalRPBalance() {
       <button
         type="button"
         data-testid="rp-readout"
-        class="hover:text-bb-accent cursor-pointer"
+        class="hover:text-bb-accent cursor-pointer max-md:text-xs max-md:text-bb-bg max-md:p-0 max-md:border-none max-md:bg-transparent"
         title="Open leaderboard"
         onClick={() => { window.location.hash = '#leaderboard'; }}
       >

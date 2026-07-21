@@ -10,7 +10,7 @@ import { ChatPanel } from "./ChatPanel";
 import { feedStore } from "../store/feedStore";
 import { marketStore } from "../store/marketStore";
 import { getActiveSkin, setSkin } from "../services/skinProvider";
-import { updateUiPreferences } from "../services/api";
+import { updateUiPreferences, getCurrentUser } from "../services/api";
 import { isAuthenticated, isAdmin } from "../services/auth";
 import { normalizeHashPath } from "../services/routes";
 import { TerminalViewHost, closeTerminalView, rememberPaneRoute } from "./terminal/TerminalViewHost";
@@ -286,6 +286,24 @@ function App() {
   const timer = setInterval(() => setTime(new Date()), 1000);
   onCleanup(() => clearInterval(timer));
 
+  // The JWT payload carries only userId/role, so after a full page reload
+  // userData().username is undefined (tokenService only refreshes the profile
+  // on saveToken). Fetch the profile once as a display fallback so the status
+  // bar never renders a bare "@".
+  const [profileUsername, setProfileUsername] = createSignal(null);
+  createEffect(() => {
+    if (!isLoggedIn()) {
+      setProfileUsername(null);
+      return;
+    }
+    if (userData()?.username) return;
+    getCurrentUser()
+      .then((p) => p?.username && setProfileUsername(p.username))
+      .catch(() => { /* keep fallback below */ });
+  });
+  const displayUsername = () =>
+    userData()?.username || profileUsername() || `USER${userData()?.userId ?? ''}`;
+
   const formatDate = (date) => {
     return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
   };
@@ -476,26 +494,31 @@ function App() {
 	      </Show>
 
 	      {/* Top Bar (Tmux Style) */}
-	      <header class="min-h-6 shrink-0 flex items-stretch text-xs font-mono z-20 relative select-none bg-bb-tmux text-bb-bg font-bold overflow-x-auto no-scrollbar whitespace-nowrap">
-	        {/* Left Block */}
+	      <header class="min-h-6 shrink-0 flex items-stretch text-xs font-mono z-20 relative select-none bg-bb-tmux text-bb-bg font-bold overflow-x-auto no-scrollbar whitespace-nowrap max-md:pb-[env(safe-area-inset-bottom)]">
+	        {/* Left Block. On phones (< md) the low-value segments are hidden so
+	            @username + RP always fit in 390px: the "[INTELLACC] USER:" label,
+	            [VAN] and [LOGOUT] collapse (both remain reachable via [MENU] ->
+	            command palette), and the username truncates. */}
 	        <div class="px-3 flex items-center border-r border-bb-bg/20 gap-2">
-	          <span>[INTELLACC] USER:</span>
+	          <span class="hidden md:inline">[INTELLACC] USER:</span>
 	          <Show when={isLoggedIn()} fallback={<span>@GUEST</span>}>
 	            <button
 	              type="button"
 	              data-testid="user-readout"
 	              onClick={() => { window.location.hash = '#profile'; }}
-	              class="hover:text-bb-accent cursor-pointer"
+	              class="hover:text-bb-accent cursor-pointer max-md:text-xs max-md:text-bb-bg max-md:p-0 max-md:border-none max-md:bg-transparent max-md:max-w-[26vw]"
 	              title="Open profile"
 	            >
-	              @{userData()?.username}
+	              {/* Global button styles are display:flex, so `truncate` on the
+	                  button itself can't ellipsize — the inner span does. */}
+	              <span class="max-md:min-w-0 max-md:truncate">@{displayUsername()}</span>
 	            </button>
 	          </Show>
 	          <TerminalRPBalance />
 	          <button
 	            type="button"
 	            onClick={switchToVan}
-	            class="hover:text-bb-accent cursor-pointer"
+	            class="hidden md:flex hover:text-bb-accent cursor-pointer"
 	            title="Switch back to the Van skin"
 	          >
 	            [VAN]
@@ -505,11 +528,23 @@ function App() {
               onClick={() => {
                 import("../services/tokenService").then(s => s.clearToken());
               }}
-	              class="hover:text-bb-accent cursor-pointer"
+	              class="hidden md:flex hover:text-bb-accent cursor-pointer"
 	            >
 	              [LOGOUT]
 	            </button>
 	          </Show>
+	          {/* Touch affordance for the command palette (Ctrl+K has no touch
+	              path). sm:hidden: from sm up the window list below already
+	              renders a [MENU] button. */}
+	          <button
+	            type="button"
+	            data-testid="nav-menu-mobile"
+	            onClick={() => setShowPalette(true)}
+	            class="sm:hidden text-xs text-bb-bg p-0 border-none bg-transparent hover:text-bb-accent cursor-pointer"
+	            title="All commands"
+	          >
+	            [MENU]
+	          </button>
 	        </div>
 
 	        {/* Window list (tmux style): persistent nav. Views are otherwise
@@ -543,22 +578,26 @@ function App() {
 	          </button>
 	        </div>
 
-		        {/* Middle Spacer */}
-		        <div class="flex-1 flex items-center justify-end px-3 gap-4">
-		          <span>SYS: {socketState.connected ? 'ONLINE' : 'OFFLINE'}</span>
+		        {/* Middle Spacer. min-w-0 + a shrinkable NOTIF button so the bar
+		            never forces horizontal scrolling on phones; SYS is desktop-only. */}
+		        <div class="flex-1 min-w-0 flex items-center justify-end px-3 gap-4">
+		          <span class="hidden md:inline">SYS: {socketState.connected ? 'ONLINE' : 'OFFLINE'}</span>
 		          <button
 		            type="button"
-		            class="max-w-[40vw] sm:max-w-[50vw] truncate hover:text-bb-accent cursor-pointer"
+		            class="min-w-0 max-w-[40vw] sm:max-w-[50vw] truncate max-md:text-xs max-md:text-bb-bg max-md:p-0 max-md:border-none max-md:bg-transparent hover:text-bb-accent cursor-pointer"
 		            title={socketState.lastNotification || ''}
 		            onClick={() => setShowNotifications(true)}
 		          >
-		            NOTIF: {socketState.lastNotification || '-'}
+		            <span class="md:hidden">[N]</span>
+		            <span class="hidden md:inline">NOTIF:</span>
+		            <span class="max-md:min-w-0 max-md:truncate">&nbsp;{socketState.lastNotification || '-'}</span>
 		          </button>
 		        </div>
 
-	        {/* Right Block */}
+	        {/* Right Block (date is desktop-only; phones keep HH:MM) */}
 	        <div class="px-3 flex items-center border-l border-bb-bg/20">
-	          {formatTime(time())} {formatDate(time())}
+	          <span>{formatTime(time())}</span>
+	          <span class="hidden md:inline">&nbsp;{formatDate(time())}</span>
 	        </div>
 	      </header>
 	    </div>

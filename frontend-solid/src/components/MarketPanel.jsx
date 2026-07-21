@@ -34,13 +34,13 @@ const MarketSearchRow = () => {
             <input
                 type="text"
                 data-testid="market-search"
-                class="flex-1 bg-transparent border-none outline-none text-bb-text placeholder-bb-muted"
+                class="flex-1 min-w-0 bg-transparent border-none outline-none text-bb-text placeholder-bb-muted"
                 placeholder="SEARCH MARKETS..."
                 value={value()}
                 onInput={onInput}
                 ref={el => inputEl = el}
             />
-            <span data-testid="market-count" class="text-bb-muted">
+            <span data-testid="market-count" class="text-bb-muted shrink-0">
                 {/* Clamp to the server total: ensureMarket() can prepend a
                     deep-linked market outside the loaded/filtered set, which
                     would otherwise render e.g. 101/100. Display only. */}
