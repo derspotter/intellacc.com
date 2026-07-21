@@ -55,6 +55,9 @@ function App() {
       setActiveView(null);
       setAuthRoute(route);
     } else {
+      // Unknown hash (or admin-only view without admin rights): close any
+      // full-screen view so the screen matches the URL; panes stay as-is.
+      setActiveView(null);
       setAuthRoute(null);
     }
   };

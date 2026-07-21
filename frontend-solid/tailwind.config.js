@@ -14,6 +14,8 @@ export default {
                     text: '#F0F0F0',
                     muted: '#666666',
                     accent: '#FFB400', // Amber for highlights
+                    active: '#FFB400', // Hover/selection wash (used at /10-/20 opacity)
+                    highlight: '#FFD75F', // Hover text pop (brighter amber)
                     tmux: '#d7d787', // Tmux Bar
                     'ib-orange': '#F5A623',
                     'ib-blue': '#007ACD',

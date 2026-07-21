@@ -19,7 +19,8 @@ export const ROUTES = {
   settings: 'settings',
   'verify-email': 'verify-email',
   search: 'search',
-  ...(import.meta.env.DEV ? { __harness: '__harness' } : {})
+  // Optional chaining keeps this importable outside Vite (node --test).
+  ...(import.meta.env?.DEV ? { __harness: '__harness' } : {})
 };
 
 export const NOT_FOUND_ROUTE = 'notFound';
