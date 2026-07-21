@@ -7948,6 +7948,19 @@ body.dark-mode .shortcut-help button:hover {
   color: #FFB400;
 }
 
+/* Armed two-step confirms (e.g. the numeric card's "Confirm sell" state):
+   the van skin fills these solid red; in the terminal use the same
+   translucent treatment as .button.primary but in the down/red color. */
+.bb-embed .button-danger {
+  background-color: rgba(255, 61, 0, 0.15);
+  color: #FF3D00;
+  border: 1px solid #FF3D00;
+}
+
+.bb-embed .button-danger:hover:not(:disabled) {
+  background-color: rgba(255, 61, 0, 0.3);
+}
+
 /* Outcome rows: amber selection instead of the van's 2px-bold border. */
 .bb-embed .outcome-row {
   font-size: 0.75rem;

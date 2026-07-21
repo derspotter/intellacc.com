@@ -84,9 +84,10 @@ test.describe('log-scaled open-tail numeric market', () => {
     await card.getByRole('button', { name: /^trade$/i }).click();
     await expect(card.locator('.distribution-card-position')).toBeVisible({ timeout: 15000 });
 
-    // Sell it back; position clears.
-    page.on('dialog', (dialog) => dialog.accept());
+    // Sell it back via the inline two-step confirm (arm, then confirm);
+    // position clears.
     await card.getByRole('button', { name: /sell all/i }).click();
+    await card.getByRole('button', { name: /confirm sell/i }).click();
     await expect(card.locator('.distribution-card-position')).not.toBeVisible({ timeout: 15000 });
   });
 });

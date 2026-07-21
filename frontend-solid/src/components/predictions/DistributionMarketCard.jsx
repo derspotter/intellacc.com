@@ -8,6 +8,7 @@ import {
   sellNumericPosition,
   ApiError
 } from '../../services/api';
+import { createConfirmCore } from '../../lib/confirmTimer';
 import {
   safeNumber,
   formatCurrency,
@@ -544,6 +545,16 @@ export default function DistributionMarketCard(props) {
     }
   };
 
+  // Two-step sell confirm replacing the old window.confirm() dialog: the
+  // first tap arms the Sell button (label flips to "Confirm sell — <est.
+  // payout>"), a second tap within CONFIRM_RESET_MS executes, otherwise the
+  // shared core auto-resets. Same pattern as the terminal settings sections'
+  // useConfirmTimer — that hook is terminal-skin-scoped, so wire the plain
+  // core (which cancels its timer on unmount via dispose) to a signal here.
+  const [armedSellId, setArmedSellId] = createSignal(null);
+  const sellConfirm = createConfirmCore({ get: armedSellId, set: setArmedSellId });
+  onCleanup(sellConfirm.dispose);
+
   const handleSell = async () => {
     if (!isOpen()) {
       setError('Market is closed or resolved.');
@@ -555,13 +566,7 @@ export default function DistributionMarketCard(props) {
     }
     const version = sellVersion();
     if (version == null) return;
-    const ok = window.confirm(
-      `Confirm sale:\n\n` +
-      `Sell your entire position (${totalShares().toFixed(2)} shares)\n` +
-      `Estimated payout: ${positionValue().toFixed(2)} RP\n\n` +
-      `Do you want to proceed?`
-    );
-    if (!ok) return;
+    if (!sellConfirm.confirm('sell')) return;
 
     closeMessages();
     setBusyAction('sell');
@@ -933,11 +938,16 @@ export default function DistributionMarketCard(props) {
             </div>
             <button
               type="button"
-              class="button secondary"
+              class={sellConfirm.isArmed('sell') ? 'button button-danger' : 'button secondary'}
               onClick={() => void handleSell()}
+              onBlur={() => sellConfirm.disarm('sell')}
               disabled={!!busyAction() || !isOpen() || totalShares() <= 0 || sellVersion() == null}
             >
-              {busyAction() === 'sell' ? 'Selling...' : `Sell all (${totalShares().toFixed(2)} sh)`}
+              {busyAction() === 'sell'
+                ? 'Selling...'
+                : sellConfirm.isArmed('sell')
+                  ? `Confirm sell — ~${positionValue().toFixed(2)} RP`
+                  : `Sell all (${totalShares().toFixed(2)} sh)`}
             </button>
             <Show when={!isOpen()}>
               <p class="muted">Market is closed or resolved — selling is unavailable.</p>

@@ -212,11 +212,26 @@ test.describe('numeric market distribution trading', () => {
     // Clearing the budget input nulls the trade quote, but Sell only needs
     // the market's version — it must stay enabled.
     await page.locator('.distribution-card-budget-input').fill('');
-    const sellButton = page.getByRole('button', { name: /sell all/i });
+    const sellButton = card.getByRole('button', { name: /sell all/i });
     await expect(sellButton).toBeEnabled({ timeout: 5000 });
 
-    page.on('dialog', (dialog) => dialog.accept());
-    await card.getByRole('button', { name: /sell/i }).click();
+    // Two-step confirm (no native dialog): the first tap only ARMS the
+    // button — label flips to "Confirm sell — ~<est payout> RP" and nothing
+    // is sold.
+    await sellButton.click();
+    const confirmButton = card.getByRole('button', { name: /confirm sell/i });
+    await expect(confirmButton).toBeVisible();
+    await expect(confirmButton).toHaveText(/~[\d.]+ RP/);
+    await expect(card.locator('.distribution-card-position')).toBeVisible();
+
+    // Without a second tap the arm auto-resets after ~4s back to "Sell all",
+    // still without selling.
+    await expect(card.getByRole('button', { name: /sell all/i })).toBeVisible({ timeout: 6000 });
+    await expect(card.locator('.distribution-card-position')).toBeVisible();
+
+    // Arm again and confirm within the window: the sale executes.
+    await card.getByRole('button', { name: /sell all/i }).click();
+    await card.getByRole('button', { name: /confirm sell/i }).click();
     await expect(card.locator('.distribution-card-position')).not.toBeVisible({ timeout: 10000 });
 
     const balanceAfter = Number(psql(`SELECT rp_balance_ledger FROM users WHERE id = ${userId}`));
