@@ -84,8 +84,12 @@ const emitToSubscribers = (subs, payload) => {
 
 const normalizeNotificationText = (data) => {
     if (typeof data === 'string') return data;
+    // The backend wraps pushed rows as { type: 'new', notification: {...} } —
+    // unwrap so the overlay/ticker show the row's text, not raw JSON.
+    if (data?.notification) return normalizeNotificationText(data.notification);
     if (data?.text != null) return String(data.text);
     if (data?.message != null) return String(data.message);
+    if (data?.content != null) return String(data.content);
     if (data?.title != null) return String(data.title);
     try {
         return JSON.stringify(data);
@@ -164,14 +168,18 @@ const connect = () => {
     });
 
     socket.on('notification', (data) => {
-        const text = normalizeNotificationText(data);
-        const entry = { ts: Date.now(), text, raw: data };
+        // Count-only updates drive badges via subscribers; they are not a
+        // human-readable notification, so keep them out of the overlay/ticker.
+        if (data?.type !== 'unreadCountUpdate') {
+            const text = normalizeNotificationText(data);
+            const entry = { ts: Date.now(), text, raw: data };
 
-        setState('lastNotification', text);
-        setState('notifications', (prev) => {
-            const next = [...(prev || []), entry];
-            return next.length > MAX_NOTIFICATIONS ? next.slice(-MAX_NOTIFICATIONS) : next;
-        });
+            setState('lastNotification', text);
+            setState('notifications', (prev) => {
+                const next = [...(prev || []), entry];
+                return next.length > MAX_NOTIFICATIONS ? next.slice(-MAX_NOTIFICATIONS) : next;
+            });
+        }
 
         emitToSubscribers(notificationSubscribers, data);
     });
