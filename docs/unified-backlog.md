@@ -19,10 +19,14 @@ Updated: 2026-07-21 (delta below; last full audit 2026-06-12)
   mobile E2E tests (mobile-van/mobile-terminal/mobile-messaging specs incl.
   CDP touch-drag on the distribution chart and the full E2EE DM flow on
   phone-sized contexts).
-- `Open` Terminal skin numeric-market trade ticket: MarketDetail always
-  renders the binary YES/NO TradeTicket — no distribution branch, so the
-  428 numeric markets get a misleading binary ticket in the terminal skin
-  (van has the proper distribution UI). Found during the mobile pass.
+- `Done` Terminal skin market-type trading (45d0977, found during the mobile
+  pass): MarketDetail always rendered the binary YES/NO TradeTicket — numeric
+  AND multi-outcome markets got a misleading binary ticket trading
+  market_prob. Now branches like the van detail view, reusing the van cards
+  inside a scoped .bb-embed terminal restyle; covered by
+  terminal-market-types.spec.js (all three types, desktop + 390px mobile).
+  Minor deferred aesthetic: numeric sell still uses the van card's native
+  window.confirm dialog inside the terminal skin.
 - `Done` /groups/search response gaps: topic_name + is_member (route gained
   optionalAuth — it had none, so is_member could never be true), shared
   mapGroup shape, parameterized limit (default 10, cap 20) replacing the
