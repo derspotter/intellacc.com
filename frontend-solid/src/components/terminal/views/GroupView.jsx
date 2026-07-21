@@ -18,6 +18,7 @@ import {
 } from '../../../services/api';
 import { joinGroupChat, leaveGroupChat } from '../../../services/socket';
 import { isLoggedIn } from '../../../services/tokenService';
+import { createEpochGuard } from '../../../lib/requestEpoch';
 import PostItem from '../PostItem';
 
 const TABS = [
@@ -73,7 +74,7 @@ export default function GroupView(props) {
   const [membersLoaded, setMembersLoaded] = createSignal(false);
   const [memberBusy, setMemberBusy] = createSignal(false);
 
-  let loadEpoch = 0;
+  const guard = createEpochGuard();
 
   // Reload everything whenever the slug changes (epoch-guarded, same pattern
   // as ProfileView so a stale in-flight response can never clobber a newer
@@ -90,20 +91,20 @@ export default function GroupView(props) {
     setMembers([]); setMembersLoaded(false);
     setReportOpen(false); setReportReason(''); setReportMsg('');
     if (!s) { setLoading(false); return; }
-    const epoch = ++loadEpoch;
+    const token = guard.begin();
     setLoading(true);
     getGroup(s)
       .then((r) => {
-        if (epoch !== loadEpoch) return;
+        if (!guard.isCurrent(token)) return;
         setGroup(r?.group || null);
       })
       .catch((e) => {
-        if (epoch !== loadEpoch) return;
+        if (!guard.isCurrent(token)) return;
         if (e?.status === 404) setNotFound(true);
         else setError(e?.message || 'FAILED TO LOAD GROUP');
       })
       .finally(() => {
-        if (epoch === loadEpoch) setLoading(false);
+        if (guard.isCurrent(token)) setLoading(false);
       });
   });
 
@@ -141,16 +142,16 @@ export default function GroupView(props) {
   const loadFeed = async () => {
     const g = group();
     if (!g) return;
-    const epoch = loadEpoch;
+    const token = guard.current();
     try {
       const r = await getGroupPosts(g.slug, { limit: 30 });
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setPosts(Array.isArray(r?.posts) ? r.posts : []);
     } catch {
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setPosts([]);
     } finally {
-      if (epoch === loadEpoch) setFeedLoaded(true);
+      if (guard.isCurrent(token)) setFeedLoaded(true);
     }
   };
   createEffect(() => {
@@ -161,32 +162,32 @@ export default function GroupView(props) {
     const g = group();
     const text = postText().trim();
     if (!g || !text || postBusy()) return;
-    const epoch = loadEpoch;
+    const token = guard.current();
     setPostBusy(true);
     setPostError('');
     try {
       const created = await postToGroup(g.id, text);
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setPosts((cur) => [created, ...cur]);
       setPostText('');
     } catch (e) {
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setPostError(e?.message || 'FAILED TO POST');
     } finally {
-      if (epoch === loadEpoch) setPostBusy(false);
+      if (guard.isCurrent(token)) setPostBusy(false);
     }
   };
 
   const removePost = async (postId) => {
     const g = group();
     if (!g) return;
-    const epoch = loadEpoch;
+    const token = guard.current();
     try {
       await removeGroupPost(g.id, postId);
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setPosts((cur) => cur.filter((p) => p.id !== postId));
     } catch (e) {
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setError(e?.message || 'FAILED TO REMOVE POST');
     }
   };
@@ -195,16 +196,16 @@ export default function GroupView(props) {
   const loadChat = async () => {
     const g = group();
     if (!g) return;
-    const epoch = loadEpoch;
+    const token = guard.current();
     try {
       const r = await getGroupMessages(g.slug, { limit: 50 });
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setMessages(Array.isArray(r?.messages) ? r.messages : []);
     } catch {
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setMessages([]);
     } finally {
-      if (epoch === loadEpoch) setChatLoaded(true);
+      if (guard.isCurrent(token)) setChatLoaded(true);
     }
   };
   createEffect(() => {
@@ -249,16 +250,16 @@ export default function GroupView(props) {
   const loadMarkets = async () => {
     const g = group();
     if (!g) return;
-    const epoch = loadEpoch;
+    const token = guard.current();
     try {
       const r = await getGroupMarkets(g.slug);
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setMarkets(Array.isArray(r?.markets) ? r.markets : []);
     } catch {
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setMarkets([]);
     } finally {
-      if (epoch === loadEpoch) setMarketsLoaded(true);
+      if (guard.isCurrent(token)) setMarketsLoaded(true);
     }
   };
   createEffect(() => {
@@ -284,35 +285,35 @@ export default function GroupView(props) {
   const pinMarket = async (eventId) => {
     const g = group();
     if (!g || marketBusy()) return;
-    const epoch = loadEpoch;
+    const token = guard.current();
     setMarketBusy(true);
     try {
       await pinGroupMarket(g.id, eventId);
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setPinQuery(''); setPinResults([]);
       await loadMarkets();
     } catch (e) {
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setError(e?.message || 'FAILED TO PIN MARKET');
     } finally {
-      if (epoch === loadEpoch) setMarketBusy(false);
+      if (guard.isCurrent(token)) setMarketBusy(false);
     }
   };
 
   const unpinMarket = async (eventId) => {
     const g = group();
     if (!g || marketBusy()) return;
-    const epoch = loadEpoch;
+    const token = guard.current();
     setMarketBusy(true);
     try {
       await unpinGroupMarket(g.id, eventId);
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       await loadMarkets();
     } catch (e) {
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setError(e?.message || 'FAILED TO UNPIN MARKET');
     } finally {
-      if (epoch === loadEpoch) setMarketBusy(false);
+      if (guard.isCurrent(token)) setMarketBusy(false);
     }
   };
 
@@ -320,16 +321,16 @@ export default function GroupView(props) {
   const loadMembers = async () => {
     const g = group();
     if (!g) return;
-    const epoch = loadEpoch;
+    const token = guard.current();
     try {
       const r = await getGroupMembers(g.slug);
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setMembers(Array.isArray(r?.members) ? r.members : []);
     } catch {
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setMembers([]);
     } finally {
-      if (epoch === loadEpoch) setMembersLoaded(true);
+      if (guard.isCurrent(token)) setMembersLoaded(true);
     }
   };
   createEffect(() => {
@@ -339,18 +340,18 @@ export default function GroupView(props) {
   const removeMember = async (userId) => {
     const g = group();
     if (!g || memberBusy()) return;
-    const epoch = loadEpoch;
+    const token = guard.current();
     setMemberBusy(true);
     try {
       const r = await removeGroupMember(g.id, userId);
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setGroup((cur) => (cur ? { ...cur, member_count: r.member_count } : cur));
       setMembers((cur) => cur.filter((m) => m.user_id !== userId));
     } catch (e) {
-      if (epoch !== loadEpoch) return;
+      if (!guard.isCurrent(token)) return;
       setError(e?.message || 'FAILED TO REMOVE MEMBER');
     } finally {
-      if (epoch === loadEpoch) setMemberBusy(false);
+      if (guard.isCurrent(token)) setMemberBusy(false);
     }
   };
 
