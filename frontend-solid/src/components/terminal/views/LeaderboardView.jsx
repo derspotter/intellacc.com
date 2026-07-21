@@ -1,31 +1,10 @@
 import { createEffect, createSignal, For, Show } from 'solid-js';
-import {
-  getLeaderboardFollowers,
-  getLeaderboardFollowing,
-  getLeaderboardGlobal,
-  getLeaderboardNetwork,
-  getLeaderboardUserRank
-} from '../../../services/api';
+import { getLeaderboardUserRank } from '../../../services/api';
+import { fetchLeaderboardRows, LEADERBOARD_TABS } from '../../../services/leaderboard';
+import { formatReputation as fmtRP } from '../../../lib/leaderboard';
 import { getCurrentUserId, isAuthenticated } from '../../../services/auth';
 
-const TABS = [
-  { key: 'global', label: 'GLOBAL' },
-  { key: 'followers', label: 'FOLLOWERS' },
-  { key: 'following', label: 'FOLLOWING' },
-  { key: 'network', label: 'NETWORK' }
-];
-
-const FETCHERS = {
-  global: getLeaderboardGlobal,
-  followers: getLeaderboardFollowers,
-  following: getLeaderboardFollowing,
-  network: getLeaderboardNetwork
-};
-
-const fmtRP = (value) => {
-  const n = Number(value);
-  return Number.isFinite(n) ? n.toFixed(2) : '0.00';
-};
+const TABS = LEADERBOARD_TABS.map(({ key, label }) => ({ key, label: label.toUpperCase() }));
 
 export default function LeaderboardView() {
   const [tab, setTab] = createSignal('global');
@@ -44,11 +23,11 @@ export default function LeaderboardView() {
     setLoading(true);
     setError('');
     Promise.all([
-      FETCHERS[t](25),
+      fetchLeaderboardRows(t, 25),
       isAuthenticated() ? getLeaderboardUserRank().catch(() => null) : Promise.resolve(null)
     ])
       .then(([entries, rank]) => {
-        setRows(Array.isArray(entries?.leaderboard) ? entries.leaderboard : (entries || []));
+        setRows(entries);
         setMyRank(rank || null);
       })
       .catch((e) => {

@@ -67,11 +67,13 @@ export default function NetworkView() {
     })
   );
 
-  // Degree = number of edges touching the node, recomputed once per
-  // filtered-graph change (edges are [fromId, toId] pairs, not objects).
+  // Degree = number of edges touching the node in the FULL graph, computed
+  // once per graph load (edges are [fromId, toId] pairs, not objects).
+  // Filters only change which rows are visible — they never change a node's
+  // actual connectivity, so the MAX cap must not silently shrink degrees.
   const degreeMap = createMemo(() => {
     const map = new Map();
-    for (const edge of displayed().edges) {
+    for (const edge of graph().edges) {
       const a = Number(edge[0]);
       const b = Number(edge[1]);
       map.set(a, (map.get(a) || 0) + 1);
@@ -94,8 +96,10 @@ export default function NetworkView() {
       const bv = getter(b);
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
-      // Stable tie-break so re-sorts don't jitter rows with equal values.
-      return Number(a.id) - Number(b.id);
+      // Deterministic id tie-break that follows the active direction, so
+      // toggling ▲/▼ fully reverses the view instead of leaving equal-value
+      // rows stuck in ascending-id order.
+      return (Number(a.id) - Number(b.id)) * dir;
     });
   });
 

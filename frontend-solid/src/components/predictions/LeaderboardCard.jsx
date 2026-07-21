@@ -1,27 +1,8 @@
 import { createEffect, createSignal, For, Show } from 'solid-js';
 import { getCurrentUserId, isAuthenticated } from '../../services/auth';
-import {
-  getLeaderboardFollowers,
-  getLeaderboardFollowing,
-  getLeaderboardGlobal,
-  getLeaderboardNetwork,
-  getLeaderboardUserRank
-} from '../../services/api';
-
-const LEADERBOARD_TABS = [
-  { key: 'global', label: 'Global' },
-  { key: 'followers', label: 'Followers' },
-  { key: 'following', label: 'Following' },
-  { key: 'network', label: 'Network' }
-];
-
-const formatReputation = (value) => {
-  if (value === null || value === undefined) {
-    return '0.00';
-  }
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric.toFixed(2) : '0.00';
-};
+import { getLeaderboardUserRank } from '../../services/api';
+import { fetchLeaderboardRows, LEADERBOARD_TABS } from '../../services/leaderboard';
+import { formatReputation } from '../../lib/leaderboard';
 
 export default function LeaderboardCard() {
   const [activeTab, setActiveTab] = createSignal('global');
@@ -35,20 +16,8 @@ export default function LeaderboardCard() {
     setError('');
 
     try {
-      let nextEntries = [];
       const tab = activeTab();
-      if (tab === 'global') {
-        nextEntries = await getLeaderboardGlobal(10);
-      } else if (tab === 'followers') {
-        nextEntries = await getLeaderboardFollowers(10);
-      } else if (tab === 'following') {
-        nextEntries = await getLeaderboardFollowing(10);
-      } else if (tab === 'network') {
-        nextEntries = await getLeaderboardNetwork(10);
-      } else {
-        nextEntries = [];
-      }
-      setEntries(Array.isArray(nextEntries?.leaderboard) ? nextEntries.leaderboard : (nextEntries || []));
+      setEntries(await fetchLeaderboardRows(tab, 10));
 
       if (tab === 'global' || tab === 'network') {
         if (!isAuthenticated()) {
