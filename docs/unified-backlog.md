@@ -2,6 +2,14 @@
 Updated: 2026-07-21 (delta below; last full audit 2026-06-12)
 
 ## 2026-07-21 Delta — terminal-skin parity-ledger backlog burn-down
+- `Done` PWA install shell restored (8108bb7, found during mobile-readiness
+  audit): the Solid cutover index.html had dropped the manifest link,
+  apple-touch-icon, and mobile-web-app metas, so add-to-home-screen was a
+  plain bookmark and iOS push impossible. Also added real install-grade
+  icons (192/512 + maskable + apple-touch 180) — the manifest had only ever
+  listed the 16-64px favicon.ico, below Chrome's install threshold. Verified
+  live on intellacc.de. Remaining mobile gap: no mobile-viewport E2E beyond
+  mobile-nav-smoke (messaging/vault/trading untested at phone width).
 - `Done` /groups/search response gaps: topic_name + is_member (route gained
   optionalAuth — it had none, so is_member could never be true), shared
   mapGroup shape, parameterized limit (default 10, cap 20) replacing the
