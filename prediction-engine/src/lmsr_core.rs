@@ -373,4 +373,63 @@ mod tests {
             "round trip should net to zero in ledger units"
         );
     }
+
+    // --- q at or near zero (Codex post-ship review minor, 2026-07-15) ---
+    // Fresh markets sit at q = (0, 0); fully unwound markets can leave tiny
+    // (even slightly negative) residues. Cost/price math must stay finite and
+    // normalized there, and delta solving must not error or panic.
+
+    #[test]
+    fn all_zero_q_fresh_market_is_finite_and_symmetric() {
+        let b = 5000.0;
+        let c = cost(0.0, 0.0, b);
+        assert!(c.is_finite(), "cost(0,0) = {c}");
+        assert!(
+            (c - b * std::f64::consts::LN_2).abs() < 1e-9,
+            "C(0,0) should be b*ln2, got {c}"
+        );
+        let py = prob_yes(0.0, 0.0, b);
+        assert!((py - 0.5).abs() < 1e-15, "fresh market must quote 50/50, got {py}");
+        for side in [Side::Yes, Side::No] {
+            let dq = delta_q_for_stake(side, 0.0, 0.0, b, 100.0).unwrap();
+            assert!(dq.is_finite() && dq > 0.0, "dq({side:?}) = {dq}");
+        }
+    }
+
+    #[test]
+    fn epsilon_and_mixed_zero_large_q_stay_finite_and_normalized() {
+        let b = 5000.0;
+        // (q_yes, q_no): one epsilon component, tiny negative unwind residue,
+        // and zero paired with a large position (q/b = 200, deep in exp range).
+        for (qy, qn) in [
+            (1e-12, 0.0),
+            (0.0, 1e-9),
+            (-1e-12, 0.0),
+            (0.0, 1_000_000.0),
+            (1e-12, 1_000_000.0),
+        ] {
+            let c = cost(qy, qn, b);
+            assert!(c.is_finite() && !c.is_nan(), "cost({qy},{qn}) = {c}");
+            let py = prob_yes(qy, qn, b);
+            // NO price is the YES price of the mirrored market.
+            let pn = prob_yes(qn, qy, b);
+            assert!(
+                py.is_finite() && (0.0..=1.0).contains(&py),
+                "prob_yes({qy},{qn}) = {py}"
+            );
+            assert!(
+                pn.is_finite() && (0.0..=1.0).contains(&pn),
+                "prob_no({qy},{qn}) = {pn}"
+            );
+            assert!(
+                (py + pn - 1.0).abs() < 1e-9,
+                "prices must sum to 1 at ({qy},{qn}), got {}",
+                py + pn
+            );
+            for side in [Side::Yes, Side::No] {
+                let dq = delta_q_for_stake(side, qy, qn, b, 100.0).unwrap();
+                assert!(dq.is_finite() && dq > 0.0, "dq({side:?}) = {dq} at ({qy},{qn})");
+            }
+        }
+    }
 }

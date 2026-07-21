@@ -455,6 +455,48 @@ mod tests {
         assert!(sell_payout(0, &q, 5000.0, f64::NAN).is_err(), "NaN amount");
         assert!(sell_payout(0, &q, 0.0, 1.0).is_err(), "bad liquidity");
     }
+
+    // --- q-vectors at or near zero (Codex post-ship review minor, 2026-07-15) ---
+
+    #[test]
+    fn fresh_all_zero_q_vector_is_finite_and_uniform() {
+        let b = 5000.0;
+        let market = MultiMarket::new(vec![0.0; 4], b).unwrap();
+        let c = market.cost();
+        assert!(c.is_finite(), "fresh cost = {c}");
+        assert!((c - b * 4f64.ln()).abs() < 1e-6, "C(0) should be b*ln(n), got {c}");
+        for p in market.probs() {
+            assert!((p - 0.25).abs() < 1e-12, "fresh probs must be uniform, got {p}");
+        }
+    }
+
+    #[test]
+    fn near_zero_q_vectors_stay_finite_and_normalized() {
+        let b = 5000.0;
+        // Fresh all-zero, one epsilon component, tiny negative unwind residue,
+        // and mixed zero/large (q/b up to 200, deep in exp range).
+        for q in [
+            vec![0.0; 5],
+            vec![1e-12, 0.0, 0.0],
+            vec![0.0, 1e-9, 0.0, 0.0],
+            vec![0.0, -1e-12, 0.0],
+            vec![0.0, 500_000.0, 0.0],
+            vec![1e-12, 1_000_000.0, 0.0],
+        ] {
+            let c = cost(&q, b);
+            assert!(c.is_finite() && !c.is_nan(), "cost({q:?}) = {c}");
+            let p = probs(&q, b);
+            assert!(
+                p.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)),
+                "probs({q:?}) = {p:?}"
+            );
+            let sum: f64 = p.iter().sum();
+            assert!((sum - 1.0).abs() < 1e-9, "probs({q:?}) sum to {sum}");
+            // Trading a zero-share outcome must solve without error or panic.
+            let dq = delta_q_for_stake(0, &q, b, 100.0).unwrap();
+            assert!(dq.is_finite() && dq > 0.0, "dq = {dq} for q = {q:?}");
+        }
+    }
 }
 
 /// Tests for the Task 5 dense-bin vector-trade math (`target_deltas`,

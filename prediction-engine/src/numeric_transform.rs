@@ -335,4 +335,101 @@ mod tests {
         assert_eq!(pick_winning_outcome(&closed, -1.0), None);
         assert_eq!(pick_winning_outcome(&closed, 21.0), None);
     }
+
+    // ---- |d - 1| < 1e-12 tolerance zone (deriv_ratio near 1) ----
+    //
+    // deriv_ratio d = (range_max - zp) / (range_min - zp). With range 0..1
+    // and zp = -1/offset, d evaluates to 1 + offset (to f64 rounding), so we
+    // can place d at a chosen distance from 1. Inside the zone
+    // (|d - 1| < 1e-12) the maps must take the linear fallback and validate()
+    // must reject the shape as degenerate; just outside they must take the
+    // log path.
+    //
+    // Range 0..1 makes the linear map the identity, so "linear branch taken"
+    // is an exact bit-for-bit check. On the log path, to_internal(0.5)
+    // deviates from 0.5 by t*(1-t)*(d-1)/2 = (d-1)/8 at the midpoint
+    // (~1.25e-10 for offset 1e-9), thousands of ulps above f64 noise, so the
+    // branch check is deterministic. (to_nominal is NOT usable for branch
+    // detection this close to d = 1: the curvature term of d.powf(t) is below
+    // ulp(1) and its output collapses to the linear values bit-for-bit.)
+
+    fn tf_near_one(offset: f64) -> NumericTransform {
+        // offset == 0.0: zp far enough out that (1 - zp)/(-zp) rounds to
+        // exactly 1.0 in f64.
+        let zero_point = if offset == 0.0 { -1e20 } else { -1.0 / offset };
+        NumericTransform { range_min: 0.0, range_max: 1.0, zero_point: Some(zero_point) }
+    }
+
+    #[test]
+    fn tolerance_zone_fixtures_land_where_intended() {
+        // Guard for the constructions below: d really is 1 exactly / inside
+        // the zone but not 1 / outside the zone.
+        assert_eq!(tf_near_one(0.0).deriv_ratio(), Some(1.0));
+        for off in [5e-13, -5e-13] {
+            let d = tf_near_one(off).deriv_ratio().unwrap();
+            let dist = (d - 1.0).abs();
+            assert!(dist > 0.0 && dist < 1e-12, "offset {off}: |d-1| = {dist:e}");
+        }
+        for off in [1e-9, -1e-9] {
+            let d = tf_near_one(off).deriv_ratio().unwrap();
+            assert!((d - 1.0).abs() >= 1e-12, "offset {off}: d = {d}");
+        }
+    }
+
+    #[test]
+    fn inside_tolerance_zone_maps_fall_back_to_linear_and_validate_rejects() {
+        for off in [0.0, 5e-13, -5e-13] {
+            let tf = tf_near_one(off);
+            let err = tf.validate().unwrap_err().to_string();
+            assert!(err.contains("degenerate deriv_ratio"), "offset {off}: {err}");
+            for i in 0..=20 {
+                let x = i as f64 / 20.0;
+                // Range 0..1: the linear fallback is exactly the identity,
+                // so round-trip and monotonicity hold bit-for-bit.
+                assert_eq!(tf.to_internal(x), x, "offset {off}: to_internal({x})");
+                assert_eq!(tf.to_nominal(x), x, "offset {off}: to_nominal({x})");
+            }
+        }
+    }
+
+    #[test]
+    fn just_outside_tolerance_zone_takes_log_path_with_stable_round_trip() {
+        for off in [1e-9, -1e-9] {
+            let tf = tf_near_one(off);
+            assert!(tf.validate().is_ok(), "offset {off} must validate");
+            // Log branch actually taken: on the linear fallback this would be
+            // exactly 0.5 (see inside-zone test); on the log path it is
+            // 0.5 + (d-1)/8.
+            // The deviation is the analytic (d-1)/8 plus cancellation noise of
+            // order ulp(1)/|d-1| ~ 1e-7 (ln argument is 1 + O(d-1)), so bound
+            // it loosely; the point is "not exactly 0.5, but still tiny".
+            let t_mid = tf.to_internal(0.5);
+            assert_ne!(t_mid, 0.5, "offset {off}: linear fallback taken instead of log path");
+            assert!((t_mid - 0.5).abs() < 1e-6, "offset {off}: t_mid = {t_mid}");
+
+            // Round trip and strict monotonicity in both directions,
+            // endpoints included.
+            let mut prev_x = f64::NEG_INFINITY;
+            let mut prev_t = f64::NEG_INFINITY;
+            for i in 0..=20 {
+                let t = i as f64 / 20.0;
+                let x = tf.to_nominal(t);
+                assert!(
+                    x.is_finite() && x > prev_x,
+                    "offset {off}: to_nominal not strictly increasing at t={t}, x={x}"
+                );
+                prev_x = x;
+                let t_back = tf.to_internal(x);
+                assert!(
+                    (t_back - t).abs() < 1e-6,
+                    "offset {off}: round trip {t} -> {x} -> {t_back}"
+                );
+                assert!(
+                    t_back > prev_t,
+                    "offset {off}: to_internal not strictly increasing at t={t}"
+                );
+                prev_t = t_back;
+            }
+        }
+    }
 }
