@@ -39,6 +39,23 @@ const parseUserId = (value) => {
 const ALLOWED_UI_SKINS = new Set(['van', 'terminal']);
 const ALLOWED_PROFILE_VISIBILITY = new Set(['public', 'followers_only', 'private']);
 
+// Usernames that would let a user impersonate system identities in the UI
+// (e.g. the Solid frontend renders "@GUEST" for logged-out visitors).
+const RESERVED_USERNAMES = new Set([
+  'guest',
+  'admin',
+  'administrator',
+  'system',
+  'moderator',
+  'mod',
+  'root',
+  'support',
+  'intellacc'
+]);
+
+const isReservedUsername = (username) =>
+  RESERVED_USERNAMES.has(String(username).trim().toLowerCase());
+
 const isNonEmptyString = (value) => typeof value === 'string' && value.length > 0;
 
 const validateWrapGroup = (fields, label) => {
@@ -147,11 +164,18 @@ exports.createUser = async (req, res) => {
   
   // Validate required fields
   if (!username || !email || !password) {
-    return res.status(400).json({ 
-      message: 'Username, email, and password are required' 
+    return res.status(400).json({
+      message: 'Username, email, and password are required'
     });
   }
-  
+
+  // Block confusable system usernames (guest, admin, ...)
+  if (isReservedUsername(username)) {
+    return res.status(400).json({
+      message: 'This username is reserved'
+    });
+  }
+
   // Validate email format
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
@@ -716,6 +740,10 @@ exports.editUserProfile = async (req, res) => {
       const trimmedUsername = String(username).trim();
       if (!trimmedUsername) {
         return res.status(400).json({ message: 'Username cannot be empty' });
+      }
+
+      if (isReservedUsername(trimmedUsername)) {
+        return res.status(400).json({ message: 'This username is reserved' });
       }
 
       const existing = await db.query(
