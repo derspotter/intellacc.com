@@ -5355,6 +5355,36 @@ select {
     box-sizing: border-box;
   }
 
+  /* Tab strip (POSITIONS/MARKETS/SUBMIT/LEADERBOARD) is wider than a phone
+     screen; keep the boxy strip but let it scroll sideways (scrollbar hidden)
+     so every tab stays reachable instead of clipping at the viewport edge. */
+  .predictions-tabs {
+    width: auto;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .predictions-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .predictions-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  /* Home empty state: desktop pins it (absolute) into the card's bottom
+     padding; on phones the composer reaches the card bottom, so the pinned
+     notice overlaps the Post button. Let it flow below the composer instead. */
+  .main-content.page-home .empty-feed {
+    position: static;
+    transform: none;
+    margin: 0.75rem 0;
+  }
+
   .events-container {
     grid-template-columns: 1fr;
     height: auto;
