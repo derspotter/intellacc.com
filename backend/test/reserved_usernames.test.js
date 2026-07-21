@@ -5,6 +5,7 @@ const db = require('../src/db');
 jest.setTimeout(30000);
 
 const RESERVED_MESSAGE = 'This username is reserved';
+const RESERVED_DISPLAY_NAME_MESSAGE = 'This display name is reserved';
 
 const uniqueSuffix = () => `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 
@@ -130,5 +131,58 @@ describe('Reserved usernames', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.username).toBe(newUsername);
+  });
+
+  test('rejects display name change to a reserved name', async () => {
+    const user = await createUser('dispreserved');
+    cleanup.push({ userId: user.id });
+
+    for (const reserved of ['GUEST', 'Admin', '  system  ', 'Intellacc']) {
+      const res = await request(app)
+        .patch('/api/users/profile')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ display_name: reserved });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toBe(RESERVED_DISPLAY_NAME_MESSAGE);
+    }
+
+    const row = await db.query('SELECT display_name FROM users WHERE id = $1', [user.id]);
+    expect(row.rows[0].display_name).toBeNull();
+  });
+
+  test('still allows a display name that merely contains a reserved word', async () => {
+    const user = await createUser('dispcontains');
+    cleanup.push({ userId: user.id });
+
+    const res = await request(app)
+      .patch('/api/users/profile')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ display_name: 'Admin Fan 2000' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.display_name).toBe('Admin Fan 2000');
+  });
+
+  test('registration ignores display_name (no reserved bypass at signup)', async () => {
+    const unique = uniqueSuffix();
+    const email = `dispreg_${unique}@example.com`;
+    cleanup.push({ email });
+
+    // createUser does not accept display_name; a smuggled reserved value
+    // must not end up on the account.
+    const res = await request(app)
+      .post('/api/users/register')
+      .send({
+        username: `dispreg_${unique}`,
+        email,
+        password: 'testpass123',
+        display_name: 'Admin'
+      });
+
+    expect(res.statusCode).toBe(201);
+
+    const row = await db.query('SELECT display_name FROM users WHERE email = $1', [email]);
+    expect(row.rows[0].display_name).toBeNull();
   });
 });

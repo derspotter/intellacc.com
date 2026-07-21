@@ -56,6 +56,11 @@ const RESERVED_USERNAMES = new Set([
 const isReservedUsername = (username) =>
   RESERVED_USERNAMES.has(String(username).trim().toLowerCase());
 
+// Display names get the same protection, exact matches only
+// ("Admin" is blocked, "Admin Fan 2000" is fine).
+const isReservedDisplayName = (displayName) =>
+  RESERVED_USERNAMES.has(String(displayName).trim().toLowerCase());
+
 const isNonEmptyString = (value) => typeof value === 'string' && value.length > 0;
 
 const validateWrapGroup = (fields, label) => {
@@ -765,6 +770,10 @@ exports.editUserProfile = async (req, res) => {
 
     if (typeof display_name !== 'undefined') {
       const trimmedDisplayName = String(display_name || '').trim();
+      if (isReservedDisplayName(trimmedDisplayName)) {
+        return res.status(400).json({ message: 'This display name is reserved' });
+      }
+
       fields.push('display_name');
       values.push(trimmedDisplayName || null);
     }
