@@ -35,6 +35,32 @@ export function redistribute(weights, locks, key, value) {
   return out;
 }
 
+// Coerce possibly-raw/partial weights (server rows, older clients) into
+// integers over KEYS summing to exactly 100 via largest-remainder rounding.
+// Pure. Returns null when nothing usable (missing/non-object/all-zero), so
+// callers can fall back to their default (rankPosts: keep input order).
+export function normalizeWeights(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const vals = {};
+  let sum = 0;
+  for (const k of KEYS) {
+    const x = Number(raw[k]);
+    vals[k] = Number.isFinite(x) && x > 0 ? x : 0;
+    sum += vals[k];
+  }
+  if (sum <= 0) return null;
+  if (sum === 100 && KEYS.every((k) => Number.isInteger(vals[k]))) return vals;
+
+  const scaled = {};
+  for (const k of KEYS) scaled[k] = (vals[k] / sum) * 100;
+  const out = {};
+  let used = 0;
+  for (const k of KEYS) { out[k] = Math.floor(scaled[k]); used += out[k]; }
+  const byFrac = [...KEYS].sort((a, b) => (scaled[b] - Math.floor(scaled[b])) - (scaled[a] - Math.floor(scaled[a])));
+  for (let i = 0; i < 100 - used; i++) out[byFrac[i % byFrac.length]] += 1;
+  return out;
+}
+
 const SIGNAL_FIELD = { accuracy: 'author_accuracy', followers: 'author_followers', likes: 'like_count', views: 'view_count' };
 const LOG_SIGNALS = new Set(['followers', 'likes', 'views']);
 

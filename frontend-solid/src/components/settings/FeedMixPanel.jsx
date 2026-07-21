@@ -1,6 +1,6 @@
 import { createSignal, onMount, onCleanup, For, Show } from 'solid-js';
 import Card from '../common/Card';
-import { redistribute, KEYS } from '../../lib/feedRanking';
+import { redistribute, normalizeWeights, KEYS } from '../../lib/feedRanking';
 import { getFeedWeights, saveFeedWeights } from '../../services/api';
 
 const LABEL = { accuracy: 'Accuracy', followers: 'Followers', likes: 'Likes', views: 'Views' };
@@ -16,7 +16,10 @@ export default function FeedMixPanel() {
   onMount(async () => {
     try {
       const res = await getFeedWeights();
-      if (res && res.weights) setWeights({ ...res.weights });
+      // Normalize to a 100-sum for display; falls back to DEFAULT when the
+      // server has nothing usable ({ weights: null } for a fresh user).
+      const norm = normalizeWeights(res?.weights);
+      if (norm) setWeights(norm);
     } catch (err) {
       setError(err?.message || 'Failed to load your feed mix.');
     }

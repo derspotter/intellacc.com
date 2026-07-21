@@ -80,7 +80,11 @@ const PostItem = (props) => {
                 url = URL.createObjectURL(blob);
                 setAttachmentSrc(url);
             })
-            .catch(() => setAttachmentSrc(null));
+            .catch(() => {
+                // Guard like the .then: a stale request failing must not
+                // clobber the blob URL a newer effect run already set.
+                if (!revoked) setAttachmentSrc(null);
+            });
         onCleanup(() => {
             revoked = true;
             if (url) URL.revokeObjectURL(url);
@@ -153,7 +157,11 @@ const PostItem = (props) => {
                             disabled={props.post.is_temp || props.post.reposted_by_user || repostBusy()}
                             onClick={() => {
                                 setRepostBusy(true);
-                                feedStore.createPost('', null, null, props.post.id)
+                                const sourceId = props.post.id;
+                                // Optimistic: bump the source post's RT count and mark
+                                // reposted (also disables the button), like handleLike.
+                                feedStore.repostPost(sourceId);
+                                feedStore.createPost('', null, null, sourceId)
                                     .then((newPost) => {
                                         // The create endpoint only echoes repost_id, not the nested
                                         // original (that's assembled server-side only on feed GETs).
@@ -170,7 +178,10 @@ const PostItem = (props) => {
                                             });
                                         }
                                     })
-                                    .catch((err) => console.error('Repost failed', err))
+                                    .catch((err) => {
+                                        feedStore.unrepostPost(sourceId); // revert optimistic bump
+                                        console.error('Repost failed', err);
+                                    })
                                     .finally(() => setRepostBusy(false));
                             }}
                         >

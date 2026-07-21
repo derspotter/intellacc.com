@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { redistribute, rankPosts, KEYS } from './feedRanking.js';
+import { redistribute, rankPosts, normalizeWeights, KEYS } from './feedRanking.js';
 
 const sum = (w) => w.accuracy + w.followers + w.likes + w.views;
 const noLocks = { accuracy: false, followers: false, likes: false, views: false };
@@ -39,6 +39,40 @@ test('redistribute splits equally when all others are zero', () => {
   const out = redistribute({ accuracy: 100, followers: 0, likes: 0, views: 0 }, noLocks, 'accuracy', 40);
   assert.deepEqual([out.followers, out.likes, out.views], [20, 20, 20]);
   assert.equal(sum(out), 100);
+});
+
+test('normalizeWeights passes through a valid integer 100-sum unchanged', () => {
+  const w = { accuracy: 40, followers: 30, likes: 20, views: 10 };
+  assert.deepEqual(normalizeWeights(w), w);
+});
+
+test('normalizeWeights rescales a non-100 sum to exactly 100', () => {
+  const out = normalizeWeights({ accuracy: 30, followers: 30, likes: 30, views: 30 });
+  assert.equal(sum(out), 100);
+  assert.deepEqual([out.accuracy, out.followers, out.likes, out.views], [25, 25, 25, 25]);
+});
+
+test('normalizeWeights rescales 0-1 fractions to integer percentages', () => {
+  const out = normalizeWeights({ accuracy: 0.5, followers: 0.25, likes: 0.25, views: 0 });
+  assert.deepEqual(out, { accuracy: 50, followers: 25, likes: 25, views: 0 });
+});
+
+test('normalizeWeights treats missing/negative/non-numeric keys as zero', () => {
+  const out = normalizeWeights({ accuracy: 50, followers: -10, likes: 'x' });
+  assert.deepEqual(out, { accuracy: 100, followers: 0, likes: 0, views: 0 });
+});
+
+test('normalizeWeights returns null when nothing is usable', () => {
+  assert.equal(normalizeWeights(null), null);
+  assert.equal(normalizeWeights('50'), null);
+  assert.equal(normalizeWeights({ weights: null }), null);
+  assert.equal(normalizeWeights({ accuracy: 0, followers: 0, likes: 0, views: 0 }), null);
+});
+
+test('normalizeWeights integer output sums to 100 on awkward ratios', () => {
+  const out = normalizeWeights({ accuracy: 1, followers: 1, likes: 1, views: 0 });
+  assert.equal(sum(out), 100);
+  for (const k of KEYS) assert.ok(Number.isInteger(out[k]));
 });
 
 const mkPost = (id, accuracy, followers, likes, views) =>

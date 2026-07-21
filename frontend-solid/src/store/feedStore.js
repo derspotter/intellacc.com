@@ -162,6 +162,20 @@ const unlikePost = (postId) => {
     setState("posts", p => String(p.id) === String(postId), "like_count", c => Math.max(0, (c || 1) - 1));
 };
 
+// Optimistic repost marker on the SOURCE post (mirrors likePost/unlikePost).
+// There is no unrepost endpoint; unrepostPost exists only as the error revert.
+const repostPost = (postId) => {
+    if (postId == null) return;
+    setState("posts", p => String(p.id) === String(postId), "reposted_by_user", true);
+    setState("posts", p => String(p.id) === String(postId), "repost_count", c => (c || 0) + 1);
+};
+
+const unrepostPost = (postId) => {
+    if (postId == null) return;
+    setState("posts", p => String(p.id) === String(postId), "reposted_by_user", false);
+    setState("posts", p => String(p.id) === String(postId), "repost_count", c => Math.max(0, (c || 1) - 1));
+};
+
 const clear = () => {
     fetchEpoch++; // invalidate any in-flight fetch so it can't repopulate cleared state
     setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: true, discoverMode: false });
@@ -177,5 +191,7 @@ export const feedStore = {
     createPost,
     likePost,
     unlikePost,
+    repostPost,
+    unrepostPost,
     clear
 };

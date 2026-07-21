@@ -2,7 +2,7 @@ import { For, Show, createSignal, createMemo, onMount } from "solid-js";
 import { Panel } from "./ui/Panel";
 import { feedStore } from "../store/feedStore";
 import { api, ApiError, getFeedWeights } from "../services/api";
-import { rankPosts } from "../lib/feedRanking";
+import { rankPosts, normalizeWeights } from "../lib/feedRanking";
 import PostItem from "./terminal/PostItem";
 
 const PostComposer = () => {
@@ -118,7 +118,9 @@ const PostComposer = () => {
 export const FeedPanel = () => {
     const [weights, setWeights] = createSignal(null);
     onMount(() => {
-        getFeedWeights().then(w => setWeights(w?.weights || w || null)).catch(() => {});
+        // Normalize to a 100-sum before ranking; null (no usable weights,
+        // e.g. { weights: null } for a fresh user) keeps the server order.
+        getFeedWeights().then(w => setWeights(normalizeWeights(w?.weights ?? w))).catch(() => {});
     });
     const rankedPosts = createMemo(() => rankPosts(feedStore.state.posts, weights()));
 

@@ -41,7 +41,12 @@ const MarketSearchRow = () => {
                 ref={el => inputEl = el}
             />
             <span data-testid="market-count" class="text-bb-muted">
-                {marketStore.state.markets.length}/{marketStore.state.total}
+                {/* Clamp to the server total: ensureMarket() can prepend a
+                    deep-linked market outside the loaded/filtered set, which
+                    would otherwise render e.g. 101/100. Display only. */}
+                {marketStore.state.total > 0
+                    ? Math.min(marketStore.state.markets.length, marketStore.state.total)
+                    : marketStore.state.markets.length}/{marketStore.state.total}
             </span>
         </div>
     );
