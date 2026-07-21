@@ -2,6 +2,14 @@ import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-j
 import { api } from "../../services/api";
 import { marketStore } from "../../store/marketStore";
 import { getToken } from "../../services/tokenService";
+import DistributionMarketCard from "../predictions/DistributionMarketCard";
+import OutcomeMarketCard from "../predictions/OutcomeMarketCard";
+
+// Same market-type gates as the van skin's MarketDetailView: numeric events
+// trade a full distribution, multiple_choice trades per-outcome, and only
+// true binary markets get the YES/NO ticket against market_prob.
+const isNumeric = (m) => m?.event_type === 'numeric';
+const isMultipleChoice = (m) => m?.event_type === 'multiple_choice';
 
 const FlashValueBig = (props) => {
     const [colorClass, setColorClass] = createSignal(props.defaultColor);
@@ -321,6 +329,14 @@ const TradeTicket = (props) => {
 export const MarketDetail = () => {
     const market = marketStore.getSelectedMarket;
 
+    // After an embedded numeric/outcome trade, pull the row's market_prob /
+    // cumulative_stake fresh from the server so the readouts above the card
+    // update immediately (binary trades get this via the socket tick).
+    const handleTradeRefresh = () => {
+        const id = market()?.id;
+        if (id != null) void marketStore.refreshMarket(id);
+    };
+
     return (
         <div class="h-full flex flex-col p-3 md:p-4 font-mono overflow-auto custom-scrollbar">
             <Show when={market()} fallback={<div class="text-center text-bb-muted mt-20">SELECT A MARKET DATA STREAM</div>}>
@@ -344,15 +360,28 @@ export const MarketDetail = () => {
                 </div>
 
                 <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div class="bg-bb-panel border border-bb-border p-2">
-                        <div class="text-xxs text-bb-muted uppercase">Current Probability</div>
-                        <FlashValueBig
-                            val={market().market_prob}
-                            prev={market().prev_market_prob}
-                            format={(v) => `${(Number(v) * 100).toFixed(1)}%`}
-                            defaultColor="text-market-up"
-                        />
-                    </div>
+                    {/* A single "probability" is meaningless for a numeric market
+                        (the distribution below is the price); show the type tag
+                        instead of a misleading market_prob readout. */}
+                    <Show
+                        when={!isNumeric(market())}
+                        fallback={
+                            <div class="bg-bb-panel border border-bb-border p-2">
+                                <div class="text-xxs text-bb-muted uppercase">Market Type</div>
+                                <div class="text-2xl font-bold text-market-neutral">NUMERIC</div>
+                            </div>
+                        }
+                    >
+                        <div class="bg-bb-panel border border-bb-border p-2">
+                            <div class="text-xxs text-bb-muted uppercase">Current Probability</div>
+                            <FlashValueBig
+                                val={market().market_prob}
+                                prev={market().prev_market_prob}
+                                format={(v) => `${(Number(v) * 100).toFixed(1)}%`}
+                                defaultColor="text-market-up"
+                            />
+                        </div>
+                    </Show>
                     <div class="bg-bb-panel border border-bb-border p-2">
                         <div class="text-xxs text-bb-muted uppercase">Cumulative Stake</div>
                         <FlashValueBig
@@ -364,9 +393,41 @@ export const MarketDetail = () => {
                     </div>
                 </div>
 
-                <div class="mt-auto">
-                    <TradeTicket market={market} />
-                </div>
+                {/* Trade UI by market type, mirroring the van skin's
+                    MarketDetailView: numeric -> distribution trading,
+                    multiple_choice -> per-outcome trading, binary -> ticket.
+                    The van cards are reused as-is inside a .bb-embed wrapper
+                    whose scoped CSS (styles.css) restyles them to the
+                    terminal palette without touching the van skin. */}
+                <Show
+                    when={isNumeric(market())}
+                    fallback={
+                        <Show
+                            when={isMultipleChoice(market())}
+                            fallback={
+                                <div class="mt-auto">
+                                    <TradeTicket market={market} />
+                                </div>
+                            }
+                        >
+                            <div class="bb-embed" data-testid="terminal-outcome-embed">
+                                <OutcomeMarketCard
+                                    event={market()}
+                                    onTrade={handleTradeRefresh}
+                                    hideTitle={true}
+                                />
+                            </div>
+                        </Show>
+                    }
+                >
+                    <div class="bb-embed" data-testid="terminal-distribution-embed">
+                        <DistributionMarketCard
+                            event={market()}
+                            onTrade={handleTradeRefresh}
+                            hideTitle={true}
+                        />
+                    </div>
+                </Show>
             </Show>
         </div>
     );

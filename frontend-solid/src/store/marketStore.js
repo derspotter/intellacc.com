@@ -135,6 +135,25 @@ const ensureMarket = async (id) => {
     }
 };
 
+// Re-fetches one market's row after an embedded trade (numeric/multi-outcome
+// cards trade via their own endpoints, so no socket-independent refresh would
+// otherwise reach the detail header's prob/stake readouts). Routes through
+// applyMarketUpdate so prev_* flash tracking behaves exactly like a socket tick.
+const refreshMarket = async (id) => {
+    if (!Number.isFinite(Number(id))) return;
+    try {
+        const market = await api.events.getById(id);
+        if (!market?.id) return;
+        applyMarketUpdate({
+            eventId: market.id,
+            market_prob: market.market_prob,
+            cumulative_stake: market.cumulative_stake
+        });
+    } catch (err) {
+        console.error('refreshMarket failed', err);
+    }
+};
+
 const clear = () => {
     guard.invalidate(); // invalidate any in-flight fetch so it can't repopulate cleared state
     setState({ markets: [], total: 0, hasMore: false, search: '', loading: false, loadingMore: false, error: null, selectedMarketId: null, serverCount: 0 });
@@ -149,5 +168,6 @@ export const marketStore = {
     getSelectedMarket,
     applyMarketUpdate,
     ensureMarket,
+    refreshMarket,
     clear
 };

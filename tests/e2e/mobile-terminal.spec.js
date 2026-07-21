@@ -9,7 +9,7 @@
 // - Views are hash-routed overlays closable via the [X] ESC TO CLOSE button;
 //   the md:hidden bottom nav ([1] FEED / [2] MARKET / [3] CHAT) switches panes.
 const { test, expect } = require('@playwright/test');
-const { createUser, provisionTopics, cleanupUsers, SOLID_URL } = require('./helpers/solidMessaging');
+const { createUser, provisionTopics, cleanupUsers, dbQuery, SOLID_URL } = require('./helpers/solidMessaging');
 
 // iPhone-14-ish. isMobile is essential: without it Chromium reports a desktop
 // visualViewport and the max-md/sm breakpoint layout under test never engages
@@ -91,31 +91,53 @@ test('[MENU] opens the palette by touch; palette carries Van-skin + Logout and o
 });
 
 test('bottom nav switches panes by touch; trade ticket fits 390px', async ({ page }) => {
-  await loginTerminal(page, 'mterm3');
+  // The binary YES/NO trade ticket under test only renders for binary
+  // markets (numeric/multiple_choice markets get their own trade UIs since
+  // the terminal market-type fix), so tapping whatever market happens to be
+  // first in the shared DB is no longer deterministic. Seed a disposable
+  // binary market and search for it instead.
+  const binaryTitle = `E2E mterm binary ${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+  const binaryEventId = Number(dbQuery(`
+    INSERT INTO events (title, details, closing_date, event_type, liquidity_b, market_prob)
+    VALUES ('${binaryTitle}', 'Seeded by mobile-terminal.spec.js', NOW() + INTERVAL '30 days', 'binary', 5000, 0.5)
+    RETURNING id;
+  `).split('\n')[0]);
+  expect(binaryEventId).toBeGreaterThan(0);
 
-  // The md:hidden bottom tab bar is the mobile pane switcher.
-  const nav = page.locator('nav.md\\:hidden');
-  await expect(nav).toBeVisible({ timeout: 10000 });
-  await nav.getByRole('button', { name: '[2] MARKET' }).tap();
+  try {
+    await loginTerminal(page, 'mterm3');
 
-  // Market pane (single-pane mobile layout) with the quotes list.
-  await expect(page.getByText('[2] MARKET DATA // QUOTES')).toBeVisible({ timeout: 10000 });
-  const row = page.locator('[data-testid="market-row"]').first();
-  await expect(row).toBeVisible({ timeout: 15000 });
-  await row.tap();
+    // The md:hidden bottom tab bar is the mobile pane switcher.
+    const nav = page.locator('nav.md\\:hidden');
+    await expect(nav).toBeVisible({ timeout: 10000 });
+    await nav.getByRole('button', { name: '[2] MARKET' }).tap();
 
-  // On phones the selection swaps the list for the ORDER BOOK / detail panel.
-  await expect(page.getByText('ORDER BOOK // DEPTH')).toBeVisible({ timeout: 10000 });
-  await expect(page.locator('[data-testid="market-detail-title"]')).toBeVisible({ timeout: 10000 });
+    // Market pane (single-pane mobile layout) with the quotes list.
+    await expect(page.getByText('[2] MARKET DATA // QUOTES')).toBeVisible({ timeout: 10000 });
+    await page.locator('[data-testid="market-search"]:visible').fill(binaryTitle);
+    // The search is debounced + server-side: wait for the filtered list (the
+    // row showing the seeded title), not just any first row — tapping a
+    // stale pre-filter row selects a market the filtered store then drops.
+    const row = page.locator('[data-testid="market-row"]', { hasText: binaryTitle }).first();
+    await expect(row).toBeVisible({ timeout: 15000 });
+    await row.tap();
 
-  // Trade ticket controls must be fully usable inside 390px.
-  const placeTrade = page.getByRole('button', { name: 'PLACE TRADE' });
-  await placeTrade.scrollIntoViewIfNeeded();
-  await expectInsideViewportWidth(page.getByRole('button', { name: 'BUY YES' }));
-  await expectInsideViewportWidth(page.getByRole('button', { name: 'BUY NO' }));
-  await expectInsideViewportWidth(page.getByPlaceholder('e.g. 10'));
-  await expectInsideViewportWidth(placeTrade);
-  await expectNoHorizontalOverflow(page);
+    // On phones the selection swaps the list for the ORDER BOOK / detail panel.
+    await expect(page.getByText('ORDER BOOK // DEPTH')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="market-detail-title"]')).toBeVisible({ timeout: 10000 });
+
+    // Trade ticket controls must be fully usable inside 390px.
+    const placeTrade = page.getByRole('button', { name: 'PLACE TRADE' });
+    await placeTrade.scrollIntoViewIfNeeded();
+    await expectInsideViewportWidth(page.getByRole('button', { name: 'BUY YES' }));
+    await expectInsideViewportWidth(page.getByRole('button', { name: 'BUY NO' }));
+    await expectInsideViewportWidth(page.getByPlaceholder('e.g. 10'));
+    await expectInsideViewportWidth(placeTrade);
+    await expectNoHorizontalOverflow(page);
+  } finally {
+    // Nothing was traded against the seeded market, so a bare delete is safe.
+    dbQuery(`DELETE FROM events WHERE id = ${binaryEventId};`);
+  }
 });
 
 test('settings view scrolls to the DANGER ZONE with no horizontal overflow', async ({ page }) => {

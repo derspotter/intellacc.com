@@ -7846,3 +7846,170 @@ body.dark-mode .shortcut-help button:hover {
   background: var(--border-color);
   color: var(--card-bg);
 }
+
+/* ============================================================================
+   TERMINAL SKIN EMBEDS (.bb-embed)
+   The terminal MarketDetail reuses the van skin's DistributionMarketCard /
+   OutcomeMarketCard for numeric and multiple_choice markets. Everything in
+   this block is scoped strictly under .bb-embed (a wrapper that only the
+   terminal skin renders), so the van skin is pixel-untouched. The van cards
+   are themed almost entirely through CSS custom properties, so the bulk of
+   the restyle is one variable remap to the terminal (bb-*) palette from
+   tailwind.config.js: bg #000, panel #111, border #333, text #F0F0F0,
+   muted #666, accent #FFB400, up #00FF41, down #FF3D00, neutral #00E5FF.
+   ========================================================================= */
+.bb-embed {
+  --blue-bg: #000;
+  --black-bg: #000;
+  --card-bg: #000;
+  --text-color: #F0F0F0;
+  --border-color: #333333;
+  --secondary-text: #666666;
+  --success-color: #00FF41;
+  --error-color: #FF3D00;
+  --info-color: #00E5FF;
+  --warning-color: #FFB400;
+  --border-radius: 0;
+  --box-shadow: none;
+  --button-bg: #000;
+  --button-fg: #F0F0F0;
+  --button-border: #333333;
+  --button-hover-bg: #1a1a1a;
+  --button-disabled-bg: #111111;
+  --button-disabled-fg: #666666;
+  --hover-bg: rgba(255, 180, 0, 0.08);
+  --focus-ring: rgba(255, 180, 0, 0.28);
+
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--text-color);
+}
+
+/* Terminal chrome: 1px hairlines everywhere (the van's Bauhaus look uses
+   2px black borders on selected rows / stake inputs). */
+.bb-embed .stake-input,
+.bb-embed .distribution-card-handle-input {
+  border-width: 1px;
+  font-family: inherit;
+  font-size: 0.75rem;
+}
+
+.bb-embed .stake-input {
+  height: 34px;
+}
+
+.bb-embed .form-field label,
+.bb-embed .stat-label {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.02em;
+  color: var(--secondary-text);
+}
+
+.bb-embed .form-field label {
+  margin-bottom: 0.25rem !important;
+}
+
+/* Buttons: mono, uppercase, amber primary — matches the terminal TradeTicket. */
+.bb-embed button,
+.bb-embed .button {
+  font-family: inherit;
+  text-transform: uppercase;
+  font-weight: 700;
+  font-size: 0.7rem;
+  min-height: 30px;
+  padding: 0.35rem 0.75rem;
+}
+
+.bb-embed .button.primary {
+  background-color: rgba(255, 180, 0, 0.15);
+  color: #FFB400;
+  border: 1px solid #FFB400;
+}
+
+.bb-embed .button.primary:hover:not(:disabled) {
+  background-color: rgba(255, 180, 0, 0.3);
+}
+
+.bb-embed .button.primary:disabled {
+  background-color: rgba(255, 180, 0, 0.08);
+  color: rgba(255, 180, 0, 0.5);
+  border-color: rgba(255, 180, 0, 0.4);
+}
+
+.bb-embed .button.secondary {
+  background-color: transparent;
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+}
+
+.bb-embed .button.secondary:hover:not(:disabled) {
+  background-color: var(--button-hover-bg);
+  color: #FFB400;
+}
+
+/* Outcome rows: amber selection instead of the van's 2px-bold border. */
+.bb-embed .outcome-row {
+  font-size: 0.75rem;
+}
+
+.bb-embed .outcome-row:hover:not(:disabled) {
+  background-color: var(--hover-bg);
+}
+
+.bb-embed .outcome-row.selected {
+  border-width: 1px;
+  border-color: #FFB400;
+  color: #FFB400;
+}
+
+/* getProbabilityColor()'s red↔blue inline color is tuned for the van's white
+   background; low-probability blues are illegible on black, so pin the
+   readout to the terminal's cyan data color (!important beats inline style). */
+.bb-embed .outcome-prob {
+  color: #00E5FF !important;
+}
+
+.bb-embed .stat {
+  height: 32px;
+  padding: 0.35rem 0.5rem;
+}
+
+.bb-embed .stat-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.bb-embed .login-prompt {
+  padding: 1rem;
+}
+
+.bb-embed .error-message {
+  background-color: rgba(255, 61, 0, 0.12);
+}
+
+/* Distribution card: keep the compact terminal rhythm. */
+.bb-embed .distribution-card-copy {
+  font-size: 0.75rem;
+}
+
+.bb-embed .distribution-card-chart {
+  height: 160px;
+}
+
+/* The detail pane already scrolls; cap the outcome list a little tighter so
+   the trade panel stays reachable inside the terminal's 2/5-height panel. */
+.bb-embed .outcome-list {
+  max-height: 12rem;
+}
+
+.bb-embed .outcome-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.bb-embed .outcome-list::-webkit-scrollbar-thumb {
+  background: #333333;
+}
+
+.bb-embed .outcome-list::-webkit-scrollbar-track {
+  background: #111111;
+}
