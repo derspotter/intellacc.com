@@ -163,19 +163,27 @@ exports.leaveGroup = async (req, res) => {
 };
 
 exports.searchGroups = async (req, res) => {
+  const viewerId = getViewerId(req);
   const q = String(req.query.q || '').trim();
   if (q.length < 2) return res.json({ groups: [] });
-  const params = [`%${q}%`];
-  let where = 'g.removed_at IS NULL AND g.name ILIKE $1';
+  const limit = Math.min(parseInt(req.query.limit, 10) || 10, 20);
+  const params = [viewerId, `%${q}%`];
+  let where = 'g.removed_at IS NULL AND g.name ILIKE $2';
   const topicId = parseInt(req.query.topic, 10);
   if (Number.isInteger(topicId)) { params.push(topicId); where += ` AND g.topic_id = $${params.length}`; }
+  params.push(limit);
   try {
     const result = await db.query(
-      `SELECT g.id, g.slug, g.name, g.member_count FROM community_groups g
-       WHERE ${where} ORDER BY g.member_count DESC LIMIT 5`,
+      `SELECT g.id, g.slug, g.name, g.description, g.topic_id, t.name AS topic_name,
+              g.member_count, g.created_by,
+              EXISTS (SELECT 1 FROM community_group_members m WHERE m.group_id = g.id AND m.user_id = $1) AS is_member
+       FROM community_groups g JOIN topics t ON t.id = g.topic_id
+       WHERE ${where}
+       ORDER BY g.member_count DESC, g.id DESC
+       LIMIT $${params.length}`,
       params
     );
-    res.json({ groups: result.rows });
+    res.json({ groups: result.rows.map((r) => mapGroup(r, viewerId)) });
   } catch (err) {
     console.error('Error searching groups:', err);
     res.status(500).json({ message: 'Internal server error' });

@@ -93,6 +93,44 @@ describe('Community groups — create/list/get', () => {
     expect(leave.body.member_count).toBe(1);
   });
 
+  test('search returns topic_name and viewer is_member; limit is parameterized (default 10, cap 20)', async () => {
+    const owner = await createUser('cgsearch', 2);
+    const outsider = await createUser('cgoutsider', 0);
+    cleanup.userIds.push(owner.id, outsider.id);
+    const topicId = await firstTopicId();
+    const marker = `Quokka${Date.now()}`;
+
+    const ids = [];
+    for (let i = 0; i < 7; i++) {
+      const created = await request(app).post('/api/groups')
+        .set('Authorization', `Bearer ${owner.token}`)
+        .send({ name: `${marker} group ${i}`, description: '', topic_id: topicId });
+      expect(created.statusCode).toBe(201);
+      ids.push(created.body.group.id);
+    }
+    cleanup.groupIds.push(...ids);
+
+    const asOwner = await request(app).get('/api/groups/search')
+      .query({ q: marker }).set('Authorization', `Bearer ${owner.token}`);
+    expect(asOwner.statusCode).toBe(200);
+    expect(asOwner.body.groups.length).toBe(7); // default limit 10, not hardcoded 5
+    for (const g of asOwner.body.groups) {
+      expect(g.topic_name).toBeTruthy();
+      expect(g.is_member).toBe(true);
+    }
+
+    const asOutsider = await request(app).get('/api/groups/search')
+      .query({ q: marker }).set('Authorization', `Bearer ${outsider.token}`);
+    expect(asOutsider.body.groups.every((g) => g.is_member === false)).toBe(true);
+
+    const anonymous = await request(app).get('/api/groups/search').query({ q: marker });
+    expect(anonymous.statusCode).toBe(200);
+    expect(anonymous.body.groups.every((g) => g.is_member === false)).toBe(true);
+
+    const limited = await request(app).get('/api/groups/search').query({ q: marker, limit: 3 });
+    expect(limited.body.groups.length).toBe(3);
+  });
+
   test('search matches by name; soft-delete only by owner/admin and then 404s', async () => {
     const owner = await createUser('cgdel', 2);
     const other = await createUser('cgother', 2);
