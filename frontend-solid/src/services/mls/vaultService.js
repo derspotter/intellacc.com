@@ -252,26 +252,9 @@ class VaultService {
         return window.crypto.subtle.importKey('raw', hash, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
     }
 
-    async findAndUnlock(password, userId) {
-        if (!userId) return false;
-        try {
-            this.masterKey = await this.getOrCreateMasterKey(password, { createIfMissing: false });
-        } catch (e) {
-            if (e.status === 403) throw e;
-            return false;
-        }
-
-        await this.initDB();
-        if (this.deviceId) {
-            if (await this.tryUnlockRecord(this.deviceId, userId, password)) return true;
-        }
-        const records = await this.getLocalDeviceIds();
-        for (const id of records) {
-            if (id === this.deviceId) continue;
-            if (await this.tryUnlockRecord(id, userId, password)) return true;
-        }
-        return false;
-    }
+    // NOTE: findAndUnlock is defined further down (the isMigration-aware
+    // version); a duplicate legacy definition that used to live here was
+    // dead code (later class members override earlier ones) and was removed.
 
     async tryUnlockRecord(recordId, userId, password) {
         return new Promise((resolve) => {
