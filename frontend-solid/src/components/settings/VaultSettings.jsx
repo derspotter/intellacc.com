@@ -110,11 +110,7 @@ export default function VaultSettings() {
     }
 
     const doWipe = async () => {
-      if (typeof vaultService.panicWipe === 'function') {
-        await vaultService.panicWipe();
-      } else {
-        await vaultService.lockKeys();
-      }
+      await vaultService.panicWipe();
       window.location.href = '/#login';
     };
 

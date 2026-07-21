@@ -557,11 +557,7 @@ function VaultSection() {
     setWipeBusy(true);
     setWipeError('');
     try {
-      if (typeof vaultService.panicWipe === 'function') {
-        await vaultService.panicWipe();
-      } else {
-        await vaultService.lockKeys();
-      }
+      await vaultService.panicWipe();
       clearToken();
       window.location.hash = '#home';
     } catch (err) {

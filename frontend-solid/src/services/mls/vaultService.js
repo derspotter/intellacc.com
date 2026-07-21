@@ -1355,23 +1355,38 @@ class VaultService {
         // We can just overwrite it. It's idempotent.
         
         if (!this.localKey) throw new Error('Must be unlocked');
-        
+
         const newSalt = window.crypto.getRandomValues(new Uint8Array(32));
         const newWrappingKey = await this.deriveWrappingKey(newPassword, newSalt);
         const wrappedLK = await this.wrapDeviceKey(this.localKey, newWrappingKey);
-        
-        // Update Local
-        await this.initDB();
-        const tx = this.db.transaction([KEYSTORE_STORE_NAME], 'readwrite');
-        const store = tx.objectStore(KEYSTORE_STORE_NAME);
-        const record = await new Promise(r => store.get(this.deviceId).onsuccess = e => r(e.target.result));
-        
-        record.deviceKeyWrapped.password = { salt: Array.from(newSalt), iv: wrappedLK.iv, ciphertext: wrappedLK.ciphertext };
-        record.updatedAt = Date.now();
-        await new Promise(r => store.put(record).onsuccess = r);
-        
-        // Update Server
+
+        // Update Server FIRST: a failure here leaves the local record untouched
+        // (no torn state). Scenario 2 keeps working — the overwrite is idempotent.
         await this.updateMasterKeyOnServer(this.masterKey, newPassword, oldPassword);
+
+        // Update Local. Server is now source of truth; if this write fails, the
+        // next login with the NEW password recovers the device (findAndUnlock
+        // misses -> setupKeystoreWithPassword rewrites the record).
+        try {
+            await this.initDB();
+            const tx = this.db.transaction([KEYSTORE_STORE_NAME], 'readwrite');
+            const store = tx.objectStore(KEYSTORE_STORE_NAME);
+            const record = await new Promise((resolve, reject) => {
+                const req = store.get(this.deviceId);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+            record.deviceKeyWrapped.password = { salt: Array.from(newSalt), iv: wrappedLK.iv, ciphertext: wrappedLK.ciphertext };
+            record.updatedAt = Date.now();
+            await new Promise((resolve, reject) => {
+                const req = store.put(record);
+                req.onsuccess = resolve;
+                req.onerror = () => reject(req.error);
+            });
+        } catch (e) {
+            console.error('[Keystore] Local re-wrap failed after server update:', e);
+            throw new Error('Password changed on the server, but this device could not be updated. Lock the vault and unlock with your NEW password to repair this device.');
+        }
         console.log('[Keystore] Password changed & keys re-wrapped');
     }
 
@@ -1390,7 +1405,42 @@ class VaultService {
         vaultStore.setLocked(true);
         console.log('[Keystore] Locked - all sensitive data wiped');
     }
-    
+
+    // Panic wipe: LOCAL-DEVICE destruction only — never touches server state.
+    // Wipes memory (lockKeys), deletes the entire keystore IndexedDB (all
+    // stores: device_keystore, encrypted_messages, mls_granular_storage,
+    // contact_fingerprints, processed_messages, message_receipts,
+    // group_settings) and removes vault localStorage keys.
+    async panicWipe() {
+        await this.lockKeys();
+
+        if (this.db) {
+            try { this.db.close(); } catch (e) {}
+            this.db = null;
+        }
+        await new Promise((resolve, reject) => {
+            const req = indexedDB.deleteDatabase(KEYSTORE_DB_NAME);
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error || new Error('Failed to delete keystore database'));
+            // Another tab holds the DB open; deletion completes once it closes.
+            req.onblocked = () => resolve();
+        });
+
+        try {
+            const ls = window.localStorage;
+            if (ls) {
+                for (const key of Object.keys(ls)) {
+                    if (key === 'device_public_id' || key.startsWith('device_public_id:')) ls.removeItem(key);
+                }
+                ls.removeItem('vault_autolock_minutes');
+            }
+        } catch (e) {}
+
+        clearPendingDeviceId();
+        vaultStore.setVaultExists(false);
+        console.log('[Keystore] Panic wipe complete - local vault data deleted');
+    }
+
     // PRF placeholders
     async getPrfInput() {
       await this.initDB();
