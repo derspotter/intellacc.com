@@ -335,6 +335,27 @@ test('bottom tab bar stays fixed and tappable after scrolling the markets list',
   await expect(page).toHaveURL(/#home$/);
 });
 
+test('app shell: a real wheel gesture scrolls the wrapper (document stays locked)', async ({ page }) => {
+  await openVan(page, 'settings'); // reliably taller than one viewport
+
+  // The van mobile layout is an app shell: body is overflow:hidden and all
+  // scrolling happens inside .wrapper. Programmatic scrolls (scrollTop,
+  // scrollIntoViewIfNeeded) work even on broken overflow chains, so this
+  // test MUST use a user gesture — a regression here once shipped a page
+  // that E2E called scrollable but no human could scroll.
+  await expect(page.locator('.danger-zone')).toBeAttached({ timeout: 20000 });
+  const before = await page.evaluate(() => document.querySelector('.wrapper').scrollTop);
+  await page.mouse.wheel(0, 600);
+  await expect
+    .poll(async () => page.evaluate(() => document.querySelector('.wrapper').scrollTop), {
+      message: 'wheel gesture must scroll .wrapper'
+    })
+    .toBeGreaterThan(before);
+  // And the document itself must NOT have scrolled (shell intact).
+  const docTop = await page.evaluate(() => document.documentElement.scrollTop);
+  expect(docTop, 'document must stay locked in the app shell').toBe(0);
+});
+
 test('settings: password-reset and danger-zone sections are reachable and fit 390px', async ({ page }) => {
   await openVan(page, 'settings');
 

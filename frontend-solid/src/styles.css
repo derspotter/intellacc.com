@@ -7807,8 +7807,12 @@ body.skin-terminal * {
     overscroll-behavior: none;
   }
 
+  /* 100dvh, not 100%: the wrapper's parent (.app-container) has auto
+     height, so a percentage collapses to content height and the page
+     becomes unscrollable (overflow:hidden boxes still scroll
+     programmatically, which is why E2E scrolls kept passing). */
   body.skin-van .wrapper {
-    height: 100%;
+    height: 100dvh;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
