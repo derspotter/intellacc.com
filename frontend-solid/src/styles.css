@@ -5144,7 +5144,7 @@ select {
   .main-content {
     width: 100%;
     padding: 1rem;
-    margin-bottom: 60px;
+    padding-bottom: 60px;
     /* Space for bottom nav */
     box-shadow: none;
   }
@@ -5635,7 +5635,7 @@ select {
   }
 
   .main-content {
-    margin-bottom: 52px;
+    padding-bottom: 52px;
   }
 }
 
@@ -7029,6 +7029,9 @@ body.dark-mode .user-rank {
     flex-direction: column;
     position: relative;
     height: calc(100vh - 112px);
+    /* dvh: with the mobile app shell the browser toolbar stays visible,
+       so 100vh (large viewport) would overflow past the tab bar. */
+    height: calc(100dvh - 112px);
     /* Account for mobile header and bottom nav */
   }
 
@@ -7783,9 +7786,31 @@ body.skin-terminal * {
   /* Sidebar drawer slides over the backdrop (z-index 1000 set
      in the tablet/mobile sidebar blocks above). */
 
-  /* Keep content clear of the fixed tab bar. */
+  /* Keep content clear of the fixed tab bar. Padding, not margin: the
+     app shell below makes .wrapper the scroll container, and a child's
+     bottom margin is not reliably part of the scrollable overflow. */
   .main-content {
-    margin-bottom: 64px;
+    padding-bottom: 64px;
+  }
+
+  /* App shell: on phones/tablets the document itself never scrolls — all
+     scrolling happens inside .wrapper. With no document scroll the mobile
+     browser toolbar never collapses, so the fixed tab bar cannot move at
+     all while scrolling (the terminal skin already works this way). */
+  html {
+    height: 100%;
+  }
+
+  body.skin-van {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  body.skin-van .wrapper {
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 
@@ -7800,13 +7825,13 @@ body.skin-terminal * {
   }
 
   .main-content {
-    margin-bottom: calc(64px + env(safe-area-inset-bottom));
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
   }
 }
 
 @media (display-mode: standalone) and (max-width: 768px) {
   .main-content {
-    margin-bottom: calc(60px + env(safe-area-inset-bottom));
+    padding-bottom: calc(60px + env(safe-area-inset-bottom));
   }
 }
 
@@ -7816,7 +7841,7 @@ body.skin-terminal * {
   }
 
   .main-content {
-    margin-bottom: calc(52px + env(safe-area-inset-bottom));
+    padding-bottom: calc(52px + env(safe-area-inset-bottom));
   }
 }
 
