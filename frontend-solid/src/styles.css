@@ -6468,6 +6468,33 @@ body.dark-mode .user-rank {
   flex: 1;
 }
 
+.vault-unlock-banner {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--card-bg);
+}
+
+.vault-unlock-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--secondary-text);
+}
+
+.vault-unlock-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.vault-unlock-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.vault-unlock-banner .error-message {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
 .new-conversation-form form.dm-start-form {
   flex-direction: column;
 }

@@ -509,6 +509,51 @@ export default function MessagesPage() {
     wasLocked = locked;
   });
 
+  const [unlockPassword, setUnlockPassword] = createSignal('');
+  const [unlockBusy, setUnlockBusy] = createSignal(false);
+  const [unlockError, setUnlockError] = createSignal('');
+
+  // Unlock (or first-time set up) the vault in-page. Sessions that predate the
+  // login-time vault setup, or that idle-locked, land on this page with a
+  // locked vault and otherwise have no way to unlock outside Settings.
+  const handleVaultUnlock = async (event) => {
+    event.preventDefault();
+    const pw = unlockPassword();
+    if (!pw || unlockBusy()) {
+      return;
+    }
+
+    const userId = getAuthUserId();
+    if (!userId) {
+      setUnlockError('Sign in first.');
+      return;
+    }
+
+    setUnlockBusy(true);
+    setUnlockError('');
+    try {
+      vaultStore.setUserId(userId);
+      vaultService.setUserId?.(userId);
+      const unlocked = await vaultService.findAndUnlock(pw, String(userId));
+      if (!unlocked) {
+        await vaultService.setupKeystoreWithPassword(pw);
+      }
+      setUnlockPassword('');
+    } catch (err) {
+      if (isLinkRequiredError(err)) {
+        pendingPostLinkAction = async () => {
+          await handleVaultUnlock(event);
+        };
+        vaultStore.setShowDeviceLinkModal(true);
+        setUnlockError('Verify this device to unlock encrypted messaging.');
+      } else {
+        setUnlockError(err?.message || 'Could not unlock messaging.');
+      }
+    } finally {
+      setUnlockBusy(false);
+    }
+  };
+
   let recipientSearchTimer;
   onCleanup(() => clearTimeout(recipientSearchTimer));
 
@@ -912,6 +957,31 @@ export default function MessagesPage() {
               {showNewConversation() ? 'Cancel' : '+ New'}
             </button>
           </div>
+
+          <Show when={isAuthenticated() && isLocked()}>
+            <form class="vault-unlock-banner" onSubmit={handleVaultUnlock}>
+              <p class="vault-unlock-hint">
+                Messaging is end-to-end encrypted. Enter your account password to unlock it on this device.
+              </p>
+              <div class="vault-unlock-row">
+                <input
+                  type="password"
+                  value={unlockPassword()}
+                  onInput={(event) => setUnlockPassword(event.target.value)}
+                  placeholder="Account password"
+                  autocomplete="current-password"
+                  disabled={unlockBusy()}
+                  required
+                />
+                <button type="submit" class="post-action" disabled={unlockBusy()}>
+                  {unlockBusy() ? 'Unlocking…' : 'Unlock'}
+                </button>
+              </div>
+              <Show when={unlockError()}>
+                <p class="error-message">{unlockError()}</p>
+              </Show>
+            </form>
+          </Show>
 
           <Show when={showNewConversation()}>
             <div class="new-conversation-form">
