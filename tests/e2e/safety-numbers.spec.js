@@ -62,7 +62,7 @@ test.describe('Safety numbers / TOFU fingerprints E2E', () => {
 
       // Real DM: invite -> welcome -> message -> reply.
       await pageA.getByRole('button', { name: '+ New' }).click();
-      await pageA.fill('input[placeholder="Start by user id"]', String(bob.id));
+      await pageA.fill('input[placeholder="Username or user id"]', String(bob.id));
       await pageA.locator('.new-conversation-form button[type="submit"]').click();
       await expect(pageA.locator('.conversation-item').first()).toBeVisible({ timeout: 45000 });
 

@@ -43,7 +43,7 @@ test.describe('DM message requests & key rotation E2E', () => {
 
       // Alice opens a DM with Bob and sends the first message.
       await pageA.getByRole('button', { name: '+ New' }).click();
-      await pageA.fill('input[placeholder="Start by user id"]', String(bob.id));
+      await pageA.fill('input[placeholder="Username or user id"]', String(bob.id));
       await pageA.locator('.new-conversation-form button[type="submit"]').click();
       await expect(pageA.locator('.conversation-item').first()).toBeVisible({ timeout: 45000 });
 

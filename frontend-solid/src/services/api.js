@@ -347,8 +347,8 @@ export const api = {
     getUserByUsername: (username) =>
       request(`/users/username/${username}`),
 
-    search: (query) =>
-      request(`/users/search?q=${encodeURIComponent(query)}`),
+    search: (query, { messagingReady = false } = {}) =>
+      request(`/users/search?q=${encodeURIComponent(query)}${messagingReady ? '&messaging_ready=1' : ''}`),
 
     changePassword: (oldPassword, newPassword) =>
       request('/users/change-password', { method: 'POST', body: { oldPassword, newPassword } }),
@@ -1219,6 +1219,8 @@ export const saveFeedWeights = (weights) => api.users.saveFeedWeights(weights);
 export const getUser = (userId) => api.users.getUser(userId);
 
 export const getUserByUsername = (username) => api.users.getUserByUsername(username);
+
+export const searchUsers = (query, options) => api.users.search(query, options);
 
 export const listGroups = (opts) => api.groups.list(opts);
 

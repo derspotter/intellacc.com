@@ -56,7 +56,7 @@ test.describe('Solid messaging E2E', () => {
 
       // Alice opens a DM with Bob by user id (real MLS invite + welcome).
       await pageA.getByRole('button', { name: '+ New' }).click();
-      await pageA.fill('input[placeholder="Start by user id"]', String(bob.id));
+      await pageA.fill('input[placeholder="Username or user id"]', String(bob.id));
       await pageA.locator('.new-conversation-form button[type="submit"]').click();
       await expect(pageA.locator('.conversation-item').first()).toBeVisible({ timeout: 45000 });
       await expect(pageA.locator('.encryption-status')).toContainText('MLS conversation', { timeout: 30000 });

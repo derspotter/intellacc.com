@@ -6468,6 +6468,61 @@ body.dark-mode .user-rank {
   flex: 1;
 }
 
+.new-conversation-form form.dm-start-form {
+  flex-direction: column;
+}
+
+.dm-start-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.dm-start-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-suggestions {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.user-suggestions button {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-color);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.user-suggestions li:last-child button {
+  border-bottom: none;
+}
+
+.user-suggestions button:hover,
+.user-suggestions button:focus {
+  background: var(--blue-bg);
+}
+
+.user-suggestion-id {
+  color: var(--secondary-text);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
 .search-box {
   padding: 0 1rem;
   border-bottom: none;

@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Show, onCleanup } from 'solid-js';
-import { getDirectMessages, getUser } from '../services/api';
+import { getDirectMessages, getUser, getUserByUsername, searchUsers } from '../services/api';
 import { getCurrentUserId as getAuthUserId, isAuthenticated } from '../services/auth';
 import vaultStore from '../store/vaultStore';
 import vaultService from '../services/mls/vaultService';
@@ -146,6 +146,8 @@ export default function MessagesPage() {
   const [sendingMessage, setSendingMessage] = createSignal(false);
   const [messageText, setMessageText] = createSignal('');
   const [targetId, setTargetId] = createSignal('');
+  const [recipientResults, setRecipientResults] = createSignal([]);
+  const [recipientId, setRecipientId] = createSignal(null);
   const [searchQuery, setSearchQuery] = createSignal('');
   const [showNewConversation, setShowNewConversation] = createSignal(false);
   const [isInitialized, setIsInitialized] = createSignal(false);
@@ -507,11 +509,66 @@ export default function MessagesPage() {
     wasLocked = locked;
   });
 
+  let recipientSearchTimer;
+  onCleanup(() => clearTimeout(recipientSearchTimer));
+
+  const handleRecipientInput = (value) => {
+    setTargetId(value);
+    setRecipientId(null);
+    clearTimeout(recipientSearchTimer);
+    const query = value.trim();
+    if (query.length < 2 || /^\d+$/.test(query)) {
+      setRecipientResults([]);
+      return;
+    }
+    recipientSearchTimer = setTimeout(async () => {
+      try {
+        const results = await searchUsers(query, { messagingReady: true });
+        if (targetId().trim() === query) {
+          setRecipientResults(Array.isArray(results) ? results.slice(0, 8) : []);
+        }
+      } catch {
+        setRecipientResults([]);
+      }
+    }, 250);
+  };
+
+  const pickRecipient = (user) => {
+    setRecipientId(user.id);
+    setTargetId(user.username);
+    setRecipientResults([]);
+  };
+
+  // Resolve the recipient input (picked suggestion, numeric id, or exact
+  // username) to a user id; null when nothing matches.
+  const resolveRecipientId = async () => {
+    const raw = targetId().trim();
+    if (Number.isInteger(recipientId())) {
+      return recipientId();
+    }
+    if (/^\d+$/.test(raw)) {
+      return Number.parseInt(raw, 10);
+    }
+    const exact = recipientResults().find(
+      (user) => String(user.username || '').toLowerCase() === raw.toLowerCase()
+    );
+    if (exact) {
+      return exact.id;
+    }
+    try {
+      const user = await getUserByUsername(raw);
+      const id = Number(user?.id ?? user?.user?.id);
+      return Number.isInteger(id) && id > 0 ? id : null;
+    } catch {
+      return null;
+    }
+  };
+
   const startConversation = async (event) => {
     event.preventDefault();
-    const nextTarget = Number.parseInt(targetId(), 10);
+    const nextTarget = await resolveRecipientId();
     if (!Number.isInteger(nextTarget) || nextTarget <= 0) {
-      setError('Please enter a valid user id.');
+      setError('No user found for that name or id.');
       return;
     }
 
@@ -531,6 +588,8 @@ export default function MessagesPage() {
         await loadMessages(groupId);
       }
       setTargetId('');
+      setRecipientId(null);
+      setRecipientResults([]);
       setShowNewConversation(false);
     } catch (err) {
       if (isLinkRequiredError(err)) {
@@ -876,19 +935,34 @@ export default function MessagesPage() {
               </div>
 
               <Show when={newConversationKind() === 'dm'}>
-                <form onSubmit={startConversation}>
-                  <input
-                    type="text"
-                    value={targetId()}
-                    onInput={(event) => setTargetId(event.target.value)}
-                    placeholder="Start by user id"
-                    disabled={conversationBusy()}
-                    required
-                    min="1"
-                  />
-                  <button type="submit" class="post-action" disabled={conversationBusy()}>
-                    {conversationBusy() ? 'Opening…' : 'Open'}
-                  </button>
+                <form class="dm-start-form" onSubmit={startConversation}>
+                  <div class="dm-start-row">
+                    <input
+                      type="text"
+                      value={targetId()}
+                      onInput={(event) => handleRecipientInput(event.target.value)}
+                      placeholder="Username or user id"
+                      disabled={conversationBusy()}
+                      required
+                    />
+                    <button type="submit" class="post-action" disabled={conversationBusy()}>
+                      {conversationBusy() ? 'Opening…' : 'Open'}
+                    </button>
+                  </div>
+                  <Show when={recipientResults().length > 0}>
+                    <ul class="user-suggestions">
+                      <For each={recipientResults()}>
+                        {(user) => (
+                          <li>
+                            <button type="button" onClick={() => pickRecipient(user)}>
+                              <span>{user.display_name || user.username}</span>
+                              <span class="user-suggestion-id">@{user.username} · #{user.id}</span>
+                            </button>
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                  </Show>
                 </form>
               </Show>
 
