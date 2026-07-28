@@ -217,7 +217,7 @@ export const DeviceLinkModal = (props) => {
                 return (
                     <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 font-mono">
                         <div
-                            class="w-full max-w-sm mx-4 border border-bb-border bg-bb-panel shadow-glow-red"
+                            class="device-link-modal w-full max-w-sm mx-4 border border-bb-border bg-bb-panel shadow-glow-red"
                             role="dialog"
                             aria-modal="true"
                             aria-label="Link device"

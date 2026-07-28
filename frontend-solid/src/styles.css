@@ -6468,6 +6468,66 @@ body.dark-mode .user-rank {
   flex: 1;
 }
 
+/* Van-skin restyle of the vault modals (DeviceLinkModal, SafetyNumberModal).
+   Both are authored with terminal-skin (bb-*) Tailwind utilities; on the van
+   skin we remap those tokens to the Bauhaus palette instead of duplicating
+   the markup. Scoped to body.skin-van so the terminal skin keeps its look. */
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) {
+  font-family: 'League Spartan', sans-serif;
+  background: var(--card-bg);
+  border-color: var(--border-color);
+  box-shadow: var(--box-shadow);
+  color: var(--text-color);
+}
+
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) code {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) :is(.border-bb-border, .border-bb-text, [class*="border-bb-border/"]) {
+  border-color: var(--border-color);
+}
+
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) :is(.text-bb-text, .text-bb-bg) {
+  color: var(--text-color);
+}
+
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) .text-bb-muted {
+  color: var(--secondary-text);
+}
+
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) :is(.text-bb-accent, .border-bb-accent) {
+  color: var(--signature-blue);
+  border-color: var(--signature-blue);
+}
+
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) .bg-black {
+  background: var(--blue-bg);
+  color: var(--text-color);
+}
+
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) .bg-bb-bg {
+  background: var(--card-bg);
+}
+
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) .bg-bb-accent {
+  background: var(--signature-blue);
+  color: var(--blue-bg);
+}
+
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) .text-market-up {
+  color: var(--success-color);
+}
+
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) :is(.text-market-down, .border-market-down) {
+  color: var(--error-color);
+  border-color: var(--error-color);
+}
+
+body.skin-van :is(.device-link-modal, .safety-numbers-modal) .bg-market-down {
+  background: var(--error-color);
+}
+
 .vault-unlock-banner {
   padding: 1rem;
   border-bottom: 1px solid var(--border-color);
