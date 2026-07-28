@@ -19,6 +19,9 @@ export const ROUTES = {
   settings: 'settings',
   'verify-email': 'verify-email',
   search: 'search',
+  impressum: 'impressum',
+  datenschutz: 'datenschutz',
+  terms: 'terms',
   // Optional chaining keeps this importable outside Vite (node --test).
   ...(import.meta.env?.DEV ? { __harness: '__harness' } : {})
 };

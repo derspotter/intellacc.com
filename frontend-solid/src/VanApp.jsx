@@ -16,6 +16,8 @@ import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import SearchPage from './pages/SearchPage';
+import LegalPage from './pages/LegalPage';
+import { legalReady } from './legal/legalConfig';
 import TopicPicker from './components/onboarding/TopicPicker';
 import { api } from './services/api';
 import { isAuthenticated } from './services/auth';
@@ -124,6 +126,9 @@ export default function App() {
     if (page() === 'search') {
       return <SearchPage />;
     }
+    if (page() === 'impressum' || page() === 'datenschutz' || page() === 'terms') {
+      return <LegalPage kind={page()} />;
+    }
 
     if (import.meta.env.DEV && page() === '__harness') {
       return <Harness />;
@@ -181,6 +186,15 @@ export default function App() {
         }
       >
         {renderPage()}
+        {/* Auth pages render without the sidebar; §5 DDG still requires the
+            Impressum to be reachable from every page. */}
+        <Show when={legalReady()}>
+          <nav class="auth-legal-links" aria-label="Legal">
+            <a href="#impressum">Impressum</a>
+            <a href="#datenschutz">Datenschutz</a>
+            <a href="#terms">Nutzungsbedingungen</a>
+          </nav>
+        </Show>
       </Show>
     </>
   );

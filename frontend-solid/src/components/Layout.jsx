@@ -5,6 +5,7 @@ import {
   Show
 } from 'solid-js';
 import { isAuthenticated, logout } from '../services/auth';
+import { legalReady } from '../legal/legalConfig';
 import { setSkin, skinState } from '../services/skinProvider';
 import MobileTabBar from './MobileTabBar';
 import { installShortcuts } from '../utils/keyboard';
@@ -87,6 +88,15 @@ function VanSidebar(props) {
         <Show when={!isAuthenticated()}>
           <div class="sidebar-item">
             <a href="#login">Login</a>
+          </div>
+        </Show>
+        {/* §5 DDG: Impressum must be reachable from every page. Links appear
+            once legalConfig is filled in (legalReady). */}
+        <Show when={legalReady()}>
+          <div class="sidebar-legal">
+            <a href="#impressum">Impressum</a>
+            <a href="#datenschutz">Datenschutz</a>
+            <a href="#terms">Nutzungsbedingungen</a>
           </div>
         </Show>
       </div>

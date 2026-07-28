@@ -6528,6 +6528,64 @@ body.skin-van :is(.device-link-modal, .safety-numbers-modal) .bg-market-down {
   background: var(--error-color);
 }
 
+.legal-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+.legal-page h1 {
+  margin-bottom: 1rem;
+}
+
+.legal-page h2 {
+  margin: 1.5rem 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.legal-page p {
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
+}
+
+.sidebar-legal {
+  margin-top: auto;
+  padding: 1rem 0 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sidebar-legal a {
+  font-size: 0.75rem;
+  color: var(--secondary-text);
+  text-decoration: none;
+}
+
+.sidebar-legal a:hover {
+  text-decoration: underline;
+}
+
+.auth-legal-links {
+  position: fixed;
+  bottom: 0.75rem;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.auth-legal-links a {
+  font-size: 0.75rem;
+  color: var(--secondary-text);
+  text-decoration: none;
+}
+
+.auth-legal-links a:hover {
+  text-decoration: underline;
+}
+
 .vault-unlock-banner {
   padding: 1rem;
   border-bottom: 1px solid var(--border-color);
