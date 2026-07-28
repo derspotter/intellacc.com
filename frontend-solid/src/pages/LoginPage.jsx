@@ -12,8 +12,6 @@ const normalizeLoginError = (message) => {
 export default function LoginPage() {
   const [identifier, setIdentifier] = createSignal('');
   const [password, setPassword] = createSignal('');
-  const [blueskyHandle, setBlueskyHandle] = createSignal('');
-  const [mastodonInstance, setMastodonInstance] = createSignal('');
   const [error, setError] = createSignal('');
   const [pending, setPending] = createSignal(false);
   const [message, setMessage] = createSignal('');
@@ -79,16 +77,6 @@ export default function LoginPage() {
     }
   };
 
-  const handleSocialPlaceholder = (type) => {
-    const handle = type === 'bluesky' ? blueskyHandle().trim() : mastodonInstance().trim();
-    if (!handle) {
-      setError(`Enter your ${type === 'bluesky' ? 'Bluesky handle' : 'Mastodon instance'} first.`);
-      return;
-    }
-    setError('');
-    setMessage(`Starting ${type === 'bluesky' ? 'Bluesky' : 'Mastodon'} login...`);
-  };
-
   return (
     <section class="login-page">
       <div class="login-container">
@@ -141,38 +129,10 @@ export default function LoginPage() {
                     {pending() ? 'Signing in…' : 'Sign In'}
                   </button>
 
-                <div class="social-auth-section">
-                  <p class="social-auth-title">or continue with</p>
-                  <div class="social-auth-provider">
-                    <label for="bluesky-identifier">Bluesky handle</label>
-                    <input
-                      id="bluesky-identifier"
-                      type="text"
-                      placeholder="you.bsky.social"
-                      value={blueskyHandle()}
-                      onInput={(event) => setBlueskyHandle(event.target.value)}
-                      disabled={pending()}
-                    />
-                    <button type="button" class="button social-auth-button" onClick={() => handleSocialPlaceholder('bluesky')}>
-                      Continue with Bluesky
-                    </button>
-                  </div>
-
-                  <div class="social-auth-provider">
-                    <label for="mastodon-instance">Mastodon instance</label>
-                    <input
-                      id="mastodon-instance"
-                      type="text"
-                      placeholder="mastodon.social"
-                      value={mastodonInstance()}
-                      onInput={(event) => setMastodonInstance(event.target.value)}
-                      disabled={pending()}
-                    />
-                    <button type="button" class="button social-auth-button" onClick={() => handleSocialPlaceholder('mastodon')}>
-                      Continue with Mastodon
-                    </button>
-                  </div>
-                </div>
+                {/* Social login (Bluesky/Mastodon) UI removed for launch: the
+                    buttons only called a placeholder handler and never reached
+                    the backend OAuth routes. Restore from git history once the
+                    UI is actually wired to /auth/atproto|mastodon/start. */}
 
                 <div class="auth-links">
                   <a href="#forgot-password">Forgot password?</a>
