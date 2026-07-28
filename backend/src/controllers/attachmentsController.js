@@ -59,9 +59,20 @@ const uploadPost = multer({
   }
 });
 
+// Message attachments are stored and served back with their claimed MIME
+// type — never accept active content (text/html, image/svg+xml,
+// application/javascript, …) that a browser would execute.
+const FORBIDDEN_MESSAGE_MIME = /html|svg|javascript|xml|xhtml/i;
+
 const uploadMessage = multer({
   storage: buildStorage('messages'),
-  limits: { fileSize: MAX_BYTES_MESSAGE }
+  limits: { fileSize: MAX_BYTES_MESSAGE },
+  fileFilter: (req, file, cb) => {
+    if (FORBIDDEN_MESSAGE_MIME.test(file.mimetype || '')) {
+      return cb(new Error('Unsupported file type'));
+    }
+    cb(null, true);
+  }
 });
 
 function hashFile(filePath) {
@@ -295,10 +306,15 @@ async function downloadAttachment(req, res) {
 
     res.setHeader('Content-Type', attachment.content_type);
     res.setHeader('Content-Length', attachment.size);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     if (attachment.scope === 'avatar') {
       res.setHeader('Cache-Control', 'public, max-age=86400');
     } else {
       res.setHeader('Cache-Control', 'private, max-age=300');
+    }
+    if (attachment.scope === 'message') {
+      // Arbitrary user-supplied MIME types: force download, never render.
+      res.setHeader('Content-Disposition', 'attachment');
     }
     const stream = fs.createReadStream(filePath);
     stream.on('error', (err) => {

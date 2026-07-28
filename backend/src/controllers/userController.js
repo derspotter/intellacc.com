@@ -483,7 +483,9 @@ exports.loginUser = async (req, res) => {
     }
 
     if (result.rows.length === 0) {
-      return res.status(400).json({ message: 'User not found' });
+      // Same message and status as a wrong password — a distinct response
+      // would let anyone enumerate which emails/usernames have accounts.
+      return res.status(401).json({ message: 'Invalid email/username or password.' });
     }
 
     const user = result.rows[0];
@@ -532,7 +534,7 @@ exports.loginUser = async (req, res) => {
         });
       }
 
-      return res.status(400).json({ message: 'Incorrect password' });
+      return res.status(401).json({ message: 'Invalid email/username or password.' });
     }
 
     if (user.is_approved === false) {

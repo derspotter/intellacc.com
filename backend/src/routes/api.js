@@ -69,8 +69,10 @@ const requireCronSharedSecret = (req, res, next) => {
     next();
 };
 
-// Base test route
+// Base route: must respond — an empty handler leaves the socket open until
+// the proxy times out, which is a free connection-exhaustion primitive.
 router.get("/", (req, res) => {
+    res.status(200).json({ status: 'ok' });
 });
 
 // Health check route
@@ -84,9 +86,29 @@ router.use('/webauthn', require('./webauthn'));
 // Device management routes
 router.use('/devices', require('./device'));
 
+// Auth-surface rate limits. Login counts only FAILED attempts, so real users
+// and E2E runs are unaffected while credential stuffing is throttled. Signup
+// counts every attempt (bot signups succeed into the approval queue).
+const isProdEnv = process.env.NODE_ENV === 'production';
+const loginRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: isProdEnv ? 20 : 1000,
+    skipSuccessfulRequests: true,
+    message: { message: 'Too many failed login attempts, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+const signupRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: isProdEnv ? 20 : 1000,
+    message: { message: 'Too many registrations from this address, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
 // User Routes
-router.post("/users", userController.createUser);
-router.post("/users/register", userController.createUser); // Alias for registration
+router.post("/users", signupRateLimit, userController.createUser);
+router.post("/users/register", signupRateLimit, userController.createUser); // Alias for registration
 router.get('/admin/users/approve', userController.approveRegistration);
 router.post('/admin/users/approve', userController.approveRegistration);
 router.get("/users/search", authenticateJWT, userController.searchUsers); // User search (before :id to avoid conflict)
@@ -104,7 +126,7 @@ router.get('/users/master-key', authenticateJWT, rejectAgentKeys, userController
 router.post('/users/master-key', authenticateJWT, rejectAgentKeys, userController.setMasterKey);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
 router.get("/users/:id", authenticateJWT, userController.getUser);
-router.post('/login', userController.loginUser);
+router.post('/login', loginRateLimit, userController.loginUser);
 
 // Social OAuth login routes
 router.post('/auth/atproto/start', socialAuthController.startAtprotoLogin);
@@ -402,7 +424,10 @@ router.get('/attachments/presign-download', authenticateJWT, attachmentsControll
 router.post('/attachments/avatar', authenticateJWT, attachmentsController.uploadUserAvatar);
 router.post('/attachments/post', authenticateJWT, requireEmailVerified, attachmentsController.uploadPostImage);
 router.post('/attachments/message', authenticateJWT, requireEmailVerified, attachmentsController.uploadMessageAttachment);
-router.get('/attachments/:id', attachmentsController.downloadAttachment);
+// optionalAuth populates req.user so message-scope membership checks can
+// actually pass (without it every E2EE message attachment 401'd); post and
+// avatar scopes stay publicly readable, matching the public feed.
+router.get('/attachments/:id', optionalAuth, attachmentsController.downloadAttachment);
 
 // LMSR Market API proxy routes (bypass CORS issues)
 router.get("/events/:eventId/market", async (req, res) => {

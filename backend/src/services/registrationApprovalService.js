@@ -422,6 +422,23 @@ const verifyApprovalToken = async (token) => {
     }
   }
 
+  // Kick off email verification for the freshly approved user. Signup skips
+  // it while approval is pending, and posting requires a verified email — so
+  // without this mail an approved user silently cannot post.
+  try {
+    const userRow = await db.query(
+      'SELECT email, email_verified_at FROM users WHERE id = $1',
+      [approvalRow.user_id]
+    );
+    const user = userRow.rows[0];
+    if (user && !user.email_verified_at) {
+      const { sendVerificationEmail } = require('./emailVerificationService');
+      await sendVerificationEmail(approvalRow.user_id, user.email);
+    }
+  } catch (err) {
+    console.error('[RegistrationApproval] Failed to send post-approval verification email:', err.message);
+  }
+
   return {
     success: true,
     userId: approvalRow.user_id

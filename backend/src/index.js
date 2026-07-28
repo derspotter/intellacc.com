@@ -10,6 +10,10 @@ const { startDeliveryWorker: startAtprotoDeliveryWorker } = require('./services/
 const { validateProductionConfig } = require('./utils/productionGuard');
 
 const app = express();
+// One reverse-proxy hop (Caddy). Without this, req.ip is the proxy's
+// container IP for every request and all IP-keyed rate limits share a
+// single global bucket.
+app.set('trust proxy', 1);
 const port = process.env.NODE_PORT || 3000;
 
 const pool = db.getPool();
