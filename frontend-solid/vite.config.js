@@ -19,7 +19,7 @@ const allowedHosts = [
   '127.0.0.1'
 ];
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
     solid(),
     wasm(),
@@ -53,6 +53,12 @@ export default defineConfig({
     }
   },
   assetsInclude: ['**/*.wasm'],
+  // Production builds must not ship debug logging (the bundle leaked device
+  // tokens and message plaintext to the console). Dev keeps the logs — the
+  // E2E browser-log relay depends on them for diagnostics.
+  esbuild: command === 'build'
+    ? { pure: ['console.log', 'console.debug', 'console.info'] }
+    : undefined,
   build: {
     rollupOptions: {
       output: {
@@ -93,4 +99,4 @@ export default defineConfig({
     strictPort: true,
     allowedHosts
   }
-});
+}));

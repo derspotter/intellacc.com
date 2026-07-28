@@ -324,7 +324,6 @@ export const ChatPanel = () => {
         const convId = getConversationId(selectedConversation());
         if (!convId) return;
 
-        console.log('[ChatPanel] Sending:', text, 'to:', selectedConversation()?.displayName);
 
         const optimisticId = `opt_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 

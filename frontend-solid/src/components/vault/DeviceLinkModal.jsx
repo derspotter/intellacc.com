@@ -52,9 +52,7 @@ export const DeviceLinkModal = (props) => {
 
         try {
             const devicePublicId = getDevicePublicId();
-            console.log("[DeviceLink] Calling API with device:", devicePublicId);
             const result = await api.devices.startLinking(devicePublicId, getDeviceName());
-            console.log("[DeviceLink] Got token:", result.token);
             setLinkToken(result.token);
             setExpiresAt(new Date(result.expires_at));
 
