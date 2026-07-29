@@ -3,7 +3,10 @@ import { render } from 'solid-js/web'
 import './index.css'
 import './styles.css'
 import { initializeSkinProvider } from './services/skinProvider'
+import { initErrorReporter } from './services/errorReporter'
 import App from './App.jsx'
+
+initErrorReporter()
 
 const root = document.getElementById('root')
 

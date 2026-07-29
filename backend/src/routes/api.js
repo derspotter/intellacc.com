@@ -106,6 +106,19 @@ const signupRateLimit = rateLimit({
     legacyHeaders: false
 });
 
+// Frontend error reporting sink (self-hosted error tracking; digest mail via
+// scripts/error-digest.sh). Unauthenticated so logged-out pages can report,
+// hence the tight per-IP limit.
+const clientErrorController = require('../controllers/clientErrorController');
+const errorReportRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 30,
+    message: { error: 'Too many error reports' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+router.post('/errors', errorReportRateLimit, optionalAuth, clientErrorController.reportClientError);
+
 // User Routes
 router.post("/users", signupRateLimit, userController.createUser);
 router.post("/users/register", signupRateLimit, userController.createUser); // Alias for registration
