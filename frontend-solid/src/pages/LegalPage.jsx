@@ -145,10 +145,11 @@ const Terms = () => (
 
     <h2>4. Konto und Mindestalter</h2>
     <p>
-      Für die Registrierung ist ein Mindestalter von 16 Jahren
-      erforderlich. Sie sind für die Sicherheit Ihrer Zugangsdaten
-      verantwortlich. Der Betreiber kann Registrierungen ablehnen
-      (Freischaltverfahren).
+      Für die Registrierung ist ein Mindestalter von 13 Jahren
+      erforderlich. Nutzer unter 16 Jahren benötigen die Einwilligung
+      eines Erziehungsberechtigten. Sie sind für die Sicherheit Ihrer
+      Zugangsdaten verantwortlich. Der Betreiber kann Registrierungen
+      ablehnen (Freischaltverfahren).
     </p>
 
     <h2>5. Inhalte und Verhalten</h2>
