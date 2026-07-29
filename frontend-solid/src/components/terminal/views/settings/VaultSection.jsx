@@ -3,6 +3,7 @@ import vaultService from '../../../../services/mls/vaultService';
 import vaultStore from '../../../../store/vaultStore';
 import { configureIdleAutoLock, loadIdleLockConfig } from '../../../../services/idleLock';
 import { clearToken } from '../../../../services/tokenService';
+import { resetE2ee } from '../../../../services/mls/e2eeReset';
 import PasswordSection from './PasswordSection';
 
 export default function VaultSection() {
@@ -24,6 +25,10 @@ export default function VaultSection() {
   const [wipeBusy, setWipeBusy] = createSignal(false);
   const [wipeError, setWipeError] = createSignal('');
   const canWipe = () => wipeText() === 'WIPE' && !wipeBusy();
+
+  const [resetPw, setResetPw] = createSignal('');
+  const [resetBusy, setResetBusy] = createSignal(false);
+  const [resetError, setResetError] = createSignal('');
 
   onMount(() => {
     loadIdleLockConfig();
@@ -50,6 +55,20 @@ export default function VaultSection() {
   const handleLockNow = async () => {
     await vaultService.lockKeys();
     window.location.hash = '#home';
+  };
+
+  const handleResetE2ee = async (event) => {
+    event.preventDefault();
+    if (resetBusy() || !resetPw()) return;
+    setResetBusy(true);
+    setResetError('');
+    try {
+      await resetE2ee(resetPw());
+      // reloads on success
+    } catch (err) {
+      setResetError(err?.data?.error || err?.message || 'RESET FAILED');
+      setResetBusy(false);
+    }
   };
 
   const handlePanicWipe = async () => {
@@ -153,6 +172,37 @@ export default function VaultSection() {
             </Show>
           </div>
         </div>
+      </div>
+
+      <div class="border-t border-market-down/40 pt-3">
+        <div class="text-market-down uppercase font-bold mb-2">E2EE RESET</div>
+        <form onSubmit={handleResetE2ee} class="flex flex-col gap-2 max-w-sm">
+          <p class="text-bb-muted">
+            LOST VAULT OR LOCKED OUT EVERYWHERE? DELETES ENCRYPTED MESSAGE
+            HISTORY + KEYS ON ALL DEVICES AND STARTS FRESH. PEERS SEE A NEW
+            SAFETY NUMBER. CANNOT BE UNDONE.
+          </p>
+          <input
+            type="password"
+            placeholder="ACCOUNT PASSWORD TO CONFIRM"
+            value={resetPw()}
+            onInput={(e) => setResetPw(e.currentTarget.value)}
+            disabled={resetBusy()}
+            class="bg-bb-bg border border-market-down/60 px-2 py-1 text-bb-text focus:outline-none focus:border-market-down"
+          />
+          <div class="flex items-center gap-3">
+            <button
+              type="submit"
+              disabled={resetBusy() || !resetPw()}
+              class="px-3 py-1 border border-market-down text-market-down hover:bg-market-down/20 disabled:opacity-40 uppercase font-bold"
+            >
+              {resetBusy() ? '[RESETTING...]' : '[RESET E2EE]'}
+            </button>
+            <Show when={resetError()}>
+              <span class="text-market-down">ERROR // {String(resetError()).toUpperCase()}</span>
+            </Show>
+          </div>
+        </form>
       </div>
     </div>
   );

@@ -6680,6 +6680,12 @@ body.skin-van :is(.device-link-modal, .safety-numbers-modal) .bg-market-down {
   font-size: 0.85rem;
 }
 
+.vault-unlock-recovery {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  color: var(--secondary-text);
+}
+
 .new-conversation-form form.dm-start-form {
   flex-direction: column;
 }

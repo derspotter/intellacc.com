@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
 const db = require('../db');
 const mlsService = require('../services/mlsService');
 const authenticateJWT = require('../middleware/auth');
@@ -336,6 +338,51 @@ router.post('/groups/:groupId/leave', async (req, res) => {
     }
     console.error(err);
     res.status(500).json({ error: 'Failed to leave group' });
+  }
+});
+
+// Self-service E2EE reset. Password-confirmed, destructive: wipes the
+// caller's devices, master key, key packages, DM groups and pending relay
+// state so the next unlock sets up a fresh first-device vault. Replaces the
+// manual-SQL recovery for users stranded without their vault password or
+// with a burned first-device slot.
+const e2eeResetRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: process.env.NODE_ENV === 'production' ? 5 : 1000,
+  keyGenerator: (req) => String(req.user?.id || req.ip),
+  message: { error: 'Too many reset attempts. Try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+router.post('/reset', e2eeResetRateLimit, async (req, res) => {
+  try {
+    const password = req.body?.password;
+    if (typeof password !== 'string' || password.length === 0) {
+      return res.status(400).json({ error: 'Password is required' });
+    }
+
+    const userRes = await db.query(
+      'SELECT password_hash FROM users WHERE id = $1 AND deleted_at IS NULL',
+      [req.user.id]
+    );
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const hash = userRes.rows[0].password_hash;
+    const match = hash ? await bcrypt.compare(password, hash) : false;
+    if (!match) {
+      // 403, not 401: the client API layer treats an authenticated 401 as an
+      // expired session and force-logs-out, which would hide the real error.
+      return res.status(403).json({ error: 'Incorrect password' });
+    }
+
+    const result = await mlsService.resetUserState(req.user.id);
+    console.log(`[MLS] E2EE reset for user ${req.user.id} (${result.dmsDeleted} DMs deleted)`);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[MLS] E2EE reset failed:', err);
+    res.status(500).json({ error: 'Failed to reset encrypted messaging' });
   }
 });
 

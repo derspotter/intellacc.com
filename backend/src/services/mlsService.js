@@ -817,6 +817,44 @@ const mlsService = {
     }
   },
 
+  // Full self-service E2EE reset: wipes the user's server-side MLS state so
+  // their next unlock sets up a fresh first-device vault. DM groups are
+  // deleted outright (the peer's client recreates the DM on next contact and
+  // TOFU records a fresh fingerprint); shared groups are only left, mirroring
+  // leaveGroup semantics, so other members keep their chat. Deleting
+  // user_devices cascades the relay rows this user sent and their pending
+  // recipient entries.
+  async resetUserState(userId) {
+    const client = await db.getPool().connect();
+    try {
+      await client.query('BEGIN');
+
+      const dmGroupsRes = await client.query(
+        'SELECT group_id FROM mls_direct_messages WHERE user_a_id = $1 OR user_b_id = $1',
+        [userId]
+      );
+      const dmGroupIds = dmGroupsRes.rows.map((r) => r.group_id);
+      if (dmGroupIds.length > 0) {
+        await client.query('DELETE FROM mls_relay_queue WHERE group_id = ANY($1::text[])', [dmGroupIds]);
+        await client.query('DELETE FROM mls_groups WHERE group_id = ANY($1::text[])', [dmGroupIds]);
+      }
+
+      await client.query('DELETE FROM mls_group_members WHERE user_id = $1', [userId]);
+      await client.query('DELETE FROM device_linking_tokens WHERE user_id = $1', [userId]);
+      await client.query('DELETE FROM user_devices WHERE user_id = $1', [userId]);
+      await client.query('DELETE FROM user_master_keys WHERE user_id = $1', [userId]);
+      await client.query('DELETE FROM mls_key_packages WHERE user_id = $1', [userId]);
+
+      await client.query('COMMIT');
+      return { dmsDeleted: dmGroupIds.length };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  },
+
   // Direct Message (DM) functions
 
   async findDirectMessage(userAId, userBId) {

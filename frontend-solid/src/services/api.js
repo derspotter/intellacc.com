@@ -842,6 +842,8 @@ export const api = {
       mlsRequest(`/mls/direct-messages/${targetUserId}/rehydrate`, { method: 'POST' }),
     getPendingMessages: () =>
       mlsRequest('/mls/queue/pending'),
+    resetE2ee: (password) =>
+      request('/mls/reset', { method: 'POST', body: { password } }),
     ackMessages: (messageIds) =>
       mlsRequest('/mls/queue/ack', { method: 'POST', body: { messageIds } })
     ,

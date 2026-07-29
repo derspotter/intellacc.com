@@ -7,9 +7,15 @@ import { configureIdleAutoLock, loadIdleLockConfig } from '../../services/idleLo
 import { api } from '../../services/api';
 import vaultStore from '../../store/vaultStore';
 import vaultService from '../../services/mls/vaultService';
+import { resetE2ee } from '../../services/mls/e2eeReset';
 
 export default function VaultSettings() {
   const [showChangePassword, setShowChangePassword] = createSignal(false);
+
+  const [showReset, setShowReset] = createSignal(false);
+  const [resetPassword, setResetPassword] = createSignal('');
+  const [resetError, setResetError] = createSignal('');
+  const [isResetting, setIsResetting] = createSignal(false);
 
   const [currentPassword, setCurrentPassword] = createSignal('');
   const [newPassword, setNewPassword] = createSignal('');
@@ -90,6 +96,20 @@ export default function VaultSettings() {
       setPasswordChangeError(err?.message || 'Failed to change password.');
     } finally {
       setIsChanging(false);
+    }
+  };
+
+  const handleResetE2ee = async (event) => {
+    event.preventDefault();
+    if (isResetting()) return;
+    setResetError('');
+    setIsResetting(true);
+    try {
+      await resetE2ee(resetPassword());
+      // resetE2ee reloads the page on success.
+    } catch (err) {
+      setResetError(err?.data?.error || err?.message || 'Failed to reset encrypted messaging.');
+      setIsResetting(false);
     }
   };
 
@@ -259,6 +279,57 @@ export default function VaultSettings() {
           </div>
         </div>
       </Show>
+
+      {/* Always available — this is the recovery path for users whose vault
+          lives in another browser or whose password no longer unlocks it. */}
+      <div class="danger-zone e2ee-reset">
+        <h3>Reset Encrypted Messaging</h3>
+        <p>
+          Lost your vault or locked out on every device? This deletes your
+          encrypted message history and encryption keys everywhere and starts
+          you fresh — chat partners will see a new safety number. It cannot be
+          undone.
+        </p>
+        <Show
+          when={showReset()}
+          fallback={
+            <button type="button" class="button button-danger" onClick={() => setShowReset(true)}>
+              Reset Encrypted Messaging…
+            </button>
+          }
+        >
+          <form class="settings-form" onSubmit={handleResetE2ee}>
+            <div class="form-group">
+              <label>Confirm with your account password</label>
+              <input
+                type="password"
+                class="form-input"
+                placeholder="Password"
+                value={resetPassword()}
+                onInput={(event) => setResetPassword(event.target.value)}
+                required
+                disabled={isResetting()}
+              />
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button button-danger" disabled={isResetting() || !resetPassword()}>
+                {isResetting() ? 'Resetting…' : 'Permanently Reset'}
+              </button>
+              <button
+                type="button"
+                class="button button-secondary"
+                disabled={isResetting()}
+                onClick={() => { setShowReset(false); setResetPassword(''); setResetError(''); }}
+              >
+                Cancel
+              </button>
+            </div>
+            <Show when={resetError()}>
+              <p class="error-message">{resetError()}</p>
+            </Show>
+          </form>
+        </Show>
+      </div>
     </section>
   );
 }

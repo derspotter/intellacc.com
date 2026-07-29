@@ -469,6 +469,10 @@ export const ChatPanel = () => {
                         <Show when={error()}>
                             <div class="text-market-down text-xs mt-2 text-center">{error()}</div>
                         </Show>
+                        <div class="text-[10px] text-bb-muted mt-3 text-center">
+                            LOCKED OUT EVERYWHERE?{' '}
+                            <a href="#settings" class="text-bb-accent hover:underline">RESET E2EE IN SETTINGS</a>
+                        </div>
                     </div>
                 </div>
             </Show>

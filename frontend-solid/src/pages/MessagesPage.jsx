@@ -980,6 +980,9 @@ export default function MessagesPage() {
               <Show when={unlockError()}>
                 <p class="error-message">{unlockError()}</p>
               </Show>
+              <p class="vault-unlock-recovery">
+                Can't unlock on any device? <a href="#settings">Reset encrypted messaging</a> in Settings.
+              </p>
             </form>
           </Show>
 
