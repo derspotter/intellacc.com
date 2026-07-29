@@ -6549,20 +6549,23 @@ body.skin-van :is(.device-link-modal, .safety-numbers-modal) .bg-market-down {
 }
 
 .sidebar-legal {
-  margin-top: auto;
-  padding: 1rem 0 0.5rem;
+  margin-top: 2.5rem;
+  padding: 0.5rem 1rem;
+  width: 100%;
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.35);
 }
 
 .sidebar-legal a {
-  font-size: 0.75rem;
-  color: var(--secondary-text);
+  color: rgba(255, 255, 255, 0.45);
   text-decoration: none;
 }
 
 .sidebar-legal a:hover {
+  color: rgba(255, 255, 255, 0.9);
   text-decoration: underline;
 }
 

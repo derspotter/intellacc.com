@@ -90,13 +90,15 @@ function VanSidebar(props) {
             <a href="#login">Login</a>
           </div>
         </Show>
-        {/* §5 DDG: Impressum must be reachable from every page. Links appear
-            once legalConfig is filled in (legalReady). */}
+        {/* §5 DDG: Impressum must be reachable from every page — but as a
+            quiet one-liner, not as nav items. */}
         <Show when={legalReady()}>
           <div class="sidebar-legal">
             <a href="#impressum">Impressum</a>
+            <span aria-hidden="true">·</span>
             <a href="#datenschutz">Datenschutz</a>
-            <a href="#terms">Nutzungsbedingungen</a>
+            <span aria-hidden="true">·</span>
+            <a href="#terms">AGB</a>
           </div>
         </Show>
       </div>

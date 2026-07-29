@@ -131,9 +131,11 @@ export default function SignUpPage() {
                     at the moment of contract formation (same pattern X and
                     Facebook use — no checkbox needed). */}
                 <p class="signup-terms-notice">
-                  By signing up you agree to the <a href="#terms">Terms of Use</a> and
-                  confirm you are at least 13 years old (under 16 with a guardian's
-                  consent). See also our <a href="#datenschutz">privacy policy</a>.
+                  Mit der Registrierung akzeptierst du die{' '}
+                  <a href="#terms">Nutzungsbedingungen</a> und bestätigst, dass du
+                  mindestens 13 Jahre alt bist (unter 16 mit Einwilligung eines
+                  Erziehungsberechtigten). Hinweise zur Datenverarbeitung:{' '}
+                  <a href="#datenschutz">Datenschutzerklärung</a>.
                 </p>
                 <button type="submit" class="btn-primary" disabled={pending()}>
                   {pending() ? 'Creating Account…' : 'Create Account'}

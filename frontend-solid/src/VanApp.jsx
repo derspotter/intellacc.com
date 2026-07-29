@@ -192,7 +192,7 @@ export default function App() {
           <nav class="auth-legal-links" aria-label="Legal">
             <a href="#impressum">Impressum</a>
             <a href="#datenschutz">Datenschutz</a>
-            <a href="#terms">Nutzungsbedingungen</a>
+            <a href="#terms">AGB</a>
           </nav>
         </Show>
       </Show>
