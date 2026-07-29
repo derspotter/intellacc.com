@@ -21,12 +21,15 @@ export default function WeeklyQuestionCard() {
   const userId = getCurrentUserId();
   const [status] = createResource(() => userId || null, fetchWeeklyStatus);
 
-  // Show only when there is an OPEN, uncompleted assignment with a target event.
+  // Show only while the assignment is open AND the user has not yet staked.
+  // `isCompleted` is authoritative but only set by the weekly batch job after
+  // the week ends; `hasStaked` is the live signal that hides the prompt the
+  // moment a stake is placed.
   const assignment = () => status()?.assignment || null;
   const isOpen = () => {
     const a = assignment();
     if (!a || !a.event_id) return false;
-    return !(status()?.isCompleted || a.weekly_assignment_completed);
+    return !(status()?.isCompleted || a.weekly_assignment_completed || status()?.hasStaked);
   };
 
   const title = () => {

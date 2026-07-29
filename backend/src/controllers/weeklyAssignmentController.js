@@ -125,12 +125,31 @@ const getUserWeeklyStatus = async (req, res) => {
     }
     
     const status = await weeklyAssignmentService.getUserWeeklyStatus(userId);
-    
+
+    // Live check: has the user already put a stake on the assigned event?
+    // The authoritative `completed` flag is only set by the weekly batch job
+    // after the week ends — the UI needs this to hide the prompt immediately.
+    let hasStaked = false;
+    if (status?.event_id && !status.weekly_assignment_completed) {
+      const staked = await db.query(`
+        SELECT EXISTS (SELECT 1 FROM user_shares
+                        WHERE user_id = $1 AND event_id = $2
+                          AND (staked_yes_ledger > 0 OR staked_no_ledger > 0))
+            OR EXISTS (SELECT 1 FROM user_outcome_shares
+                        WHERE user_id = $1 AND event_id = $2 AND shares > 0)
+            OR EXISTS (SELECT 1 FROM numeric_position_basis
+                        WHERE user_id = $1 AND event_id = $2 AND basis_ledger > 0)
+            AS has_staked
+      `, [userId, status.event_id]);
+      hasStaked = !!staked.rows[0]?.has_staked;
+    }
+
     res.status(200).json({
       success: true,
       assignment: status,
       hasAssignment: !!status,
-      isCompleted: status ? !!status.weekly_assignment_completed : false
+      isCompleted: status ? !!status.weekly_assignment_completed : false,
+      hasStaked
     });
   } catch (error) {
     console.error('Error getting user weekly status:', error);
