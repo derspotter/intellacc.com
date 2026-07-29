@@ -1,0 +1,6 @@
+# recipient            Maildir path relative to virtual_mailbox_base
+# (trailing slash = Maildir format)
+kontakt@intellacc.com     intellacc.com/kontakt/
+# RFC 5321 requires postmaster@ to be deliverable; abuse@ is convention.
+postmaster@intellacc.com  intellacc.com/kontakt/
+abuse@intellacc.com       intellacc.com/kontakt/

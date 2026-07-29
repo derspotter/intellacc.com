@@ -11,6 +11,18 @@ services:
     networks:
       - intellacc-network
 
+  # Inbound-only mail for kontakt@/postmaster@/abuse@intellacc.com
+  # (Impressum contact). Delivers to a Maildir on the host; read it with
+  # himalaya/notmuch. Deliberately separate from the outbound relay above.
+  mail-in:
+    restart: unless-stopped
+    build: ./mail-in
+    container_name: intellacc_mail_in
+    ports:
+      - "25:25"
+    volumes:
+      - ./mail-in/data:/var/mail
+
   db:
     restart: unless-stopped
     image: pgvector/pgvector:pg18

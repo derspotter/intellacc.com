@@ -1,0 +1,37 @@
+# Inbound-only postfix for intellacc.com contact mail.
+# Outbound transactional mail is a separate container (boky/postfix,
+# container "postfix") — this one never relays anything anywhere.
+
+myhostname = mail.intellacc.com
+mydomain = intellacc.com
+inet_interfaces = all
+inet_protocols = all
+
+# No local delivery, everything goes through the virtual mailbox map.
+mydestination =
+virtual_mailbox_domains = intellacc.com
+virtual_mailbox_base = /var/mail
+virtual_mailbox_maps = lmdb:/etc/postfix/vmailbox
+# set by entrypoint.sh from the packaged vmail user
+virtual_uid_maps = static:VMAIL_UID
+virtual_gid_maps = static:VMAIL_GID
+
+# Hard no-relay: only accept mail FOR our domain, never THROUGH us.
+mynetworks = 127.0.0.0/8
+smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
+smtpd_recipient_restrictions =
+    reject_non_fqdn_recipient,
+    reject_unknown_sender_domain,
+    reject_unauth_destination
+smtpd_helo_required = yes
+disable_vrfy_command = yes
+smtpd_banner = $myhostname ESMTP
+
+# Opportunistic STARTTLS with a self-signed cert (generated at start).
+smtpd_tls_security_level = may
+smtpd_tls_cert_file = /etc/postfix/tls/cert.pem
+smtpd_tls_key_file = /etc/postfix/tls/key.pem
+
+message_size_limit = 26214400
+mailbox_size_limit = 0
+maillog_file = /dev/stdout
