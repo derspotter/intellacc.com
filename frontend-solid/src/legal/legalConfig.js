@@ -14,8 +14,9 @@ export const legalConfig = {
     name: '',
     // Street + number, postal code + city, country — use \n for line breaks
     address: '',
-    // Contact email shown on all three pages
-    email: '',
+    // Contact email shown on all three pages (self-hosted inbound,
+    // verified working 2026-07-29 — Maildir at backend/mail-in/data/)
+    email: 'kontakt@intellacc.com',
     // Optional but recommended as the second contact channel
     phone: ''
   },
