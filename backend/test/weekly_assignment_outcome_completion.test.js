@@ -329,6 +329,25 @@ describe('Weekly assignment completion counts multi-outcome trades', () => {
     expect(statusRes.body.assignment.event_id).toBe(eventId);
     expect(statusRes.body.assignment.has_stake).toBe(true);
     expect(Number(statusRes.body.assignment.stake_amount)).toBeGreaterThanOrEqual(2);
+
+    // 2 RP staked < 10 RP required: the prompt must not report the week as done,
+    // or the card would hide while the batch job would still penalize.
+    expect(statusRes.body.hasStaked).toBe(false);
+
+    await insertMarketOutcomeUpdate({
+      userId,
+      eventId,
+      outcomeId,
+      stakeAmount: 8,
+      createdAt: new Date()
+    });
+
+    const statusRes2 = await request(app)
+      .get(`/api/weekly/user/${userId}/status`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(statusRes2.statusCode).toBe(200);
+    expect(statusRes2.body.hasStaked).toBe(true);
   });
 
   test('process-completed marks a user complete for a numeric distribution trade journaled in distribution_trades', async () => {

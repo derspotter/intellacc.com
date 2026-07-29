@@ -126,22 +126,20 @@ const getUserWeeklyStatus = async (req, res) => {
     
     const status = await weeklyAssignmentService.getUserWeeklyStatus(userId);
 
-    // Live check: has the user already put a stake on the assigned event?
+    // Live check: has the user already met this week's stake requirement?
     // The authoritative `completed` flag is only set by the weekly batch job
     // after the week ends — the UI needs this to hide the prompt immediately.
+    // Mirrors the batch criterion (this week's summed stake >= requirement),
+    // so the card never disappears while the user would still be penalized.
     let hasStaked = false;
     if (status?.event_id && !status.weekly_assignment_completed) {
-      const staked = await db.query(`
-        SELECT EXISTS (SELECT 1 FROM user_shares
-                        WHERE user_id = $1 AND event_id = $2
-                          AND (staked_yes_ledger > 0 OR staked_no_ledger > 0))
-            OR EXISTS (SELECT 1 FROM user_outcome_shares
-                        WHERE user_id = $1 AND event_id = $2 AND shares > 0)
-            OR EXISTS (SELECT 1 FROM numeric_position_basis
-                        WHERE user_id = $1 AND event_id = $2 AND basis_ledger > 0)
-            AS has_staked
-      `, [userId, status.event_id]);
-      hasStaked = !!staked.rows[0]?.has_staked;
+      try {
+        const stakeLedger = BigInt(status.stake_amount_ledger || 0);
+        const requiredLedger = BigInt(status.required_stake_ledger || 0);
+        hasStaked = stakeLedger > 0n && stakeLedger >= requiredLedger;
+      } catch {
+        hasStaked = !!status.has_stake;
+      }
     }
 
     res.status(200).json({

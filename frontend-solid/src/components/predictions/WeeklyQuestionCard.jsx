@@ -38,6 +38,9 @@ export default function WeeklyQuestionCard() {
     return a.event_title || `Event #${a.event_id}`;
   };
 
+  const stakedRp = () => Number(assignment()?.stake_amount_ledger || 0) / 1_000_000;
+  const requiredRp = () => assignment()?.min_stake_rp || null;
+
   const goStake = () => {
     const a = assignment();
     if (!a?.event_id) return;
@@ -49,6 +52,11 @@ export default function WeeklyQuestionCard() {
       <div class="weekly-question-card">
         <div class="label">Your weekly question</div>
         <p class="weekly-question-title">{title()}</p>
+        <Show when={stakedRp() > 0 && requiredRp()}>
+          <p class="weekly-question-progress">
+            Staked {stakedRp().toFixed(2)} of {requiredRp()} RP required
+          </p>
+        </Show>
         <button type="button" class="post-action" onClick={goStake}>
           Stake now
         </button>

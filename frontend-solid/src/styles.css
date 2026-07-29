@@ -7890,6 +7890,7 @@ body.skin-terminal * {
 .weekly-question-card { margin-bottom: 1rem; padding: 0.85rem 1rem; border: 1px solid var(--primary-color); background: rgba(var(--primary-color-rgb), 0.06); }
 .weekly-question-card .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.75; }
 .weekly-question-card .weekly-question-title { margin: 0.35rem 0 0.65rem; font-weight: 600; }
+.weekly-question-card .weekly-question-progress { margin: 0 0 0.65rem; font-size: 0.8rem; color: var(--secondary-text); }
 
 .feed-mix-help { font-size: 0.85rem; color: var(--secondary-text); margin: 0 0 0.75rem; }
 .feed-mix-channels { display: flex; gap: 28px; justify-content: center; padding: 6px 0 10px; }

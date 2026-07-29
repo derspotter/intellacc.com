@@ -60,7 +60,7 @@ export const ChatPanel = () => {
 
     const refreshPeerVerification = async () => {
         const peer = dmPeerId();
-        if (!peer || vaultStore.state.locked) {
+        if (!peer || vaultStore.state.isLocked) {
             setPeerVerification(null);
             return;
         }
@@ -73,7 +73,7 @@ export const ChatPanel = () => {
 
     createEffect(() => {
         void selectedConversation();
-        void vaultStore.state.locked;
+        void vaultStore.state.isLocked;
         void messagingStore.fingerprintWarnings;
         void refreshPeerVerification();
     });
@@ -200,7 +200,7 @@ export const ChatPanel = () => {
     // Vault unlock: load conversations + drain pending relay queue.
     let wasLocked = true;
     createEffect(() => {
-        const locked = vaultStore.state.locked;
+        const locked = vaultStore.state.isLocked;
         if (wasLocked && !locked) {
             (async () => {
                 await processPendingQueue().catch(() => {});
@@ -231,7 +231,7 @@ export const ChatPanel = () => {
             if (disposed) return;
 
             // If vault is locked, we can't process MLS. Still keep unread counters.
-            if (vaultStore.state.locked) {
+            if (vaultStore.state.isLocked) {
                 for (const gid of groupIds) bumpUnread(gid);
                 return;
             }
@@ -443,7 +443,7 @@ export const ChatPanel = () => {
 
     return (
         <Panel title="[3] COMMS // E2EE" class="h-full flex flex-col font-mono text-xs">
-            <Show when={vaultStore.state.locked}>
+            <Show when={vaultStore.state.isLocked}>
                 <div class="flex-1 flex flex-col items-center justify-center p-4 bg-bb-bg">
                     <div class="w-full max-w-xs border border-bb-border p-4 bg-bb-panel shadow-glow-red">
                         <form onSubmit={handleUnlock} class="flex flex-col gap-2">
@@ -473,7 +473,7 @@ export const ChatPanel = () => {
                 </div>
             </Show>
 
-            <Show when={!vaultStore.state.locked}>
+            <Show when={!vaultStore.state.isLocked}>
                 <div class="relative flex flex-1 min-h-0 bg-bb-bg text-bb-text font-mono">
                     <Show when={sidebarOpen()}>
                         <div
