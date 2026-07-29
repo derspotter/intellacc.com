@@ -63,7 +63,7 @@ docker compose up -d --build prediction-engine
 ## Key Technical Details
 
 ### Frontend (`frontend-solid/`)
-- **Framework**: SolidJS + Vite, container `intellacc_frontend_solid` (serves a production `vite preview` build on port 4174)
+- **Framework**: SolidJS + Vite, container `intellacc_frontend_solid` (builds on container start, nginx serves `dist/` on port 4174 — see `frontend-solid/nginx.conf`)
 - **State**: Stores in `src/store/` (messaging, vault, user)
 - **Routing**: Hash-based (`#home`, `#predictions`, `#profile`, `#messages`, `#analytics`)
 - **E2EE Client**: `shared/mls/coreCryptoClient.js` - OpenMLS WASM wrapper shared via the `@shared` Vite alias (exposed as `window.coreCryptoClient` for E2E)

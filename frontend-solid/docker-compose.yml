@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: intellacc_frontend_solid
-    command: sh -lc "npm ci --legacy-peer-deps && npm run build && npm run preview -- --host 0.0.0.0 --port 4174"
+    command: sh -lc "npm ci --legacy-peer-deps && npm run build && exec nginx -c /app/nginx.conf -g 'daemon off;'"
     environment:
       VITE_API_PROXY_TARGET: http://intellacc_backend:3000
       VITE_SERVER_PORT: 4174
