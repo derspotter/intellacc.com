@@ -21,11 +21,34 @@ test('redistribute keeps locked sliders fixed', () => {
   assert.equal(sum(out), 100);
 });
 
-test('redistribute is proportional to current values', () => {
+test('redistribute preserves pairwise differences (equal-delta)', () => {
   const out = redistribute({ accuracy: 40, followers: 30, likes: 20, views: 10 }, noLocks, 'accuracy', 60);
   assert.equal(out.accuracy, 60);
-  assert.equal(sum(out), 100);
-  assert.ok(out.followers > out.likes && out.likes > out.views);
+  assert.ok(Math.abs(sum(out) - 100) < 1e-9);
+  // -20 spread equally: each free slider drops by 20/3
+  assert.ok(Math.abs((out.followers - out.likes) - 10) < 1e-9);
+  assert.ok(Math.abs((out.likes - out.views) - 10) < 1e-9);
+});
+
+test('redistribute keeps equal sliders equal across many small drags', () => {
+  let w = { accuracy: 25, followers: 25, likes: 25, views: 25 };
+  const locks = { ...noLocks, views: true };
+  // wiggle accuracy up and down repeatedly — followers/likes must stay equal
+  for (let i = 0; i < 40; i++) {
+    w = redistribute(w, locks, 'accuracy', w.accuracy + (i % 2 === 0 ? 1 : -1));
+    assert.ok(Math.abs(w.followers - w.likes) < 1e-9, `drifted at step ${i}`);
+  }
+  assert.equal(w.views, 25);
+  assert.ok(Math.abs(sum(w) - 100) < 1e-9);
+});
+
+test('redistribute clamps a free slider at 0 and spills to the rest', () => {
+  const out = redistribute({ accuracy: 40, followers: 50, likes: 5, views: 5 }, noLocks, 'accuracy', 70);
+  // -30 over three: likes/views hit 0 (-10 each would go negative), spill lands on followers
+  assert.equal(out.likes, 0);
+  assert.equal(out.views, 0);
+  assert.ok(Math.abs(out.followers - 30) < 1e-9);
+  assert.ok(Math.abs(sum(out) - 100) < 1e-9);
 });
 
 test('redistribute clamps the dragged slider to 100 minus locked', () => {

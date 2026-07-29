@@ -3,14 +3,18 @@ export const KEYS = ['accuracy', 'followers', 'likes', 'views'];
 // Recompute the four weights when one slider is dragged.
 // weights/locks: objects keyed by KEYS; key: dragged key; value: desired 0-100.
 // Locked sliders never move; the dragged slider clamps to [0, 100 - sum(locked)];
-// the remaining budget is split among the unlocked, non-dragged sliders
-// proportionally to their current values (equal split if all zero). Integer
-// result summing to exactly 100 via largest-remainder rounding.
+// the remaining budget change is absorbed in EQUAL absolute shares by the
+// unlocked, non-dragged sliders, so their pairwise differences are preserved
+// ("the others rise and fall the same"). A slider hitting 0 spills its
+// overshoot onto the remaining free sliders.
+// Values are deliberately fractional: rounding on every drag event made
+// equal sliders drift apart. The UI rounds for display; the save path
+// normalizes to integers summing to 100.
 export function redistribute(weights, locks, key, value) {
   if (locks[key]) return { ...weights };
   const lockedSum = KEYS.filter((k) => k !== key && locks[k]).reduce((s, k) => s + weights[k], 0);
   const maxForKey = 100 - lockedSum;
-  const v = Math.round(Math.max(0, Math.min(maxForKey, value)));
+  const v = Math.max(0, Math.min(maxForKey, value));
 
   const out = { ...weights };
   out[key] = v;
@@ -23,15 +27,30 @@ export function redistribute(weights, locks, key, value) {
   }
 
   const budget = maxForKey - v;
-  const freeSum = free.reduce((s, k) => s + weights[k], 0);
-  const raw = {};
-  for (const k of free) raw[k] = freeSum > 0 ? budget * (weights[k] / freeSum) : budget / free.length;
-
-  let used = 0;
-  for (const k of free) { out[k] = Math.floor(raw[k]); used += out[k]; }
-  let remainder = budget - used;
-  const byFrac = [...free].sort((a, b) => (raw[b] - Math.floor(raw[b])) - (raw[a] - Math.floor(raw[a])));
-  for (let i = 0; i < remainder; i++) out[byFrac[i % byFrac.length]] += 1;
+  let pool = free.map((k) => ({ k, val: weights[k] }));
+  let delta = budget - pool.reduce((s, e) => s + e.val, 0);
+  while (pool.length > 0 && Math.abs(delta) > 1e-9) {
+    const per = delta / pool.length;
+    delta = 0;
+    const kept = [];
+    for (const e of pool) {
+      const target = e.val + per;
+      if (target < 0) {
+        delta += target; // negative overshoot spills to the remaining pool
+        out[e.k] = 0;
+      } else {
+        e.val = target;
+        kept.push(e);
+      }
+    }
+    if (kept.length === pool.length) {
+      // nothing clamped this round — distribution is final
+      pool = kept;
+      break;
+    }
+    pool = kept;
+  }
+  for (const e of pool) out[e.k] = e.val;
   return out;
 }
 

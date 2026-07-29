@@ -68,7 +68,8 @@ export default function FeedMixPanel() {
   const save = async () => {
     setSaving(true); setError(''); setMessage('');
     try {
-      await saveFeedWeights(weights());
+      // weights are fractional during drags; persist clean integers.
+      await saveFeedWeights(normalizeWeights(weights()) || weights());
       setMessage('Feed mix saved.');
     } catch (err) {
       setError(err?.message || 'Failed to save.');
@@ -87,14 +88,14 @@ export default function FeedMixPanel() {
             let trackRef;
             return (
               <div class="feed-mix-ch">
-                <div class="feed-mix-pct">{weights()[key]}%</div>
+                <div class="feed-mix-pct">{Math.round(weights()[key])}%</div>
                 <div
                   class="feed-mix-track"
                   ref={(el) => (trackRef = el)}
                   role="slider"
                   tabindex="0"
                   aria-label={LABEL[key]}
-                  aria-valuenow={weights()[key]}
+                  aria-valuenow={Math.round(weights()[key])}
                   aria-valuemin="0"
                   aria-valuemax="100"
                   onPointerDown={(e) => startDrag(key, trackRef)(e)}
