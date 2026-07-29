@@ -146,11 +146,23 @@ export default function HomePage() {
   return (
     <section class="home-page">
       <Show when={!isAuthenticated()}>
-        <div class="login-notice">
-          <p>Sign in to create posts and see personalized content.</p>
-          <button type="button" onClick={() => (window.location.hash = 'login')}>
-            Log in
-          </button>
+        <div class="hero-blurb">
+          <h1>Social prediction markets</h1>
+          <p>
+            Intellacc is a social network built around forecasting: post and
+            follow like on any feed, but back your claims by trading on
+            real-world questions with reputation points. Accuracy is tracked,
+            visible, and decides whose voice carries. Messaging is end-to-end
+            encrypted.
+          </p>
+          <div class="hero-actions">
+            <button type="button" class="btn-primary" onClick={() => (window.location.hash = 'signup')}>
+              Create account
+            </button>
+            <button type="button" onClick={() => (window.location.hash = 'login')}>
+              Log in
+            </button>
+          </div>
         </div>
       </Show>
       
