@@ -2,6 +2,7 @@ import { createSignal, Show, For, createEffect, onCleanup } from "solid-js";
 import { Panel } from "./ui/Panel";
 import vaultService from "../services/mls/vaultService";
 import vaultStore from "../store/vaultStore";
+import { joinVaultBootstrap } from "../services/mls/vaultBootstrap";
 import { userData, getToken } from "../services/tokenService";
 import { api } from "../services/api";
 import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
@@ -394,6 +395,14 @@ export const ChatPanel = () => {
         const userId = user?.username || (user?.userId ? String(user.userId) : null);
         if (!userId) throw new Error("Wait for login...");
 
+        // Join a still-running login-time bootstrap rather than racing a
+        // second setup against the same vaultService singleton.
+        const inflight = joinVaultBootstrap();
+        if (inflight) {
+            await inflight;
+            if (!vaultStore.state.isLocked) return;
+        }
+
         const success = await vaultService.findAndUnlock(pw, userId);
         if (!success) {
             await vaultService.setupKeystoreWithPassword(pw, userId);
@@ -445,7 +454,12 @@ export const ChatPanel = () => {
         <Panel title="[3] COMMS // E2EE" class="h-full flex flex-col font-mono text-xs">
             <Show when={vaultStore.state.isLocked}>
                 <div class="flex-1 flex flex-col items-center justify-center p-4 bg-bb-bg">
-                    <div class="w-full max-w-xs border border-bb-border p-4 bg-bb-panel shadow-glow-red">
+                    <Show when={vaultStore.state.bootstrapping}>
+                        <div class="text-[10px] text-bb-muted text-center leading-tight">
+                            SETTING UP ENCRYPTION FOR THIS DEVICE...
+                        </div>
+                    </Show>
+                    <div class={`w-full max-w-xs border border-bb-border p-4 bg-bb-panel shadow-glow-red ${vaultStore.state.bootstrapping ? 'hidden' : ''}`}>
                         <form onSubmit={handleUnlock} class="flex flex-col gap-2">
                             <div class="text-[10px] text-bb-muted mb-2 text-center leading-tight">
                                 NO LOCAL KEYS FOUND.<br />ENTER PASSWORD TO UNLOCK.

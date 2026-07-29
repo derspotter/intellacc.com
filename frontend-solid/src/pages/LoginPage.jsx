@@ -1,5 +1,6 @@
 import { createSignal, Show } from 'solid-js';
 import { login, isAuthenticated, saveToken, clearToken, getCurrentUserId } from '../services/auth';
+import { startVaultLoginBootstrap } from '../services/mls/vaultBootstrap';
 
 const normalizeLoginError = (message) => {
   const text = String(message || '').trim();
@@ -47,25 +48,16 @@ export default function LoginPage() {
         clearToken();
         saveToken(response.token);
 
-        // Auto-unlock (or first-time set up) the MLS vault with the login
-        // password, matching LoginModal/AuthScreens — without this, encrypted
-        // messaging stays locked after a login through this page.
-        try {
-          const userId = getCurrentUserId();
-          if (userId) {
-            const { default: vaultStore } = await import('../store/vaultStore.js');
-            const { default: vaultService } = await import('../services/mls/vaultService.js');
-            vaultStore.setUserId(userId);
-            vaultService.setUserId?.(userId);
-            const unlocked = await vaultService.findAndUnlock(passwordValue, userId);
-            if (!unlocked) {
-              await vaultService.setupKeystoreWithPassword(passwordValue);
-            }
-          }
-        } catch (vaultErr) {
-          console.warn('[LoginPage] Vault auto-unlock failed:', vaultErr);
+        // Unlock (or first-time set up) the MLS vault in the BACKGROUND —
+        // awaiting it here blocked navigation for the whole crypto sequence
+        // (2-5s on first devices). vaultBootstrap serializes the work so the
+        // messaging unlock forms join it instead of racing it.
+        const userId = getCurrentUserId();
+        if (userId) {
+          startVaultLoginBootstrap(userId, passwordValue);
         }
 
+        setPassword('');
         setMessage('Login successful. Redirecting…');
         window.location.hash = 'home';
       }

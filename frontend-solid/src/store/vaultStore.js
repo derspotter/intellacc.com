@@ -9,6 +9,10 @@ const [state, setState] = createStore({
     isLocked: true,
     vaultExists: false,
 
+    // Login-time background bootstrap in progress (vaultBootstrap.js) —
+    // unlock UIs show progress instead of a password form while true.
+    bootstrapping: false,
+
     // Auto-lock settings
     autoLockMinutes: 15,
     lastActivity: Date.now(),
@@ -36,6 +40,7 @@ const vaultStore = {
     // Direct property access (getters for compatibility with master's vaultStore.isLocked pattern)
     get isLocked() { return state.isLocked; },
     get vaultExists() { return state.vaultExists; },
+    get bootstrapping() { return state.bootstrapping; },
     get autoLockMinutes() { return state.autoLockMinutes; },
     get lastActivity() { return state.lastActivity; },
     get showUnlockModal() { return state.showUnlockModal; },
@@ -63,6 +68,10 @@ const vaultStore = {
 
     setVaultExists(exists) {
         setState('vaultExists', exists);
+    },
+
+    setBootstrapping(value) {
+        setState('bootstrapping', value);
     },
 
     setAutoLockMinutes(minutes) {

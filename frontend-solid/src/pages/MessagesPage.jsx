@@ -3,6 +3,7 @@ import { getDirectMessages, getUser, getUserByUsername, searchUsers } from '../s
 import { getCurrentUserId as getAuthUserId, isAuthenticated } from '../services/auth';
 import vaultStore from '../store/vaultStore';
 import vaultService from '../services/mls/vaultService';
+import { joinVaultBootstrap } from '../services/mls/vaultBootstrap';
 import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import { onMlsMessage, onMlsWelcome } from '../services/socket';
 import { DeviceLinkModal } from '../components/vault/DeviceLinkModal';
@@ -532,6 +533,16 @@ export default function MessagesPage() {
     setUnlockBusy(true);
     setUnlockError('');
     try {
+      // A login-time background bootstrap may still be running — join it
+      // instead of racing a second setup against the same singleton.
+      const inflight = joinVaultBootstrap();
+      if (inflight) {
+        await inflight;
+        if (!vaultStore.isLocked) {
+          setUnlockPassword('');
+          return;
+        }
+      }
       vaultStore.setUserId(userId);
       vaultService.setUserId?.(userId);
       const unlocked = await vaultService.findAndUnlock(pw, String(userId));
@@ -958,7 +969,13 @@ export default function MessagesPage() {
             </button>
           </div>
 
-          <Show when={isAuthenticated() && isLocked()}>
+          <Show when={isAuthenticated() && isLocked() && vaultStore.state.bootstrapping}>
+            <div class="vault-unlock-banner">
+              <p class="vault-unlock-hint">Setting up encryption for this device…</p>
+            </div>
+          </Show>
+
+          <Show when={isAuthenticated() && isLocked() && !vaultStore.state.bootstrapping}>
             <form class="vault-unlock-banner" onSubmit={handleVaultUnlock}>
               <p class="vault-unlock-hint">
                 Messaging is end-to-end encrypted. Enter your account password to unlock it on this device.

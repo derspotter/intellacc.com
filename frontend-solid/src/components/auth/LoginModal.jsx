@@ -1,7 +1,7 @@
 import { createSignal, onMount, onCleanup, Show } from "solid-js";
 import { api } from "../../services/api";
 import { saveToken, userData } from "../../services/tokenService";
-import vaultService from "../../services/mls/vaultService";
+import { startVaultLoginBootstrap } from "../../services/mls/vaultBootstrap";
 import { createFocusTrap, pushOverlay, popOverlay } from "../../utils/keyboard";
 
 export const LoginModal = () => {
@@ -36,21 +36,12 @@ export const LoginModal = () => {
             if (result && result.token) {
                 saveToken(result.token);
 
-                // Try to auto-unlock/setup vault after login
-                try {
-                    const user = userData();
-                    const userId = user?.username || String(user?.userId);
-                    if (userId) {
-                        // Set userId on vaultStore before vault operations (master reads from vaultStore.userId)
-                        const { default: vaultStore } = await import('../../store/vaultStore.js');
-                        vaultStore.setUserId(userId);
-                        const success = await vaultService.findAndUnlock(password(), userId);
-                        if (!success) {
-                            await vaultService.setupKeystoreWithPassword(password());
-                        }
-                    }
-                } catch (vaultErr) {
-                    console.warn('[LoginModal] Vault auto-unlock failed:', vaultErr);
+                // Unlock/set up the vault in the background (serialized in
+                // vaultBootstrap) so the modal closes immediately.
+                const user = userData();
+                const userId = user?.username || String(user?.userId);
+                if (userId) {
+                    startVaultLoginBootstrap(userId, password());
                 }
             } else {
                 setError('Login failed: No token received');
@@ -93,20 +84,11 @@ export const LoginModal = () => {
             if (result && result.token) {
                 saveToken(result.token);
 
-                // Try to auto-unlock/setup vault after login
-                try {
-                    const user = userData();
-                    const userId = user?.username || String(user?.userId);
-                    if (userId) {
-                        const { default: vaultStore } = await import('../../store/vaultStore.js');
-                        vaultStore.setUserId(userId);
-                        const success = await vaultService.findAndUnlock(regPassword, userId);
-                        if (!success) {
-                            await vaultService.setupKeystoreWithPassword(regPassword);
-                        }
-                    }
-                } catch (vaultErr) {
-                    console.warn('[LoginModal] Vault auto-unlock failed:', vaultErr);
+                // Same background bootstrap as the login path.
+                const user = userData();
+                const userId = user?.username || String(user?.userId);
+                if (userId) {
+                    startVaultLoginBootstrap(userId, regPassword);
                 }
             } else {
                 setError("Login failed: No token received");

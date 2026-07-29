@@ -8,7 +8,7 @@ import {
 } from '../../../../services/api';
 import { clearToken } from '../../../../services/auth';
 import { saveToken, userData, isLoggedIn } from '../../../../services/tokenService';
-import vaultService from '../../../../services/mls/vaultService';
+import { startVaultLoginBootstrap } from '../../../../services/mls/vaultBootstrap';
 
 // Full-screen logged-out auth layer, keyed by hash route segment. Mirrors the
 // van skin's dedicated auth pages (ForgotPasswordPage / ResetPasswordPage /
@@ -78,19 +78,12 @@ function SignupScreen() {
     if (!loginResult?.token) return false;
 
     saveToken(loginResult.token);
-    try {
-      const user = userData();
-      const userId = user?.username || (user?.userId != null ? String(user.userId) : null);
-      if (userId) {
-        const { default: vaultStore } = await import('../../../../store/vaultStore.js');
-        vaultStore.setUserId(userId);
-        const unlocked = await vaultService.findAndUnlock(passwordValue, userId);
-        if (!unlocked) {
-          await vaultService.setupKeystoreWithPassword(passwordValue);
-        }
-      }
-    } catch (vaultErr) {
-      console.warn('[SignupScreen] Vault auto-unlock failed:', vaultErr);
+    // Background vault setup (serialized in vaultBootstrap) — no need to
+    // block the signup flow on the crypto sequence.
+    const user = userData();
+    const userId = user?.username || (user?.userId != null ? String(user.userId) : null);
+    if (userId) {
+      startVaultLoginBootstrap(userId, passwordValue);
     }
     return true;
   };
