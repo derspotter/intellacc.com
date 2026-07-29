@@ -5,18 +5,22 @@ import LoginPage from './pages/LoginPage';
 import SignUpPage from './pages/SignUpPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
-import ProfilePage from './pages/ProfilePage';
-import PredictionsPage from './pages/PredictionsPage';
-import AnalyticsPage from './pages/AnalyticsPage';
-import NetworkPage from './pages/NetworkPage';
-import GroupsPage from './pages/GroupsPage';
-import GroupPage from './pages/GroupPage';
-import MessagesPage from './pages/MessagesPage';
-import NotificationsPage from './pages/NotificationsPage';
-import SettingsPage from './pages/SettingsPage';
-import VerifyEmailPage from './pages/VerifyEmailPage';
-import SearchPage from './pages/SearchPage';
+import SearchPage from './pages/SearchPage'; // already eager via HomePage's static import
 import LegalPage from './pages/LegalPage';
+
+// Route chunks: only first-paint pages (home + auth) load eagerly. Lazying
+// MessagesPage also pulls the whole MLS/vault graph out of the initial
+// bundle — it loads when someone actually opens messaging.
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const PredictionsPage = lazy(() => import('./pages/PredictionsPage'));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
+const NetworkPage = lazy(() => import('./pages/NetworkPage'));
+const GroupsPage = lazy(() => import('./pages/GroupsPage'));
+const GroupPage = lazy(() => import('./pages/GroupPage'));
+const MessagesPage = lazy(() => import('./pages/MessagesPage'));
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const VerifyEmailPage = lazy(() => import('./pages/VerifyEmailPage'));
 import { legalReady } from './legal/legalConfig';
 import TopicPicker from './components/onboarding/TopicPicker';
 import { api } from './services/api';

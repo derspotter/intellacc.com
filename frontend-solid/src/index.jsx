@@ -20,26 +20,6 @@ try {
 
 const RUNTIME_RESET_KEY = 'solid_runtime_reset_v1';
 
-const waitForWindowLoad = async () => {
-  if (typeof document === 'undefined') return;
-  if (document.readyState === 'complete') return;
-  await new Promise((resolve) => {
-    window.addEventListener('load', resolve, { once: true });
-  });
-};
-
-const waitForInitialLayoutStability = async () => {
-  await waitForWindowLoad();
-
-  if (typeof document !== 'undefined' && document.fonts?.ready) {
-    try {
-      await document.fonts.ready;
-    } catch {}
-  }
-
-  await new Promise((resolve) => requestAnimationFrame(() => resolve()));
-};
-
 const resetLegacyRuntimeState = async () => {
   if (typeof window === 'undefined') return;
   if (window.location.hostname !== 'intellacc.com') return;
@@ -75,11 +55,16 @@ const ensureCoreServiceWorker = async () => {
 };
 
 initializeSkinProvider();
+
+// Render immediately — the old boot path waited for window.load,
+// document.fonts.ready, cache cleanup, AND service-worker registration
+// before first paint, turning a ~700B HTML response into a blank page until
+// every subresource settled. Fonts are preloaded with font-display: swap,
+// so painting early is safe; the housekeeping below runs after render and
+// must never block it.
+render(() => <App />, root);
+
 Promise.resolve(resetLegacyRuntimeState())
   .catch(() => null)
   .then(() => ensureCoreServiceWorker())
-  .catch(() => null)
-  .then(() => waitForInitialLayoutStability())
-  .finally(() => {
-    render(() => <App />, root);
-  });
+  .catch(() => null);
