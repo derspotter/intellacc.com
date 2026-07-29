@@ -168,6 +168,10 @@ async function loginOnSolid(page, user) {
   await page.addInitScript((token) => localStorage.setItem('token', token), user.token);
   await page.goto(`${SOLID_URL}/#messages`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('a[href="#messages"]').first()).toBeVisible({ timeout: 30000 });
+  // MessagesPage is a lazy route chunk (code-splitting, 2026-07-29): the MLS
+  // client only lands on window once that chunk loads. Wait for it instead of
+  // assuming eager availability, or provisioning races the import.
+  await page.waitForFunction(() => !!window.coreCryptoClient, null, { timeout: 30000 });
 }
 
 // Bind the pre-verified device to this browser session, set up the vault
