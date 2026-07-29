@@ -6549,10 +6549,14 @@ body.skin-van :is(.device-link-modal, .safety-numbers-modal) .bg-market-down {
 }
 
 .sidebar-legal {
+  /* Desktop keeps the sidebar clean — legal links live in Settings, the
+     logged-out hero, and the auth pages instead (§5 DDG two-click rule).
+     The mobile drawer (the "More" sheet) shows them, see the <=1024px
+     media query. */
+  display: none;
   margin-top: 2.5rem;
   padding: 0.5rem 1rem;
   width: 100%;
-  display: flex;
   justify-content: flex-end;
   gap: 0.4rem;
   font-size: 0.68rem;
@@ -6592,6 +6596,29 @@ body.skin-van :is(.device-link-modal, .safety-numbers-modal) .bg-market-down {
 .hero-actions {
   display: flex;
   gap: 0.75rem;
+}
+
+.hero-legal {
+  margin: 1rem 0 0;
+  font-size: 0.7rem;
+  color: var(--secondary-text);
+}
+
+.hero-legal a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.hero-legal a:hover {
+  text-decoration: underline;
+}
+
+.settings-legal-links {
+  font-size: 0.9rem;
+}
+
+.settings-legal-links a {
+  color: var(--text-color);
 }
 
 .signup-terms-notice {
@@ -7975,6 +8002,12 @@ body.skin-terminal * {
   /* Desktop's 10vh centered-column offset is dead space on small screens. */
   .wrapper {
     padding-top: 1rem;
+  }
+
+  /* The drawer doubles as the "More" sheet — legal links belong here on
+     mobile (hidden on desktop, see .sidebar-legal above). */
+  .sidebar-legal {
+    display: flex;
   }
 
   .mobile-tab-bar {

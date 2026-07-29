@@ -163,6 +163,13 @@ export default function HomePage() {
               Log in
             </button>
           </div>
+          <p class="hero-legal">
+            <a href="#impressum">Impressum</a>
+            {' · '}
+            <a href="#datenschutz">Datenschutz</a>
+            {' · '}
+            <a href="#terms">AGB</a>
+          </p>
         </div>
       </Show>
       

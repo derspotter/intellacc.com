@@ -11,6 +11,7 @@ import PasswordResetCancel from '../components/settings/PasswordResetCancel';
 import DangerZone from '../components/settings/DangerZone';
 import AiFlaggedContent from '../components/admin/AiFlaggedContent';
 import { isAdmin } from '../services/auth';
+import { legalReady } from '../legal/legalConfig';
 
 export default function SettingsPage() {
   const [isDarkMode, setIsDarkMode] = createSignal(false);
@@ -82,6 +83,20 @@ export default function SettingsPage() {
       <VaultSettings />
       <PasswordResetCancel />
       <DangerZone />
+      {/* Desktop path to the legal pages (sidebar stays clean): Settings is
+          one click from everywhere, these are the second. */}
+      <Show when={legalReady()}>
+        <div class="settings-section">
+          <h3 class="settings-section-title">Rechtliches</h3>
+          <p class="settings-legal-links">
+            <a href="#impressum">Impressum</a>
+            {' · '}
+            <a href="#datenschutz">Datenschutzerklärung</a>
+            {' · '}
+            <a href="#terms">Nutzungsbedingungen</a>
+          </p>
+        </div>
+      </Show>
     </section>
   );
 }
