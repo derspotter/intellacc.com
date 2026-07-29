@@ -52,19 +52,31 @@ export default function HomePage() {
 
       // Empty following-feed on a reset load: fall back to the discover feed
       // (top predictors in the caller's topics) so the home page is never blank.
+      // The feed endpoint inlines the fallback payload to save a round trip;
+      // the separate request remains for older backend responses without it.
       if (reset && usingFeed() && nextPosts.length === 0) {
-        try {
-          const discover = await api.discover.feed();
-          const discoverItems = getPostsPayloadItems(discover?.items);
-          if (discoverItems.length > 0) {
-            setDiscoverMode(true);
-            setPosts(discoverItems);
-            setHasMore(false);
-            setNextCursor(null);
-            return;
+        const inlineItems = getPostsPayloadItems(response?.discover?.items);
+        if (inlineItems.length > 0) {
+          setDiscoverMode(true);
+          setPosts(inlineItems);
+          setHasMore(false);
+          setNextCursor(null);
+          return;
+        }
+        if (!response?.discover) {
+          try {
+            const discover = await api.discover.feed();
+            const discoverItems = getPostsPayloadItems(discover?.items);
+            if (discoverItems.length > 0) {
+              setDiscoverMode(true);
+              setPosts(discoverItems);
+              setHasMore(false);
+              setNextCursor(null);
+              return;
+            }
+          } catch (discoverErr) {
+            console.error('Discover feed fallback failed:', discoverErr);
           }
-        } catch (discoverErr) {
-          console.error('Discover feed fallback failed:', discoverErr);
         }
       }
 

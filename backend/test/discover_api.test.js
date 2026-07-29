@@ -95,4 +95,28 @@ describe('Discover API', () => {
     expect((await request(app).get('/api/discover/predictors')).statusCode).toBe(401);
     expect((await request(app).get('/api/discover/feed')).statusCode).toBe(401);
   });
+
+  test('empty following-feed inlines the discover fallback payload', async () => {
+    // viewer follows nobody, so the first feed page is empty and should carry
+    // the discover payload inline (saves clients a second round trip).
+    const res = await request(app).get('/api/feed?limit=20').set('Authorization', `Bearer ${viewer.token}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.items).toEqual([]);
+    expect(res.body.discover).toBeDefined();
+    expect(res.body.discover.items.map((p) => p.user_id)).toContain(ace.id);
+    expect(res.body.discover.predictors.map((p) => p.id)).toContain(ace.id);
+  });
+
+  test('non-empty following-feed omits the discover payload', async () => {
+    // viewer follows ace -> feed has posts -> no discover payload attached.
+    await request(app).post(`/api/users/${ace.id}/follow`).set('Authorization', `Bearer ${viewer.token}`);
+    try {
+      const res = await request(app).get('/api/feed?limit=20').set('Authorization', `Bearer ${viewer.token}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.items.map((p) => p.user_id)).toContain(ace.id);
+      expect(res.body.discover).toBeUndefined();
+    } finally {
+      await db.query('DELETE FROM follows WHERE follower_id = $1 AND following_id = $2', [viewer.id, ace.id]);
+    }
+  });
 });

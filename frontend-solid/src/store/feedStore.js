@@ -54,23 +54,28 @@ const fetchPage = async ({ reset }) => {
         const paging = getPostsPaging(response);
 
         // Empty following-feed on reset: discover fallback (top predictors).
+        // The feed endpoint inlines the fallback payload to save a round trip;
+        // the separate request remains for older backend responses without it.
         if (reset && usingFeed && paging.items.length === 0) {
-            try {
-                const discover = await api.discover.feed();
-                if (!guard.isCurrent(token)) return;
-                const items = Array.isArray(discover?.items) ? discover.items : [];
-                if (items.length > 0) {
-                    setState({
-                        posts: items, usingFeed, discoverMode: true,
-                        hasMore: false, nextCursor: null,
-                        loading: false, loadingMore: false
-                    });
-                    return;
+            let items = Array.isArray(response?.discover?.items) ? response.discover.items : [];
+            if (items.length === 0 && !response?.discover) {
+                try {
+                    const discover = await api.discover.feed();
+                    if (!guard.isCurrent(token)) return;
+                    items = Array.isArray(discover?.items) ? discover.items : [];
+                } catch (err) {
+                    console.error('Discover fallback failed', err);
                 }
-            } catch (err) {
-                console.error('Discover fallback failed', err);
+                if (!guard.isCurrent(token)) return; // superseded while discover was in flight
             }
-            if (!guard.isCurrent(token)) return; // superseded while discover was in flight
+            if (items.length > 0) {
+                setState({
+                    posts: items, usingFeed, discoverMode: true,
+                    hasMore: false, nextCursor: null,
+                    loading: false, loadingMore: false
+                });
+                return;
+            }
         }
 
         setState({

@@ -67,29 +67,35 @@ exports.getPredictors = async (req, res) => {
   }
 };
 
+const discoverFeedFor = async (userId) => {
+  const predictors = await topPredictorsFor(userId);
+  if (predictors.length === 0) return { items: [], predictors: [] };
+
+  // $1 = viewer id, $2 = predictor ids array, $3 = feed limit
+  // buildPostVisibilityClause('$1') applies: is_hidden=FALSE + no block relationship
+  // This matches the same filter used in postController getFeed/getPosts.
+  const result = await db.query(
+    `SELECT p.*, u.username, u.avatar_url,
+            CASE WHEN EXISTS (SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1)
+                 THEN true ELSE false END AS liked_by_user
+     FROM posts p
+     JOIN users u ON p.user_id = u.id
+     WHERE p.user_id = ANY($2::int[])
+       AND p.parent_id IS NULL
+       AND p.is_comment = FALSE
+       AND ${buildPostVisibilityClause('$1')}
+     ORDER BY p.created_at DESC, p.id DESC
+     LIMIT $3`,
+    [userId, predictors.map((p) => p.id), FEED_LIMIT]
+  );
+  return { items: result.rows, predictors };
+};
+
+exports.discoverFeedFor = discoverFeedFor;
+
 exports.getFeed = async (req, res) => {
   try {
-    const predictors = await topPredictorsFor(req.user.id);
-    if (predictors.length === 0) return res.json({ items: [], predictors: [] });
-
-    // $1 = viewer id, $2 = predictor ids array, $3 = feed limit
-    // buildPostVisibilityClause('$1') applies: is_hidden=FALSE + no block relationship
-    // This matches the same filter used in postController getFeed/getPosts.
-    const result = await db.query(
-      `SELECT p.*, u.username, u.avatar_url,
-              CASE WHEN EXISTS (SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1)
-                   THEN true ELSE false END AS liked_by_user
-       FROM posts p
-       JOIN users u ON p.user_id = u.id
-       WHERE p.user_id = ANY($2::int[])
-         AND p.parent_id IS NULL
-         AND p.is_comment = FALSE
-         AND ${buildPostVisibilityClause('$1')}
-       ORDER BY p.created_at DESC, p.id DESC
-       LIMIT $3`,
-      [req.user.id, predictors.map((p) => p.id), FEED_LIMIT]
-    );
-    res.json({ items: result.rows, predictors });
+    res.json(await discoverFeedFor(req.user.id));
   } catch (err) {
     console.error('Error fetching discover feed:', err);
     res.status(500).json({ message: 'Failed to fetch discover feed' });

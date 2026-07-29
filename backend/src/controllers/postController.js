@@ -954,14 +954,11 @@ exports.deletePost = async (req, res) => {
 
 // Get personalized feed of posts from followed users
 exports.getFeed = async (req, res) => {
-  console.log("--- ENTERING getFeed function ---"); // Add entry log
   const userId = req.user.id; // Using standardized user object
   const viewerId = isAdminViewer(req) ? null : userId;
   const searchQuery = (req.query.q || '').trim();
 
   try {
-    console.log("getFeed called with userId:", userId);
-
     const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10) || 20, 1), 50);
     const cursor = parsePostCursor(req.query.cursor, 'global');
     if (req.query.cursor && !cursor) {
@@ -1047,15 +1044,6 @@ exports.getFeed = async (req, res) => {
       params
     );
 
-    // Log the raw result which should include reputation data
-    console.log("Raw feed query result:", result.rows.map(post => ({
-      id: post.id,
-      username: post.username,
-      user_total_reputation: post.user_total_reputation,
-      visibility_multiplier: post.visibility_multiplier,
-      liked_by_user: post.liked_by_user
-    })));
-
     const rows = result.rows || [];
     const hasMore = rows.length > limit;
     const items = hasMore ? rows.slice(0, limit) : rows;
@@ -1075,7 +1063,23 @@ exports.getFeed = async (req, res) => {
       });
     }
 
-    res.status(200).json({ items, hasMore, nextCursor });
+    const payload = { items, hasMore, nextCursor };
+
+    // Empty first page of the unfiltered following-feed: inline the discover
+    // fallback (top predictors in the caller's topics) so clients don't need a
+    // second round trip to render a non-blank home page.
+    if (items.length === 0 && !cursor && !searchQuery) {
+      try {
+        // Lazy require: discoverController requires this module at load time,
+        // so a top-level require here would create a circular import.
+        const { discoverFeedFor } = require('./discoverController');
+        payload.discover = await discoverFeedFor(userId);
+      } catch (discoverErr) {
+        console.error('Inline discover fallback failed:', discoverErr);
+      }
+    }
+
+    res.status(200).json(payload);
   } catch (err) {
     console.error("Error getting feed:", err);
     res.status(500).json({ message: "Internal server error" });
