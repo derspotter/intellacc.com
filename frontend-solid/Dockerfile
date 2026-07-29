@@ -1,10 +1,5 @@
 FROM node:20-alpine
 
-# nginx serves the production build (see nginx.conf); node stays in the image
-# because the production container builds from the mounted source on start
-# (restart-to-deploy) and the local dev compose runs `npm run dev` instead.
-RUN apk add --no-cache nginx
-
 WORKDIR /app
 
 # Copy package files first for better caching

@@ -37,8 +37,10 @@ docker compose up -d
 
 # View logs
 docker logs -f intellacc_backend
-docker logs -f intellacc_frontend_solid
 docker logs -f intellacc_prediction_engine
+
+# Deploy the frontend (build + rsync into Caddy's static dir, zero downtime)
+./scripts/deploy-frontend.sh
 
 # Database access
 docker exec -it intellacc_db psql -U intellacc_user -d intellaccdb
@@ -63,7 +65,7 @@ docker compose up -d --build prediction-engine
 ## Key Technical Details
 
 ### Frontend (`frontend-solid/`)
-- **Framework**: SolidJS + Vite, container `intellacc_frontend_solid` (builds on container start, nginx serves `dist/` on port 4174 — see `frontend-solid/nginx.conf`)
+- **Framework**: SolidJS + Vite. No long-running production container: Caddy serves the built SPA from `/var/opt/docker/caddy/site/intellacc`; deploy with `./scripts/deploy-frontend.sh` (one-shot build container + rsync)
 - **State**: Stores in `src/store/` (messaging, vault, user)
 - **Routing**: Hash-based (`#home`, `#predictions`, `#profile`, `#messages`, `#analytics`)
 - **E2EE Client**: `shared/mls/coreCryptoClient.js` - OpenMLS WASM wrapper shared via the `@shared` Vite alias (exposed as `window.coreCryptoClient` for E2E)

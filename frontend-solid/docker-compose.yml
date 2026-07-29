@@ -1,11 +1,16 @@
+# Build-only since 2026-07-29: Caddy serves the built SPA straight from
+# /var/opt/docker/caddy/site/intellacc. Deploy with scripts/deploy-frontend.sh
+# (build + rsync, zero downtime) — there is no long-running frontend container
+# in production anymore. The `build` profile keeps `docker compose up -d`
+# from starting one.
 services:
   frontend-solid:
-    restart: unless-stopped
+    profiles: ["build"]
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: intellacc_frontend_solid
-    command: sh -lc "npm ci --legacy-peer-deps && npm run build && exec nginx -c /app/nginx.conf -g 'daemon off;'"
+    container_name: intellacc_frontend_solid_build
+    command: sh -lc "npm ci --legacy-peer-deps && npm run build"
     environment:
       VITE_API_PROXY_TARGET: http://intellacc_backend:3000
       VITE_SERVER_PORT: 4174
