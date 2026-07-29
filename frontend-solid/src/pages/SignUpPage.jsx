@@ -127,6 +127,14 @@ export default function SignUpPage() {
               </Show>
 
               <div class="form-actions">
+                {/* §305 II BGB Einbeziehung: the terms notice must be visible
+                    at the moment of contract formation (same pattern X and
+                    Facebook use — no checkbox needed). */}
+                <p class="signup-terms-notice">
+                  By signing up you agree to the <a href="#terms">Terms of Use</a> and
+                  confirm you are at least 13 years old (under 16 with a guardian's
+                  consent). See also our <a href="#datenschutz">privacy policy</a>.
+                </p>
                 <button type="submit" class="btn-primary" disabled={pending()}>
                   {pending() ? 'Creating Account…' : 'Create Account'}
                 </button>

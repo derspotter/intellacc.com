@@ -6566,6 +6566,18 @@ body.skin-van :is(.device-link-modal, .safety-numbers-modal) .bg-market-down {
   text-decoration: underline;
 }
 
+.signup-terms-notice {
+  font-size: 0.8rem;
+  color: var(--secondary-text);
+  line-height: 1.4;
+  margin-bottom: 0.75rem;
+}
+
+.signup-terms-notice a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .auth-legal-links {
   position: fixed;
   bottom: 0.75rem;
