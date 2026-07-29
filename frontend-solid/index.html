@@ -18,6 +18,9 @@
     <meta name="twitter:description" content="A social network built around prediction markets: post, follow forecasters, and trade on real-world questions with reputation points." />
     <meta name="twitter:image" content="https://intellacc.com/icon-512.png" />
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <!-- The display font otherwise queues behind CSS parse — preload cuts a
+         round-trip off first styled paint (latin only; latin-ext is rare). -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/league-spartan-latin.woff2" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="mobile-web-app-capable" content="yes" />
