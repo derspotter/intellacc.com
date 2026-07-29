@@ -11,9 +11,9 @@
 export const legalConfig = {
   operator: {
     // Full name of the responsible person or company, e.g. 'Max Mustermann'
-    name: '',
+    name: 'Justus Spott',
     // Street + number, postal code + city, country — use \n for line breaks
-    address: '',
+    address: 'Tiergartenstraße 38\n40237 Düsseldorf\nDeutschland',
     // Contact email shown on all three pages (self-hosted inbound,
     // verified working 2026-07-29 — Maildir at backend/mail-in/data/)
     email: 'kontakt@intellacc.com',
