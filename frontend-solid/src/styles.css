@@ -2046,9 +2046,11 @@ body.dark-mode .post-action.liked:hover {
 
 .analytics-summary-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 0.75rem;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(80px, 1fr);
+  gap: 0.5rem;
   margin-bottom: 1rem;
+  overflow-x: auto;
 }
 
 .analytics-stat-card,
@@ -2063,18 +2065,22 @@ body.dark-mode .post-action.liked:hover {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  padding: 0.6rem 0.55rem;
+  min-width: 0;
 }
 
 .analytics-stat-label {
-  font-size: 0.8rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--secondary-text);
 }
 
 .analytics-stat-value {
-  font-size: 1.35rem;
+  font-size: 1.05rem;
   font-weight: 700;
+  overflow-wrap: break-word;
+  margin-top: auto;
 }
 
 .analytics-detail-grid {
