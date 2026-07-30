@@ -1155,10 +1155,32 @@ fn provider_enabled_for_sync_all(provider: ImportProvider) -> bool {
 
 fn provider_fetch_limit(provider: ImportProvider, full: bool) -> Option<usize> {
     if full {
-        None
+        // Full mode is a bounded newest-first deep refresh, NOT a catalog
+        // mirror: the one uncapped sweep ever completed (2026-07-30) imported
+        // Metaculus's entire open backlog — 10,903 events, 79% already past
+        // close — which had to be purged by hand.
+        Some(full_import_limit())
     } else {
         Some(provider_limit(provider))
     }
+}
+
+fn full_import_limit() -> usize {
+    env::var("IMPORT_FULL_LIMIT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|v| v.clamp(100, 20_000))
+        .unwrap_or(2_000)
+}
+
+/// Provider names sync_all_markets will run, for callers that trigger a
+/// background sync and poll run rows for completion.
+pub fn enabled_sync_provider_names() -> Vec<&'static str> {
+    ImportProvider::all()
+        .into_iter()
+        .filter(|provider| provider_enabled_for_sync_all(*provider))
+        .map(|provider| provider.as_str())
+        .collect()
 }
 
 fn embedding_to_vector_literal(values: &[f64]) -> String {
@@ -1640,5 +1662,16 @@ mod tests {
         assert_eq!(normalize_event_type("date"), "date");
         // Unknown types still default to binary (with a warning log).
         assert_eq!(normalize_event_type("conditional"), "binary");
+    }
+
+    #[test]
+    fn full_mode_is_always_capped() {
+        // Full sweeps must never run unbounded (the one uncapped sweep
+        // imported Metaculus's whole backlog); IMPORT_FULL_LIMIT tunes the
+        // cap but None is never returned.
+        for provider in super::ImportProvider::all() {
+            let limit = super::provider_fetch_limit(provider, true);
+            assert!(matches!(limit, Some(n) if (100..=20_000).contains(&n)));
+        }
     }
 }

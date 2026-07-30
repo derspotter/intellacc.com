@@ -467,6 +467,7 @@ struct ImportStatusQuery {
 #[derive(Debug, Deserialize)]
 struct ImportSyncQuery {
     full: Option<bool>,
+    background: Option<bool>,
 }
 
 async fn resolution_sync_endpoint(State(app_state): State<AppState>) -> ApiResult<Value> {
@@ -494,18 +495,38 @@ async fn sync_all_imports_endpoint(
     // tokio::spawn keeps the sync running to completion regardless; fast
     // (incremental) calls still return their real summary.
     let db = app_state.db.clone();
-    let sync_task = tokio::spawn(async move { market_import::sync_all_markets(&db, full).await });
+    let broadcast_state = app_state.clone();
+    // The spawned task owns the post-sync cache broadcast so it also fires in
+    // background mode, where nothing awaits the handle.
+    let sync_task = tokio::spawn(async move {
+        let result = market_import::sync_all_markets(&db, full).await;
+        if let Ok(ref runs) = result {
+            invalidate_and_broadcast(
+                &broadcast_state,
+                "external_import_sync_all",
+                json!({ "providers": runs.len(), "full": full }),
+            );
+        }
+        result
+    });
+
+    // background=true: fire-and-poll contract. Return immediately; callers
+    // watch GET /imports/status for a finished run per listed provider.
+    if params.background.unwrap_or(false) {
+        return Ok(Json(json!({
+            "success": true,
+            "started": true,
+            "background": true,
+            "full": full,
+            "providers": market_import::enabled_sync_provider_names(),
+        })));
+    }
     match sync_task
         .await
         .map_err(|join_err| anyhow::anyhow!("import sync task panicked: {}", join_err))
         .and_then(|res| res)
     {
         Ok(runs) => {
-            invalidate_and_broadcast(
-                &app_state,
-                "external_import_sync_all",
-                json!({ "providers": runs.len(), "full": full }),
-            );
             let summary = runs.iter().fold(
                 json!({
                     "fetched_count": 0,

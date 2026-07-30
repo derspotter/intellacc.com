@@ -1,5 +1,7 @@
 node_modules
 npm-debug.log
+# Live Postfix Maildir (root-owned — unreadable to the build-context sender)
+mail-in/data
 .git
 .gitignore
 README.md

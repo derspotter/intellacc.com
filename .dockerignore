@@ -1,0 +1,8 @@
+# Not needed in any image build; backend/mail-in/data is the live Postfix
+# Maildir (root-owned — unreadable to the build context sender).
+backend/mail-in/data
+node_modules
+**/node_modules
+frontend-solid/dist
+frontend-solid/test-results
+.git

@@ -318,7 +318,8 @@ router.get('/admin/post-match-usage/summary', authenticateJWT, requireAdmin, pos
 router.post('/admin/external-imports/sync-all', authenticateJWT, requireAdmin, async (req, res) => {
     try {
         const full = req.query.full === '1' || req.query.full === 'true' || req.body?.full === true;
-        const response = await fetch(`${PREDICTION_ENGINE_BASE_URL}/imports/sync-all?full=${full ? 'true' : 'false'}`, {
+        const background = req.query.background === '1' || req.query.background === 'true' || req.body?.background === true;
+        const response = await fetch(`${PREDICTION_ENGINE_BASE_URL}/imports/sync-all?full=${full ? 'true' : 'false'}&background=${background ? 'true' : 'false'}`, {
             method: 'POST',
             headers: predictionEngineHeaders
         });
