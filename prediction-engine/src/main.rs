@@ -488,7 +488,18 @@ async fn sync_all_imports_endpoint(
     Query(params): Query<ImportSyncQuery>,
 ) -> ApiResult<Value> {
     let full = params.full.unwrap_or(false);
-    match market_import::sync_all_markets(&app_state.db, full).await {
+    // Detached task: a full sweep outlives the backend proxy's client timeout,
+    // and axum drops the handler future when the client disconnects — which
+    // silently cancelled full sweeps mid-pagination (observed 2026-07-30).
+    // tokio::spawn keeps the sync running to completion regardless; fast
+    // (incremental) calls still return their real summary.
+    let db = app_state.db.clone();
+    let sync_task = tokio::spawn(async move { market_import::sync_all_markets(&db, full).await });
+    match sync_task
+        .await
+        .map_err(|join_err| anyhow::anyhow!("import sync task panicked: {}", join_err))
+        .and_then(|res| res)
+    {
         Ok(runs) => {
             invalidate_and_broadcast(
                 &app_state,

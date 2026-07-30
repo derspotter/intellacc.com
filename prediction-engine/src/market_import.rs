@@ -1099,11 +1099,22 @@ fn normalize_event_type(raw: &str) -> String {
     } else if value.contains("multi") || value.contains("choice") || value.contains("free_response")
     {
         "multiple_choice".to_string()
-    } else if value.contains("numeric") || value.contains("number") || value.contains("scalar") {
+    } else if value.contains("numeric")
+        || value.contains("number")
+        || value.contains("scalar")
+        || value == "discrete"
+    {
+        // Metaculus "discrete" = stepped numeric; traded as a binned numeric market.
         "numeric".to_string()
     } else if value.contains("date") || value.contains("time") {
         "date".to_string()
     } else {
+        // Unknown provider types once fell through silently and minted dead
+        // 50% binary markets (Metaculus "discrete", found 2026-07-30).
+        println!(
+            "\u{26a0}\u{fe0f} Unknown external event type '{}' — defaulting to binary",
+            raw
+        );
         "binary".to_string()
     }
 }
@@ -1610,3 +1621,24 @@ fn ensure_unique_outcome_keys(outcomes: &mut [ImportedOutcome]) {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_event_type;
+
+    #[test]
+    fn discrete_normalizes_to_numeric() {
+        assert_eq!(normalize_event_type("discrete"), "numeric");
+        assert_eq!(normalize_event_type(" Discrete "), "numeric");
+    }
+
+    #[test]
+    fn known_types_keep_their_mapping() {
+        assert_eq!(normalize_event_type("binary"), "binary");
+        assert_eq!(normalize_event_type("multiple_choice"), "multiple_choice");
+        assert_eq!(normalize_event_type("numeric"), "numeric");
+        assert_eq!(normalize_event_type("date"), "date");
+        // Unknown types still default to binary (with a warning log).
+        assert_eq!(normalize_event_type("conditional"), "binary");
+    }
+}

@@ -76,7 +76,13 @@ impl MetaculusClient {
     pub fn new() -> Self {
         dotenv::dotenv().ok();
         Self {
-            client: Client::new(),
+            // Without a timeout one stalled/throttled response hangs a full
+            // sweep forever (observed live 2026-07-30 at pagination offset
+            // 12300; resolution_sync.rs learned the same lesson earlier).
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
             base_url: "https://www.metaculus.com/api".to_string(),
         }
     }
@@ -125,12 +131,51 @@ impl MetaculusClient {
         let per_page_limit = limit.unwrap_or(100).min(100);
         url = format!("{}&limit={}", url, per_page_limit);
 
+        // Metaculus keeps serving `next` links long past the last
+        // question-bearing post (observed live 2026-07-30: all ~13k questions
+        // collected by offset ~13000, then 170k+ offsets of empty pages with
+        // next still set — an uncapped full sweep never terminates). Stop
+        // after a run of pages that yield no questions.
+        const MAX_CONSECUTIVE_EMPTY_PAGES: u32 = 10;
+        let mut consecutive_empty_pages: u32 = 0;
+
         loop {
             println!("🔍 Fetching from: {}", url);
 
-            let response = self.make_api_request(&url).await?;
+            // A full sweep is 100+ pages; retry transient per-page failures
+            // (timeouts, throttling) instead of aborting the whole run.
+            let mut response = None;
+            for attempt in 1..=3 {
+                match self.make_api_request(&url).await {
+                    Ok(r) => {
+                        response = Some(r);
+                        break;
+                    }
+                    Err(err) if attempt < 3 => {
+                        println!(
+                            "⚠️ Metaculus page fetch failed (attempt {}/3): {} — retrying",
+                            attempt, err
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5 * attempt)).await;
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+            let response = response.expect("loop either sets response or returns");
             let next_url = response.next.clone(); // Store next URL before consuming response
             let questions = self.extract_questions_from_response(response);
+            if questions.is_empty() {
+                consecutive_empty_pages += 1;
+                if consecutive_empty_pages >= MAX_CONSECUTIVE_EMPTY_PAGES {
+                    println!(
+                        "🛑 Stopping pagination: {} consecutive pages without questions",
+                        consecutive_empty_pages
+                    );
+                    break;
+                }
+            } else {
+                consecutive_empty_pages = 0;
+            }
             all_questions.extend(questions);
 
             println!("📊 Collected {} questions so far", all_questions.len());
@@ -237,7 +282,11 @@ impl MetaculusClient {
             numeric_open_lower,
             numeric_open_upper,
             numeric_unit,
-        ) = if question.question_type == "numeric" {
+        ) = if question.question_type == "numeric" || question.question_type == "discrete" {
+            // "discrete" is Metaculus's stepped-numeric type; it carries the
+            // same scaling block (verified live 2026-07-30, question 44175:
+            // range 549.5-590.5 = integer steps with half-step bounds) and is
+            // traded here as a regular binned numeric market.
             let scaling = question.scaling.as_ref();
             let unit = question
                 .unit
@@ -579,6 +628,21 @@ mod tests {
         "open_upper_bound": false
     }"#;
 
+    // Live-verified 2026-07-30 against
+    // https://www.metaculus.com/api/questions/44175/ (discrete: stepped
+    // numeric, integer steps 550..590 with half-step outer bounds).
+    const DISCRETE_QUESTION_JSON: &str = r#"{
+        "id": 44175,
+        "title": "How many active US drilling rigs will there be for the week ending July 31, 2026?",
+        "type": "discrete",
+        "status": "open",
+        "options": null,
+        "scaling": {"range_min": 549.5, "range_max": 590.5, "zero_point": null},
+        "unit": "",
+        "open_lower_bound": true,
+        "open_upper_bound": true
+    }"#;
+
     fn make_post(question_json: &str) -> (MetaculusQuestion, MetaculusPost) {
         let question: MetaculusQuestion = serde_json::from_str(question_json)
             .expect("fixture should deserialize into MetaculusQuestion");
@@ -634,6 +698,22 @@ mod tests {
         assert!(!market.numeric_open_lower);
         assert!(!market.numeric_open_upper);
         assert_eq!(market.numeric_unit, None);
+    }
+
+    #[test]
+    fn discrete_post_populates_range_metadata_like_numeric() {
+        let (question, post) = make_post(DISCRETE_QUESTION_JSON);
+        let market = client().convert_to_imported_market(&question, &post);
+
+        // Discrete questions are traded as binned numeric markets; without the
+        // range metadata they fell through to a dead 50% binary market.
+        assert!(market.outcomes.is_empty());
+        assert_eq!(market.event_type, "discrete");
+        assert_eq!(market.numeric_range_min, Some(549.5));
+        assert_eq!(market.numeric_range_max, Some(590.5));
+        assert_eq!(market.numeric_zero_point, None);
+        assert!(market.numeric_open_lower);
+        assert!(market.numeric_open_upper);
     }
 
     #[test]
