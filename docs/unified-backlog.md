@@ -1,5 +1,61 @@
 # Unified Backlog
-Updated: 2026-07-21 (delta below; last full audit 2026-06-12)
+Updated: 2026-07-30 (delta below; last full audit 2026-06-12)
+
+## 2026-07-30 Delta — launch hardening, legal go-live, performance, import fixes
+Covers 2026-07-22..30 (86397cf..ad5e360, ~40 commits).
+- `Done` Launch security hardening (2026-07-28): leaked backend/_1.env
+  untracked + all credentials rotated; auth-surface rate limiting + trust-proxy
+  config; production builds strip console.log; test users purged. Daily DB +
+  uploads backup (cron 04:15, 14-day retention) plus nightly offsite sync to
+  the Mac mini.
+- `Done` Legal go-live (2026-07-29): Impressum/Datenschutz/Nutzungsbedingungen
+  pages gated on legalConfig (operator data filled), min age 13 with parental
+  consent under 16, §305 II BGB Einbeziehung at signup (links + notice, not a
+  checkbox), quiet footer/sidebar placement per DDG §5 two-click reasoning.
+  Self-hosted inbound mail for kontakt@intellacc.com (Postfix container;
+  netcup firewall rule via user-level policy endpoint). Remaining: lawyer
+  read-through (human item).
+- `Done` Domain consolidation: 6 defensive domains (intellacc.io/.co/.org/.net
+  /.eu, intella.cc) via INWX + Caddy, 14 hostnames 301 → intellacc.com.
+- `Done` Self-service E2EE reset (7dc0abd): password-confirmed POST /api/mls/
+  reset (403 on wrong password — 401 would trigger the client's session-expiry
+  logout), full server-side MLS/device/master-key wipe with shared-group
+  leave semantics, danger-zone UI in both skins, recovery links from locked
+  states. No more manual SQL for stranded vaults.
+- `Done` Self-hosted error tracking (f468f1e): client_errors table, rate-
+  limited /api/errors sink, PROD-only deduped frontend reporter, daily digest
+  mail via local postfix (08:00 cron) with backend-log error signatures.
+- `Done` Frontend serving/deploys (d940345, superseding 96d5fad): Caddy serves
+  the built SPA directly from /srv/intellacc (no production frontend
+  container); `./scripts/deploy-frontend.sh` = one-shot build container +
+  rsync --delay-updates (zero-downtime). compose service is behind
+  `profiles: ["build"]`.
+- `Done` Performance pass (7034701..935fe08): precompressed brotli + cache
+  headers + HTTP/3 verified; font preload; render-immediately boot; skins and
+  heavy routes lazy-split (cold load 161KB→~45KB brotli, ~940KB→~190KB parsed
+  JS); login-time vault bootstrap backgrounded + serialized (2–5s off
+  first-device logins, forms join the in-flight bootstrap); post-login
+  hydration measured — five calls already parallel on one h3 round trip, so
+  no combined endpoint; the one real serial chain (empty feed → discover
+  fallback) inlined into /api/feed. Remaining latency is transatlantic RTT;
+  CDN deliberately deferred (conflicts with self-hosting stance).
+- `Done` Metaculus discrete-type imports (ad5e360): "discrete" (stepped
+  numeric) fell through normalize_event_type's silent binary catch-all → 22
+  dead 50% binary markets (zero trades). Now maps to numeric with the same
+  scaling block; catch-all warns. The conversion vehicle — a FULL import
+  sweep — had never completed: no HTTP timeout, axum handler future dropped
+  on the proxy's client timeout (silent cancellation), and Metaculus serves
+  `next` links forever (pagination now stops after 10 empty pages). All 22
+  events converted in place to 50-bin numeric markets, verified live.
+- `Done` Assorted fixes: van mobile app-shell scrolling (document never
+  scrolls, static tab bar), DM recipient autocomplete, weekly card hides only
+  at required stake, feed-mix sliders rebalance with equal deltas, terminal
+  chat vault-state read.
+- Stale-entry corrections to the sections below: "richer social-graph UX and
+  social groups" (P3 Advanced social) shipped 2026-06; CI now runs build +
+  backend suites + E2EE E2E smoke on every push, so the P3 "CI/CD automation"
+  gap is closed. Still genuinely open there: offline caching/queueing/
+  background sync, federation production hardening, capacity testing.
 
 ## 2026-07-21 Delta — terminal-skin parity-ledger backlog burn-down
 - `Done` PWA install shell restored (8108bb7, found during mobile-readiness
