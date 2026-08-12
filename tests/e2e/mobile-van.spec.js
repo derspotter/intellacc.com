@@ -210,13 +210,11 @@ test('binary market: trade controls fit inside 390px and a real stake goes throu
   // Every trade control must be fully inside the viewport width — the old
   // failure mode was the form spilling past 390 so YES/submit were off-screen.
   const card = detail.locator('.event-card');
-  const yesBtn = card.locator('.direction-btn.yes-btn');
-  const noBtn = card.locator('.direction-btn.no-btn');
+  const beliefSlider = card.locator('.belief-slider');
   const stakeInput = card.locator('.stake-input');
   const submit = card.getByRole('button', { name: /place stake/i });
   for (const [locator, label] of [
-    [yesBtn, 'YES direction button'],
-    [noBtn, 'NO direction button'],
+    [beliefSlider, 'belief slider'],
     [stakeInput, 'stake input'],
     [submit, 'Place Stake button']
   ]) {
@@ -228,7 +226,12 @@ test('binary market: trade controls fit inside 390px and a real stake goes throu
   // Place a small real trade (disposable tier-2 user, 1000 RP default) and
   // require a UI reaction: the freshly seeded market has zero activity rows,
   // so exactly one row naming this user must appear after the stake.
-  await yesBtn.click();
+  // Direction is derived: push the belief above the market price → YES badge.
+  await beliefSlider.focus();
+  for (let i = 0; i < 10; i += 1) await page.keyboard.press('ArrowRight');
+  const yesBadge = card.locator('.direction-btn.yes-btn');
+  await expect(yesBadge).toBeVisible();
+  await expectInsideViewportWidth(yesBadge, 'derived YES badge');
   await stakeInput.fill('10');
   await submit.click();
   const tradeRows = detail.locator('.market-detail-trade-row');
@@ -343,7 +346,7 @@ test('app shell: a real wheel gesture scrolls the wrapper (document stays locked
   // scrollIntoViewIfNeeded) work even on broken overflow chains, so this
   // test MUST use a user gesture — a regression here once shipped a page
   // that E2E called scrollable but no human could scroll.
-  await expect(page.locator('.danger-zone')).toBeAttached({ timeout: 20000 });
+  await expect(page.locator('section.settings-section.danger-zone')).toBeAttached({ timeout: 20000 });
   const before = await page.evaluate(() => document.querySelector('.wrapper').scrollTop);
   await page.mouse.wheel(0, 600);
   await expect
