@@ -185,7 +185,12 @@ test.describe('market detail view', () => {
     const before = await probText.textContent();
 
     const card = page.locator('.market-detail .event-card');
-    await card.locator('.direction-btn.yes-btn').click();
+    // Direction is derived from the stated belief: push the slider above the
+    // market price and the YES badge appears.
+    const belief = card.locator('.belief-slider');
+    await belief.focus();
+    for (let i = 0; i < 10; i += 1) await page.keyboard.press('ArrowRight');
+    await expect(card.locator('.direction-btn.yes-btn')).toBeVisible();
     await card.locator('.stake-input').fill('100');
     await card.getByRole('button', { name: /place stake/i }).click();
 

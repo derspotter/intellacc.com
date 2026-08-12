@@ -129,8 +129,7 @@ test('bottom nav switches panes by touch; trade ticket fits 390px', async ({ pag
     // Trade ticket controls must be fully usable inside 390px.
     const placeTrade = page.getByRole('button', { name: 'PLACE TRADE' });
     await placeTrade.scrollIntoViewIfNeeded();
-    await expectInsideViewportWidth(page.getByRole('button', { name: 'BUY YES' }));
-    await expectInsideViewportWidth(page.getByRole('button', { name: 'BUY NO' }));
+    await expectInsideViewportWidth(page.locator('.belief-slider'));
     await expectInsideViewportWidth(page.getByPlaceholder('e.g. 10'));
     await expectInsideViewportWidth(placeTrade);
     await expectNoHorizontalOverflow(page);

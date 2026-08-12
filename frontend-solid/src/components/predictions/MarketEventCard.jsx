@@ -18,6 +18,7 @@ import {
   getProbabilityColor,
   getKellyEdge
 } from './marketCardShared';
+import { deriveTradeSide } from '../../lib/tradeBelief';
 
 export default function MarketEventCard(props) {
   const event = () => props.event || {};
@@ -36,8 +37,7 @@ export default function MarketEventCard(props) {
   const isOpen = () => !isClosed();
 
   const [stakeAmount, setStakeAmount] = createSignal('');
-  const [beliefProb, setBeliefProb] = createSignal(0.7);
-  const [direction, setDirection] = createSignal('yes');
+  const [beliefProb, setBeliefProb] = createSignal(0.5);
   const [position, setPosition] = createSignal(null);
   const [marketState, setMarketState] = createSignal({
     market_prob: safeNumber(event().market_prob, 0.5),
@@ -210,7 +210,8 @@ export default function MarketEventCard(props) {
     return safeNumber(current.yes_shares) > 0 || safeNumber(current.no_shares) > 0;
   };
 
-  const targetProb = () => (direction() === 'yes' ? 0.99 : 0.01);
+  // Direction is a consequence of the stated belief, never a separate choice.
+  const tradeSide = () => deriveTradeSide(beliefProb(), marketState().market_prob);
 
   const handleStake = async (eventObj) => {
     eventObj?.preventDefault?.();
@@ -233,11 +234,15 @@ export default function MarketEventCard(props) {
       setError('Event not available.');
       return;
     }
+    if (!tradeSide()) {
+      setError('Move the belief slider away from the market price to trade.');
+      return;
+    }
 
     closeMessages();
     setBusyAction('stake');
     try {
-      await placeEventUpdate(eventId(), { stake: amount, target_prob: targetProb() });
+      await placeEventUpdate(eventId(), { stake: amount, target_prob: beliefProb() });
       await loadUserPosition();
       setStakeAmount('');
       emitSuccess('Trade submitted. Market refreshed.');
@@ -377,7 +382,7 @@ export default function MarketEventCard(props) {
   };
 
   const handleBeliefChange = (eventInput) => {
-    const value = safeNumber(eventInput.target.value, 0.7);
+    const value = safeNumber(eventInput.target.value, 0.5);
     setBeliefProb(value);
 
     if (kellyTimeout) {
@@ -415,6 +420,9 @@ export default function MarketEventCard(props) {
       cumulative_stake: safeNumber(nextEvent.cumulative_stake, 0),
       liquidity_b: safeNumber(nextEvent.liquidity_b, 5000),
     });
+    // Start the belief at the market price: the neutral no-trade state. Any
+    // movement is then an explicit disagreement with the market.
+    setBeliefProb(safeNumber(nextEvent.market_prob, 0.5));
 
     const current = position();
     if (!current) {
@@ -448,7 +456,7 @@ export default function MarketEventCard(props) {
   createEffect(() => {
     if (isLoggedIn() && eventId()) {
       const id = setTimeout(() => {
-        void loadKellySuggestion(safeNumber(beliefProb(), 0.7));
+        void loadKellySuggestion(safeNumber(beliefProb(), 0.5));
       }, 100);
       return () => clearTimeout(id);
     }
@@ -507,45 +515,6 @@ export default function MarketEventCard(props) {
           }>
             <div class="betting-interface">
               <form class="betting-form" onSubmit={handleStake}>
-                <div class="form-row horizontal-row">
-                  <div class="form-field">
-                    <label for={`direction-${eventId()}`}>Bet Direction:</label>
-                    <div class="direction-buttons">
-                      <button
-                        type="button"
-                        class={`direction-btn no-btn ${direction() === 'no' ? 'active' : ''}`}
-                        onClick={() => setDirection('no')}
-                        disabled={!!busyAction()}
-                      >
-                        NO
-                      </button>
-                      <button
-                        type="button"
-                        class={`direction-btn yes-btn ${direction() === 'yes' ? 'active' : ''}`}
-                        onClick={() => setDirection('yes')}
-                        disabled={!!busyAction()}
-                      >
-                        YES
-                      </button>
-                    </div>
-                  </div>
-
-                  <div class="form-field">
-                    <label for={`stake-${eventId()}`}>Stake Amount (RP):</label>
-                    <input
-                      ref={setStakeInputRef}
-                      id={`stake-${eventId()}`}
-                      class="stake-input"
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      placeholder="Enter stake amount"
-                      value={stakeAmount()}
-                      onInput={(e) => setStakeAmount(e.target.value)}
-                    />
-                  </div>
-                </div>
-
                 <div class="form-row">
                   <label>Your Belief Probability:</label>
                   <div class="belief-slider-container">
@@ -565,6 +534,41 @@ export default function MarketEventCard(props) {
                           `Your edge: ${(getKellyEdge(beliefProb(), marketState().market_prob) * 100).toFixed(1)}%`}
                       </small>
                     </div>
+                  </div>
+                </div>
+
+                <div class="form-row horizontal-row">
+                  <div class="form-field">
+                    <label>This Trade:</label>
+                    <Show
+                      when={tradeSide()}
+                      fallback={
+                        <span class="derived-side muted">
+                          Market already agrees with you — move the slider to trade
+                        </span>
+                      }
+                    >
+                      <div class="direction-buttons">
+                        <span class={`direction-btn active ${tradeSide() === 'yes' ? 'yes-btn' : 'no-btn'}`}>
+                          {`Buys ${tradeSide().toUpperCase()}`}
+                        </span>
+                      </div>
+                    </Show>
+                  </div>
+
+                  <div class="form-field">
+                    <label for={`stake-${eventId()}`}>Stake Amount (RP):</label>
+                    <input
+                      ref={setStakeInputRef}
+                      id={`stake-${eventId()}`}
+                      class="stake-input"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      placeholder="Enter stake amount"
+                      value={stakeAmount()}
+                      onInput={(e) => setStakeAmount(e.target.value)}
+                    />
                   </div>
                 </div>
 
@@ -591,8 +595,10 @@ export default function MarketEventCard(props) {
                       </div>
                       <div class="kelly-stat">
                         <span class="kelly-label">Your Edge:</span>
-                        <span class="kelly-edge positive">
-                          {kellyData() ? `${Math.abs(getKellyEdge(beliefProb(), marketState().market_prob) * 100).toFixed(1)}%` : '--'}
+                        <span class={`kelly-edge ${getKellyEdge(beliefProb(), marketState().market_prob) >= 0 ? 'positive' : 'negative'}`}>
+                          {kellyData()
+                            ? `${Math.abs(getKellyEdge(beliefProb(), marketState().market_prob) * 100).toFixed(1)}% ${tradeSide() ? tradeSide().toUpperCase() : ''}`
+                            : '--'}
                         </span>
                       </div>
                     </div>
@@ -602,7 +608,7 @@ export default function MarketEventCard(props) {
                     <button
                       type="submit"
                       class="button primary"
-                      disabled={!stakeAmount() || !!busyAction()}
+                      disabled={!stakeAmount() || !tradeSide() || !!busyAction()}
                     >
                       {busyAction() === 'stake' ? 'Placing Stake...' : 'Place Stake'}
                     </button>

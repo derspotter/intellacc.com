@@ -178,15 +178,19 @@ test.describe('desktop', () => {
     await openTerminalDetail(page, binaryEventId);
     await expect(page.locator('[data-testid="market-detail-title"]')).toHaveText(binaryTitle);
 
-    // Classic ticket, no embedded van cards.
+    // Classic ticket, no embedded van cards. Direction is derived from the
+    // belief slider (starts at the market price = neutral, no-trade state).
     await expect(page.getByText('Trade Ticket')).toBeVisible({ timeout: 20000 });
-    await expect(page.getByRole('button', { name: 'BUY YES' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'BUY NO' })).toBeVisible();
+    await expect(page.locator('.belief-slider')).toBeVisible();
+    await expect(page.getByText(/move the belief slider to trade/i)).toBeVisible();
     await expect(page.getByText('Current Probability')).toBeVisible();
     await expect(page.locator('[data-testid="terminal-distribution-embed"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="terminal-outcome-embed"]')).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'BUY YES' }).click();
+    // State a belief above the market price → derived BUYS YES badge.
+    await page.locator('.belief-slider').focus();
+    for (let i = 0; i < 10; i += 1) await page.keyboard.press('ArrowRight');
+    await expect(page.getByText('BUYS YES')).toBeVisible();
     await page.getByPlaceholder('e.g. 10').fill('10');
     await page.getByRole('button', { name: /place trade/i }).click();
     await expect(page.getByText(/Filled: \+[\d.]+ yes shares/i)).toBeVisible({ timeout: 20000 });
@@ -271,8 +275,7 @@ test.describe('mobile 390x844', () => {
     await expectNoPageOverflow(page, 'binary detail');
 
     for (const [locator, label] of [
-      [page.getByRole('button', { name: 'BUY YES' }), 'BUY YES button'],
-      [page.getByRole('button', { name: 'BUY NO' }), 'BUY NO button'],
+      [page.locator('.belief-slider'), 'belief slider'],
       [page.getByPlaceholder('e.g. 10'), 'stake input'],
       [page.getByRole('button', { name: /place trade/i }), 'PLACE TRADE button']
     ]) {

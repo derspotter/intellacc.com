@@ -2,6 +2,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-j
 import { api } from "../../services/api";
 import { marketStore } from "../../store/marketStore";
 import { getToken } from "../../services/tokenService";
+import { deriveTradeSide } from "../../lib/tradeBelief";
 import DistributionMarketCard from "../predictions/DistributionMarketCard";
 import OutcomeMarketCard from "../predictions/OutcomeMarketCard";
 
@@ -44,18 +45,35 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const TradeTicket = (props) => {
     const market = () => props.market?.();
 
-    const [side, setSide] = createSignal("YES"); // YES | NO
     const [stakeShares, setStakeShares] = createSignal("");
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal(null);
     const [lastFill, setLastFill] = createSignal(null);
-    const [belief, setBelief] = createSignal(0.7);
+    const [belief, setBelief] = createSignal(0.5);
     const [kellyData, setKellyData] = createSignal(null);
     let kellyTimeout;
 
     const marketProb = createMemo(() => {
         const p = Number(market()?.market_prob);
         return Number.isFinite(p) ? p : 0.5;
+    });
+
+    // Direction is derived from the stated belief vs. the market price;
+    // null when the belief sits on the market (no edge, nothing to buy).
+    const side = createMemo(() => {
+        const s = deriveTradeSide(belief(), marketProb());
+        return s ? s.toUpperCase() : null;
+    });
+
+    // Start the belief at the market price whenever a new market is shown:
+    // the neutral no-trade state, so any movement is explicit disagreement.
+    let beliefInitId = null;
+    createEffect(() => {
+        const id = market()?.id;
+        if (id != null && id !== beliefInitId) {
+            beliefInitId = id;
+            setBelief(marketProb());
+        }
     });
 
     const getUserId = () => {
@@ -118,7 +136,7 @@ const TradeTicket = (props) => {
 
     const priceYes = createMemo(() => marketProb());
     const priceNo = createMemo(() => 1 - marketProb());
-    const selectedPrice = createMemo(() => (side() === "YES" ? priceYes() : priceNo()));
+    const selectedPrice = createMemo(() => (side() === "NO" ? priceNo() : priceYes()));
 
     const sharesNum = createMemo(() => {
         const n = Number(stakeShares());
@@ -131,6 +149,7 @@ const TradeTicket = (props) => {
     const canTrade = createMemo(() => {
         if (submitting()) return false;
         if (!market()?.id) return false;
+        if (!side()) return false;
         if (sharesNum() <= 0) return false;
         const stake = estimatedCost();
         if (!Number.isFinite(stake) || stake < 0.01 || stake > 1_000_000) return false;
@@ -150,17 +169,19 @@ const TradeTicket = (props) => {
         const shares = sharesNum();
         if (shares <= 0) return setError("Enter a positive stake amount.");
 
+        if (!side()) return setError("Move your belief away from the market price to trade.");
         const p = marketProb();
         if (side() === "YES" && p >= 0.999) return setError("YES is already priced near 1.00.");
         if (side() === "NO" && p <= 0.001) return setError("NO is already priced near 1.00.");
 
-        // Backend expects: stake (RP) + target_prob. target_prob is only used to pick direction (>p => YES, else NO).
+        // Backend expects: stake (RP) + target_prob. The engine picks the side
+        // from target_prob vs. the fresh price inside its transaction; sending
+        // the stated belief keeps the side race-correct AND records the belief
+        // on the market_updates row for calibration.
         const stake = shares * selectedPrice();
         if (!Number.isFinite(stake) || stake < 0.01) return setError("Estimated cost must be at least 0.01 RP.");
         if (stake > 1_000_000) return setError("Estimated cost exceeds the 1,000,000 RP max per trade.");
-        const eps = 0.001;
-        const target_prob =
-            side() === "YES" ? clamp(p + eps, 0.001, 0.999) : clamp(p - eps, 0.001, 0.999);
+        const target_prob = clamp(belief(), 0.001, 0.999);
 
         setSubmitting(true);
         try {
@@ -189,29 +210,25 @@ const TradeTicket = (props) => {
                 </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-2 mb-3">
-                <button
-                    type="button"
-                    onClick={() => setSide("YES")}
-                    class={
-                        side() === "YES"
-                            ? "bg-market-up/30 text-market-up border border-market-up py-2 font-bold uppercase text-sm"
-                            : "bg-market-up/10 text-market-up border border-bb-border hover:bg-market-up/20 py-2 font-bold uppercase text-sm"
+            <div class="mb-3">
+                <Show
+                    when={side()}
+                    fallback={
+                        <div class="border border-bb-border text-bb-muted py-2 text-center uppercase text-xs">
+                            Market agrees with you — move the belief slider to trade
+                        </div>
                     }
                 >
-                    BUY YES
-                </button>
-                <button
-                    type="button"
-                    onClick={() => setSide("NO")}
-                    class={
-                        side() === "NO"
-                            ? "bg-market-down/30 text-market-down border border-market-down py-2 font-bold uppercase text-sm"
-                            : "bg-market-down/10 text-market-down border border-bb-border hover:bg-market-down/20 py-2 font-bold uppercase text-sm"
-                    }
-                >
-                    BUY NO
-                </button>
+                    <div
+                        class={
+                            side() === "YES"
+                                ? "bg-market-up/30 text-market-up border border-market-up py-2 font-bold uppercase text-sm text-center"
+                                : "bg-market-down/30 text-market-down border border-market-down py-2 font-bold uppercase text-sm text-center"
+                        }
+                    >
+                        {`BUYS ${side()}`}
+                    </div>
+                </Show>
             </div>
 
             {/* Belief Slider */}
@@ -227,7 +244,7 @@ const TradeTicket = (props) => {
                     step="0.01"
                     value={belief()}
                     onInput={(e) => handleBeliefChange(parseFloat(e.currentTarget.value))}
-                    class="w-full accent-bb-accent"
+                    class="belief-slider w-full accent-bb-accent"
                 />
             </div>
 
@@ -253,7 +270,6 @@ const TradeTicket = (props) => {
                                 const k = kellyData();
                                 if (k && !isNaN(k.quarter_kelly)) {
                                     setStakeShares(Math.max(0, k.quarter_kelly).toFixed(2));
-                                    setSide(k.edge >= 0 ? "YES" : "NO");
                                 }
                             }}
                         >
@@ -272,7 +288,6 @@ const TradeTicket = (props) => {
                                 const k = kellyData();
                                 if (k && !isNaN(k.kelly_optimal)) {
                                     setStakeShares(Math.max(0, k.kelly_optimal).toFixed(2));
-                                    setSide(k.edge >= 0 ? "YES" : "NO");
                                 }
                             }}
                         >
