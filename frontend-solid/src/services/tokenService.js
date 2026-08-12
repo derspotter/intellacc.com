@@ -18,13 +18,16 @@ const [token, setToken] = createSignal(localStorage.getItem('token') || '');
 const [isLoggedIn, setIsLoggedIn] = createSignal(!!localStorage.getItem('token'));
 const [userData, setUserData] = createSignal(null);
 
-import { api } from './api';
-
-// Fetch full profile from backend to supplement token data
+// Fetch full profile from backend to supplement token data.
+// api is resolved lazily: api.js statically imports this module, so a static
+// import back would be circular — and refreshProfile() runs during THIS
+// module's evaluation, where the cycle leaves `api` undefined whenever the
+// bundler happens to evaluate tokenService first (chunk-order dependent).
 async function refreshProfile() {
     const t = token();
     if (!t) return;
     try {
+        const { api } = await import('./api');
         const profile = await api.users.getProfile();
         setUserData(prev => ({ ...prev, ...profile }));
     } catch (e) {
