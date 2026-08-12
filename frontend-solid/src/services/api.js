@@ -344,6 +344,9 @@ export const api = {
     getUser: (id) =>
       request(`/users/${id}`),
 
+    getCalibration: (id) =>
+      request(`/users/${id}/calibration`),
+
     getUserByUsername: (username) =>
       request(`/users/username/${username}`),
 

@@ -8371,3 +8371,87 @@ body.dark-mode .shortcut-help button:hover {
 .bb-embed .outcome-list::-webkit-scrollbar-track {
   background: #111111;
 }
+
+/* Calibration (profile) — reliability diagram, ink-on-surface so it works in
+   every skin/theme without its own palette. Single series: no legend needed. */
+.calibration-section {
+  margin-top: 1rem;
+}
+
+.calibration-chart-row {
+  display: flex;
+  gap: 1.25rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.calibration-chart {
+  width: 240px;
+  max-width: 100%;
+  height: auto;
+  flex: 0 0 auto;
+}
+
+.calibration-grid {
+  stroke: var(--border-color);
+  stroke-width: 0.5;
+  opacity: 0.5;
+}
+
+.calibration-diagonal {
+  stroke: var(--secondary-text);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+
+.calibration-line {
+  stroke: var(--text-color);
+  stroke-width: 2;
+  fill: none;
+}
+
+.calibration-dot {
+  fill: var(--text-color);
+  r: 5px;
+  transition: r var(--transition);
+}
+
+.calibration-dot:hover {
+  r: 7px;
+}
+
+.calibration-tick,
+.calibration-axis-title {
+  fill: var(--secondary-text);
+  font-size: 10px;
+}
+
+.calibration-axis-title {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.calibration-stats {
+  flex: 1 1 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 150px;
+}
+
+.calibration-stat-value {
+  display: block;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.calibration-stat-label {
+  color: var(--secondary-text);
+  font-size: 0.8rem;
+}
+
+.calibration-note {
+  color: var(--secondary-text);
+  font-size: 0.85rem;
+  margin: 0;
+}

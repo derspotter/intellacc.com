@@ -822,6 +822,65 @@ exports.deleteAllPredictions = asyncHandler(async (req, res) => {
   res.status(200).json({ message: "All predictions deleted." });
 });
 
+// Calibration curve for a user's stated beliefs on resolved binary markets.
+// One data point per market: the LAST belief the user stated before
+// resolution (belief_prob is recorded on every binary trade since 2026-08-12).
+exports.getUserCalibration = asyncHandler(async (req, res) => {
+  const userId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(userId)) {
+    return res.status(400).json({ message: 'Invalid user id.' });
+  }
+
+  const result = await db.query(
+    `WITH last_beliefs AS (
+       SELECT DISTINCT ON (mu.event_id)
+         mu.belief_prob,
+         (e.outcome = 'resolved_yes')::int AS outcome_yes
+       FROM market_updates mu
+       JOIN events e ON e.id = mu.event_id
+       WHERE mu.user_id = $1
+         AND mu.belief_prob IS NOT NULL
+         AND e.event_type = 'binary'
+         AND e.outcome IN ('resolved_yes', 'resolved_no')
+       ORDER BY mu.event_id, mu.created_at DESC, mu.id DESC
+     )
+     SELECT
+       LEAST(FLOOR(belief_prob * 5), 4)::int AS bucket,
+       COUNT(*)::int AS n,
+       AVG(belief_prob)::float AS mean_belief,
+       AVG(outcome_yes)::float AS observed,
+       SUM(POWER(belief_prob - outcome_yes, 2))::float AS sq_err
+     FROM last_beliefs
+     GROUP BY 1`,
+    [userId]
+  );
+
+  const buckets = Array.from({ length: 5 }, (_, i) => ({
+    lower: i / 5,
+    upper: (i + 1) / 5,
+    n: 0,
+    mean_belief: null,
+    observed: null
+  }));
+  let n = 0;
+  let sqErr = 0;
+  for (const row of result.rows) {
+    const bucket = buckets[row.bucket];
+    if (!bucket) continue;
+    bucket.n = row.n;
+    bucket.mean_belief = row.mean_belief;
+    bucket.observed = row.observed;
+    n += row.n;
+    sqErr += row.sq_err;
+  }
+
+  res.status(200).json({
+    n,
+    brier: n > 0 ? sqErr / n : null,
+    buckets
+  });
+});
+
 // Get all available categories from events
 exports.getCategories = asyncHandler(async (req, res) => {
   const result = await db.query(`

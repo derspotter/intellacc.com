@@ -255,6 +255,7 @@ router.post('/federation/atproto/posts/:postId/enqueue', authenticateJWT, atprot
 
 // Portfolio Routes
 router.get("/users/:id/positions", authenticateJWT, userController.getUserPositions);
+router.get("/users/:id/calibration", authenticateJWT, predictionsController.getUserCalibration);
 
 // Prediction/Events Routes
 router.post("/predict", authenticateJWT, requirePhoneVerified, predictionsController.createPrediction);

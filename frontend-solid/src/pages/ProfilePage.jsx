@@ -2,6 +2,7 @@ import { createEffect, createSignal, For, Show } from 'solid-js';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import NetworkUserRow from '../components/profile/NetworkUserRow';
+import CalibrationCard from '../components/profile/CalibrationCard';
 import {
   createDirectMessage,
   followUser,
@@ -440,6 +441,8 @@ export default function ProfilePage(props) {
                         </div>
                       </Show>
                     </div>
+
+                    <CalibrationCard userId={() => user.id} />
 
                     <div class="bio-section">
                       <h4>Bio</h4>
