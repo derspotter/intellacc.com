@@ -264,6 +264,7 @@ async fn run_test_migrations(pool: &PgPool) -> Result<()> {
             referral_click_id INTEGER,
             had_prior_position BOOLEAN NOT NULL DEFAULT FALSE,
             hold_until TIMESTAMP WITH TIME ZONE NOT NULL,
+            belief_prob DOUBLE PRECISION,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
     "#,
@@ -617,6 +618,47 @@ async fn cleanup_test_database(pool: PgPool, db_name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The trade request's target_prob is the user's stated belief; it must be
+    /// stored on the audit row so calibration can be computed later.
+    #[tokio::test]
+    async fn test_market_update_records_stated_belief() -> Result<()> {
+        let test_db = setup_test_database().await?;
+        let pool = &test_db.pool;
+        let users = create_test_users(pool, 1).await?;
+        let user = &users[0];
+        let event_id = create_test_event(pool, "Belief Recording Test Event").await?;
+        let config = test_config();
+
+        let _ = lmsr_api::update_market(
+            pool,
+            &config,
+            user.id,
+            MarketUpdate {
+                event_id,
+                target_prob: 0.65,
+                stake: 25.0,
+                referral_post_id: None,
+                referral_click_id: None,
+            },
+        )
+        .await?;
+
+        let row = sqlx::query(
+            "SELECT belief_prob FROM market_updates WHERE user_id = $1 AND event_id = $2",
+        )
+        .bind(user.id)
+        .bind(event_id)
+        .fetch_one(pool)
+        .await?;
+        let belief: Option<f64> = row.get("belief_prob");
+        assert_eq!(
+            belief,
+            Some(0.65),
+            "market update row must record the submitted belief"
+        );
+        Ok(())
+    }
 
     /// Single user market cycle test
     #[tokio::test]

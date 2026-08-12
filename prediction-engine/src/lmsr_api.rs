@@ -400,6 +400,7 @@ async fn update_market_transaction(
         update.referral_post_id,
         update.referral_click_id,
         had_prior_position,
+        Some(update.target_prob),
     )
     .await?;
 

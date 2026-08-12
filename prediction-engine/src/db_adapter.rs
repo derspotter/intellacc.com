@@ -155,6 +155,7 @@ impl DbAdapter {
         referral_post_id: Option<i32>,
         referral_click_id: Option<i32>,
         had_prior_position: bool,
+        belief_prob: Option<f64>,
     ) -> Result<i32> {
         let share_type = side.as_str();
         let cost_ledger = i64::try_from(
@@ -164,9 +165,9 @@ impl DbAdapter {
         .map_err(|_| anyhow!("stake_amount_ledger out of i64 range"))?;
 
         let row = sqlx::query(
-            "INSERT INTO market_updates 
-             (user_id, event_id, prev_prob, new_prob, stake_amount, shares_acquired, share_type, hold_until, stake_amount_ledger, referral_post_id, referral_click_id, had_prior_position)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            "INSERT INTO market_updates
+             (user_id, event_id, prev_prob, new_prob, stake_amount, shares_acquired, share_type, hold_until, stake_amount_ledger, referral_post_id, referral_click_id, had_prior_position, belief_prob)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
              RETURNING id"
         )
         .bind(user_id)
@@ -181,6 +182,7 @@ impl DbAdapter {
         .bind(referral_post_id)
         .bind(referral_click_id)
         .bind(had_prior_position)
+        .bind(belief_prob)
         .fetch_one(&mut **tx)
         .await?;
 
