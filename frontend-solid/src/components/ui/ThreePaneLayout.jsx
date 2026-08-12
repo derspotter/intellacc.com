@@ -65,13 +65,18 @@ export const ThreePaneLayout = (props) => {
     };
 
     onMount(() => {
+        // matchMedia instead of reading window.innerWidth: innerWidth forces a
+        // synchronous layout flush on first mount (before window load), which
+        // Firefox flags as a potential FOUC.
+        const mdQuery = window.matchMedia(`(min-width: ${BREAKPOINT_MD}px)`);
+        const lgQuery = window.matchMedia(`(min-width: ${BREAKPOINT_LG}px)`);
+
         const updateLayoutMode = () => {
-            const width = window.innerWidth;
-            if (width < BREAKPOINT_MD) {
+            if (!mdQuery.matches) {
                 setLayoutMode("mobile");
                 return;
             }
-            if (width < BREAKPOINT_LG) {
+            if (!lgQuery.matches) {
                 setLayoutMode("tablet");
                 return;
             }
@@ -79,12 +84,14 @@ export const ThreePaneLayout = (props) => {
         };
 
         updateLayoutMode();
-        window.addEventListener("resize", updateLayoutMode);
+        mdQuery.addEventListener("change", updateLayoutMode);
+        lgQuery.addEventListener("change", updateLayoutMode);
 
         // Ensure we always clean up if the component unmounts mid-drag (HMR, route change, etc).
         onCleanup(() => {
             stopDrag();
-            window.removeEventListener("resize", updateLayoutMode);
+            mdQuery.removeEventListener("change", updateLayoutMode);
+            lgQuery.removeEventListener("change", updateLayoutMode);
         });
     });
 
