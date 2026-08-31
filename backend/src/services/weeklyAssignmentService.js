@@ -101,6 +101,7 @@ class WeeklyAssignmentService {
           LEFT JOIN event_topics et ON et.event_id = e.id
           WHERE e.closing_date > NOW() + INTERVAL '7 days'
           AND e.outcome IS NULL
+          AND e.hidden_at IS NULL
           AND e.market_prob IS NOT NULL  -- Only events with initialized markets
           -- Untradeable dead ends: non-binary events with no configured outcome set
           -- (same predicate as the public listing in predictionsController.getEvents).
@@ -117,8 +118,11 @@ class WeeklyAssignmentService {
           HAVING COUNT(p.id) < 50  -- Don't assign events with too many predictions
         ),
         general_pool AS (
+          -- closing_date ASC (was DESC): far-future closes are dominated by
+          -- "when will X happen?" markets whose real-world answer is often
+          -- already known; sooner-closing questions are livelier assignments.
           SELECT * FROM candidate
-          ORDER BY prediction_count ASC, closing_date DESC
+          ORDER BY prediction_count ASC, closing_date ASC
           LIMIT 200
         ),
         in_topic AS (
@@ -132,7 +136,7 @@ class WeeklyAssignmentService {
         SELECT id, title, closing_date, market_prob, prediction_count, topic_ids FROM general_pool
         UNION
         SELECT id, title, closing_date, market_prob, prediction_count, topic_ids FROM in_topic
-        ORDER BY prediction_count ASC, closing_date DESC
+        ORDER BY prediction_count ASC, closing_date ASC
       `, [eligibleUserIds]);
 
       if (eventsResult.rows.length === 0) {

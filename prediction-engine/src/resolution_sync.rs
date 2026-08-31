@@ -1,8 +1,22 @@
 // Resolution sync: providers are only polled with status=open during import,
 // so resolved outcomes never arrive on their own. This module walks our
-// past-close, unresolved, provider-mapped binary events, asks each provider
-// for the market's current resolution by external id, and settles matches
-// through lmsr_api::resolve_event (transactional payout path).
+// unresolved, provider-mapped binary events, asks each provider for the
+// market's current resolution by external id, and settles matches through
+// lmsr_api::resolve_event (transactional payout path).
+//
+// Candidate scope: past-close events for every source, PLUS all open
+// manifold/polymarket events regardless of closing_date — those providers
+// settle early (creator/UMA resolves when reality decides, often years
+// before the listed close; e.g. "what day will X release?" markets close
+// 2027 but resolved 2026). Batches rotate via events.resolution_checked_at
+// (least-recently-checked first) so the per-run LIMIT still covers every
+// candidate over successive nightly runs.
+//
+// Dead ends: a market the provider has resolved in a way we can never settle
+// (multi-winner/percent resolutions, cancellations, winning labels that don't
+// match our event_outcomes) is hidden (events.hidden_at/hidden_reason) so it
+// stops being listed, traded, and weekly-assigned. Positions in hidden events
+// stay visible in My Positions; a refund path for voided markets is still TODO.
 //
 // v1 scope: binary events on manifold / metaculus / polymarket, plus
 // multiple_choice events on manifold / metaculus (label-matched against
@@ -34,6 +48,7 @@ pub struct ResolutionStats {
     pub resolved: u32,
     pub still_open: u32,
     pub unsupported: u32,
+    pub dead_ends_hidden: u32,
     pub errors: u32,
     // multiple_choice sub-counts (rolled into the totals above too, so
     // `resolved`/`checked`/etc. reflect binary + MC combined).
@@ -54,6 +69,7 @@ impl ResolutionStats {
             "resolved": self.resolved,
             "still_open": self.still_open,
             "unsupported": self.unsupported,
+            "dead_ends_hidden": self.dead_ends_hidden,
             "errors": self.errors,
             "mc_checked": self.mc_checked,
             "mc_resolved": self.mc_resolved,
@@ -71,14 +87,17 @@ pub async fn sync_resolutions(pool: &PgPool) -> Result<ResolutionStats> {
          FROM events e
          JOIN event_external_sources s ON s.event_id = e.id
          WHERE e.outcome IS NULL
-           AND e.closing_date <= NOW()
+           AND e.hidden_at IS NULL
+           -- Manifold/polymarket settle early, so they're polled regardless
+           -- of closing_date; other sources keep the past-close gate.
+           AND (e.closing_date <= NOW() OR s.source IN ('manifold', 'polymarket'))
            AND e.event_type = 'binary'
            -- Metaculus's API returns resolution: null for every question at
            -- our token's access level (verified 2026-07-07, even on their own
            -- resolved-list endpoint), so lookups are pure waste and would
-           -- clog the oldest-first batch forever. Re-enable if they expose it.
+           -- clog the batch forever. Re-enable if they expose it.
            AND s.source != 'metaculus'
-         ORDER BY e.closing_date ASC
+         ORDER BY e.resolution_checked_at ASC NULLS FIRST, e.closing_date ASC
          LIMIT $1",
     )
     .bind(BATCH_LIMIT)
@@ -92,7 +111,7 @@ pub async fn sync_resolutions(pool: &PgPool) -> Result<ResolutionStats> {
 
     let mut stats = ResolutionStats::default();
     println!(
-        "🔎 Resolution sync: checking {} past-close unresolved binary events",
+        "🔎 Resolution sync: checking {} unresolved binary events",
         rows.len()
     );
 
@@ -101,6 +120,10 @@ pub async fn sync_resolutions(pool: &PgPool) -> Result<ResolutionStats> {
         let source: String = row.get("source");
         let external_id: String = row.get("external_id");
         stats.checked += 1;
+
+        // Mark checked up front (errors included) so a market whose lookup
+        // keeps failing can't pin the least-recently-checked queue head.
+        mark_resolution_checked(pool, event_id).await;
 
         let verdict = match source.as_str() {
             "manifold" => manifold_resolution(&client, &external_id).await,
@@ -133,6 +156,9 @@ pub async fn sync_resolutions(pool: &PgPool) -> Result<ResolutionStats> {
             }
             Ok(Verdict::StillOpen) => stats.still_open += 1,
             Ok(Verdict::Unsupported) => stats.unsupported += 1,
+            Ok(Verdict::DeadEnd(reason)) => {
+                hide_dead_end(pool, event_id, &source, &external_id, reason, &mut stats).await;
+            }
             Err(err) => {
                 stats.errors += 1;
                 println!(
@@ -149,8 +175,8 @@ pub async fn sync_resolutions(pool: &PgPool) -> Result<ResolutionStats> {
     sync_numeric_resolutions(pool, &client, &mut stats).await?;
 
     println!(
-        "🔎 Resolution sync done: {} checked, {} resolved, {} still open, {} unsupported, {} errors ({} MC checked, {} MC resolved, {} MC no-label-match; {} numeric checked, {} numeric resolved, {} numeric no-bin-match)",
-        stats.checked, stats.resolved, stats.still_open, stats.unsupported, stats.errors,
+        "🔎 Resolution sync done: {} checked, {} resolved, {} still open, {} unsupported, {} dead-ends hidden, {} errors ({} MC checked, {} MC resolved, {} MC no-label-match; {} numeric checked, {} numeric resolved, {} numeric no-bin-match)",
+        stats.checked, stats.resolved, stats.still_open, stats.unsupported, stats.dead_ends_hidden, stats.errors,
         stats.mc_checked, stats.mc_resolved, stats.mc_no_label_match,
         stats.numeric_checked, stats.numeric_resolved, stats.numeric_no_bin_match
     );
@@ -171,17 +197,20 @@ async fn sync_mc_resolutions(
          FROM events e
          JOIN event_external_sources s ON s.event_id = e.id
          WHERE e.outcome IS NULL
-           AND e.closing_date <= NOW()
+           AND e.hidden_at IS NULL
+           -- Manifold settles early, so it's polled regardless of
+           -- closing_date; other sources keep the past-close gate.
+           AND (e.closing_date <= NOW() OR s.source = 'manifold')
            AND e.event_type = 'multiple_choice'
            -- Verified live 2026-07-14 against several resolved multiple_choice
            -- posts (e.g. question 44366/post 44355, question 44009/post
            -- 43982): question.resolution is null at our token's access level,
            -- same restriction already documented above for metaculus binary
            -- questions. Skip polling metaculus here so it doesn't crowd real
-           -- (manifold) resolutions out of the oldest-first batch. Re-enable
-           -- if Metaculus exposes resolution to this token.
+           -- (manifold) resolutions out of the batch. Re-enable if Metaculus
+           -- exposes resolution to this token.
            AND s.source != 'metaculus'
-         ORDER BY e.closing_date ASC
+         ORDER BY e.resolution_checked_at ASC NULLS FIRST, e.closing_date ASC
          LIMIT $1",
     )
     .bind(BATCH_LIMIT)
@@ -189,7 +218,7 @@ async fn sync_mc_resolutions(
     .await?;
 
     println!(
-        "🔎 MC resolution sync: checking {} past-close unresolved multiple_choice events",
+        "🔎 MC resolution sync: checking {} unresolved multiple_choice events",
         rows.len()
     );
 
@@ -199,6 +228,9 @@ async fn sync_mc_resolutions(
         let external_id: String = row.get("external_id");
         stats.checked += 1;
         stats.mc_checked += 1;
+
+        // Same up-front marking as the binary loop: failures count as checks.
+        mark_resolution_checked(pool, event_id).await;
 
         let verdict = match source.as_str() {
             "manifold" => manifold_mc_resolution(client, &external_id).await,
@@ -251,11 +283,25 @@ async fn sync_mc_resolutions(
                             external_id = %external_id,
                             "MC resolution sync: no event_outcomes row matches provider's winning label"
                         );
+                        // Decided at the provider but unsettleable here — a
+                        // dead end nobody can ever win. Hide it.
+                        hide_dead_end(
+                            pool,
+                            event_id,
+                            &source,
+                            &external_id,
+                            "provider resolved, winning label has no local outcome match",
+                            &mut *stats,
+                        )
+                        .await;
                     }
                 }
             }
             Ok(McVerdict::StillOpen) => stats.still_open += 1,
             Ok(McVerdict::Unsupported) => stats.unsupported += 1,
+            Ok(McVerdict::DeadEnd(reason)) => {
+                hide_dead_end(pool, event_id, &source, &external_id, reason, &mut *stats).await;
+            }
             Err(err) => {
                 stats.errors += 1;
                 println!(
@@ -430,25 +476,81 @@ fn match_outcome_label(outcomes: &[(i64, String)], resolution_label: &str) -> Op
     }
 }
 
+#[derive(Debug, PartialEq)]
 enum Verdict {
     Resolved(bool),
     StillOpen,
-    // Resolved on the provider but not expressible as YES/NO (MKT/percent
-    // resolutions, cancelled/annulled markets needing refunds).
+    // Not resolvable right now for reasons that may be transient or fixable
+    // (odd provider payloads).
     Unsupported,
+    // Resolved on the provider in a way that can never settle here
+    // (MKT/percent resolutions, cancelled/annulled markets). The market is a
+    // dead end nobody can win, so it gets hidden; payload is hidden_reason.
+    DeadEnd(&'static str),
+}
+
+/// Fairness cursor: least-recently-checked candidates go first, so the batch
+/// LIMIT rotates through the whole backlog over successive runs. Best-effort —
+/// a failed update just means this event may be re-checked sooner.
+async fn mark_resolution_checked(pool: &PgPool, event_id: i32) {
+    if let Err(err) =
+        sqlx::query("UPDATE events SET resolution_checked_at = NOW() WHERE id = $1")
+            .bind(event_id)
+            .execute(pool)
+            .await
+    {
+        tracing::warn!(event_id, %err, "failed to stamp resolution_checked_at");
+    }
+}
+
+async fn hide_dead_end(
+    pool: &PgPool,
+    event_id: i32,
+    source: &str,
+    external_id: &str,
+    reason: &str,
+    stats: &mut ResolutionStats,
+) {
+    match sqlx::query(
+        "UPDATE events SET hidden_at = NOW(), hidden_reason = $2 WHERE id = $1 AND hidden_at IS NULL",
+    )
+    .bind(event_id)
+    .bind(format!("resolution-sync dead end: {}", reason))
+    .execute(pool)
+    .await
+    {
+        Ok(_) => {
+            stats.dead_ends_hidden += 1;
+            println!(
+                "🪦 Hid dead-end event {} ({}: {}): {}",
+                event_id, source, external_id, reason
+            );
+        }
+        Err(err) => {
+            stats.errors += 1;
+            println!("⚠️ Failed to hide dead-end event {}: {}", event_id, err);
+        }
+    }
 }
 
 async fn manifold_resolution(client: &Client, external_id: &str) -> Result<Verdict> {
     let url = format!("https://api.manifold.markets/v0/market/{}", external_id);
     let body: Value = client.get(&url).send().await?.error_for_status()?.json().await?;
+    Ok(classify_manifold_binary(&body))
+}
 
+fn classify_manifold_binary(body: &Value) -> Verdict {
     if !body["isResolved"].as_bool().unwrap_or(false) {
-        return Ok(Verdict::StillOpen);
+        return Verdict::StillOpen;
     }
     match body["resolution"].as_str() {
-        Some("YES") => Ok(Verdict::Resolved(true)),
-        Some("NO") => Ok(Verdict::Resolved(false)),
-        _ => Ok(Verdict::Unsupported),
+        Some("YES") => Verdict::Resolved(true),
+        Some("NO") => Verdict::Resolved(false),
+        Some("CANCEL") => Verdict::DeadEnd("manifold market cancelled"),
+        Some("MKT") => Verdict::DeadEnd("manifold resolved to a probability (MKT)"),
+        // isResolved with a missing/unknown resolution string: odd payload,
+        // don't hide on it.
+        _ => Verdict::Unsupported,
     }
 }
 
@@ -469,7 +571,7 @@ async fn metaculus_resolution(client: &Client, external_id: &str) -> Result<Verd
     match resolution {
         "yes" => Ok(Verdict::Resolved(true)),
         "no" => Ok(Verdict::Resolved(false)),
-        "annulled" | "ambiguous" => Ok(Verdict::Unsupported),
+        "annulled" | "ambiguous" => Ok(Verdict::DeadEnd("metaculus annulled/ambiguous")),
         _ => Ok(Verdict::StillOpen),
     }
 }
@@ -502,29 +604,41 @@ async fn polymarket_resolution(client: &Client, external_id: &str) -> Result<Ver
     }
 }
 
+#[derive(Debug, PartialEq)]
 enum McVerdict {
     // Winning option's label, verbatim from the provider.
     Resolved(String),
     StillOpen,
-    // Resolved on the provider but not a single-winner label (Manifold
-    // CANCEL/MKT, Metaculus annulled/ambiguous), or the winning answer
-    // couldn't be matched back to a label at all.
+    // Odd payload; may be transient, don't hide on it.
     Unsupported,
+    // Resolved on the provider without a single winning label we could ever
+    // settle against (Manifold CANCEL/MKT/CHOOSE_MULTIPLE, Metaculus
+    // annulled/ambiguous). Hidden as a dead end; payload is hidden_reason.
+    DeadEnd(&'static str),
 }
 
 async fn manifold_mc_resolution(client: &Client, external_id: &str) -> Result<McVerdict> {
     let url = format!("https://api.manifold.markets/v0/market/{}", external_id);
     let body: Value = client.get(&url).send().await?.error_for_status()?.json().await?;
+    Ok(classify_manifold_mc(&body))
+}
 
+fn classify_manifold_mc(body: &Value) -> McVerdict {
     if !body["isResolved"].as_bool().unwrap_or(false) {
-        return Ok(McVerdict::StillOpen);
+        return McVerdict::StillOpen;
     }
     // For MULTIPLE_CHOICE markets, `resolution` is the winning answer's id,
-    // or "CANCEL" (voided) / "MKT" (weighted multi-winner - no single
-    // label). Verified live 2026-07-14 against a resolved MC market.
+    // or "CANCEL" (voided) / "MKT" / "CHOOSE_MULTIPLE" (weighted or
+    // multi-winner - no single label). Verified live 2026-07-14 against a
+    // resolved MC market; CHOOSE_MULTIPLE verified live 2026-08-31.
     let resolution = match body["resolution"].as_str() {
-        Some(r) if !r.is_empty() && r != "CANCEL" && r != "MKT" => r,
-        _ => return Ok(McVerdict::Unsupported),
+        Some("CANCEL") => return McVerdict::DeadEnd("manifold market cancelled"),
+        Some("MKT") => return McVerdict::DeadEnd("manifold resolved to weighted answers (MKT)"),
+        Some("CHOOSE_MULTIPLE") => {
+            return McVerdict::DeadEnd("manifold resolved to multiple answers (CHOOSE_MULTIPLE)")
+        }
+        Some(r) if !r.is_empty() => r,
+        _ => return McVerdict::Unsupported,
     };
 
     let label = body["answers"]
@@ -537,8 +651,10 @@ async fn manifold_mc_resolution(client: &Client, external_id: &str) -> Result<Mc
         .and_then(|a| a["text"].as_str());
 
     match label {
-        Some(text) => Ok(McVerdict::Resolved(text.to_string())),
-        None => Ok(McVerdict::Unsupported),
+        Some(text) => McVerdict::Resolved(text.to_string()),
+        // Resolution names an answer id we can't find in the payload — odd
+        // payload rather than a provable dead end.
+        None => McVerdict::Unsupported,
     }
 }
 
@@ -561,7 +677,9 @@ async fn metaculus_mc_resolution(client: &Client, external_id: &str) -> Result<M
     // token's access level, for genuinely resolved multiple_choice posts.
     match body["question"]["resolution"].as_str() {
         None => Ok(McVerdict::StillOpen),
-        Some("annulled") | Some("ambiguous") => Ok(McVerdict::Unsupported),
+        Some("annulled") | Some("ambiguous") => {
+            Ok(McVerdict::DeadEnd("metaculus annulled/ambiguous"))
+        }
         Some(label) => Ok(McVerdict::Resolved(label.to_string())),
     }
 }
@@ -664,4 +782,85 @@ mod tests {
     // pick_winning_outcome (ported to the shared (id, BucketKind, lower,
     // upper) signature) when this function was replaced by a direct call to
     // the shared picker.
+
+    #[test]
+    fn manifold_binary_open_and_resolved() {
+        assert_eq!(
+            classify_manifold_binary(&json!({"isResolved": false})),
+            Verdict::StillOpen
+        );
+        assert_eq!(
+            classify_manifold_binary(&json!({"isResolved": true, "resolution": "YES"})),
+            Verdict::Resolved(true)
+        );
+        assert_eq!(
+            classify_manifold_binary(&json!({"isResolved": true, "resolution": "NO"})),
+            Verdict::Resolved(false)
+        );
+    }
+
+    #[test]
+    fn manifold_binary_dead_ends_and_odd_payloads() {
+        assert!(matches!(
+            classify_manifold_binary(&json!({"isResolved": true, "resolution": "CANCEL"})),
+            Verdict::DeadEnd(_)
+        ));
+        assert!(matches!(
+            classify_manifold_binary(&json!({"isResolved": true, "resolution": "MKT"})),
+            Verdict::DeadEnd(_)
+        ));
+        // Resolved with a missing/unknown resolution string must NOT hide.
+        assert_eq!(
+            classify_manifold_binary(&json!({"isResolved": true})),
+            Verdict::Unsupported
+        );
+    }
+
+    #[test]
+    fn manifold_mc_single_winner_resolves_to_label() {
+        let body = json!({
+            "isResolved": true,
+            "resolution": "abc123",
+            "answers": [
+                {"id": "xyz", "text": "Before June"},
+                {"id": "abc123", "text": "June 17"},
+            ]
+        });
+        assert_eq!(
+            classify_manifold_mc(&body),
+            McVerdict::Resolved("June 17".to_string())
+        );
+    }
+
+    #[test]
+    fn manifold_mc_multi_winner_is_dead_end() {
+        // Regression: "What day will GPT 5.6 come out?" (zAClyQAdpt) resolved
+        // CHOOSE_MULTIPLE on Manifold and sat open here for months.
+        let body = json!({"isResolved": true, "resolution": "CHOOSE_MULTIPLE"});
+        assert!(matches!(classify_manifold_mc(&body), McVerdict::DeadEnd(_)));
+        assert!(matches!(
+            classify_manifold_mc(&json!({"isResolved": true, "resolution": "CANCEL"})),
+            McVerdict::DeadEnd(_)
+        ));
+        assert!(matches!(
+            classify_manifold_mc(&json!({"isResolved": true, "resolution": "MKT"})),
+            McVerdict::DeadEnd(_)
+        ));
+    }
+
+    #[test]
+    fn manifold_mc_open_and_odd_payloads() {
+        assert_eq!(
+            classify_manifold_mc(&json!({"isResolved": false})),
+            McVerdict::StillOpen
+        );
+        // Winning answer id missing from the answers array: odd payload,
+        // must NOT hide.
+        let body = json!({
+            "isResolved": true,
+            "resolution": "ghost-id",
+            "answers": [{"id": "xyz", "text": "Before June"}]
+        });
+        assert_eq!(classify_manifold_mc(&body), McVerdict::Unsupported);
+    }
 }
