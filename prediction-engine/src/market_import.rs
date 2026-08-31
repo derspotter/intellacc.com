@@ -1119,6 +1119,47 @@ fn normalize_event_type(raw: &str) -> String {
     }
 }
 
+/// Engagement floor for an import knob (IMPORT_*_MIN_*), env-overridable.
+fn import_min_threshold(key: &str, default: f64) -> f64 {
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(default)
+        .max(0.0)
+}
+
+/// Only import markets with real engagement — everything else is clutter
+/// users can add themselves. Manifold reports unique traders directly.
+fn manifold_row_is_viral(row: &Value, min_bettors: f64) -> bool {
+    row.get("uniqueBettorCount")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0)
+        >= min_bettors
+}
+
+/// Manifold's popular feed mixes in perpetual/non-predictive market types
+/// (stonks, polls, bounties) that can never resolve — skip them outright.
+fn manifold_type_is_predictive(outcome_type: &str) -> bool {
+    !matches!(
+        outcome_type,
+        "STONK" | "POLL" | "BOUNTIED_QUESTION" | "QUADRATIC_FUNDING"
+    )
+}
+
+/// Polymarket exposes lifetime volume as volumeNum (number) with a stringly
+/// "volume" fallback on some rows.
+fn polymarket_row_is_viral(row: &Value, min_volume: f64) -> bool {
+    row.get("volumeNum")
+        .and_then(|v| v.as_f64())
+        .or_else(|| {
+            row.get("volume")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+        })
+        .unwrap_or(0.0)
+        >= min_volume
+}
+
 fn dedup_threshold() -> f64 {
     env::var("IMPORT_DEDUP_THRESHOLD")
         .ok()
@@ -1246,27 +1287,28 @@ async fn embed_text(text: &str) -> Result<Vec<f64>> {
 async fn fetch_manifold_markets(max_markets: Option<usize>) -> Result<Vec<ImportedMarket>> {
     let client = Client::new();
     let page_limit = 100usize;
-    let mut before: Option<String> = None;
+    let mut offset = 0usize;
     let mut output = Vec::new();
+    let min_bettors = import_min_threshold("IMPORT_MANIFOLD_MIN_BETTORS", 20.0);
 
     while max_markets.map(|max| output.len() < max).unwrap_or(true) {
-        let remaining = max_markets
-            .map(|max| max.saturating_sub(output.len()))
-            .unwrap_or(page_limit);
-        let request_limit = page_limit.min(remaining).max(1);
-        let mut url = format!(
-            "https://api.manifold.markets/v0/markets?limit={}",
-            request_limit
+        // Popularity-sorted search instead of the newest-first firehose:
+        // /v0/markets mirrors whatever got created that day (mostly personal
+        // markets with a handful of bettors); most-popular surfaces the
+        // markets people actually trade. Always request full pages — rows are
+        // filtered below, so a small request could stall on a filtered page.
+        let url = format!(
+            "https://api.manifold.markets/v0/search-markets?term=&sort=most-popular&filter=open&limit={}&offset={}",
+            page_limit, offset
         );
-        if let Some(ref b) = before {
-            url.push_str("&before=");
-            url.push_str(b);
-        }
 
         let batch: Vec<Value> = client.get(&url).send().await?.json().await?;
         if batch.is_empty() {
             break;
         }
+        offset += batch.len();
+        let full_page = batch.len() >= page_limit;
+        let accepted_before_page = output.len();
 
         for row in &batch {
             if max_markets.map(|max| output.len() >= max).unwrap_or(false) {
@@ -1277,6 +1319,13 @@ async fn fetch_manifold_markets(max_markets: Option<usize>) -> Result<Vec<Import
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false)
             {
+                continue;
+            }
+            let outcome_type_raw = value_to_string(row.get("outcomeType")).unwrap_or_default();
+            if !manifold_type_is_predictive(&outcome_type_raw) {
+                continue;
+            }
+            if !manifold_row_is_viral(row, min_bettors) {
                 continue;
             }
             let Some(id) = value_to_string(row.get("id")) else {
@@ -1336,10 +1385,10 @@ async fn fetch_manifold_markets(max_markets: Option<usize>) -> Result<Vec<Import
             });
         }
 
-        before = batch.last().and_then(|v| value_to_string(v.get("id")));
-        // Stop only when the provider returns fewer rows than we asked for.
-        // This avoids premature termination on small requested pages.
-        if before.is_none() || batch.len() < request_limit {
+        // Stop when the provider runs out of rows, or when popularity has
+        // decayed below the engagement floor for a whole page — every later
+        // page ranks lower still, so keeping on paging is pure waste.
+        if !full_page || output.len() == accepted_before_page {
             break;
         }
     }
@@ -1361,13 +1410,17 @@ async fn fetch_polymarket_markets(max_markets: Option<usize>) -> Result<Vec<Impo
     let page_limit = 100usize;
     let mut offset = 0usize;
     let mut output = Vec::new();
+    let min_volume = import_min_threshold("IMPORT_POLYMARKET_MIN_VOLUME", 10_000.0);
+    let mut below_floor = false;
 
-    while max_markets.map(|max| output.len() < max).unwrap_or(true) {
+    while max_markets.map(|max| output.len() < max).unwrap_or(true) && !below_floor {
         let remaining = max_markets
             .map(|max| max.saturating_sub(output.len()))
             .unwrap_or(page_limit);
+        // volume-desc so the engagement floor is a clean cutoff: once one row
+        // is below it, every later row is too.
         let url = format!(
-            "https://gamma-api.polymarket.com/markets?active=true&closed=false&limit={}&offset={}",
+            "https://gamma-api.polymarket.com/markets?active=true&closed=false&order=volumeNum&ascending=false&limit={}&offset={}",
             page_limit.min(remaining).max(1),
             offset
         );
@@ -1378,6 +1431,10 @@ async fn fetch_polymarket_markets(max_markets: Option<usize>) -> Result<Vec<Impo
 
         for row in &batch {
             if max_markets.map(|max| output.len() >= max).unwrap_or(false) {
+                break;
+            }
+            if !polymarket_row_is_viral(row, min_volume) {
+                below_floor = true;
                 break;
             }
             let Some(id) = value_to_string(row.get("id")) else {
@@ -1673,5 +1730,40 @@ mod tests {
             let limit = super::provider_fetch_limit(provider, true);
             assert!(matches!(limit, Some(n) if (100..=20_000).contains(&n)));
         }
+    }
+
+    #[test]
+    fn manifold_viral_floor_uses_unique_bettors() {
+        let popular = serde_json::json!({"uniqueBettorCount": 4570});
+        let personal = serde_json::json!({"uniqueBettorCount": 3});
+        let missing = serde_json::json!({});
+        assert!(super::manifold_row_is_viral(&popular, 20.0));
+        assert!(!super::manifold_row_is_viral(&personal, 20.0));
+        // No engagement data counts as no engagement, not a free pass.
+        assert!(!super::manifold_row_is_viral(&missing, 20.0));
+        // Floor of 0 admits everything (the escape hatch).
+        assert!(super::manifold_row_is_viral(&missing, 0.0));
+    }
+
+    #[test]
+    fn manifold_non_predictive_types_are_skipped() {
+        for t in ["STONK", "POLL", "BOUNTIED_QUESTION", "QUADRATIC_FUNDING"] {
+            assert!(!super::manifold_type_is_predictive(t), "{t} must be skipped");
+        }
+        for t in ["BINARY", "MULTIPLE_CHOICE", "PSEUDO_NUMERIC", "NUMBER", ""] {
+            assert!(super::manifold_type_is_predictive(t), "{t} must pass");
+        }
+    }
+
+    #[test]
+    fn polymarket_viral_floor_reads_volume_num_with_string_fallback() {
+        let big = serde_json::json!({"volumeNum": 83_453_040.6});
+        let small = serde_json::json!({"volumeNum": 950.0});
+        let stringly = serde_json::json!({"volume": "83453040.65"});
+        let missing = serde_json::json!({});
+        assert!(super::polymarket_row_is_viral(&big, 10_000.0));
+        assert!(!super::polymarket_row_is_viral(&small, 10_000.0));
+        assert!(super::polymarket_row_is_viral(&stringly, 10_000.0));
+        assert!(!super::polymarket_row_is_viral(&missing, 10_000.0));
     }
 }

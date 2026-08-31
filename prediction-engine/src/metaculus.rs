@@ -19,6 +19,11 @@ struct MetaculusPost {
     #[serde(default)]
     categories: Vec<String>,
     question: Option<MetaculusQuestion>,
+    // Post-level engagement (number of forecasts across the post's
+    // questions); verified live 2026-08-31 on /api/posts/. Used for the
+    // viral-only import floor.
+    #[serde(default)]
+    forecasts_count: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -58,6 +63,16 @@ struct MetaculusQuestion {
     open_upper_bound: Option<bool>,
     #[serde(default)]
     unit: Option<String>,
+}
+
+/// Viral-only import floor: minimum forecasts on a post before it's worth
+/// mirroring. 0 disables the floor.
+fn min_forecasts_floor() -> f64 {
+    env::var("IMPORT_METACULUS_MIN_FORECASTS")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(30.0)
+        .max(0.0)
 }
 
 #[derive(Clone)]
@@ -107,14 +122,20 @@ impl MetaculusClient {
         Ok(response)
     }
 
-    // DRY helper: Extract questions from API response
+    // DRY helper: Extract questions from API response.
+    // Applies the viral-only floor: posts below the forecast-count minimum
+    // are clutter users can add themselves (also skips notebook/announcement
+    // posts, which carry 0 forecasts). Applies to every Metaculus import
+    // route on purpose.
     fn extract_questions_from_response(
         &self,
         response: MetaculusResponse,
     ) -> Vec<(MetaculusQuestion, MetaculusPost)> {
+        let min_forecasts = min_forecasts_floor();
         response
             .results
             .into_iter()
+            .filter(|post| post.forecasts_count.unwrap_or(0.0) >= min_forecasts)
             .filter_map(|post| post.question.clone().map(|question| (question, post)))
             .collect()
     }
@@ -125,7 +146,9 @@ impl MetaculusClient {
         limit: Option<u32>,
     ) -> Result<Vec<(MetaculusQuestion, MetaculusPost)>> {
         let mut all_questions = Vec::new();
-        let mut url = format!("{}/posts/?status=open&order_by=-id", self.base_url);
+        // -hotness (was -id): surface the questions people are actually
+        // forecasting instead of whatever was created most recently.
+        let mut url = format!("{}/posts/?status=open&order_by=-hotness", self.base_url);
 
         // Set a reasonable per-page limit for API requests
         let per_page_limit = limit.unwrap_or(100).min(100);
@@ -649,6 +672,7 @@ mod tests {
         let post = MetaculusPost {
             categories: Vec::new(),
             question: Some(question.clone()),
+            forecasts_count: None,
         };
         (question, post)
     }
@@ -723,8 +747,43 @@ mod tests {
         let post = MetaculusPost {
             categories: Vec::new(),
             question: Some(question.clone()),
+            forecasts_count: None,
         };
         let market = client().convert_to_imported_market(&question, &post);
         assert_eq!(market.numeric_unit, Some("USD".to_string()));
+    }
+
+    #[test]
+    fn extraction_drops_posts_below_forecast_floor() {
+        // Default floor is 30; notebook/announcement posts (0 forecasts) and
+        // missing counts must be dropped, engaged questions kept.
+        let (question, _) = make_post(MC_QUESTION_JSON);
+        let hot = MetaculusPost {
+            categories: Vec::new(),
+            question: Some(question.clone()),
+            forecasts_count: Some(250.0),
+        };
+        let cold = MetaculusPost {
+            categories: Vec::new(),
+            question: Some(question.clone()),
+            forecasts_count: Some(2.0),
+        };
+        let notebook = MetaculusPost {
+            categories: Vec::new(),
+            question: None,
+            forecasts_count: Some(9999.0),
+        };
+        let uncounted = MetaculusPost {
+            categories: Vec::new(),
+            question: Some(question),
+            forecasts_count: None,
+        };
+        let response = MetaculusResponse {
+            results: vec![hot, cold, notebook, uncounted],
+            next: None,
+        };
+        let extracted = client().extract_questions_from_response(response);
+        assert_eq!(extracted.len(), 1);
+        assert_eq!(extracted[0].1.forecasts_count, Some(250.0));
     }
 }
