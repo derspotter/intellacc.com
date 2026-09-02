@@ -1,4 +1,5 @@
 const db = require('../db');
+const eventEnrichmentService = require('../services/eventEnrichmentService');
 const {
   normalizeEventType,
   normalizeOutcomeRows,
@@ -612,6 +613,15 @@ exports.submitReview = async (req, res) => {
     );
 
     await client.query('COMMIT');
+
+    if (approved && approvedEventId) {
+      eventEnrichmentService.enrichEventInBackground({
+        id: approvedEventId,
+        title: submission.title,
+        details: submission.details
+      });
+    }
+
     return res.json({
       finalized: true,
       approved,

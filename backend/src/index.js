@@ -154,6 +154,7 @@ if (!isJestRuntime()) {
   passwordResetService.startResetWorker();
   mlsService.startCleanupWorker();
   require('./services/topicService').startClassificationWorker();
+  require('./services/eventEnrichmentService').startEmbeddingSweepWorker();
 }
 
 // Security headers
