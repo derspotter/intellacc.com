@@ -112,7 +112,26 @@ const buildScene = async ({ bystanders = 4 } = {}) => {
 };
 
 describe('Community market resolution flow', () => {
+  // CI has no prediction-engine container (postgres only), so intercept the
+  // engine's market-resolve endpoint; everything else (including the events
+  // row update and all stake bookkeeping) runs for real. Locally this also
+  // keeps the suite from settling through the live engine.
+  const realFetch = global.fetch;
+  beforeAll(() => {
+    global.fetch = (url, options) => {
+      if (String(url).includes('/market-resolve')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ message: 'mocked engine resolution', outcome_id: null })
+        });
+      }
+      return realFetch(url, options);
+    };
+  });
+
   afterAll(async () => {
+    global.fetch = realFetch;
     if (cleanup.marketUpdates.size) {
       await db.query('DELETE FROM market_updates WHERE id = ANY($1::int[])', [Array.from(cleanup.marketUpdates)]);
     }
