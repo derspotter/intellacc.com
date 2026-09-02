@@ -3,6 +3,7 @@ import { api } from '../../services/api';
 import MarketEventCard from './MarketEventCard';
 import OutcomeMarketCard from './OutcomeMarketCard';
 import DistributionMarketCard from './DistributionMarketCard';
+import ResolutionPanel from './ResolutionPanel';
 import { formatProbability, safeNumber } from './marketCardShared';
 
 const TRADES_LIMIT = 200;
@@ -249,6 +250,8 @@ export default function MarketDetailView(props) {
             />
           </Show>
         </div>
+
+        <ResolutionPanel event={event()} />
 
         <Show when={activity().length > 0}>
           <div class="market-detail-activity">

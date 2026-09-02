@@ -548,60 +548,23 @@ exports.resolveEvent = asyncHandler(async (req, res) => {
     return res.status(409).json({ message: 'Event already resolved' });
   }
 
-  const resolvedBoolean = outcomeValue === 'yes';
-  const engineBody = hasOutcomeId
-    ? { outcome_id: outcomeId }
-    : (hasNumericalOutcome ? { numerical_outcome: numericalValue } : { outcome: resolvedBoolean });
-  const outcomeResponse = await fetch(`http://prediction-engine:3001/events/${eventId}/market-resolve`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(process.env.PREDICTION_ENGINE_AUTH_TOKEN ? { 'x-engine-token': process.env.PREDICTION_ENGINE_AUTH_TOKEN } : {})
-    },
-    body: JSON.stringify(engineBody)
-  });
-
-  const outcomeResult = await outcomeResponse.json().catch(() => ({}));
-  if (!outcomeResponse.ok) {
-    return res.status(outcomeResponse.status).json(outcomeResult);
-  }
-
-  const backendOutcome = hasOutcomeId
-    ? `resolved_outcome_${outcomeId}`
-    : (hasNumericalOutcome ? 'resolved_numeric' : outcomeValue);
-  const backendNumericalOutcome = hasNumericalOutcome
-    ? numericalValue
-    : (hasOutcomeId ? null : (resolvedBoolean ? 1 : 0));
-  const resolvedOutcomeId = hasOutcomeId
-    ? outcomeId
-    : (Number.isInteger(outcomeResult.outcome_id) ? outcomeResult.outcome_id : null);
-
-  const update = await db.query(
-    `UPDATE events
-     SET outcome = $1,
-         numerical_outcome = $2,
-         resolution_outcome_id = $3,
-         resolved_at = COALESCE(resolved_at, NOW()),
-         updated_at = NOW()
-     WHERE id = $4
-     RETURNING id, title, outcome, numerical_outcome, resolution_outcome_id, closing_date`,
-    [backendOutcome, backendNumericalOutcome, resolvedOutcomeId, eventId]
-  );
-
-  const resolvedEvent = update.rows[0];
-  if (req.app.get('io')) {
-    req.app.get('io').to('predictions').emit('marketResolved', {
-      eventId,
-      outcome: backendOutcome,
-      outcome_id: resolvedOutcomeId,
-      numerical_outcome: backendNumericalOutcome,
-      timestamp: new Date().toISOString()
-    });
+  let settled;
+  try {
+    settled = await require('../services/marketSettlementService').settleEvent(eventId, {
+      outcome: outcomeValue,
+      outcomeId: hasOutcomeId ? outcomeId : null,
+      numericalOutcome: hasNumericalOutcome ? numericalValue : null
+    }, req.app.get('io'));
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json(err.body || { message: err.message });
+    }
+    throw err;
   }
 
   return res.status(200).json({
-    event: resolvedEvent,
-    message: outcomeResult.message || `Market ${eventId} resolved`
+    event: settled.event,
+    message: settled.engineResult.message || `Market ${eventId} resolved`
   });
 });
 

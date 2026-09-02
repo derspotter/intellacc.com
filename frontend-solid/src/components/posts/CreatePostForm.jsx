@@ -1,5 +1,6 @@
 import { createSignal, Show } from 'solid-js';
-import { createPost, postToGroup, uploadPostImage } from '../../services/api';
+import api, { createPost, postToGroup, uploadPostImage } from '../../services/api';
+import MarketPicker from './MarketPicker';
 
 const MAX_PREVIEW_SIZE = 4_000_000;
 
@@ -9,6 +10,20 @@ export default function CreatePostForm(props) {
   const [previewUrl, setPreviewUrl] = createSignal(null);
   const [submitting, setSubmitting] = createSignal(false);
   const [error, setError] = createSignal('');
+  const [showMarketPicker, setShowMarketPicker] = createSignal(false);
+  const [selectedMarket, setSelectedMarket] = createSignal(null);
+  const [marketStance, setMarketStance] = createSignal('related');
+
+  const handleMarketSelect = (market, stance) => {
+    setSelectedMarket(market);
+    setMarketStance(stance);
+    setShowMarketPicker(false);
+  };
+
+  const clearMarket = () => {
+    setSelectedMarket(null);
+    setMarketStance('related');
+  };
 
   const clearAttachment = () => {
     const current = attachment();
@@ -69,8 +84,21 @@ export default function CreatePostForm(props) {
       const post = props.groupId
         ? await postToGroup(props.groupId, text, imageAttachmentId)
         : await createPost(text, imageAttachmentId, null);
+
+      const market = selectedMarket();
+      if (market && post?.id) {
+        try {
+          await api.posts.attachMarket(post.id, market.event_id, marketStance());
+        } catch (attachErr) {
+          console.error('Failed to attach market to new post:', attachErr);
+          setError('Posted, but attaching the market failed. You can attach it from the post.');
+        }
+      }
+
       setContent('');
       clearAttachment();
+      clearMarket();
+      setShowMarketPicker(false);
       props.onCreated?.(post);
     } catch (err) {
       setError(err?.message || 'Failed to create post.');
@@ -124,8 +152,37 @@ export default function CreatePostForm(props) {
                 Remove
               </button>
             </Show>
+            <button
+              type="button"
+              class="file-button"
+              onClick={() => setShowMarketPicker(!showMarketPicker())}
+              disabled={submitting()}
+            >
+              {selectedMarket() ? 'Change Market' : 'Attach Market'}
+            </button>
           </div>
         </div>
+        <Show when={selectedMarket()}>
+          <div class="selected-market" style={{ display: 'flex', 'align-items': 'center', gap: '8px', 'margin-top': '6px', 'font-size': '0.85em' }}>
+            <span class="market-chip" style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>
+              {selectedMarket().title}
+              <Show when={selectedMarket().market_prob != null}>
+                <strong style={{ 'margin-left': '6px' }}>{Math.round(selectedMarket().market_prob * 100)}%</strong>
+              </Show>
+            </span>
+            <span class="muted">({marketStance()})</span>
+            <button type="button" class="attachment-remove" onClick={clearMarket}>
+              Remove
+            </button>
+          </div>
+        </Show>
+        <Show when={showMarketPicker()}>
+          <MarketPicker
+            seedText={content()}
+            onSelect={handleMarketSelect}
+            onClose={() => setShowMarketPicker(false)}
+          />
+        </Show>
         <Show when={previewUrl()}>
           <div class="attachment-preview">
             <img src={previewUrl()} alt="Image preview" />

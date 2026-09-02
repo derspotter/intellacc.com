@@ -16,9 +16,11 @@ import {
   uploadPostImage,
   followUser
 } from '../../services/api';
+import api from '../../services/api';
 import { getCurrentUserId, isAdmin, isAuthenticated } from '../../services/auth';
 import PostMarkets from './PostMarkets';
 import PostCritiques from './PostCritiques';
+import MarketPicker from './MarketPicker';
 import { RenderTextWithLinks } from '../../utils/text';
 
 const normalizePosts = (payload) => {
@@ -124,6 +126,20 @@ export default function PostItem(props) {
 
   const author = () => post().username || `user-${post().user_id || 'unknown'}`;
   const isMine = () => String(post().user_id) === getCurrentUserId();
+  const [showMarketPicker, setShowMarketPicker] = createSignal(false);
+  const [marketsVersion, setMarketsVersion] = createSignal(0);
+
+  const handleAttachMarket = async (market, stance) => {
+    try {
+      await api.posts.attachMarket(post().id, market.event_id, stance);
+      setActionError('');
+      setShowMarketPicker(false);
+      setMarketsVersion(marketsVersion() + 1);
+    } catch (err) {
+      console.error('Failed to attach market:', err);
+      setActionError(err?.message || 'Failed to attach market.');
+    }
+  };
   const canEdit = () => isMine() || isAdmin();
   const currentCommentCount = () => Number(post().comment_count || 0);
   const commentCountText = () => `${commentCount()} comment${commentCount() === 1 ? '' : 's'}`;
@@ -761,7 +777,14 @@ export default function PostItem(props) {
       </Show>
 
       <PostMarkets postId={post().id} />
-      <PostCritiques postId={post().id} />
+      <PostCritiques postId={post().id} authorId={post().user_id} refresh={marketsVersion()} />
+      <Show when={showMarketPicker()}>
+        <MarketPicker
+          seedText={post().content}
+          onSelect={handleAttachMarket}
+          onClose={() => setShowMarketPicker(false)}
+        />
+      </Show>
 
       <Show when={actionError()}>
         <p class="error-message">{actionError()}</p>
@@ -773,6 +796,15 @@ export default function PostItem(props) {
             <button type="button" class="post-action edit" onClick={handleStartEdit}>
               Edit
             </button>
+            <Show when={isMine()}>
+              <button
+                type="button"
+                class="post-action attach-market"
+                onClick={() => setShowMarketPicker(!showMarketPicker())}
+              >
+                Market
+              </button>
+            </Show>
             <Show when={isAdmin()}>
               <button type="button" class="post-action delete" onClick={handleDelete}>
                 Delete

@@ -300,6 +300,18 @@ router.post('/market-questions/:id/reviews', authenticateJWT, marketQuestionCont
 router.post('/market-questions/:id/rewards/traction', authenticateJWT, requireAdmin, marketQuestionController.rewardTraction);
 router.post('/market-questions/:id/rewards/resolution', authenticateJWT, requireAdmin, marketQuestionController.rewardResolution);
 
+// Community market resolution: proposals, juries, staked votes, admin fallback
+const marketResolutionController = require('../controllers/marketResolutionController');
+router.get('/resolution-proposals/config', authenticateJWT, marketResolutionController.getConfig);
+router.get('/resolution-proposals/jury-queue', authenticateJWT, marketResolutionController.getJuryQueue);
+router.get('/resolution-proposals/escalations', authenticateJWT, requireAdmin, marketResolutionController.getEscalations);
+router.post('/resolution-proposals/sweep', authenticateJWT, requireAdmin, marketResolutionController.runSweep);
+router.post('/resolution-proposals/:id/votes', authenticateJWT, marketResolutionController.submitVote);
+router.post('/resolution-proposals/:id/challenge', authenticateJWT, marketResolutionController.challengeProposal);
+router.post('/resolution-proposals/:id/admin-ruling', authenticateJWT, requireAdmin, marketResolutionController.adminRuling);
+router.post('/events/:eventId/resolution-proposals', authenticateJWT, marketResolutionController.createProposal);
+router.get('/events/:eventId/resolution-proposal', authenticateJWT, marketResolutionController.getEventProposal);
+
 router.get('/admin/external-imports/status', authenticateJWT, requireAdmin, async (req, res) => {
     try {
         const limit = Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 25));
@@ -364,6 +376,9 @@ router.get("/posts/:postId/markets", authenticateJWT, persuasiveAlphaController.
 router.get("/posts/:postId/signal-summary", authenticateJWT, persuasiveAlphaController.getPostSignalSummary);
 router.get("/posts/:postId/market-link", authenticateJWT, persuasiveAlphaController.getPostMarketLink);
 router.post("/posts/:postId/confirm-market", authenticateJWT, persuasiveAlphaController.confirmMarketLink);
+router.post("/posts/match-preview", authenticateJWT, persuasiveAlphaController.matchPreview);
+router.post("/posts/:postId/market-links", authenticateJWT, persuasiveAlphaController.attachMarketLink);
+router.delete("/posts/:postId/market-links/:eventId", authenticateJWT, persuasiveAlphaController.detachMarketLink);
 router.post("/posts/:postId/verify", authenticateJWT, persuasiveAlphaController.submitVerification);
 router.post("/admin/persuasion-score/run", authenticateJWT, requireAdmin, persuasiveAlphaController.runAutomaticRewards);
 router.post("/admin/persuasion-score/run-cron", requireCronSharedSecret, persuasiveAlphaController.runAutomaticRewards);

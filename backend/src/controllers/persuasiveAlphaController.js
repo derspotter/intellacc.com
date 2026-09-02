@@ -659,3 +659,144 @@ exports.getRewardRunStatus = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch run status' });
   }
 };
+
+const VALID_STANCES = new Set(['agrees', 'disagrees', 'related']);
+const MATCH_PREVIEW_MIN_LENGTH = 8;
+const MATCH_PREVIEW_LIMIT = 5;
+
+exports.attachMarketLink = async (req, res) => {
+  try {
+    const postId = parseIntParam(req.params.postId, 'postId');
+    const eventId = parseIntParam(req.body?.event_id, 'event_id');
+    const userId = req.user?.id || req.user?.userId;
+    const stance = VALID_STANCES.has(req.body?.stance) ? req.body.stance : 'related';
+
+    const postResult = await db.query('SELECT user_id FROM posts WHERE id = $1', [postId]);
+    if (postResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    if (postResult.rows[0].user_id !== Number(userId)) {
+      return res.status(403).json({ message: 'Not allowed to attach markets to this post' });
+    }
+
+    const eventResult = await db.query('SELECT id FROM events WHERE id = $1', [eventId]);
+    if (eventResult.rows.length === 0) {
+      return res.status(400).json({ message: 'Invalid event_id' });
+    }
+
+    const existing = await db.query(
+      'SELECT 1 FROM post_market_links WHERE post_id = $1 AND event_id = $2',
+      [postId, eventId]
+    );
+    const isNew = existing.rows.length === 0;
+
+    const upsertResult = await db.query(
+      `INSERT INTO post_market_links (
+         post_id,
+         event_id,
+         stance,
+         source,
+         confirmed,
+         match_method,
+         confirmed_count
+       ) VALUES ($1, $2, $3, 'author_confirmed', TRUE, 'manual', 1)
+       ON CONFLICT (post_id, event_id) DO UPDATE
+       SET stance = EXCLUDED.stance,
+           source = 'author_confirmed',
+           confirmed = TRUE,
+           match_method = 'manual',
+           updated_at = NOW()
+       RETURNING *`,
+      [postId, eventId, stance]
+    );
+
+    return res.status(isNew ? 201 : 200).json({
+      post_id: postId,
+      link: upsertResult.rows[0]
+    });
+  } catch (error) {
+    if (normalizeOptionalTableResult(error, res, {})) {
+      return undefined;
+    }
+    if (error.message.startsWith('Invalid ')) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error attaching market link:', error);
+    return res.status(500).json({ message: 'Failed to attach market link' });
+  }
+};
+
+exports.detachMarketLink = async (req, res) => {
+  try {
+    const postId = parseIntParam(req.params.postId, 'postId');
+    const eventId = parseIntParam(req.params.eventId, 'eventId');
+    const userId = req.user?.id || req.user?.userId;
+
+    const postResult = await db.query('SELECT user_id FROM posts WHERE id = $1', [postId]);
+    if (postResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    if (postResult.rows[0].user_id !== Number(userId)) {
+      return res.status(403).json({ message: 'Not allowed to detach markets from this post' });
+    }
+
+    const deleteResult = await db.query(
+      'DELETE FROM post_market_links WHERE post_id = $1 AND event_id = $2 RETURNING id',
+      [postId, eventId]
+    );
+    if (deleteResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Link not found' });
+    }
+
+    return res.status(200).json({ post_id: postId, event_id: eventId, detached: true });
+  } catch (error) {
+    if (normalizeOptionalTableResult(error, res, {})) {
+      return undefined;
+    }
+    if (error.message.startsWith('Invalid ')) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error detaching market link:', error);
+    return res.status(500).json({ message: 'Failed to detach market link' });
+  }
+};
+
+exports.matchPreview = async (req, res) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    if (text.length < MATCH_PREVIEW_MIN_LENGTH) {
+      return res.json({ markets: [] });
+    }
+
+    const { retrieveCandidateMarkets } = require('../services/openRouterMatcher/marketRetrieval');
+    const candidates = await retrieveCandidateMarkets(text, [], null);
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      return res.json({ markets: [] });
+    }
+
+    const top = candidates.slice(0, MATCH_PREVIEW_LIMIT);
+    const eventIds = top.map((candidate) => Number(candidate.event_id));
+    const eventsResult = await db.query(
+      'SELECT id, title, market_prob, closing_date, event_type FROM events WHERE id = ANY($1::int[])',
+      [eventIds]
+    );
+    const eventsById = new Map(eventsResult.rows.map((row) => [Number(row.id), row]));
+
+    const markets = top.map((candidate) => {
+      const event = eventsById.get(Number(candidate.event_id));
+      return {
+        event_id: Number(candidate.event_id),
+        title: event?.title || candidate.title,
+        market_prob: event?.market_prob != null ? Number(event.market_prob) : null,
+        closing_date: event?.closing_date || candidate.closing_date || null,
+        event_type: event?.event_type || null,
+        match_score: Number(candidate.match_score) || 0
+      };
+    });
+
+    return res.json({ markets });
+  } catch (error) {
+    console.error('Error building match preview:', error);
+    return res.status(500).json({ message: 'Failed to build match preview' });
+  }
+};

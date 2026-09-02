@@ -480,6 +480,16 @@ const storeMarketLink = async (client, postId, bestMarket, candidateMap, conclus
     return null;
   }
 
+  // An author-confirmed link (manual attach or confirmed auto-match) outranks
+  // the reasoner: never clobber it or add a competing auto link beside it.
+  const confirmedLink = await client.query(
+    'SELECT 1 FROM post_market_links WHERE post_id = $1 AND confirmed = TRUE LIMIT 1',
+    [postId]
+  );
+  if (confirmedLink.rows.length > 0) {
+    return null;
+  }
+
   const candidate = candidateMap.get(bestMarket.event_id);
   const reasonedConfidence = Number.isFinite(bestMarket.confidence)
     ? bestMarket.confidence

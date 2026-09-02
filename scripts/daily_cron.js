@@ -90,6 +90,32 @@ async function runDailyTasks() {
     });
     console.log(`✅ Persuasive Alpha results: ${JSON.stringify(rewardsResponse.data, null, 2)}`);
 
+    // Step 2: Sweep community resolution proposals (settle elapsed challenge
+    // windows, escalate voting timeouts). The route is admin-JWT-only, so
+    // authenticate with the admin account even when a cron secret is set.
+    console.log('\n⚖️ Step 2: Sweeping community resolution proposals...');
+    try {
+      let sweepHeaders = headers;
+      if (CRON_SHARED_SECRET) {
+        if (ADMIN_TOKEN) {
+          sweepHeaders = { 'Authorization': `Bearer ${ADMIN_TOKEN}` };
+        } else if (ADMIN_EMAIL && ADMIN_PASSWORD) {
+          const loginRes = await requestJson(`${API_BASE}/login`, {
+            method: 'POST',
+            body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD }
+          });
+          sweepHeaders = { 'Authorization': `Bearer ${loginRes.data.token}` };
+        }
+      }
+      const sweepResponse = await requestJson(`${API_BASE}/resolution-proposals/sweep`, {
+        method: 'POST',
+        headers: sweepHeaders
+      });
+      console.log(`✅ Resolution sweep: ${JSON.stringify(sweepResponse.data)}`);
+    } catch (sweepError) {
+      console.error('⚠️ Resolution sweep failed:', JSON.stringify(sweepError));
+    }
+
   } catch (error) {
     console.error('\n❌ Error in daily cron run:', JSON.stringify(error, null, 2));
     process.exit(1);

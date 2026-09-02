@@ -4,6 +4,7 @@ import MarketDetailView from '../components/predictions/MarketDetailView';
 import MyPositions from '../components/predictions/MyPositions';
 import LeaderboardCard from '../components/predictions/LeaderboardCard';
 import MarketQuestionHub from '../components/predictions/MarketQuestionHub';
+import ResolutionJuryQueue from '../components/predictions/ResolutionJuryQueue';
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
 import AdminMarketResolution from '../components/predictions/AdminMarketResolution';
 import AdminTools from '../components/predictions/AdminTools';
@@ -95,6 +96,7 @@ export default function PredictionsPage(props) {
         </Show>
 
         <Show when={activeTab() === 'submit'}>
+          <ResolutionJuryQueue />
           <MarketQuestionHub />
         </Show>
 

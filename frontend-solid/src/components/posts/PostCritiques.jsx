@@ -32,7 +32,10 @@ const fetchAnalysis = async (postId) => {
 };
 
 export default function PostCritiques(props) {
-  const [data, { mutate, refetch }] = createResource(() => props.postId, fetchAnalysis);
+  const [data, { mutate, refetch }] = createResource(
+    () => [props.postId, props.refresh ?? 0],
+    ([postId]) => fetchAnalysis(postId)
+  );
   const [isConfirming, setIsConfirming] = createSignal(false);
   const currentData = () => data() || data.latest || null;
   const loadingMessageStyle = { color: "var(--text-muted, #888)", "font-size": "0.85em", "font-style": "italic" };
@@ -50,7 +53,20 @@ export default function PostCritiques(props) {
 
   const isAuthor = () => {
     const currentUserId = getCurrentUserId();
-    return currentUserId === props.authorId;
+    return currentUserId != null && props.authorId != null
+      && String(currentUserId) === String(props.authorId);
+  };
+
+  const handleDetach = async (eventId) => {
+    setIsConfirming(true);
+    try {
+      await api.posts.detachMarket(props.postId, eventId);
+      refetch();
+    } catch (err) {
+      console.error('Failed to detach market:', err);
+    } finally {
+      setIsConfirming(false);
+    }
   };
 
   const handleConfirm = async (action) => {
@@ -90,13 +106,14 @@ export default function PostCritiques(props) {
           const markets = Array.isArray(d().markets) ? d().markets : [];
           const hasDuplicateMarketChip = !!link && markets.some((market) => String(market.event_id) === String(link.event_id));
 
-          if (!s || s.processing_status === 'gated_out') return null;
-
-          if (['pending', 'retrieving', 'reasoning'].includes(s.processing_status)) {
-            return <div style={loadingMessageStyle}>AI is matching markets...</div>;
+          // A manually attached link renders regardless of analysis status
+          // (old posts may have no analysis row, casual ones gate out).
+          if (!link) {
+            if (s && ['pending', 'retrieving', 'reasoning'].includes(s.processing_status)) {
+              return <div style={loadingMessageStyle}>AI is matching markets...</div>;
+            }
+            return null;
           }
-
-          if (!link) return null;
 
           return (
             <div style={{ display: "flex", "flex-wrap": "wrap", gap: "8px", "align-items": "center" }}>
@@ -127,6 +144,18 @@ export default function PostCritiques(props) {
                 </a>
               </Show>
 
+              {/* Detach (author only, manually attached links) */}
+              <Show when={isAuthor() && link.confirmed && link.match_method === 'manual'}>
+                <button
+                  title="Detach this market"
+                  style={{ background: "transparent", color: "var(--text-muted, #888)", border: "1px solid var(--border-color, #ccc)", padding: "2px 8px", "border-radius": "12px", cursor: "pointer", "font-size": "0.75em" }}
+                  onClick={() => handleDetach(link.event_id)}
+                  disabled={isConfirming()}
+                >
+                  ×
+                </button>
+              </Show>
+
               {/* Confirmation Actions (Author Only) */}
               <Show when={isAuthor() && !link.confirmed}>
                 <div style={{ display: "flex", gap: "4px" }}>
@@ -136,7 +165,7 @@ export default function PostCritiques(props) {
                     onClick={() => handleConfirm('confirm')}
                     disabled={isConfirming()}
                   >
-                   
+                    ✓
                   </button>
                   <button 
                     title="Reject this match"

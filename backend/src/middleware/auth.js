@@ -126,6 +126,15 @@ const authenticateJWT = async (req, res, next) => {
 
   // Attach standardized user data to request
   req.user = getUserFromToken(decoded);
+
+  // Throttled activity stamp (jury eligibility for market resolution):
+  // at most one write per hour per user, fire-and-forget.
+  db.query(
+    `UPDATE users SET last_active_at = NOW()
+     WHERE id = $1 AND (last_active_at IS NULL OR last_active_at < NOW() - INTERVAL '1 hour')`,
+    [req.user.id]
+  ).catch((err) => console.error('Failed to stamp last_active_at:', err.message));
+
   next();
 };
 

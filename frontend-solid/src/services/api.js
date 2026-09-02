@@ -596,6 +596,15 @@ export const api = {
     marketClick: (postId, eventId) =>
       request(`/posts/${postId}/market-click`, { method: 'POST', body: { event_id: eventId } }),
 
+    attachMarket: (postId, eventId, stance) =>
+      request(`/posts/${postId}/market-links`, { method: 'POST', body: { event_id: eventId, stance } }),
+
+    detachMarket: (postId, eventId) =>
+      request(`/posts/${postId}/market-links/${eventId}`, { method: 'DELETE' }),
+
+    matchPreview: (text) =>
+      request('/posts/match-preview', { method: 'POST', body: { text } }),
+
     getSignalSummary: (postId) =>
       request(`/posts/${postId}/signal-summary`)
   },
@@ -636,6 +645,21 @@ export const api = {
 
     runAutomaticRewards: () =>
       request('/market-questions/rewards/run', { method: 'POST' })
+  },
+
+  resolutionProposals: {
+    getConfig: () => request('/resolution-proposals/config'),
+    getForEvent: (eventId) => request(`/events/${eventId}/resolution-proposal`),
+    create: (eventId, payload) =>
+      request(`/events/${eventId}/resolution-proposals`, { method: 'POST', body: payload }),
+    vote: (proposalId, { vote, note = null }) =>
+      request(`/resolution-proposals/${proposalId}/votes`, { method: 'POST', body: { vote, note } }),
+    challenge: (proposalId, { note = null } = {}) =>
+      request(`/resolution-proposals/${proposalId}/challenge`, { method: 'POST', body: { note } }),
+    juryQueue: () => request('/resolution-proposals/jury-queue'),
+    escalations: () => request('/resolution-proposals/escalations'),
+    adminRule: (proposalId, payload) =>
+      request(`/resolution-proposals/${proposalId}/admin-ruling`, { method: 'POST', body: payload })
   },
 
   attachments: {
