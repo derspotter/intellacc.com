@@ -79,12 +79,49 @@ const TARGET_MASS_FLOOR = 1e-6;
  * Preset narrow/medium/wide handle placements. Scales the *original*
  * low/high spread around the *current* center by `factor` (0.5 / 1 / 2),
  * so repeated preset clicks are idempotent rather than compounding.
- * Caller is responsible for clamping the result into [rangeMin, rangeMax].
+ *
+ * Spreads are scaled in t-space (the chart's linear coordinate), and the
+ * result is deliberately NOT clamped into [rangeMin, rangeMax]: clamping
+ * one side at a range edge makes sigmaLeft != sigmaRight, and the split
+ * normal then has a density cliff exactly at the center handle. Out-of-range
+ * handles are fine — fitDistributionFromState routes that mass into the
+ * tail buckets (or drops+renormalizes on closed markets), and t-space
+ * round-trips through toNominal/toInternal are exact even outside [0,1].
  */
-export function applySpreadPreset({ center, baseLow, baseCenter, baseHigh, factor }) {
-  const leftSpread = (baseCenter - baseLow) * factor;
-  const rightSpread = (baseHigh - baseCenter) * factor;
-  return { low: center - leftSpread, high: center + rightSpread };
+export function applySpreadPreset({ center, baseLow, baseCenter, baseHigh, factor, config }) {
+  const tf = makeTransform(config);
+  if (!tf) {
+    // no usable transform: legacy nominal-space scaling
+    return {
+      low: center - (baseCenter - baseLow) * factor,
+      high: center + (baseHigh - baseCenter) * factor
+    };
+  }
+  const tCenter = tf.toInternal(center);
+  const leftSpread = (tf.toInternal(baseCenter) - tf.toInternal(baseLow)) * factor;
+  const rightSpread = (tf.toInternal(baseHigh) - tf.toInternal(baseCenter)) * factor;
+  return { low: tf.toNominal(tCenter - leftSpread), high: tf.toNominal(tCenter + rightSpread) };
+}
+
+/**
+ * Rigid translation of the three handles so `center` lands on `newCenter`
+ * with the curve's shape unchanged: both t-space offsets (center-low,
+ * high-center) are preserved exactly, which keeps sigmaLeft/sigmaRight and
+ * therefore the fitted split normal identical up to the shift. low/high may
+ * leave [rangeMin, rangeMax] — see applySpreadPreset on why that's safe.
+ */
+export function translateHandles({ low, center, high, newCenter, config }) {
+  const tf = makeTransform(config);
+  if (!tf) {
+    // no usable transform: fall back to the old pointwise center move
+    return { low, center: Math.min(Math.max(newCenter, low), high), high };
+  }
+  const dt = tf.toInternal(newCenter) - tf.toInternal(center);
+  return {
+    low: tf.toNominal(tf.toInternal(low) + dt),
+    center: newCenter,
+    high: tf.toNominal(tf.toInternal(high) + dt)
+  };
 }
 
 /**

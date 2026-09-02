@@ -6,7 +6,9 @@ import {
   quantileFromState,
   niceTicks,
   chartXToNominal,
-  pickNearestHandle
+  pickNearestHandle,
+  translateHandles,
+  applySpreadPreset
 } from './distributionMath.js';
 
 const LOG_CFG = { range_min: 1, range_max: 10000, zero_point: 0, open_lower_bound: true, open_upper_bound: true };
@@ -127,6 +129,74 @@ test('pickNearestHandle picks the closest of the three guides', () => {
   assert.equal(pickNearestHandle(120, xs), 'low');
   assert.equal(pickNearestHandle(290, xs), 'center');
   assert.equal(pickNearestHandle(640, xs), 'high');
+});
+
+test('translateHandles rigidly translates the whole spread', () => {
+  // linear market: nominal offsets are preserved verbatim
+  const lin = translateHandles({ low: 1, center: 2, high: 3, newCenter: 1, config: LIN_CFG });
+  assert.ok(Math.abs(lin.low - 0) < 1e-9 && lin.center === 1 && Math.abs(lin.high - 2) < 1e-9);
+  // overshoot past the range edge is allowed — mass flows into the tail
+  const over = translateHandles({ low: 1, center: 2, high: 3, newCenter: 0.5, config: LIN_CFG });
+  assert.ok(Math.abs(over.low - -0.5) < 1e-9, `got ${over.low}`);
+  // log market: offsets are preserved in t-space, not nominal space
+  const log = translateHandles({ low: 10, center: 100, high: 1000, newCenter: 10, config: LOG_CFG });
+  assert.ok(Math.abs(log.low - 1) < 1e-6, `got ${log.low}`);      // t 0.25 -> 0
+  assert.ok(Math.abs(log.high - 100) < 1e-6, `got ${log.high}`);  // t 0.75 -> 0.5
+});
+
+test('applySpreadPreset scales the base spread in t-space without clamping', () => {
+  // symmetric base, factor 2, centered: spreads double
+  const wide = applySpreadPreset({ center: 2, baseLow: 1, baseCenter: 2, baseHigh: 3, factor: 2, config: LIN_CFG });
+  assert.ok(Math.abs(wide.low - 0) < 1e-9 && Math.abs(wide.high - 4) < 1e-9);
+  // off-center: NOT clamped at the range edge (that clamp used to make the
+  // sigmas asymmetric and put a density cliff at the center handle)
+  const off = applySpreadPreset({ center: 1, baseLow: 1, baseCenter: 2, baseHigh: 3, factor: 2, config: LIN_CFG });
+  assert.ok(Math.abs(off.low - -1) < 1e-9, `got ${off.low}`);
+  assert.ok(Math.abs(off.high - 3) < 1e-9, `got ${off.high}`);
+  // factor 1 at the base center is idempotent — returns the base handles
+  const med = applySpreadPreset({ center: 2, baseLow: 1, baseCenter: 2, baseHigh: 3, factor: 1, config: LIN_CFG });
+  assert.ok(Math.abs(med.low - 1) < 1e-9 && Math.abs(med.high - 3) < 1e-9);
+  // log market: scaling happens in t-space (10,100,1000 spans t 0.25..0.75,
+  // so factor 2 spans t 0..1 — nominal 1..10000, NOT 100/10..1000*10)
+  const log = applySpreadPreset({ center: 100, baseLow: 10, baseCenter: 100, baseHigh: 1000, factor: 2, config: LOG_CFG });
+  assert.ok(Math.abs(log.low - 1) < 1e-6, `got ${log.low}`);
+  assert.ok(Math.abs(log.high - 10000) < 1e-3, `got ${log.high}`);
+});
+
+test('fitDistributionFromState keeps the curve shape when handles are translated', () => {
+  const rows = mkRows(20, LIN_CFG); // 0..4 linear, bin width 0.2
+  // tails absorb the (tiny) out-of-range mass; without them, truncation +
+  // renormalization perturbs the interior bins by ~1e-3 and hides the shift
+  rows.push({ outcome_id: 90, bucket_kind: 'lower_tail', prob: 0 });
+  rows.push({ outcome_id: 91, bucket_kind: 'upper_tail', prob: 0 });
+  const before = fitDistributionFromState({ low: 1, center: 2, high: 3, rows, config: LIN_CFG });
+  const moved = translateHandles({ low: 1, center: 2, high: 3, newCenter: 2.4, config: LIN_CFG });
+  const after = fitDistributionFromState({ ...moved, rows, config: LIN_CFG });
+  // translated by exactly 2 bins: the mass profile shifts, shape unchanged
+  for (let i = 4; i < 14; i++) {
+    assert.ok(Math.abs(after[i + 2] - before[i]) < 1e-6, `bin ${i}: ${before[i]} vs ${after[i + 2]}`);
+  }
+});
+
+test('presets after a center drag produce no density cliff at the center (regression: market 6291)', () => {
+  // 50-bin linear market like prod event 6291 (750k..950k, open tails)
+  const cfg = { range_min: 750000, range_max: 950000, zero_point: null };
+  const rows = [];
+  for (let i = 0; i < 50; i++) {
+    rows.push({ outcome_id: i, bucket_kind: 'inbound', lower_bound: 750000 + i * 4000, upper_bound: 750000 + (i + 1) * 4000, prob: 1 / 52 });
+  }
+  rows.push({ outcome_id: 90, bucket_kind: 'lower_tail', prob: 1 / 52 });
+  rows.push({ outcome_id: 91, bucket_kind: 'upper_tail', prob: 1 / 52 });
+  // base quantiles of the uniform market, center dragged to 800k, Wide preset
+  const base = { baseLow: 766800, baseCenter: 850000, baseHigh: 933200 };
+  const moved = translateHandles({ low: 766800, center: 850000, high: 933200, newCenter: 800000, config: cfg });
+  const { low, high } = applySpreadPreset({ ...base, center: moved.center, factor: 2, config: cfg });
+  const u = fitDistributionFromState({ low, center: moved.center, high, rows, config: cfg });
+  const inbound = u.slice(0, 50);
+  for (let i = 1; i < 50; i++) {
+    const ratio = Math.max(inbound[i] / inbound[i - 1], inbound[i - 1] / inbound[i]);
+    assert.ok(ratio < 1.2, `cliff at bin ${i}: ${inbound[i - 1]} -> ${inbound[i]}`);
+  }
 });
 
 test('pickNearestHandle separates overlapping handles by click side', () => {

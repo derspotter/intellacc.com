@@ -22,6 +22,7 @@ import {
   quantileFromState,
   niceTicks,
   applySpreadPreset,
+  translateHandles,
   rpToLedger,
   ledgerToRp,
   chartXToNominal,
@@ -442,9 +443,27 @@ export default function DistributionMarketCard(props) {
     return nominal == null ? null : { x, nominal };
   };
 
+  // Dragging the center guide translates the whole curve rigidly (both
+  // t-space offsets preserved, so the fitted shape is unchanged — what the
+  // user asked of "moving the peak"); low/high may overshoot the range, with
+  // that mass flowing into the open tails. The P50 number input keeps the
+  // old pointwise updateCenter semantics for deliberate asymmetric setups.
+  const translateCenterTo = (value) => {
+    const next = translateHandles({
+      low: low(),
+      center: center(),
+      high: high(),
+      newCenter: clamp(safeNumber(value, center()), rangeMin(), rangeMax()),
+      config: numericConfig() || fallbackConfig()
+    });
+    setLow(next.low);
+    setCenter(next.center);
+    setHigh(next.high);
+  };
+
   const applyHandleValue = (key, value) => {
     if (key === 'low') updateLow(value);
-    else if (key === 'center') updateCenter(value);
+    else if (key === 'center') translateCenterTo(value);
     else updateHigh(value);
   };
 
@@ -479,16 +498,20 @@ export default function DistributionMarketCard(props) {
     }
   };
 
+  // Not clamped into the range: out-of-range handle mass flows into the
+  // tails, and clamping one side used to make the sigmas asymmetric,
+  // putting a sharp density cliff at the center handle.
   const applyPreset = (factor) => {
     const { low: nextLow, high: nextHigh } = applySpreadPreset({
       center: center(),
       baseLow: baseSpread.low,
       baseCenter: baseSpread.center,
       baseHigh: baseSpread.high,
-      factor
+      factor,
+      config: numericConfig() || fallbackConfig()
     });
-    setLow(clamp(nextLow, rangeMin(), center()));
-    setHigh(clamp(nextHigh, center(), rangeMax()));
+    setLow(nextLow);
+    setHigh(nextHigh);
   };
 
   // --- Trade / sell ----------------------------------------------------------
