@@ -32,7 +32,7 @@ const fetchAnalysis = async (postId) => {
 };
 
 export default function PostCritiques(props) {
-  const [data, { mutate, refetch }] = createResource(
+  const [data, { refetch }] = createResource(
     () => [props.postId, props.refresh ?? 0],
     ([postId]) => fetchAnalysis(postId)
   );
@@ -76,10 +76,7 @@ export default function PostCritiques(props) {
     setIsConfirming(true);
     try {
       await api.posts.confirmMarketLink(props.postId, currentData.link.event_id, action, currentData.link.stance);
-      mutate({
-        ...currentData,
-        link: { ...currentData.link, confirmed: action === 'confirm' }
-      });
+      refetch();
     } catch (err) {
       console.error('Failed to confirm market link:', err);
     } finally {
@@ -97,18 +94,95 @@ export default function PostCritiques(props) {
     window.location.hash = `#market/${eventId}`;
   };
 
+  const chipStyle = {
+    display: "inline-flex",
+    "align-items": "stretch",
+    border: "1px solid var(--border-color, #999)",
+    background: "var(--bg-secondary, rgba(0, 123, 255, 0.06))",
+    "font-size": "0.85em"
+  };
+
+  const chipLinkStyle = {
+    display: "inline-flex",
+    "align-items": "center",
+    gap: "6px",
+    padding: "4px 10px",
+    color: "var(--text-link, #007bff)",
+    "text-decoration": "none",
+    cursor: "pointer"
+  };
+
+  // Flat control segment inside the chip: its left border is the vertical
+  // divider line. Deliberately rectangular — no radii (Bauhaus skin).
+  const chipActionStyle = {
+    display: "inline-flex",
+    "align-items": "center",
+    padding: "0 10px",
+    border: "none",
+    "border-left": "1px solid var(--border-color, #999)",
+    background: "transparent",
+    color: "inherit",
+    "font-size": "inherit",
+    cursor: "pointer"
+  };
+
+  const marketChip = (market, isLinked) => (
+    <span class="market-chip" style={chipStyle}>
+      <a
+        href={`#market/${market.event_id}`}
+        style={chipLinkStyle}
+        onClick={(e) => handleMarketClick(e, market.event_id)}
+      >
+        <span class="market-chip-title">{market.title}</span>
+        <Show when={market.market_prob != null}>
+          <span class="market-chip-prob" style={{ "font-weight": "bold" }}>
+            {Math.round(market.market_prob * 100)}%
+          </span>
+        </Show>
+      </a>
+      <Show when={isLinked && isAuthor() && !market.confirmed}>
+        <button
+          title="Confirm this match"
+          style={{ ...chipActionStyle, color: "var(--success-color, #28a745)" }}
+          onClick={() => handleConfirm('confirm')}
+          disabled={isConfirming()}
+        >
+          ✓
+        </button>
+        <button
+          title="Reject this match"
+          style={{ ...chipActionStyle, color: "var(--danger-color, #dc3545)" }}
+          onClick={() => handleConfirm('override')}
+          disabled={isConfirming()}
+        >
+          ×
+        </button>
+      </Show>
+      <Show when={isLinked && isAuthor() && market.confirmed && market.match_method === 'manual'}>
+        <button
+          title="Detach this market"
+          style={{ ...chipActionStyle, color: "var(--text-muted, #888)" }}
+          onClick={() => handleDetach(market.event_id)}
+          disabled={isConfirming()}
+        >
+          ×
+        </button>
+      </Show>
+    </span>
+  );
+
   return (
     <div class="post-critiques-container" style={{ "margin-top": "8px" }}>
-      <Show when={currentData()}>
+      <Show when={currentData()} keyed>
         {(d) => {
-          const s = d().status;
-          const link = d().link;
-          const markets = Array.isArray(d().markets) ? d().markets : [];
-          const hasDuplicateMarketChip = !!link && markets.some((market) => String(market.event_id) === String(link.event_id));
+          const s = d.status;
+          const link = d.link;
+          const candidates = (Array.isArray(d.markets) ? d.markets : [])
+            .filter((market) => !link || String(market.event_id) !== String(link.event_id));
 
           // A manually attached link renders regardless of analysis status
           // (old posts may have no analysis row, casual ones gate out).
-          if (!link) {
+          if (!link && candidates.length === 0) {
             if (s && ['pending', 'retrieving', 'reasoning'].includes(s.processing_status)) {
               return <div style={loadingMessageStyle}>AI is matching markets...</div>;
             }
@@ -117,66 +191,8 @@ export default function PostCritiques(props) {
 
           return (
             <div style={{ display: "flex", "flex-wrap": "wrap", gap: "8px", "align-items": "center" }}>
-              <Show when={!hasDuplicateMarketChip}>
-                <a 
-                  href={`#market/${link.event_id}`}
-                  class="market-chip"
-                  style={{
-                    background: "var(--bg-secondary, rgba(0, 123, 255, 0.1))",
-                    color: "var(--text-link, #007bff)",
-                    padding: "4px 10px",
-                    "border-radius": "16px",
-                    "font-size": "0.85em",
-                    "text-decoration": "none",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    "align-items": "center",
-                    gap: "4px"
-                  }}
-                  onClick={(e) => handleMarketClick(e, link.event_id)}
-                >
-                  <span class="market-chip-title">{link.title}</span>
-                  <Show when={link.market_prob != null}>
-                    <span class="market-chip-prob" style={{ "font-weight": "bold" }}>
-                      {Math.round(link.market_prob * 100)}%
-                    </span>
-                  </Show>
-                </a>
-              </Show>
-
-              {/* Detach (author only, manually attached links) */}
-              <Show when={isAuthor() && link.confirmed && link.match_method === 'manual'}>
-                <button
-                  title="Detach this market"
-                  style={{ background: "transparent", color: "var(--text-muted, #888)", border: "1px solid var(--border-color, #ccc)", padding: "2px 8px", "border-radius": "12px", cursor: "pointer", "font-size": "0.75em" }}
-                  onClick={() => handleDetach(link.event_id)}
-                  disabled={isConfirming()}
-                >
-                  ×
-                </button>
-              </Show>
-
-              {/* Confirmation Actions (Author Only) */}
-              <Show when={isAuthor() && !link.confirmed}>
-                <div style={{ display: "flex", gap: "4px" }}>
-                  <button 
-                    title="Confirm this match"
-                    style={{ background: "#28a745", color: "white", border: "none", padding: "2px 8px", "border-radius": "12px", cursor: "pointer", "font-size": "0.75em", display: "flex", "align-items": "center", "justify-content": "center" }}
-                    onClick={() => handleConfirm('confirm')}
-                    disabled={isConfirming()}
-                  >
-                    ✓
-                  </button>
-                  <button 
-                    title="Reject this match"
-                    style={{ background: "transparent", color: "#dc3545", border: "1px solid #dc3545", padding: "2px 8px", "border-radius": "12px", cursor: "pointer", "font-size": "0.75em", display: "flex", "align-items": "center", "justify-content": "center" }}
-                    onClick={() => handleConfirm('override')}
-                    disabled={isConfirming()}
-                  >
-                    ×
-                  </button>
-                </div>
-              </Show>
+              <Show when={link}>{marketChip(link, true)}</Show>
+              <For each={candidates}>{(market) => marketChip(market, false)}</For>
             </div>
           );
         }}
