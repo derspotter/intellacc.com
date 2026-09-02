@@ -673,7 +673,7 @@ exports.getPostById = async (req, res) => {
               ai.is_flagged as ai_is_flagged,
               (SELECT COUNT(*)::int FROM posts rpc WHERE rpc.repost_id = p.id) AS repost_count,
               CASE WHEN EXISTS (SELECT 1 FROM posts rpu
-                                WHERE rpu.repost_id = p.id AND rpu.user_id = $2)
+                                WHERE rpu.repost_id = p.id AND rpu.user_id = $3)
                    THEN true
                    ELSE false
               END AS reposted_by_user
@@ -689,7 +689,7 @@ exports.getPostById = async (req, res) => {
         ) ai ON true
        WHERE p.id = $1
          AND ${buildPostVisibilityClause('$2')}`,
-      [postId, viewerId]
+      [postId, viewerId, userId]
     );
     if (result.rows.length === 0) {
       return res.status(404).send('Post not found');
@@ -965,12 +965,14 @@ exports.getFeed = async (req, res) => {
       return res.status(400).json({ message: 'Invalid cursor' });
     }
 
-    const params = [viewerId, limit + 1];
+    // $1 = the authenticated user (feed scoping, likes, reposts); $3 = nullable
+    // viewer id for the block-visibility clause only (NULL = admin bypass).
+    const params = [userId, limit + 1, viewerId];
     const whereClauses = [
       '(p.user_id IN (SELECT following_id FROM follows WHERE follower_id = $1) OR p.user_id = $1)',
       'p.parent_id IS NULL',
       'p.is_comment = FALSE',
-      buildPostVisibilityClause('$1')
+      buildPostVisibilityClause('$3')
     ];
 
     if (searchQuery) {
@@ -1025,7 +1027,7 @@ exports.getFeed = async (req, res) => {
                   FROM posts rp
                   JOIN users ru ON rp.user_id = ru.id
                   WHERE rp.id = p.repost_id
-                    AND ${buildPostVisibilityClauseForAlias('rp', '$1')}
+                    AND ${buildPostVisibilityClauseForAlias('rp', '$3')}
                 ) repost_data
               ) as reposted_post
        FROM posts p
