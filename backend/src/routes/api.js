@@ -379,6 +379,7 @@ router.post("/posts/:postId/confirm-market", authenticateJWT, persuasiveAlphaCon
 router.post("/posts/match-preview", authenticateJWT, persuasiveAlphaController.matchPreview);
 router.post("/posts/:postId/market-links", authenticateJWT, persuasiveAlphaController.attachMarketLink);
 router.delete("/posts/:postId/market-links/:eventId", authenticateJWT, persuasiveAlphaController.detachMarketLink);
+router.delete("/posts/:postId/markets/:eventId", authenticateJWT, persuasiveAlphaController.dismissMarketCandidate);
 router.post("/posts/:postId/verify", authenticateJWT, persuasiveAlphaController.submitVerification);
 router.post("/admin/persuasion-score/run", authenticateJWT, requireAdmin, persuasiveAlphaController.runAutomaticRewards);
 router.post("/admin/persuasion-score/run-cron", requireCronSharedSecret, persuasiveAlphaController.runAutomaticRewards);

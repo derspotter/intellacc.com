@@ -602,6 +602,9 @@ export const api = {
     detachMarket: (postId, eventId) =>
       request(`/posts/${postId}/market-links/${eventId}`, { method: 'DELETE' }),
 
+    dismissMarket: (postId, eventId) =>
+      request(`/posts/${postId}/markets/${eventId}`, { method: 'DELETE' }),
+
     matchPreview: (text) =>
       request('/posts/match-preview', { method: 'POST', body: { text } }),
 

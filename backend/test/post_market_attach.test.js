@@ -241,6 +241,64 @@ describe('Manual post market attach APIs', () => {
     expect(rows.rows).toHaveLength(1);
   });
 
+  test('GET /api/posts/:postId/markets excludes hidden events', async () => {
+    const author = await makeUser('markets_hidden');
+    cleanup.users.add(author.id);
+    const visibleEvent = await createEvent();
+    const hiddenEvent = await createEvent();
+    cleanup.events.add(visibleEvent.id);
+    cleanup.events.add(hiddenEvent.id);
+    await db.query("UPDATE events SET hidden_at = NOW(), hidden_reason = 'test' WHERE id = $1", [hiddenEvent.id]);
+    const post = await createPost(author);
+    cleanup.posts.add(post.id);
+
+    await db.query(
+      `INSERT INTO post_market_matches (post_id, event_id, match_score, match_method)
+       VALUES ($1, $2, 0.9, 'hybrid_v1'), ($1, $3, 0.8, 'hybrid_v1')`,
+      [post.id, visibleEvent.id, hiddenEvent.id]
+    );
+
+    const res = await request(app)
+      .get(`/api/posts/${post.id}/markets`)
+      .set('Authorization', `Bearer ${author.token}`);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.markets.map((m) => Number(m.event_id))).toEqual([visibleEvent.id]);
+  });
+
+  test('DELETE /api/posts/:postId/markets/:eventId dismisses a candidate (author only)', async () => {
+    const author = await makeUser('dismiss_author');
+    const stranger = await makeUser('dismiss_stranger');
+    cleanup.users.add(author.id);
+    cleanup.users.add(stranger.id);
+    const event = await createEvent();
+    cleanup.events.add(event.id);
+    const post = await createPost(author);
+    cleanup.posts.add(post.id);
+
+    await db.query(
+      `INSERT INTO post_market_matches (post_id, event_id, match_score, match_method)
+       VALUES ($1, $2, 0.9, 'hybrid_v1')`,
+      [post.id, event.id]
+    );
+
+    const strangerRes = await request(app)
+      .delete(`/api/posts/${post.id}/markets/${event.id}`)
+      .set('Authorization', `Bearer ${stranger.token}`);
+    expect(strangerRes.statusCode).toBe(403);
+
+    const res = await request(app)
+      .delete(`/api/posts/${post.id}/markets/${event.id}`)
+      .set('Authorization', `Bearer ${author.token}`);
+    expect(res.statusCode).toBe(200);
+
+    const rows = await db.query(
+      'SELECT 1 FROM post_market_matches WHERE post_id = $1 AND event_id = $2',
+      [post.id, event.id]
+    );
+    expect(rows.rows).toHaveLength(0);
+  });
+
   test('POST /api/posts/match-preview returns enriched candidates', async () => {
     const author = await makeUser('preview_author');
     cleanup.users.add(author.id);

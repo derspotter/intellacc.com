@@ -219,6 +219,7 @@ exports.getPostMarkets = async (req, res) => {
        FROM post_market_matches pm
        JOIN events e ON e.id = pm.event_id
        WHERE pm.post_id = $1
+         AND e.hidden_at IS NULL
        ORDER BY pm.match_score DESC, pm.event_id ASC
        LIMIT 3`,
       [postId]
@@ -758,6 +759,41 @@ exports.detachMarketLink = async (req, res) => {
     }
     console.error('Error detaching market link:', error);
     return res.status(500).json({ message: 'Failed to detach market link' });
+  }
+};
+
+exports.dismissMarketCandidate = async (req, res) => {
+  try {
+    const postId = parseIntParam(req.params.postId, 'postId');
+    const eventId = parseIntParam(req.params.eventId, 'eventId');
+    const userId = req.user?.id || req.user?.userId;
+
+    const postResult = await db.query('SELECT user_id FROM posts WHERE id = $1', [postId]);
+    if (postResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    if (postResult.rows[0].user_id !== Number(userId)) {
+      return res.status(403).json({ message: 'Not allowed to dismiss candidates for this post' });
+    }
+
+    const deleteResult = await db.query(
+      'DELETE FROM post_market_matches WHERE post_id = $1 AND event_id = $2 RETURNING id',
+      [postId, eventId]
+    );
+    if (deleteResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+
+    return res.status(200).json({ post_id: postId, event_id: eventId, dismissed: true });
+  } catch (error) {
+    if (normalizeOptionalTableResult(error, res, {})) {
+      return undefined;
+    }
+    if (error.message.startsWith('Invalid ')) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Error dismissing market candidate:', error);
+    return res.status(500).json({ message: 'Failed to dismiss market candidate' });
   }
 };
 

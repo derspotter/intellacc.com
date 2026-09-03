@@ -69,6 +69,18 @@ export default function PostCritiques(props) {
     }
   };
 
+  const handleDismiss = async (eventId) => {
+    setIsConfirming(true);
+    try {
+      await api.posts.dismissMarket(props.postId, eventId);
+      refetch();
+    } catch (err) {
+      console.error('Failed to dismiss market candidate:', err);
+    } finally {
+      setIsConfirming(false);
+    }
+  };
+
   const handleConfirm = async (action) => {
     const currentData = data();
     if (!currentData || !currentData.link) return;
@@ -91,7 +103,7 @@ export default function PostCritiques(props) {
     } catch (err) {
       console.error('Failed to register market click:', err);
     }
-    window.location.hash = `#market/${eventId}`;
+    window.location.hash = `#predictions/${eventId}`;
   };
 
   const chipStyle = {
@@ -129,7 +141,7 @@ export default function PostCritiques(props) {
   const marketChip = (market, isLinked) => (
     <span class="market-chip" style={chipStyle}>
       <a
-        href={`#market/${market.event_id}`}
+        href={`#predictions/${market.event_id}`}
         style={chipLinkStyle}
         onClick={(e) => handleMarketClick(e, market.event_id)}
       >
@@ -163,6 +175,16 @@ export default function PostCritiques(props) {
           title="Detach this market"
           style={{ ...chipActionStyle, color: "var(--text-muted, #888)" }}
           onClick={() => handleDetach(market.event_id)}
+          disabled={isConfirming()}
+        >
+          ×
+        </button>
+      </Show>
+      <Show when={!isLinked && isAuthor()}>
+        <button
+          title="Dismiss this suggestion"
+          style={{ ...chipActionStyle, color: "var(--text-muted, #888)" }}
+          onClick={() => handleDismiss(market.event_id)}
           disabled={isConfirming()}
         >
           ×
