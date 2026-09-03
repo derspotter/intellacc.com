@@ -1,0 +1,10 @@
+# Health check for the shared wacli WhatsApp session (see health-check.sh).
+# Oneshot, driven by wacli-health-check.timer. Install as a USER unit:
+#   cp scripts/wacli-otp-bridge/wacli-health-check.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now wacli-health-check.timer
+[Unit]
+Description=wacli WhatsApp session health check (intake alarms + Intellacc OTP)
+
+[Service]
+Type=oneshot
+ExecStart=/var/opt/docker/intellacc.com/scripts/wacli-otp-bridge/health-check.sh
