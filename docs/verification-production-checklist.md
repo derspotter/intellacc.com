@@ -35,13 +35,18 @@ If enabled:
     - `PHONE_CODE_TTL_MINUTES`
     - `PHONE_CODE_MAX_ATTEMPTS`
     - `PHONE_CODE_HASH_SALT`
-- WhatsApp fallback via OpenClaw (optional, used only when SMS send fails):
-  - `OPENCLAW_URL` (wss endpoint)
-  - `OPENCLAW_TOKEN`
-  - Optional:
-    - `OPENCLAW_CLI_BIN` (default `openclaw`; set to `npx` with `OPENCLAW_CLI_ARGS='-y openclaw'` if needed)
-    - `OPENCLAW_CLI_ARGS`
-    - `OPENCLAW_TIMEOUT_MS`
+- WhatsApp channel via the host wacli bridge (user-selectable channel, no
+  cross-channel fallback; see `scripts/wacli-otp-bridge/` and the spec at
+  `docs/superpowers/specs/2026-07-14-whatsapp-otp-channel-design.md`):
+  - `WACLI_BRIDGE_SOCKET` (in-container path of the bind-mounted bridge socket,
+    `/var/run/wacli-bridge/bridge.sock`)
+  - `WACLI_BRIDGE_TOKEN` (same value as `BRIDGE_TOKEN` in
+    `~/.config/wacli-otp-bridge.env` on the host)
+  - Optional: `WACLI_TIMEOUT_MS`, `WACLI_BRIDGE_URL` (TCP mode, unused in prod)
+  - Kill switch: unset SOCKET+TOKEN and recreate the backend — the channel
+    disappears from the status payload and UI, SMS is untouched.
+  - Host side: user systemd unit `wacli-otp-bridge` must be running
+    (`systemctl --user status wacli-otp-bridge`).
 - Stripe:
   - `STRIPE_SECRET_KEY`
   - `STRIPE_PUBLISHABLE_KEY`

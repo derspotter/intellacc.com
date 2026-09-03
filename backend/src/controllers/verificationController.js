@@ -78,7 +78,7 @@ exports.getVerificationStatus = async (req, res) => {
     try {
         const userId = req.user.id;
         const status = await emailVerificationService.getVerificationStatus(userId);
-        const phoneProviderStatus = phoneVerificationService.getProviderStatus();
+        const phoneProviderStatus = await phoneVerificationService.getProviderStatus();
         const paymentProviderStatus = paymentVerificationService.getProviderStatus();
         const maxTier = phoneProviderStatus?.enabled === false
             ? 1
@@ -159,19 +159,18 @@ exports.resendVerificationEmail = async (req, res) => {
 exports.startPhoneVerification = async (req, res) => {
     try {
         const userId = req.user.id;
-        const { phoneNumber } = req.body;
+        const { phoneNumber, channel } = req.body;
 
         if (!phoneNumber) {
             return res.status(400).json({ error: 'Phone number required' });
         }
 
-        const result = await phoneVerificationService.startPhoneVerification(userId, phoneNumber);
+        const result = await phoneVerificationService.startPhoneVerification(userId, phoneNumber, channel || 'sms');
 
         res.json({
             success: true,
             provider: result.provider,
             channel: result.channel,
-            fallback_from: result.fallbackFrom || undefined,
             dev_code: result.devCode || undefined
         });
     } catch (err) {

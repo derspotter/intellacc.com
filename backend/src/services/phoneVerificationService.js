@@ -4,16 +4,12 @@
  */
 const crypto = require('crypto');
 const axios = require('axios');
-const { execFile } = require('child_process');
-const { promisify } = require('util');
 const db = require('../db');
 
 const PHONE_HASH_SALT = process.env.PHONE_HASH_SALT || 'dev-phone-hash-salt';
 const PHONE_CODE_HASH_SALT = process.env.PHONE_CODE_HASH_SALT || 'dev-phone-code-hash-salt';
 const DEV_PHONE_CODE = process.env.DEV_PHONE_CODE || '000000';
 const getPhoneVerificationEnabledEnv = () => process.env.PHONE_VERIFICATION_ENABLED;
-const execFileAsync = promisify(execFile);
-
 let twilioClient = null;
 let twilioClientKey = null;
 
@@ -37,10 +33,20 @@ const getTwilioVerifySid = () => process.env.TWILIO_VERIFY_SID;
 const getSmsGatewayUrl = () => process.env.SMS_GATEWAY_URL;
 const getSmsGatewayUsername = () => process.env.SMS_GATEWAY_USERNAME;
 const getSmsGatewayPassword = () => process.env.SMS_GATEWAY_PASSWORD;
-const getOpenClawUrl = () => process.env.OPENCLAW_URL;
-const getOpenClawToken = () => process.env.OPENCLAW_TOKEN;
-const getOpenClawCliBin = () => process.env.OPENCLAW_CLI_BIN || 'openclaw';
-const getOpenClawCliArgs = () => String(process.env.OPENCLAW_CLI_ARGS || '').trim();
+const getWacliBridgeUrl = () => String(process.env.WACLI_BRIDGE_URL || '').trim().replace(/\/+$/, '');
+const getWacliBridgeSocket = () => String(process.env.WACLI_BRIDGE_SOCKET || '').trim();
+const getWacliBridgeToken = () => process.env.WACLI_BRIDGE_TOKEN;
+
+// Transport: unix socket (bind-mounted from the host bridge; preferred — no
+// TCP, immune to the host firewall) or a plain URL. Returns axios config
+// pieces { base, extra } for either.
+const wacliBridgeRequestParts = () => {
+  const socketPath = getWacliBridgeSocket();
+  if (socketPath) {
+    return { base: 'http://localhost', extra: { socketPath } };
+  }
+  return { base: getWacliBridgeUrl(), extra: {} };
+};
 
 const toInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
@@ -52,11 +58,14 @@ const getCodeMaxAttempts = () => toInt(process.env.PHONE_CODE_MAX_ATTEMPTS, 5);
 const getSmsGatewayTimeoutMs = () => toInt(process.env.SMS_GATEWAY_TIMEOUT_MS, 8000);
 const getSmsGatewayStatusCheckAttempts = () => toInt(process.env.SMS_GATEWAY_STATUS_CHECK_ATTEMPTS, 2);
 const getSmsGatewayStatusCheckIntervalMs = () => toInt(process.env.SMS_GATEWAY_STATUS_CHECK_INTERVAL_MS, 350);
-const getOpenClawTimeoutMs = () => toInt(process.env.OPENCLAW_TIMEOUT_MS, 15000);
+const getWacliTimeoutMs = () => toInt(process.env.WACLI_TIMEOUT_MS, 15000);
 
 const useTwilio = () => !isJestRuntime() && !!(getTwilioSid() && getTwilioAuthToken() && getTwilioVerifySid());
 const useSmsGateway = () => !isJestRuntime() && !!(getSmsGatewayUrl() && getSmsGatewayUsername() && getSmsGatewayPassword());
-const useOpenClawFallback = () => !isJestRuntime() && !!(getOpenClawUrl() && getOpenClawToken());
+const useWacliBridge = () => (
+  (!isJestRuntime() || parseBool(process.env.WACLI_BRIDGE_FORCE)) &&
+  !!((getWacliBridgeUrl() || getWacliBridgeSocket()) && getWacliBridgeToken())
+);
 const isProduction = () => process.env.NODE_ENV === 'production';
 const isEnabled = () => {
   const explicit = parseBool(getPhoneVerificationEnabledEnv(), true);
@@ -73,7 +82,36 @@ const assertProviderAvailable = () => {
   }
 };
 
-const getProviderStatus = () => {
+// Bridge health: the host wacli bridge exposes GET /health (wraps
+// `wacli doctor`). Cached so status polls don't hammer the bridge; a failed
+// or unreachable bridge reports the WhatsApp channel unavailable without
+// affecting SMS.
+const WACLI_HEALTH_CACHE_MS = 60 * 1000;
+let wacliHealthCache = { ok: false, checkedAt: 0 };
+
+const checkWacliBridgeHealth = async () => {
+  if (!useWacliBridge()) return false;
+  const now = Date.now();
+  if (now - wacliHealthCache.checkedAt < WACLI_HEALTH_CACHE_MS) {
+    return wacliHealthCache.ok;
+  }
+  let ok = false;
+  try {
+    const { base, extra } = wacliBridgeRequestParts();
+    const response = await axios.get(`${base}/health`, {
+      headers: { Authorization: `Bearer ${getWacliBridgeToken()}` },
+      timeout: Math.min(getWacliTimeoutMs(), 5000),
+      ...extra
+    });
+    ok = response?.data?.ok === true;
+  } catch (err) {
+    ok = false;
+  }
+  wacliHealthCache = { ok, checkedAt: now };
+  return ok;
+};
+
+const getProviderStatus = async () => {
   const enabled = isEnabled();
   const twilioConfigured = useTwilio();
   const smsGatewayConfigured = useSmsGateway();
@@ -81,6 +119,7 @@ const getProviderStatus = () => {
   const available = enabled && (!isProduction() || configured);
   const requiresConfig = process.env.REQUIRE_TWILIO_VERIFICATION === 'true';
   const provider = twilioConfigured ? 'twilio' : (smsGatewayConfigured ? 'smsgate' : 'dev');
+  const whatsappAvailable = enabled && useWacliBridge() && await checkWacliBridgeHealth();
 
   return {
     provider,
@@ -90,7 +129,7 @@ const getProviderStatus = () => {
     available,
     channels: {
       sms: twilioConfigured || smsGatewayConfigured,
-      whatsapp_fallback: !twilioConfigured && smsGatewayConfigured && useOpenClawFallback()
+      whatsapp: whatsappAvailable
     },
     reason: available
       ? null
@@ -270,47 +309,48 @@ const sendViaSmsGateway = async (phoneNumber, message) => {
   return { provider: 'smsgate', channel: 'sms' };
 };
 
-const sendViaOpenClaw = async (phoneNumber, message) => {
-  if (!useOpenClawFallback()) {
-    throw new Error('OpenClaw WhatsApp fallback is not configured');
+// WhatsApp delivery via the host wacli bridge. The bridge (host-side systemd
+// service, scripts/wacli-otp-bridge/) owns the wacli store; the backend can
+// only ask it to send an OTP-template text to a number — it enforces the
+// template and rate caps server-side. No cross-channel fallback by design.
+const sendViaWacliBridge = async (phoneNumber, message) => {
+  if (!useWacliBridge()) {
+    throw new Error('WhatsApp delivery is not configured');
   }
 
-  const cliArgsPrefix = getOpenClawCliArgs()
-    ? getOpenClawCliArgs().split(/\s+/).filter(Boolean)
-    : [];
-  const args = [
-    ...cliArgsPrefix,
-    'message',
-    'send',
-    '--url', getOpenClawUrl(),
-    '--token', getOpenClawToken(),
-    '--target', phoneNumber,
-    '--message', message
-  ];
-  await execFileAsync(getOpenClawCliBin(), args, {
-    timeout: getOpenClawTimeoutMs(),
-    maxBuffer: 1024 * 1024
-  });
+  const digits = normalizePhone(phoneNumber); // E.164 without '+', never a contact name
+  try {
+    const { base, extra } = wacliBridgeRequestParts();
+    const response = await axios.post(`${base}/send`, {
+      to: digits,
+      message
+    }, {
+      headers: {
+        Authorization: `Bearer ${getWacliBridgeToken()}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: getWacliTimeoutMs(),
+      ...extra
+    });
+    if (response?.data?.ok !== true) {
+      throw new Error(String(response?.data?.error || 'bridge rejected the send'));
+    }
+  } catch (err) {
+    const summary = String(err?.response?.data?.error || err.message || 'send failed')
+      .replace(/\+?\d[\d\s()-]{5,}\d/g, '[redacted-number]');
+    console.error(`[PhoneVerification] wacli bridge send failed (to …${digits.slice(-4)}): ${summary}`);
+    throw new Error('WhatsApp delivery failed — try SMS');
+  }
 
-  return { provider: 'openclaw-whatsapp', channel: 'whatsapp' };
+  return { provider: 'wacli-whatsapp', channel: 'whatsapp' };
 };
 
 const deliverVerificationCode = async (phoneNumber, code) => {
   const message = buildVerificationMessage(code);
-
   try {
     return await sendViaSmsGateway(phoneNumber, message);
   } catch (smsError) {
-    if (!useOpenClawFallback()) {
-      throw new Error(`SMS delivery failed: ${smsError.message}`);
-    }
-
-    try {
-      const fallbackResult = await sendViaOpenClaw(phoneNumber, message);
-      return { ...fallbackResult, fallback_from: 'sms' };
-    } catch (whatsAppError) {
-      throw new Error(`SMS delivery failed (${smsError.message}); WhatsApp fallback failed (${whatsAppError.message})`);
-    }
+    throw new Error(`SMS delivery failed: ${smsError.message}`);
   }
 };
 
@@ -406,7 +446,17 @@ const ensurePhoneAvailable = async (userId, phoneHash) => {
   }
 };
 
-exports.startPhoneVerification = async (userId, phoneNumber) => {
+const VALID_CHANNELS = ['sms', 'whatsapp'];
+
+exports.startPhoneVerification = async (userId, phoneNumber, requestedChannel = 'sms') => {
+  const channelChoice = String(requestedChannel || 'sms').trim().toLowerCase();
+  if (!VALID_CHANNELS.includes(channelChoice)) {
+    throw new Error(`Unknown delivery channel '${channelChoice}'. Use 'sms' or 'whatsapp'.`);
+  }
+  if (channelChoice === 'whatsapp' && !useWacliBridge()) {
+    throw new Error('WhatsApp delivery is unavailable — use SMS');
+  }
+
   assertProviderAvailable();
   await ensureEmailVerified(userId);
 
@@ -418,9 +468,14 @@ exports.startPhoneVerification = async (userId, phoneNumber) => {
   let providerId = null;
   let devCode = null;
   let channel = 'sms';
-  let fallbackFrom = null;
 
-  if (useTwilio()) {
+  if (channelChoice === 'whatsapp') {
+    const code = generateOtpCode();
+    const delivery = await sendViaWacliBridge(normalizedPhone, buildVerificationMessage(code));
+    provider = delivery.provider;
+    channel = delivery.channel;
+    await createLocalVerificationChallenge(userId, phoneHash, code, provider, channel);
+  } else if (useTwilio()) {
     const client = getTwilioClient();
     const verification = await client.verify.v2
       .services(getTwilioVerifySid())
@@ -434,7 +489,6 @@ exports.startPhoneVerification = async (userId, phoneNumber) => {
     const delivery = await deliverVerificationCode(normalizedPhone, code);
     provider = delivery.provider;
     channel = delivery.channel;
-    fallbackFrom = delivery.fallback_from || null;
     await createLocalVerificationChallenge(userId, phoneHash, code, provider, channel);
   } else {
     if (isProduction()) {
@@ -454,7 +508,7 @@ exports.startPhoneVerification = async (userId, phoneNumber) => {
       updated_at = NOW()
   `, [userId, provider, providerId]);
 
-  return { success: true, provider, channel, fallbackFrom, devCode };
+  return { success: true, provider, channel, devCode };
 };
 
 exports.confirmPhoneVerification = async (userId, phoneNumber, code) => {
@@ -466,7 +520,15 @@ exports.confirmPhoneVerification = async (userId, phoneNumber, code) => {
   await ensurePhoneAvailable(userId, phoneHash);
   let verifiedProvider = 'dev';
 
-  if (useTwilio()) {
+  // A pending local challenge (SMS gateway, WhatsApp, dev) always wins over
+  // Twilio: WhatsApp codes are local challenges even when Twilio handles SMS.
+  const pendingLocal = await db.query(`
+    SELECT 1 FROM phone_verification_challenges
+    WHERE user_id = $1 AND phone_hash = $2 AND consumed_at IS NULL
+    LIMIT 1
+  `, [userId, phoneHash]);
+
+  if (pendingLocal.rows.length === 0 && useTwilio()) {
     const client = getTwilioClient();
     const verification = await client.verify.v2
       .services(getTwilioVerifySid())

@@ -1,4 +1,4 @@
-import { createSignal, Show } from 'solid-js';
+import { createSignal, onMount, Show } from 'solid-js';
 import { api } from '../../services/api';
 
 export default function PhoneVerification({ onSuccess } = {}) {
@@ -7,6 +7,17 @@ export default function PhoneVerification({ onSuccess } = {}) {
   const [code, setCode] = createSignal('');
   const [error, setError] = createSignal('');
   const [devCode, setDevCode] = createSignal('');
+  const [channel, setChannel] = createSignal('sms');
+  const [whatsappAvailable, setWhatsappAvailable] = createSignal(false);
+
+  onMount(async () => {
+    try {
+      const status = await api.verification.getStatus();
+      setWhatsappAvailable(status?.provider_capabilities?.phone?.channels?.whatsapp === true);
+    } catch (e) {
+      // channel picker simply stays hidden; SMS default unaffected
+    }
+  });
 
   const toPhoneErrorMessage = (err, fallbackMessage) => {
     const raw = String(err?.data?.error || err?.message || fallbackMessage || '').trim();
@@ -35,7 +46,7 @@ export default function PhoneVerification({ onSuccess } = {}) {
     setDevCode('');
 
     try {
-      const result = await api.verification.startPhoneVerification(phoneNumber().trim());
+      const result = await api.verification.startPhoneVerification(phoneNumber().trim(), channel());
       setStage('code_sent');
       setCode('');
       if (result?.dev_code) {
@@ -43,7 +54,12 @@ export default function PhoneVerification({ onSuccess } = {}) {
       }
     } catch (err) {
       setStage('idle');
-      setError(toPhoneErrorMessage(err, 'Failed to send verification code'));
+      const message = toPhoneErrorMessage(err, 'Failed to send verification code');
+      // no automatic cross-channel fallback — suggest the other channel instead
+      const hint = whatsappAvailable()
+        ? (channel() === 'whatsapp' ? ' You can retry via SMS.' : ' You can retry via WhatsApp.')
+        : '';
+      setError(message + hint);
     }
   };
 
@@ -92,6 +108,30 @@ export default function PhoneVerification({ onSuccess } = {}) {
       </Show>
       <Show when={stage() === 'idle' || stage() === 'code_sent'}>
         <p class="description" style="margin-bottom: 0.5rem;">Verify a phone number to unlock prediction market participation.</p>
+        <Show when={whatsappAvailable()}>
+          <div class="phone-channel-toggle" style="display: flex; gap: 1rem; margin-bottom: 0.75rem;">
+            <label style="display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer;">
+              <input
+                type="radio"
+                name="phone-channel"
+                value="sms"
+                checked={channel() === 'sms'}
+                onChange={() => setChannel('sms')}
+              />
+              SMS
+            </label>
+            <label style="display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer;">
+              <input
+                type="radio"
+                name="phone-channel"
+                value="whatsapp"
+                checked={channel() === 'whatsapp'}
+                onChange={() => setChannel('whatsapp')}
+              />
+              WhatsApp
+            </label>
+          </div>
+        </Show>
         <div class="form-group" style="margin-bottom: 1rem;">
           <input
             type="tel"

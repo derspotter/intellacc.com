@@ -94,11 +94,12 @@ services:
       SMS_GATEWAY_USERNAME: ${SMS_GATEWAY_USERNAME:-}
       SMS_GATEWAY_PASSWORD: ${SMS_GATEWAY_PASSWORD:-}
       SMS_GATEWAY_TIMEOUT_MS: ${SMS_GATEWAY_TIMEOUT_MS:-}
-      OPENCLAW_URL: ${OPENCLAW_URL:-}
-      OPENCLAW_TOKEN: ${OPENCLAW_TOKEN:-}
-      OPENCLAW_CLI_BIN: ${OPENCLAW_CLI_BIN:-}
-      OPENCLAW_CLI_ARGS: ${OPENCLAW_CLI_ARGS:-}
-      OPENCLAW_TIMEOUT_MS: ${OPENCLAW_TIMEOUT_MS:-}
+      # WhatsApp OTP via the host-side wacli bridge (scripts/wacli-otp-bridge/),
+      # reached over a bind-mounted unix socket (host firewall drops docker->host
+      # TCP). Unset SOCKET+TOKEN to remove the WhatsApp channel (kill switch).
+      WACLI_BRIDGE_SOCKET: ${WACLI_BRIDGE_SOCKET:-}
+      WACLI_BRIDGE_TOKEN: ${WACLI_BRIDGE_TOKEN:-}
+      WACLI_TIMEOUT_MS: ${WACLI_TIMEOUT_MS:-}
       PAYMENT_VERIFICATION_ENABLED: ${PAYMENT_VERIFICATION_ENABLED:-true}
       REQUIRE_STRIPE_VERIFICATION: ${REQUIRE_STRIPE_VERIFICATION:-false}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
@@ -140,6 +141,8 @@ services:
       # single-file bind mount — edits that replace the inode are invisible
       # to the container until it is recreated.
       - ./jest.config.js:/usr/src/app/jest.config.js
+      # wacli OTP bridge socket dir (host user service; see scripts/wacli-otp-bridge/)
+      - /home/jay/.local/state/wacli-otp-bridge:/var/run/wacli-bridge
     working_dir: /usr/src/app
     command: ["./scripts/docker-dev-entrypoint.sh"]
     depends_on:

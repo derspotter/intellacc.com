@@ -1,7 +1,27 @@
-# WhatsApp OTP Channel via wacli — Design (PARKED)
+# WhatsApp OTP Channel via wacli — Design (SHIPPED 2026-09-02)
 
-Status: **parked** — approved design, not scheduled for implementation until a
-dedicated WhatsApp number exists for Intellacc. See "Preconditions to unpark".
+Status: **shipped** with amended transport. Justus decided on 2026-09-02
+(risk explicitly discussed and accepted) to use the existing wacli number
+rather than wait for a dedicated one. Amendments vs. the design below:
+
+- **Transport is a host-side bridge, not wacli-in-container**: the wacli
+  binary + store stay on the host (`scripts/wacli-otp-bridge/`, user systemd
+  unit `wacli-otp-bridge`). The backend container talks to it over a
+  bind-mounted **unix socket** (`WACLI_BRIDGE_SOCKET`; the host firewall
+  drops docker→host TCP). The container can only request OTP-template sends —
+  it can never read the store (preserves the privileged-communications
+  containment that hard constraint 1 was protecting).
+- The bridge enforces server-side: bearer token, exact OTP message template,
+  digits-only recipients sent as explicit JIDs (`<digits>@s.whatsapp.net`,
+  no contact-name resolution), 3/number/hour + 100/day caps, serialized
+  sends with `--lock-wait 30s`.
+- Kill switch env vars are `WACLI_BRIDGE_SOCKET`/`WACLI_BRIDGE_TOKEN`
+  (plus optional `WACLI_BRIDGE_URL` TCP mode and `WACLI_TIMEOUT_MS`).
+- Hard constraint 1 below is superseded ONLY in its "never this number"
+  part; the "never mount/copy the store into a container" part still holds
+  and is what the bridge design preserves.
+
+Original design follows.
 
 ## Summary
 

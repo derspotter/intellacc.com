@@ -1040,7 +1040,7 @@ export const api = {
     sendEmailVerification: () => request('/auth/verify-email/send', { method: 'POST' }),
     confirmEmailVerification: (token) => request('/auth/verify-email/confirm', { method: 'POST', body: { token } }),
     resendEmailVerification: () => request('/verification/email/resend', { method: 'POST' }),
-    startPhoneVerification: (phoneNumber) => request('/verification/phone/start', { method: 'POST', body: { phoneNumber } }),
+    startPhoneVerification: (phoneNumber, channel = 'sms') => request('/verification/phone/start', { method: 'POST', body: { phoneNumber, channel } }),
     confirmPhoneVerification: (phoneNumber, code) => request('/verification/phone/confirm', { method: 'POST', body: { phoneNumber, code } }),
     createPaymentSetup: () => request('/verification/payment/setup', { method: 'POST' }),
     createPaypalSetup: () => request('/verification/paypal/setup', { method: 'POST' }),
