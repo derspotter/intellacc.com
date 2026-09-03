@@ -10,6 +10,7 @@ import AdminMarketResolution from '../components/predictions/AdminMarketResoluti
 import AdminTools from '../components/predictions/AdminTools';
 import RPBalance from '../components/predictions/RPBalance';
 import { isAdmin, isAuthenticated } from '../services/auth';
+import { createPhoneGate, PHONE_GATE_MESSAGE } from '../services/verificationGate';
 
 const VERIFICATION_NOTICE_KEY = 'verificationNotice';
 
@@ -17,6 +18,9 @@ export default function PredictionsPage(props) {
   const [verificationNotice, setVerificationNotice] = createSignal(
     localStorage.getItem(VERIFICATION_NOTICE_KEY) || ''
   );
+  // Say up front that trading needs phone verification, instead of only
+  // after a failed trade.
+  const phoneGate = createPhoneGate();
 
   const handleVerificationNotice = (message = '') => {
     const normalized = String(message || '').trim();
@@ -57,6 +61,12 @@ export default function PredictionsPage(props) {
     <section class="predictions-page">
       <Show when={verificationNotice()}>
         <div class="predictions-phone-banner">{verificationNotice()}</div>
+      </Show>
+      <Show when={!verificationNotice() && phoneGate.needsPhone()}>
+        <div class="predictions-phone-banner" data-testid="phone-gate-banner">
+          {PHONE_GATE_MESSAGE}{' '}
+          <a href="#settings" class="predictions-phone-banner-link">Verify your phone in Settings</a>
+        </div>
       </Show>
 
       <div class="predictions-header">

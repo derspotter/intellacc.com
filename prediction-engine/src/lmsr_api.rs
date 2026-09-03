@@ -118,8 +118,14 @@ pub struct SellResult {
 #[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../shared/types/KellySuggestion.ts")]
 pub struct KellySuggestion {
+    /// Stake scaled by the configured `kelly_fraction` (the conservative default).
     pub kelly_suggestion: f64,
     pub quarter_kelly: f64,
+    /// Unscaled Kelly-optimal stake, capped at the balance. Clients offer
+    /// fractions of this (¼ / ½ / full) without needing to know the config.
+    pub full_kelly: f64,
+    /// The fraction `kelly_suggestion` was scaled by.
+    pub kelly_fraction: f64,
     pub current_prob: f64,
     pub balance: f64,
 }
@@ -1946,15 +1952,16 @@ pub fn kelly_suggestion(
         (market_prob - belief) / market_prob
     };
 
-    // Configurable Kelly fraction for conservative betting
+    // Unscaled optimum first; the configurable fraction is applied on top.
+    let full_kelly = (edge * balance).max(0.0).min(balance.max(0.0));
     let kelly_fraction = config.market.kelly_fraction;
-    let suggestion = (edge * balance * kelly_fraction)
-        .max(0.0)
-        .min(balance * kelly_fraction);
+    let suggestion = full_kelly * kelly_fraction;
 
     KellySuggestion {
         kelly_suggestion: suggestion,
         quarter_kelly: suggestion / 4.0,
+        full_kelly,
+        kelly_fraction,
         current_prob: market_prob,
         balance,
     }
@@ -3041,4 +3048,30 @@ async fn verify_system_consistency_transaction(
             "liquidity_b": market_state.liquidity_b
         }
     }))
+}
+
+#[cfg(test)]
+mod kelly_suggestion_tests {
+    use super::*;
+
+    #[test]
+    fn reports_full_kelly_and_the_fraction_next_to_the_scaled_suggestion() {
+        let mut config = Config::default();
+        config.market.kelly_fraction = 0.25;
+        // belief 0.75 vs market 0.5 → edge = 0.25/0.5 = 0.5; full Kelly = 0.5 * 1000
+        let k = kelly_suggestion(&config, 0.75, 0.5, 1000.0);
+        assert!((k.full_kelly - 500.0).abs() < 1e-9, "full_kelly = {}", k.full_kelly);
+        assert!((k.kelly_suggestion - 125.0).abs() < 1e-9, "scaled = {}", k.kelly_suggestion);
+        assert!((k.kelly_fraction - 0.25).abs() < 1e-12);
+    }
+
+    #[test]
+    fn full_kelly_is_capped_at_balance_and_never_negative() {
+        let config = Config::default();
+        let k = kelly_suggestion(&config, 0.99, 0.01, 100.0);
+        assert!(k.full_kelly <= 100.0 && k.full_kelly >= 0.0);
+        let flat = kelly_suggestion(&config, 0.5, 0.5, 100.0);
+        assert_eq!(flat.full_kelly, 0.0);
+        assert_eq!(flat.kelly_suggestion, 0.0);
+    }
 }

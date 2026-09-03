@@ -20,6 +20,9 @@ import { joinGroupChat, leaveGroupChat } from '../../../services/socket';
 import { isLoggedIn } from '../../../services/tokenService';
 import { createEpochGuard } from '../../../lib/requestEpoch';
 import PostItem from '../PostItem';
+import { goToUser } from '../../../lib/profileLinks';
+import { createDraftSignal, draftKey } from '../../../lib/persistedState';
+import { getCurrentUserId } from '../../../services/auth';
 
 const TABS = [
   { key: 'feed', label: 'FEED' },
@@ -49,7 +52,7 @@ export default function GroupView(props) {
   // Feed tab
   const [posts, setPosts] = createSignal([]);
   const [feedLoaded, setFeedLoaded] = createSignal(false);
-  const [postText, setPostText] = createSignal('');
+  const [postText, setPostText, clearPostDraft] = createDraftSignal(() => (slug() ? draftKey(`group-post:${slug()}`, getCurrentUserId()) : null), '');
   const [postBusy, setPostBusy] = createSignal(false);
   const [postError, setPostError] = createSignal('');
 
@@ -85,7 +88,7 @@ export default function GroupView(props) {
     setError('');
     setNotFound(false);
     setTab('feed');
-    setPosts([]); setFeedLoaded(false); setPostText(''); setPostError('');
+    setPosts([]); setFeedLoaded(false); setPostError(''); // postText: draft reloads per slug
     setMessages([]); setChatLoaded(false); setChatText(''); setChatError('');
     setMarkets([]); setMarketsLoaded(false); setPinQuery(''); setPinResults([]);
     setMembers([]); setMembersLoaded(false);
@@ -169,7 +172,7 @@ export default function GroupView(props) {
       const created = await postToGroup(g.id, text);
       if (!guard.isCurrent(token)) return;
       setPosts((cur) => [created, ...cur]);
-      setPostText('');
+      clearPostDraft();
     } catch (e) {
       if (!guard.isCurrent(token)) return;
       setPostError(e?.message || 'FAILED TO POST');
@@ -642,7 +645,7 @@ export default function GroupView(props) {
                   <button
                     type="button"
                     class="font-bold text-left truncate hover:text-bb-accent"
-                    onClick={() => { window.location.hash = `#user/${m.user_id}`; }}
+                    onClick={() => goToUser(m.user_id)}
                   >
                     @{m.username}
                   </button>

@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, Show } from 'solid-js';
 import { getUserPositions, api } from '../../services/api';
 import { isAuthenticated, getCurrentUserId } from '../../services/auth';
 import { activateOnKey } from '../../utils/keyboard';
+import { createPersistedSignal } from '../../lib/persistedState';
 
 const formatProbability = (value) => {
   const parsed = Number(value);
@@ -50,8 +51,9 @@ export default function EventsList() {
   const [error, setError] = createSignal(null);
 
   const [searchQuery, setSearchQuery] = createSignal('');
-  const [filter, setFilter] = createSignal('open');
-  const [categoryFilter, setCategoryFilter] = createSignal('');
+  // Filters survive tab switches and reloads (localStorage).
+  const [filter, setFilter] = createPersistedSignal('predictions.filter', 'open');
+  const [categoryFilter, setCategoryFilter] = createPersistedSignal('predictions.category', '');
 
   const [userPositions, setUserPositions] = createSignal([]);
   const [positionsLoading, setPositionsLoading] = createSignal(false);
@@ -336,7 +338,11 @@ export default function EventsList() {
             >
               <option value="">All categories</option>
               <For each={topicOptions()}>
-                {(topic) => <option value={topic.name}>{`${topic.name} (${topic.event_count})`}</option>}
+                {(topic) => (
+                  // `selected` re-applies the persisted category once topics arrive
+                  // (the select's `value` is set before its options exist).
+                  <option value={topic.name} selected={categoryFilter() === topic.name}>{`${topic.name} (${topic.event_count})`}</option>
+                )}
               </For>
             </select>
 

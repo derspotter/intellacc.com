@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Show } from 'solid-js';
 import { api, followUser, unfollowUser } from '../../../services/api';
 import { getCurrentUserId, isAuthenticated } from '../../../services/auth';
 import { applyGraphFilters } from '../../../lib/graphFilters';
+import { goToUser as goToUserProfile } from '../../../lib/profileLinks';
 
 // Terminal twin of the van page's three.js 3D follow graph: same data
 // (`api.network.getGraph()` -> { nodes: [{id, username, followers,
@@ -138,7 +139,7 @@ export default function NetworkView() {
     }
   };
 
-  const goToUser = (node) => { window.location.hash = `#user/${node.id}`; };
+  const goToUser = (node) => { goToUserProfile(node?.id); };
 
   const headerCell = (key, label, extraClass = '') => (
     <button

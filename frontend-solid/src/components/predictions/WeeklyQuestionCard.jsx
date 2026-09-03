@@ -1,6 +1,7 @@
 import { createResource, Show } from 'solid-js';
 import { api } from '../../services/api';
 import { getCurrentUserId } from '../../services/auth';
+import { createPhoneGate, PHONE_GATE_MESSAGE } from '../../services/verificationGate';
 
 /**
  * Fetch the caller's current weekly assignment status.
@@ -20,6 +21,7 @@ const fetchWeeklyStatus = async (userId) => {
 export default function WeeklyQuestionCard() {
   const userId = getCurrentUserId();
   const [status] = createResource(() => userId || null, fetchWeeklyStatus);
+  const phoneGate = createPhoneGate();
 
   // Show only while the assignment is open AND the user has not yet staked.
   // `isCompleted` is authoritative but only set by the weekly batch job after
@@ -55,6 +57,11 @@ export default function WeeklyQuestionCard() {
         <Show when={stakedRp() > 0 && requiredRp()}>
           <p class="weekly-question-progress">
             Staked {stakedRp().toFixed(2)} of {requiredRp()} RP required
+          </p>
+        </Show>
+        <Show when={phoneGate.needsPhone()}>
+          <p class="weekly-question-gate muted" data-testid="weekly-phone-gate">
+            {PHONE_GATE_MESSAGE} <a href="#settings">Verify in Settings</a>
           </p>
         </Show>
         <button type="button" class="post-action" onClick={goStake}>

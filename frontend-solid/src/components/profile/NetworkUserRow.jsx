@@ -1,4 +1,5 @@
 import { Show } from 'solid-js';
+import { goToUser } from '../../lib/profileLinks';
 
 // One row in a Followers / Following list: username link, accuracy + follower
 // metadata, and a viewer-relative Follow / Unfollow button. Presentational only —
@@ -13,7 +14,7 @@ export default function NetworkUserRow(props) {
 
   const goToProfile = () => {
     if (user().id) {
-      window.location.hash = `#user/${user().id}`;
+      goToUser(user().id);
     }
   };
 

@@ -13,6 +13,7 @@ import {
 import { getCurrentUserId } from '../../../services/auth';
 import { isLoggedIn } from '../../../services/tokenService';
 import { createEpochGuard } from '../../../lib/requestEpoch';
+import { goToUser } from '../../../lib/profileLinks';
 
 const fmtRP = (v) => `${(Number(v) || 0).toFixed(2)} RP`;
 
@@ -208,7 +209,7 @@ export default function ProfileView(props) {
                         <button
                           type="button"
                           class="block w-full text-left py-1 border-b border-bb-border/20 text-xs hover:bg-white/5"
-                          onClick={() => { window.location.hash = `#user/${row.id || row.user_id}`; }}
+                          onClick={() => goToUser(row.id || row.user_id)}
                         >
                           <span class="font-bold">@{row.username}</span>
                           <Show when={row.accuracy_percent != null}>

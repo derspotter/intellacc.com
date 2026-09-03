@@ -1,6 +1,7 @@
 import { createSignal } from 'solid-js';
 import { api } from '../../services/api';
 import { activateOnKey } from '../../utils/keyboard';
+import { goToUser } from '../../lib/profileLinks';
 
 const getNotificationIcon = (type) => {
   switch (type) {
@@ -115,7 +116,7 @@ export default function NotificationItem(props) {
       return;
     }
     if (targetType === 'user' && props.notification.actor_id) {
-      window.location.hash = `#user/${props.notification.actor_id}`;
+      goToUser(props.notification.actor_id);
     }
   };
 

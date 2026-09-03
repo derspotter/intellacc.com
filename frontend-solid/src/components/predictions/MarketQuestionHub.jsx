@@ -8,6 +8,8 @@ import {
   runMarketQuestionRewards,
   submitMarketQuestionReview
 } from '../../services/api';
+import { createDraftSignal, draftKey } from '../../lib/persistedState';
+import { getCurrentUserId } from '../../services/auth';
 
 const toLocalDateTimeValue = (date) => {
   const now = date || new Date();
@@ -56,13 +58,19 @@ export default function MarketQuestionHub() {
   const [reviewSubmitting, setReviewSubmitting] = createSignal(null);
   const [statusFilter, setStatusFilter] = createSignal('all');
   const [mineOnly, setMineOnly] = createSignal(true);
-  const [title, setTitle] = createSignal('');
-  const [details, setDetails] = createSignal('');
-  const [category, setCategory] = createSignal('');
-  const [closingDate, setClosingDate] = createSignal(toLocalDateTimeValue(new Date(Date.now() + 24 * 60 * 60 * 1000)));
-  const [eventType, setEventType] = createSignal('binary');
-  const [outcomeLabels, setOutcomeLabels] = createSignal(['', '']);
-  const [bucketBoundaries, setBucketBoundaries] = createSignal('');
+  // Create-form fields are drafts: they survive tab switches and reloads.
+  const field = (name, initial) => createDraftSignal(() => draftKey(`market-question:${name}`, getCurrentUserId()), initial);
+  const [title, setTitle, clearTitle] = field('title', '');
+  const [details, setDetails, clearDetails] = field('details', '');
+  const [category, setCategory, clearCategory] = field('category', '');
+  const [closingDate, setClosingDate, clearClosingDate] = field('closingDate', toLocalDateTimeValue(new Date(Date.now() + 24 * 60 * 60 * 1000)));
+  const [eventType, setEventType, clearEventType] = field('eventType', 'binary');
+  const [outcomeLabels, setOutcomeLabels, clearOutcomeLabels] = field('outcomeLabels', ['', '']);
+  const [bucketBoundaries, setBucketBoundaries, clearBucketBoundaries] = field('bucketBoundaries', '');
+  const clearFormDrafts = () => {
+    clearTitle(); clearDetails(); clearCategory(); clearClosingDate();
+    clearEventType(); clearOutcomeLabels(); clearBucketBoundaries();
+  };
   const [reviewNotes, setReviewNotes] = createSignal({});
 
   const noteFor = (id) => {
@@ -214,13 +222,7 @@ export default function MarketQuestionHub() {
       };
       const result = await createMarketQuestion(payload);
       setSuccess(`Submitted. Bond withheld: ${result?.creator_bond_rp ?? '10'} RP`);
-      setTitle('');
-      setDetails('');
-      setCategory('');
-      setClosingDate(toLocalDateTimeValue(new Date(Date.now() + 24 * 60 * 60 * 1000)));
-      setEventType('binary');
-      setOutcomeLabels(['', '']);
-      setBucketBoundaries('');
+      clearFormDrafts();
       setMineOnly(true);
       setActiveTab('mine');
       setListLoaded(false);

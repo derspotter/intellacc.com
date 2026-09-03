@@ -8,6 +8,7 @@ import {
 } from '../../../services/api';
 import { registerSocketEventHandler } from '../../../services/socket';
 import { createEpochGuard } from '../../../lib/requestEpoch';
+import { goToUser } from '../../../lib/profileLinks';
 
 const PAGE = 20;
 
@@ -102,7 +103,7 @@ export default function NotificationsView() {
 
   const open = (n) => {
     markOne(n);
-    if (n.type === 'follow' && n.actor_id) window.location.hash = `#user/${n.actor_id}`;
+    if (n.type === 'follow') goToUser(n.actor_id);
   };
 
   return (

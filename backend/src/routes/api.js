@@ -36,6 +36,7 @@ const optionalAuth = require('../middleware/optionalAuth');
 const feedWeightsController = require('../controllers/feedWeightsController');
 const discoverController = require('../controllers/discoverController');
 const { requireTier, requireEmailVerified, requirePhoneVerified, requirePaymentVerified } = require('../middleware/verification');
+const validateUserIdParam = require('../middleware/validateUserIdParam');
 const { requireScope } = require('../middleware/scopes');
 const db = require('../db');
 const { ensureEventIsActive } = require('../utils/eventLifecycle');
@@ -138,7 +139,7 @@ router.put('/users/me/feed-weights', authenticateJWT, feedWeightsController.setM
 router.get('/users/master-key', authenticateJWT, rejectAgentKeys, userController.getMasterKey);
 router.post('/users/master-key', authenticateJWT, rejectAgentKeys, userController.setMasterKey);
 router.get("/users/username/:username", authenticateJWT, userController.getUserByUsername);
-router.get("/users/:id", authenticateJWT, userController.getUser);
+router.get("/users/:id", validateUserIdParam, authenticateJWT, userController.getUser);
 router.post('/login', loginRateLimit, userController.loginUser);
 
 // Social OAuth login routes
@@ -234,12 +235,12 @@ router.post('/users/me/api-keys', authenticateJWT, rejectAgentKeys, requireEmail
 router.delete('/users/me/api-keys/:id', authenticateJWT, rejectAgentKeys, requireEmailVerified, requirePhoneVerified, apiKeysController.revokeKey);
 
 // Follow System Routes
-router.post("/users/:id/follow", authenticateJWT, userController.followUser);
-router.delete("/users/:id/follow", authenticateJWT, userController.unfollowUser);
-router.get("/users/:id/following-status", authenticateJWT, userController.getFollowingStatus);
+router.post("/users/:id/follow", validateUserIdParam, authenticateJWT, userController.followUser);
+router.delete("/users/:id/follow", validateUserIdParam, authenticateJWT, userController.unfollowUser);
+router.get("/users/:id/following-status", validateUserIdParam, authenticateJWT, userController.getFollowingStatus);
 router.get("/network/graph", authenticateJWT, userController.getNetworkGraph);
-router.get("/users/:id/followers", authenticateJWT, userController.getFollowers);
-router.get("/users/:id/following", authenticateJWT, userController.getFollowing);
+router.get("/users/:id/followers", validateUserIdParam, authenticateJWT, userController.getFollowers);
+router.get("/users/:id/following", validateUserIdParam, authenticateJWT, userController.getFollowing);
 
 // ActivityPub Federation Routes
 router.post('/federation/activitypub/follow', authenticateJWT, federationController.followActivityPubActor);
@@ -254,8 +255,8 @@ router.delete('/federation/atproto/account', authenticateJWT, atprotoController.
 router.post('/federation/atproto/posts/:postId/enqueue', authenticateJWT, atprotoController.enqueuePost);
 
 // Portfolio Routes
-router.get("/users/:id/positions", authenticateJWT, userController.getUserPositions);
-router.get("/users/:id/calibration", authenticateJWT, predictionsController.getUserCalibration);
+router.get("/users/:id/positions", validateUserIdParam, authenticateJWT, userController.getUserPositions);
+router.get("/users/:id/calibration", validateUserIdParam, authenticateJWT, predictionsController.getUserCalibration);
 
 // Prediction/Events Routes
 router.post("/predict", authenticateJWT, requirePhoneVerified, predictionsController.createPrediction);

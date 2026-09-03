@@ -58,9 +58,14 @@ class WeeklyAssignmentService {
   }
 
   /**
-   * Assign weekly predictions to all active users
+   * Assign weekly predictions to all active users.
+   *
+   * Every non-deleted user gets one — users without onboarding topics simply
+   * draw from the general pool instead of an in-topic pick. Pass
+   * `{ userIds }` to scope the run (used for on-demand assignment when a
+   * mid-week signup asks for their status before the Monday batch).
    */
-  async assignWeeklyPredictions() {
+  async assignWeeklyPredictions({ userIds = null } = {}) {
     const client = await db.getPool().connect();
 
     try {
@@ -70,14 +75,16 @@ class WeeklyAssignmentService {
       console.log(`🗓️ Starting weekly assignment for week: ${currentWeek}`);
 
       // Get all users who don't have a weekly assignment for current week
+      const scopeClause = Array.isArray(userIds) && userIds.length > 0 ? 'AND id = ANY($2::int[])' : '';
+      const scopeParams = scopeClause ? [currentWeek, userIds] : [currentWeek];
       const usersResult = await client.query(`
         SELECT id, username, rp_balance_ledger
         FROM users
         WHERE (weekly_assignment_week != $1 OR weekly_assignment_week IS NULL)
-        AND id IN (SELECT DISTINCT user_id FROM user_topics)  -- Onboarded users only
+        ${scopeClause}
         AND deleted_at IS NULL
         ORDER BY id
-      `, [currentWeek]);
+      `, scopeParams);
 
       if (usersResult.rows.length === 0) {
         console.log('ℹ️ All users already have weekly assignments');

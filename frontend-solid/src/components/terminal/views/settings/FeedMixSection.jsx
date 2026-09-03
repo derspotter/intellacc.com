@@ -56,7 +56,7 @@ export default function FeedMixSection() {
               value={weights()[key]}
               disabled={locks()[key]}
               onInput={(e) => onSlide(key, e.currentTarget.value)}
-              class="flex-1 accent-bb-accent disabled:opacity-40"
+              class="flex-1 accent-bb-accent disabled:opacity-40 touch-none"
             />
             <div class="w-10 text-right font-bold text-bb-text">{weights()[key]}</div>
             <button

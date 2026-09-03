@@ -4,9 +4,12 @@ import { feedStore } from "../store/feedStore";
 import { api, ApiError, getFeedWeights } from "../services/api";
 import { rankPosts, normalizeWeights } from "../lib/feedRanking";
 import PostItem from "./terminal/PostItem";
+import { createDraftSignal, draftKey } from "../lib/persistedState";
+import { getCurrentUserId } from "../services/auth";
 
 const PostComposer = () => {
-    const [content, setContent] = createSignal("");
+    // Same draft key as the Van composer: a draft follows the user across skins.
+    const [content, setContent, clearDraft] = createDraftSignal(() => draftKey('post', getCurrentUserId()), "");
     const [submitting, setSubmitting] = createSignal(false);
     const [verifyBanner, setVerifyBanner] = createSignal(null); // null | 'needs_verify' | 'sending' | 'sent' | 'error'
     const [postError, setPostError] = createSignal(null);
@@ -21,7 +24,7 @@ const PostComposer = () => {
             // Call the API directly first to catch 403 before any optimistic UI
             const newPost = await api.posts.create(content());
             feedStore.addPost(newPost);
-            setContent("");
+            clearDraft();
             setVerifyBanner(null);
         } catch (err) {
             if (err instanceof ApiError && err.status === 403 && err.data?.required_tier_name === 'email') {

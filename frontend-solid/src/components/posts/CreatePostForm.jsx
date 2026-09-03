@@ -1,28 +1,35 @@
 import { createSignal, Show } from 'solid-js';
 import api, { createPost, postToGroup, uploadPostImage } from '../../services/api';
 import MarketPicker from './MarketPicker';
+import { createDraftSignal, draftKey } from '../../lib/persistedState';
+import { getCurrentUserId } from '../../services/auth';
 
 const MAX_PREVIEW_SIZE = 4_000_000;
 
 export default function CreatePostForm(props) {
-  const [content, setContent] = createSignal('');
+  // Drafts survive route switches (which unmount this form) and reloads.
+  const draftScope = () => (props.groupId ? `group-post:${props.groupId}` : 'post');
+  const [content, setContent, clearContentDraft] = createDraftSignal(
+    () => draftKey(draftScope(), getCurrentUserId()), ''
+  );
+  const [marketDraft, setMarketDraft, clearMarketDraft] = createDraftSignal(
+    () => draftKey(`${draftScope()}:market`, getCurrentUserId()), null
+  );
+  const selectedMarket = () => marketDraft()?.market || null;
+  const marketStance = () => marketDraft()?.stance || 'related';
   const [attachment, setAttachment] = createSignal(null);
   const [previewUrl, setPreviewUrl] = createSignal(null);
   const [submitting, setSubmitting] = createSignal(false);
   const [error, setError] = createSignal('');
   const [showMarketPicker, setShowMarketPicker] = createSignal(false);
-  const [selectedMarket, setSelectedMarket] = createSignal(null);
-  const [marketStance, setMarketStance] = createSignal('related');
 
   const handleMarketSelect = (market, stance) => {
-    setSelectedMarket(market);
-    setMarketStance(stance);
+    setMarketDraft({ market, stance });
     setShowMarketPicker(false);
   };
 
   const clearMarket = () => {
-    setSelectedMarket(null);
-    setMarketStance('related');
+    clearMarketDraft();
   };
 
   const clearAttachment = () => {
@@ -95,7 +102,7 @@ export default function CreatePostForm(props) {
         }
       }
 
-      setContent('');
+      clearContentDraft();
       clearAttachment();
       clearMarket();
       setShowMarketPicker(false);

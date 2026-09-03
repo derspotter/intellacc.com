@@ -1,10 +1,13 @@
 import { createSignal, For, Show } from 'solid-js';
 import { createGroup, searchGroups } from '../../services/api';
+import { createDraftSignal, draftKey } from '../../lib/persistedState';
+import { getCurrentUserId } from '../../services/auth';
 
 export default function CreateGroupForm(props) {
-  const [name, setName] = createSignal('');
-  const [topicId, setTopicId] = createSignal('');
-  const [description, setDescription] = createSignal('');
+  const [name, setName, clearName] = createDraftSignal(() => draftKey('group-create:name', getCurrentUserId()), '');
+  const [topicId, setTopicId, clearTopic] = createDraftSignal(() => draftKey('group-create:topic', getCurrentUserId()), '');
+  const [description, setDescription, clearDescription] = createDraftSignal(() => draftKey('group-create:description', getCurrentUserId()), '');
+  const clearDrafts = () => { clearName(); clearTopic(); clearDescription(); };
   const [dupes, setDupes] = createSignal([]);
   const [submitting, setSubmitting] = createSignal(false);
   const [error, setError] = createSignal('');
@@ -25,6 +28,7 @@ export default function CreateGroupForm(props) {
     setSubmitting(true);
     try {
       const r = await createGroup({ name: name().trim(), description: description().trim(), topic_id: Number(topicId()) });
+      clearDrafts();
       props.onCreated?.(r.group);
     } catch (err) {
       if (err?.status === 403) setNeedsVerify(true);

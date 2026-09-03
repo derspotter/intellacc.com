@@ -2,6 +2,7 @@ import { createSignal, createEffect, onCleanup, Show, For } from 'solid-js';
 import PostItem from '../components/posts/PostItem';
 import api from '../services/api';
 import { isAuthenticated } from '../services/auth';
+import { userHash } from '../lib/profileLinks';
 
 const SEARCH_DEBOUNCE_MS = 300;
 const SEARCH_PAGE_SIZE = 20;
@@ -324,7 +325,7 @@ export default function SearchPage(props) {
                 <div class="search-user-row">
                   <a
                     class="search-user-link"
-                    href={`#user/${user.id}`}
+                    href={userHash(user.id) || undefined}
                   >
                     <div class="search-user-avatar">{String(user.username?.[0] || '?').toUpperCase()}</div>
                     <div class="search-user-main">

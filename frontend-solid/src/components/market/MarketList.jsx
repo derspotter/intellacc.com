@@ -7,11 +7,11 @@ export const MarketList = () => {
     return (
         <div class="flex flex-col h-full bg-bb-bg text-xs font-mono">
             {/* Dense "table" layout: pack columns (no wide fractional gutters) */}
-            <div class="grid grid-cols-[minmax(0,1fr)_max-content] sm:grid-cols-[4ch_minmax(0,1fr)_max-content_max-content] gap-x-0 px-2 py-1 border-b border-bb-border text-bb-muted bg-bb-panel">
+            <div class="grid grid-cols-[minmax(0,1fr)_max-content_max-content] sm:grid-cols-[4ch_minmax(0,1fr)_max-content_max-content] gap-x-0 px-2 py-1 border-b border-bb-border text-bb-muted bg-bb-panel">
                 <div class="hidden sm:block pr-2">ID</div>
                 <div class="min-w-0 truncate sm:border-l sm:border-bb-border/50 sm:px-2">EVENT</div>
                 <div class="border-l border-bb-border/50 px-2 text-right">PROB</div>
-                <div class="hidden sm:block border-l border-bb-border/50 px-2 text-right">CLOSE / OUT</div>
+                <div class="border-l border-bb-border/50 px-2 text-right">CLOSE / OUT</div>
             </div>
 
             <div class="flex-1 overflow-auto custom-scrollbar">
@@ -20,7 +20,7 @@ export const MarketList = () => {
                         <div
                             data-testid="market-row"
                             class={clsx(
-                                "grid grid-cols-[minmax(0,1fr)_max-content] sm:grid-cols-[4ch_minmax(0,1fr)_max-content_max-content] gap-x-0 px-2 py-0.5 border-b border-bb-border/20 cursor-pointer transition-colors",
+                                "grid grid-cols-[minmax(0,1fr)_max-content_max-content] sm:grid-cols-[4ch_minmax(0,1fr)_max-content_max-content] gap-x-0 px-2 py-0.5 border-b border-bb-border/20 cursor-pointer transition-colors",
                                 marketStore.state.selectedMarketId === market.id
                                     ? "bg-bb-accent text-black font-bold"
                                     : [
@@ -38,7 +38,7 @@ export const MarketList = () => {
                             <div class="border-l border-bb-border/50 px-2 text-right text-market-up font-bold">
                                 {market.market_prob != null ? `${(Number(market.market_prob) * 100).toFixed(1)}%` : "--"}
                             </div>
-                            <div class="hidden sm:block border-l border-bb-border/50 px-2 text-right text-bb-muted uppercase truncate">
+                            <div class="border-l border-bb-border/50 px-2 text-right text-bb-muted uppercase truncate">
                                 <Show when={market.outcome} fallback={
                                     market.closing_date 
                                         ? new Date(market.closing_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-') 

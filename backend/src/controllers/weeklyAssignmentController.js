@@ -124,7 +124,18 @@ const getUserWeeklyStatus = async (req, res) => {
       });
     }
     
-    const status = await weeklyAssignmentService.getUserWeeklyStatus(userId);
+    let status = await weeklyAssignmentService.getUserWeeklyStatus(userId);
+
+    // No assignment yet this week (signed up after the Monday batch, or the
+    // batch skipped them): assign on demand so nobody waits a whole week.
+    if (!status?.event_id) {
+      try {
+        await weeklyAssignmentService.assignWeeklyPredictions({ userIds: [userId] });
+        status = await weeklyAssignmentService.getUserWeeklyStatus(userId);
+      } catch (assignError) {
+        console.error('On-demand weekly assignment failed:', assignError);
+      }
+    }
 
     // Live check: has the user already met this week's stake requirement?
     // The authoritative `completed` flag is only set by the weekly batch job

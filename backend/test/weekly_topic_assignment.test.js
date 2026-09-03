@@ -57,7 +57,7 @@ describe('Topic-aware weekly assignment', () => {
   });
 
   test('assigns onboarded user an event from their topics', async () => {
-    const summary = await weeklyAssignmentService.assignWeeklyPredictions();
+    const summary = await weeklyAssignmentService.assignWeeklyPredictions({ userIds: [user.id] });
     expect(summary.assigned).toBeGreaterThanOrEqual(1);
     const row = await db.query(
       'SELECT event_id FROM weekly_user_assignments WHERE user_id = $1 ORDER BY id DESC LIMIT 1', [user.id]
@@ -66,12 +66,31 @@ describe('Topic-aware weekly assignment', () => {
     expect(row.rows[0].event_id).toBe(inTopicEvent);
   });
 
-  test('user without topics gets no assignment', async () => {
+  test('user without topics still gets an assignment from the general pool', async () => {
     const lurker = await createUser('weeklylurker');
     cleanup.userIds.push(lurker.id);
-    await weeklyAssignmentService.assignWeeklyPredictions();
-    const row = await db.query('SELECT 1 FROM weekly_user_assignments WHERE user_id = $1', [lurker.id]);
-    expect(row.rows).toHaveLength(0);
+    await weeklyAssignmentService.assignWeeklyPredictions({ userIds: [lurker.id] });
+    const row = await db.query('SELECT event_id FROM weekly_user_assignments WHERE user_id = $1', [lurker.id]);
+    expect(row.rows).toHaveLength(1);
+    expect(row.rows[0].event_id).toEqual(expect.any(Number));
+  });
+
+  test('status endpoint assigns on demand when the user has no assignment this week', async () => {
+    // Mid-week signup: the Monday batch already ran, so nothing exists yet.
+    const newcomer = await createUser('weeklynewcomer');
+    cleanup.userIds.push(newcomer.id);
+    const before = await db.query('SELECT 1 FROM weekly_user_assignments WHERE user_id = $1', [newcomer.id]);
+    expect(before.rows).toHaveLength(0);
+
+    const res = await request(app)
+      .get(`/api/weekly/user/${newcomer.id}/status`)
+      .set('Authorization', `Bearer ${newcomer.token}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.hasAssignment).toBe(true);
+    expect(res.body.assignment.event_id).toEqual(expect.any(Number));
+
+    const after = await db.query('SELECT event_id FROM weekly_user_assignments WHERE user_id = $1', [newcomer.id]);
+    expect(after.rows).toHaveLength(1);
   });
 
   test('an unconfigured multiple_choice event (no outcomes) is never candidate-eligible, even in-topic', async () => {
@@ -97,7 +116,7 @@ describe('Topic-aware weekly assignment', () => {
     cleanup.eventIds.push(unconfiguredEventId);
     await db.query(`INSERT INTO event_topics (event_id, topic_id, source) VALUES ($1, $2, 'test')`, [unconfiguredEventId, soloTopicId]);
 
-    await weeklyAssignmentService.assignWeeklyPredictions();
+    await weeklyAssignmentService.assignWeeklyPredictions({ userIds: [soloUser.id] });
 
     const assignedRow = await db.query(
       'SELECT event_id FROM weekly_user_assignments WHERE user_id = $1 ORDER BY id DESC LIMIT 1',

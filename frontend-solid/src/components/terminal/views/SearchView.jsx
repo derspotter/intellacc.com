@@ -2,6 +2,7 @@ import { For, Show, createSignal, onCleanup } from 'solid-js';
 import { api, followUser, getPostsPage, getPostsPaging, unfollowUser } from '../../../services/api';
 import { isLoggedIn } from '../../../services/tokenService';
 import { createEpochGuard } from '../../../lib/requestEpoch';
+import { goToUser } from '../../../lib/profileLinks';
 
 export default function SearchView() {
   const [tab, setTab] = createSignal('users'); // 'users' | 'posts'
@@ -111,7 +112,7 @@ export default function SearchView() {
             <For each={users()}>
               {(u) => (
                 <div data-testid="search-user-row" class="px-3 py-2 border-b border-bb-border/20 flex items-center justify-between gap-3 hover:bg-white/5">
-                  <button type="button" class="font-bold text-left truncate hover:text-bb-accent" onClick={() => { window.location.hash = `#user/${u.id}`; }}>
+                  <button type="button" class="font-bold text-left truncate hover:text-bb-accent" onClick={() => goToUser(u.id)}>
                     @{u.username}
                   </button>
                   <button

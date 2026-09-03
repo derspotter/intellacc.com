@@ -1,10 +1,24 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import { api } from "../../services/api";
 import { marketStore } from "../../store/marketStore";
 import { getToken } from "../../services/tokenService";
 import { deriveTradeSide } from "../../lib/tradeBelief";
+import {
+    KELLY_FRACTIONS,
+    DEFAULT_KELLY_FRACTION,
+    fullKellyFromSuggestion,
+    stakeForFraction,
+    beliefTrackGradient,
+    normalizeKellyFraction,
+} from "../../lib/kellyStake";
+import { createPersistedSignal } from "../../lib/persistedState";
+
+const KELLY_FRACTION_LABELS = { 0.25: "1/4", 0.5: "1/2", 1: "1x" };
+// Terminal palette: market-down / white / market-up (see tailwind theme).
+const BELIEF_TRACK_COLORS = { no: "#FF3D00", mid: "#ffffff", yes: "#00FF41" };
 import DistributionMarketCard from "../predictions/DistributionMarketCard";
 import OutcomeMarketCard from "../predictions/OutcomeMarketCard";
+import { createPhoneGate } from "../../services/verificationGate";
 
 // Same market-type gates as the van skin's MarketDetailView: numeric events
 // trade a full distribution, multiple_choice trades per-outcome, and only
@@ -50,7 +64,13 @@ const TradeTicket = (props) => {
     const [error, setError] = createSignal(null);
     const [lastFill, setLastFill] = createSignal(null);
     const [belief, setBelief] = createSignal(0.5);
-    const [kellyData, setKellyData] = createSignal(null);
+    // Full Kelly (RP) for the current belief plus the balance it was sized
+    // against; the shares field auto-fills at the remembered fraction of it.
+    const [fullKelly, setFullKelly] = createSignal(0);
+    const [kellyBalance, setKellyBalance] = createSignal(0);
+    const [kellyFraction, setKellyFraction] = createPersistedSignal("kellyFraction", DEFAULT_KELLY_FRACTION);
+    const [stakeTouched, setStakeTouched] = createSignal(false);
+    const phoneGate = createPhoneGate();
     let kellyTimeout;
 
     const marketProb = createMemo(() => {
@@ -73,6 +93,8 @@ const TradeTicket = (props) => {
         if (id != null && id !== beliefInitId) {
             beliefInitId = id;
             setBelief(marketProb());
+            setStakeTouched(false);
+            setStakeShares("");
         }
     });
 
@@ -92,31 +114,14 @@ const TradeTicket = (props) => {
         if (!userId) return;
         try {
             const data = await api.events.getKelly(m.id, beliefVal);
-            const kellyOptimal = data.kelly_suggestion ? parseFloat(data.kelly_suggestion) : 0;
-            const quarterKelly = data.quarter_kelly ? parseFloat(data.quarter_kelly) : kellyOptimal * 0.25;
-            const currentProb = data.current_prob ? parseFloat(data.current_prob) : 0.5;
-            const balance = data.balance ? parseFloat(data.balance) : 1000;
-            setKellyData({
-                kelly_optimal: kellyOptimal,
-                quarter_kelly: quarterKelly,
-                edge: beliefVal - currentProb,
-                balance
-            });
-            return;
+            setFullKelly(fullKellyFromSuggestion(data));
+            const balance = Number(data?.balance);
+            setKellyBalance(Number.isFinite(balance) ? balance : 0);
         } catch (err) {
-            console.error('[Kelly] API error, using fallback:', err);
+            // Sizing is a helper, never a gate: without it the field stays empty.
+            if (err?.status !== 403) console.error('[Kelly] API error:', err);
+            setFullKelly(0);
         }
-        // Fallback: local calculation
-        const mp = marketProb();
-        const edge = beliefVal - mp;
-        const balance = 1000;
-        const kellyOptimal = Math.max(0, Math.abs(edge) * balance * 0.25);
-        setKellyData({
-            kelly_optimal: kellyOptimal,
-            quarter_kelly: kellyOptimal * 0.25,
-            edge,
-            balance
-        });
     };
 
     const handleBeliefChange = (val) => {
@@ -137,6 +142,30 @@ const TradeTicket = (props) => {
     const priceYes = createMemo(() => marketProb());
     const priceNo = createMemo(() => 1 - marketProb());
     const selectedPrice = createMemo(() => (side() === "NO" ? priceNo() : priceYes()));
+
+    // Auto-fill: the Kelly stake is in RP, the ticket trades shares, so
+    // convert at the current price of the derived side.
+    const suggestedShares = () => {
+        const rp = Number(stakeForFraction(fullKelly(), kellyFraction(), kellyBalance()));
+        const price = selectedPrice();
+        if (!(rp > 0) || !(price > 0)) return "";
+        return (rp / price).toFixed(2);
+    };
+    createEffect(() => {
+        const next = suggestedShares();
+        if (untrack(stakeTouched)) return;
+        setStakeShares(next);
+    });
+    const chooseFraction = (fraction) => {
+        setKellyFraction(normalizeKellyFraction(fraction));
+        setStakeTouched(false);
+        setStakeShares(suggestedShares());
+    };
+    const handleStakeInput = (raw) => {
+        setStakeShares(raw);
+        setStakeTouched(String(raw).trim() !== "");
+    };
+
 
     const sharesNum = createMemo(() => {
         const n = Number(stakeShares());
@@ -189,6 +218,7 @@ const TradeTicket = (props) => {
             setLastFill(result);
             window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
             setStakeShares("");
+            setStakeTouched(false);
         } catch (err) {
             setError(err?.data?.message || err?.message || "Trade failed.");
         } finally {
@@ -209,6 +239,13 @@ const TradeTicket = (props) => {
                     <div>Est. cost uses current price.</div>
                 </div>
             </div>
+
+            <Show when={phoneGate.needsPhone()}>
+                <div data-testid="ticket-phone-gate" class="mb-3 p-2 border border-yellow-500/50 bg-yellow-500/10 text-yellow-400 text-xs font-mono flex items-center justify-between gap-2">
+                    <span>PHONE VERIFICATION REQUIRED // TO TRADE</span>
+                    <a href="#settings" class="px-2 py-0.5 border border-yellow-500 text-yellow-400 hover:bg-yellow-500/20 whitespace-nowrap uppercase">Verify</a>
+                </div>
+            </Show>
 
             <div class="mb-3">
                 <Show
@@ -244,58 +281,11 @@ const TradeTicket = (props) => {
                     step="0.01"
                     value={belief()}
                     onInput={(e) => handleBeliefChange(parseFloat(e.currentTarget.value))}
-                    class="belief-slider w-full accent-bb-accent"
+                    style={{ background: beliefTrackGradient(marketProb(), BELIEF_TRACK_COLORS) }}
+                    aria-label="Your belief probability"
+                    class="belief-slider terminal-belief-slider w-full touch-none"
                 />
             </div>
-
-            {/* Kelly Optimal Box */}
-            <Show when={kellyData()}>
-                <div class="mb-3 bg-black border border-bb-border p-2">
-                    <div class="flex items-center justify-between mb-1">
-                        <span class="text-xxs text-bb-muted uppercase">Kelly Criterion</span>
-                        <span class={`text-xxs font-bold ${kellyData().edge >= 0 ? "text-market-up" : "text-market-down"}`}>
-                            EDGE: {kellyData().edge >= 0 ? "+" : ""}{(kellyData().edge * 100).toFixed(1)}%
-                            {" "}{kellyData().edge >= 0 ? "YES" : "NO"}
-                        </span>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2 text-xs font-mono mb-1">
-                        <div class="flex items-center gap-1">
-                            <span class="text-bb-muted">1/4 Kelly:</span>
-                            <span class="text-bb-accent font-bold">{kellyData().quarter_kelly.toFixed(2)} RP</span>
-                        </div>
-                        <button
-                            type="button"
-                            class="px-2 py-0.5 text-xxs border border-bb-accent text-bb-accent hover:bg-bb-accent/20 transition-colors uppercase font-bold text-right"
-                            onClick={() => {
-                                const k = kellyData();
-                                if (k && !isNaN(k.quarter_kelly)) {
-                                    setStakeShares(Math.max(0, k.quarter_kelly).toFixed(2));
-                                }
-                            }}
-                        >
-                            Apply 1/4
-                        </button>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2 text-xs font-mono">
-                        <div class="flex items-center gap-1">
-                            <span class="text-bb-muted">Full Kelly:</span>
-                            <span class="text-bb-text">{kellyData().kelly_optimal.toFixed(2)} RP</span>
-                        </div>
-                        <button
-                            type="button"
-                            class="px-2 py-0.5 text-xxs border border-bb-border text-bb-muted hover:bg-bb-border/30 transition-colors uppercase font-bold text-right"
-                            onClick={() => {
-                                const k = kellyData();
-                                if (k && !isNaN(k.kelly_optimal)) {
-                                    setStakeShares(Math.max(0, k.kelly_optimal).toFixed(2));
-                                }
-                            }}
-                        >
-                            Apply Full
-                        </button>
-                    </div>
-                </div>
-            </Show>
 
             <div class="grid grid-cols-2 gap-3 items-end mb-3">
                 <label class="block">
@@ -306,10 +296,31 @@ const TradeTicket = (props) => {
                         min="0"
                         step="0.01"
                         value={stakeShares()}
-                        onInput={(e) => setStakeShares(e.currentTarget.value)}
+                        onInput={(e) => handleStakeInput(e.currentTarget.value)}
                         placeholder="e.g. 10"
                         class="w-full bg-black border border-bb-border px-2 py-2 text-bb-text"
                     />
+                    <div class="flex items-center gap-1 mt-1 text-xxs font-mono" role="group" aria-label="Stake size as a fraction of Kelly">
+                        <span class="text-bb-muted uppercase mr-1">Kelly</span>
+                        <For each={KELLY_FRACTIONS}>
+                            {(fraction) => (
+                                <button
+                                    type="button"
+                                    data-testid={`kelly-fraction-${fraction}`}
+                                    disabled={!side() || !(fullKelly() > 0)}
+                                    aria-pressed={!stakeTouched() && kellyFraction() === fraction}
+                                    onClick={() => chooseFraction(fraction)}
+                                    class={`px-1.5 py-0.5 border uppercase font-bold disabled:opacity-40 ${
+                                        !stakeTouched() && kellyFraction() === fraction
+                                            ? "border-bb-accent bg-bb-accent/20 text-bb-accent"
+                                            : "border-bb-border text-bb-muted hover:border-bb-accent/60"
+                                    }`}
+                                >
+                                    {KELLY_FRACTION_LABELS[fraction]}
+                                </button>
+                            )}
+                        </For>
+                    </div>
                 </label>
                 <div class="bg-black border border-bb-border px-2 py-2">
                     <div class="text-xxs text-bb-muted uppercase">Estimated Cost (RP)</div>

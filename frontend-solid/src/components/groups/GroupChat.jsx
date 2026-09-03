@@ -1,10 +1,12 @@
 import { createSignal, onMount, onCleanup, For, Show } from 'solid-js';
 import { getGroupMessages, sendGroupMessage } from '../../services/api';
 import { joinGroupChat, leaveGroupChat } from '../../services/socket';
+import { createDraftSignal, draftKey } from '../../lib/persistedState';
+import { getCurrentUserId } from '../../services/auth';
 
 export default function GroupChat(props) {
   const [messages, setMessages] = createSignal([]);
-  const [text, setText] = createSignal('');
+  const [text, setText, clearDraft] = createDraftSignal(() => draftKey(`group-chat:${props.group?.id}`, getCurrentUserId()), '');
   const [sending, setSending] = createSignal(false);
   let listRef;
   const scrollDown = () => { if (listRef) listRef.scrollTop = listRef.scrollHeight; };
@@ -22,7 +24,7 @@ export default function GroupChat(props) {
     const c = text().trim();
     if (!c || sending()) return;
     setSending(true);
-    try { await sendGroupMessage(props.group.id, c); setText(''); } catch { /* keep text */ } finally { setSending(false); }
+    try { await sendGroupMessage(props.group.id, c); clearDraft(); } catch { /* keep text */ } finally { setSending(false); }
   };
 
   return (

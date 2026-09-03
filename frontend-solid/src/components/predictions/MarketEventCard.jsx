@@ -1,4 +1,4 @@
-import { createEffect, createSignal, Show, untrack } from 'solid-js';
+import { createEffect, createSignal, For, Show, untrack } from 'solid-js';
 import { getCurrentUserId } from '../../services/auth';
 import { getToken } from '../../services/tokenService';
 import {
@@ -15,10 +15,21 @@ import {
   toDate,
   toShortDate,
   isPhoneVerificationMessage,
-  getProbabilityColor,
-  getKellyEdge
+  getProbabilityColor
 } from './marketCardShared';
 import { deriveTradeSide } from '../../lib/tradeBelief';
+import {
+  KELLY_FRACTIONS,
+  DEFAULT_KELLY_FRACTION,
+  fullKellyFromSuggestion,
+  stakeForFraction,
+  beliefTrackGradient,
+  normalizeKellyFraction
+} from '../../lib/kellyStake';
+import { createPersistedSignal } from '../../lib/persistedState';
+
+const KELLY_FRACTION_LABELS = { 0.25: '¼', 0.5: '½', 1: '1×' };
+const BELIEF_TRACK_COLORS = { no: 'var(--error-color, #d00)', mid: '#ffffff', yes: 'var(--success-color, #080)' };
 
 export default function MarketEventCard(props) {
   const event = () => props.event || {};
@@ -45,8 +56,13 @@ export default function MarketEventCard(props) {
     liquidity_b: safeNumber(event().liquidity_b, 5000),
   });
   const [, setPositionLoading] = createSignal(false);
-  const [kellyData, setKellyData] = createSignal(null);
-  const [, setKellyLoading] = createSignal(false);
+  // Full Kelly for the current belief (RP) and the balance it was sized
+  // against. The stake field auto-fills at the remembered fraction of it.
+  const [fullKelly, setFullKelly] = createSignal(0);
+  const [kellyBalance, setKellyBalance] = createSignal(0);
+  const [kellyFraction, setKellyFraction] = createPersistedSignal('kellyFraction', DEFAULT_KELLY_FRACTION);
+  // Once the user types a stake, the slider stops overwriting it.
+  const [stakeTouched, setStakeTouched] = createSignal(false);
   const [busyAction, setBusyAction] = createSignal('');
   const [error, setError] = createSignal('');
   const [isVerificationError, setIsVerificationError] = createSignal(false);
@@ -149,46 +165,29 @@ export default function MarketEventCard(props) {
     if (!isLoggedIn() || !eventId()) {
       return;
     }
-
-    setKellyLoading(true);
     try {
       const data = await api.events.getKelly(eventId(), belief);
-      const currentProb = safeNumber(marketState().market_prob, safeNumber(event().market_prob, 0.5));
-      const edge = getKellyEdge(belief, currentProb);
-      setKellyData({
-        kelly_optimal: safeNumber(data.kelly_suggestion),
-        quarter_kelly: safeNumber(data.quarter_kelly),
-        kelly_growth: safeNumber(data.expected_log_growth),
-        edge,
-        balance: safeNumber(data.balance, 1000),
-        current_prob: currentProb
-      });
+      setFullKelly(fullKellyFromSuggestion(data));
+      setKellyBalance(safeNumber(data?.balance, 0));
     } catch (err) {
-      if (err instanceof ApiError && err.status === 403) {
-        // Kelly is an optional helper loaded automatically on expand. A 403
-        // (unverified) must NOT bubble the global page-top verification banner
-        // — that shifts the whole page and moves the market the user clicked.
-        // Just hide the suggestion; verification surfaces on an actual trade.
-        setKellyData(null);
-        return;
+      // Kelly sizing is a helper, never a gate. A 403 (unverified) must NOT
+      // bubble the page-top verification banner — that shifts the whole page
+      // and moves the market the user clicked. Without a suggestion the stake
+      // simply stays empty; verification surfaces on an actual trade.
+      if (!(err instanceof ApiError && err.status === 403)) {
+        console.error('Kelly suggestion failed:', err);
       }
-
-      const fallbackBalance = 1000;
-      const currentProb = safeNumber(marketState().market_prob, safeNumber(event().market_prob, 0.5));
-      const edge = getKellyEdge(belief, currentProb);
-      const fallback = Math.max(0, Math.abs(edge) * fallbackBalance * 0.25);
-      setKellyData({
-        kelly_optimal: fallback,
-        quarter_kelly: fallback * 0.25,
-        edge,
-        balance: fallbackBalance,
-        kelly_growth: edge * 0.1,
-        current_prob: currentProb
-      });
-    } finally {
-      setKellyLoading(false);
+      setFullKelly(0);
     }
   };
+
+  // Auto-fill the stake at the chosen fraction of full Kelly whenever the
+  // sizing inputs change, unless the user has typed their own amount.
+  createEffect(() => {
+    const suggested = stakeForFraction(fullKelly(), kellyFraction(), kellyBalance());
+    if (untrack(stakeTouched)) return;
+    setStakeAmount(suggested);
+  });
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
@@ -245,6 +244,7 @@ export default function MarketEventCard(props) {
       await placeEventUpdate(eventId(), { stake: amount, target_prob: beliefProb() });
       await loadUserPosition();
       setStakeAmount('');
+      setStakeTouched(false);
       emitSuccess('Trade submitted. Market refreshed.');
       window.dispatchEvent(new CustomEvent('rp-balance-refresh'));
       await onTrade()?.(eventId());
@@ -395,12 +395,10 @@ export default function MarketEventCard(props) {
     }, 300);
   };
 
-  const applyKelly = () => {
-    const suggestion = kellyData();
-    if (!suggestion || !Number.isFinite(safeNumber(suggestion.kelly_optimal))) {
-      return;
-    }
-    setStakeAmount(Math.max(0, safeNumber(suggestion.kelly_optimal)).toFixed(2));
+  const chooseFraction = (fraction) => {
+    setKellyFraction(normalizeKellyFraction(fraction));
+    setStakeTouched(false);
+    setStakeAmount(stakeForFraction(fullKelly(), kellyFraction(), kellyBalance()));
     const input = stakeInputRef();
     if (input) {
       input.classList.remove('kelly-flash');
@@ -409,6 +407,12 @@ export default function MarketEventCard(props) {
       input.classList.add('kelly-flash');
       setTimeout(() => input?.classList.remove('kelly-flash'), 500);
     }
+  };
+
+  const handleStakeInput = (eventInput) => {
+    const raw = eventInput.target.value;
+    setStakeAmount(raw);
+    setStakeTouched(String(raw).trim() !== '');
   };
 
   const updatePositionFromEvent = () => {
@@ -423,6 +427,8 @@ export default function MarketEventCard(props) {
     // Start the belief at the market price: the neutral no-trade state. Any
     // movement is then an explicit disagreement with the market.
     setBeliefProb(safeNumber(nextEvent.market_prob, 0.5));
+    setStakeTouched(false);
+    setStakeAmount('');
 
     const current = position();
     if (!current) {
@@ -524,14 +530,15 @@ export default function MarketEventCard(props) {
                       max="0.99"
                       step="0.01"
                       class="belief-slider"
+                      style={{ background: beliefTrackGradient(marketState().market_prob, BELIEF_TRACK_COLORS) }}
+                      aria-label="Your belief probability"
                       value={beliefProb()}
                       onInput={handleBeliefChange}
                     />
                     <div class="belief-display">
                       <span class="belief-percentage">{formatProbability(beliefProb())}</span>
                       <small class="belief-hint">
-                        {`Market: ${formatProbability(marketState().market_prob)} | ` +
-                          `Your edge: ${(getKellyEdge(beliefProb(), marketState().market_prob) * 100).toFixed(1)}%`}
+                        {`Market: ${formatProbability(marketState().market_prob)}`}
                       </small>
                     </div>
                   </div>
@@ -567,43 +574,28 @@ export default function MarketEventCard(props) {
                       step="0.01"
                       placeholder="Enter stake amount"
                       value={stakeAmount()}
-                      onInput={(e) => setStakeAmount(e.target.value)}
+                      onInput={handleStakeInput}
                     />
+                    <div class="kelly-fraction-toggles" role="group" aria-label="Stake size as a fraction of Kelly">
+                      <span class="kelly-fraction-caption">Kelly</span>
+                      <For each={KELLY_FRACTIONS}>
+                        {(fraction) => (
+                          <button
+                            type="button"
+                            class={`kelly-fraction-btn ${!stakeTouched() && kellyFraction() === fraction ? 'active' : ''}`}
+                            disabled={!tradeSide() || !(fullKelly() > 0)}
+                            aria-pressed={!stakeTouched() && kellyFraction() === fraction}
+                            onClick={() => chooseFraction(fraction)}
+                          >
+                            {KELLY_FRACTION_LABELS[fraction]}
+                          </button>
+                        )}
+                      </For>
+                    </div>
                   </div>
                 </div>
 
                 <div class="kelly-and-stake">
-                  <div class="kelly-suggestion">
-                    <div class="kelly-header">
-                      <span>Kelly Optimal Suggestion</span>
-                      <div class="kelly-buttons">
-                        <button
-                          type="button"
-                          class="button kelly-apply-btn primary"
-                          onClick={applyKelly}
-                        >
-                          Apply Kelly
-                        </button>
-                      </div>
-                    </div>
-                    <div class="kelly-details">
-                      <div class="kelly-stat">
-                        <span class="kelly-label">Optimal Kelly:</span>
-                        <span class="kelly-amount">
-                          {kellyData() ? formatCurrency(kellyData().kelly_optimal) : '--'}
-                        </span>
-                      </div>
-                      <div class="kelly-stat">
-                        <span class="kelly-label">Your Edge:</span>
-                        <span class={`kelly-edge ${getKellyEdge(beliefProb(), marketState().market_prob) >= 0 ? 'positive' : 'negative'}`}>
-                          {kellyData()
-                            ? `${Math.abs(getKellyEdge(beliefProb(), marketState().market_prob) * 100).toFixed(1)}% ${tradeSide() ? tradeSide().toUpperCase() : ''}`
-                            : '--'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
                   <div class="form-actions">
                     <button
                       type="submit"

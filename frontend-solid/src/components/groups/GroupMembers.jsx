@@ -1,5 +1,6 @@
 import { createSignal, onMount, For, Show } from 'solid-js';
 import { getGroupMembers, removeGroupMember } from '../../services/api';
+import { userHash } from '../../lib/profileLinks';
 
 export default function GroupMembers(props) {
   const [members, setMembers] = createSignal([]);
@@ -12,7 +13,7 @@ export default function GroupMembers(props) {
       <For each={members()}>
         {(m) => (
           <div class="group-member-row">
-            <a class="group-member-name" href={`#user/${m.user_id}`}>@{m.username}</a>
+            <a class="group-member-name" href={userHash(m.user_id) || undefined}>@{m.username}</a>
             <Show when={m.role === 'owner'}><span class="group-chip">Owner</span></Show>
             <Show when={props.isOwner && m.role !== 'owner'}>
               <button type="button" class="group-market-unpin" onClick={() => kick(m.user_id)} disabled={busy()}>Remove</button>

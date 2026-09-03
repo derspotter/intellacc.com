@@ -3,6 +3,7 @@ import { getCurrentUserId, isAuthenticated } from '../../services/auth';
 import { getLeaderboardUserRank } from '../../services/api';
 import { fetchLeaderboardRows, LEADERBOARD_TABS } from '../../services/leaderboard';
 import { formatReputation } from '../../lib/leaderboard';
+import { userHash, goToUser } from '../../lib/profileLinks';
 
 export default function LeaderboardCard() {
   const [activeTab, setActiveTab] = createSignal('global');
@@ -78,10 +79,10 @@ export default function LeaderboardCard() {
               <div class="leaderboard-user">
                 <a
                   class="leaderboard-username"
-                  href={`#user/${entry.user_id}`}
+                  href={userHash(entry.user_id) || undefined}
                   onClick={(event) => {
                     event.preventDefault();
-                    window.location.hash = `user/${entry.user_id}`;
+                    goToUser(entry.user_id);
                   }}
                 >
                   {entry.username || `User ${entry.user_id}`}

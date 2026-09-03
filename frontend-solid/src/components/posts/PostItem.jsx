@@ -22,6 +22,7 @@ import PostMarkets from './PostMarkets';
 import PostCritiques from './PostCritiques';
 import MarketPicker from './MarketPicker';
 import { RenderTextWithLinks } from '../../utils/text';
+import { userHash, goToUser } from '../../lib/profileLinks';
 
 const normalizePosts = (payload) => {
   if (!payload) return [];
@@ -597,9 +598,9 @@ export default function PostItem(props) {
         <div class="post-header-main">
           <div class="post-author">
             {post().user_id ? (
-              <a href={`#user/${post().user_id}`} class="username-link" onClick={(event) => {
+              <a href={userHash(post().user_id) || undefined} class="username-link" onClick={(event) => {
                 event.preventDefault();
-                window.location.hash = `user/${post().user_id}`;
+                goToUser(post().user_id);
               }}>
                 {author()}
               </a>
@@ -668,7 +669,7 @@ export default function PostItem(props) {
               <div class="post-header" style="margin-bottom: 0.5rem;">
                 <div class="post-author">
                   <span style="margin-right: 0.5rem;">Reposted from </span>
-                  <a href={`#user/${post().reposted_post.user_id}`} class="username-link">
+                  <a href={userHash(post().reposted_post.user_id) || undefined} class="username-link">
                     {post().reposted_post.username}
                   </a>
                 </div>
