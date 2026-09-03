@@ -415,8 +415,9 @@ export const api = {
     getUiPreferences: () =>
       request('/users/me/preferences'),
 
-    updateUiPreferences: (skin) =>
-      request('/users/me/preferences', { method: 'PUT', body: { skin } })
+    // Accepts a skin string (legacy) or a partial { skin, kelly_fraction } object.
+    updateUiPreferences: (prefs) =>
+      request('/users/me/preferences', { method: 'PUT', body: typeof prefs === 'string' ? { skin: prefs } : prefs })
   },
 
   // Topic onboarding endpoints

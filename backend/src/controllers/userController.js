@@ -638,11 +638,18 @@ exports.approveRegistration = async (req, res) => {
   return res.json({ success: true, message, userId: result.userId });
 };
 
+const ALLOWED_KELLY_FRACTIONS = new Set([0.25, 0.5, 1]);
+
+const uiPreferencesPayload = (row) => ({
+  skin: row.ui_skin_preference || null,
+  kelly_fraction: row.kelly_fraction_preference == null ? null : Number(row.kelly_fraction_preference)
+});
+
 exports.getUserUiPreferences = async (req, res) => {
   try {
     const userId = req.user.id;
     const result = await db.query(
-      'SELECT ui_skin_preference FROM users WHERE id = $1 AND deleted_at IS NULL',
+      'SELECT ui_skin_preference, kelly_fraction_preference FROM users WHERE id = $1 AND deleted_at IS NULL',
       [userId]
     );
 
@@ -650,43 +657,50 @@ exports.getUserUiPreferences = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    return res.json({
-      skin: result.rows[0].ui_skin_preference || null
-    });
+    return res.json(uiPreferencesPayload(result.rows[0]));
   } catch (err) {
     console.error('Error fetching UI preferences:', err);
     return res.status(500).json({ message: 'Error fetching UI preferences' });
   }
 };
 
+// Partial update: only the fields present in the body change.
 exports.updateUserUiPreferences = async (req, res) => {
-  const { skin } = req.body || {};
+  const body = req.body || {};
+  const hasSkin = Object.prototype.hasOwnProperty.call(body, 'skin');
+  const hasKelly = Object.prototype.hasOwnProperty.call(body, 'kelly_fraction');
 
-  if (!ALLOWED_UI_SKINS.has(skin)) {
+  if (!hasSkin && !hasKelly) {
+    return res.status(400).json({ message: 'Provide skin and/or kelly_fraction' });
+  }
+  if (hasSkin && !ALLOWED_UI_SKINS.has(body.skin)) {
     return res.status(400).json({
       message: 'Skin must be one of: van, terminal'
     });
+  }
+  const kellyFraction = hasKelly ? Number(body.kelly_fraction) : null;
+  if (hasKelly && !ALLOWED_KELLY_FRACTIONS.has(kellyFraction)) {
+    return res.status(400).json({ message: 'kelly_fraction must be one of: 0.25, 0.5, 1' });
   }
 
   try {
     const userId = req.user.id;
     const result = await db.query(
       `UPDATE users
-       SET ui_skin_preference = $1,
+       SET ui_skin_preference = CASE WHEN $1::boolean THEN $2 ELSE ui_skin_preference END,
+           kelly_fraction_preference = CASE WHEN $3::boolean THEN $4::double precision ELSE kelly_fraction_preference END,
            updated_at = NOW()
-       WHERE id = $2
+       WHERE id = $5
          AND deleted_at IS NULL
-       RETURNING ui_skin_preference`,
-      [skin, userId]
+       RETURNING ui_skin_preference, kelly_fraction_preference`,
+      [hasSkin, hasSkin ? body.skin : null, hasKelly, kellyFraction, userId]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    return res.json({
-      skin: result.rows[0].ui_skin_preference
-    });
+    return res.json(uiPreferencesPayload(result.rows[0]));
   } catch (err) {
     console.error('Error updating UI preferences:', err);
     return res.status(500).json({ message: 'Error updating UI preferences' });

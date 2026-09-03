@@ -5,13 +5,11 @@ import { getToken } from "../../services/tokenService";
 import { deriveTradeSide } from "../../lib/tradeBelief";
 import {
     KELLY_FRACTIONS,
-    DEFAULT_KELLY_FRACTION,
     fullKellyFromSuggestion,
     stakeForFraction,
     beliefTrackGradient,
-    normalizeKellyFraction,
 } from "../../lib/kellyStake";
-import { createPersistedSignal } from "../../lib/persistedState";
+import { kellyFraction, setKellyFractionPreference } from "../../services/kellyPreference";
 
 const KELLY_FRACTION_LABELS = { 0.25: "1/4", 0.5: "1/2", 1: "1x" };
 // Terminal palette: market-down / white / market-up (see tailwind theme).
@@ -68,7 +66,6 @@ const TradeTicket = (props) => {
     // against; the shares field auto-fills at the remembered fraction of it.
     const [fullKelly, setFullKelly] = createSignal(0);
     const [kellyBalance, setKellyBalance] = createSignal(0);
-    const [kellyFraction, setKellyFraction] = createPersistedSignal("kellyFraction", DEFAULT_KELLY_FRACTION);
     const [stakeTouched, setStakeTouched] = createSignal(false);
     const phoneGate = createPhoneGate();
     let kellyTimeout;
@@ -157,7 +154,7 @@ const TradeTicket = (props) => {
         setStakeShares(next);
     });
     const chooseFraction = (fraction) => {
-        setKellyFraction(normalizeKellyFraction(fraction));
+        void setKellyFractionPreference(fraction);
         setStakeTouched(false);
         setStakeShares(suggestedShares());
     };

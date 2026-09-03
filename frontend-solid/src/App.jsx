@@ -5,6 +5,7 @@ import { lazy, onMount, Show } from 'solid-js';
 const TerminalApp = lazy(() => import('./components/TerminalApp'));
 const VanApp = lazy(() => import('./VanApp'));
 import { getActiveSkin, syncSkinWithServer } from './services/skinProvider';
+import { syncKellyFractionWithServer } from './services/kellyPreference';
 import { isAuthenticated } from './services/auth';
 
 export default function App() {
@@ -13,6 +14,7 @@ export default function App() {
   onMount(() => {
     if (isAuthenticated()) {
       syncSkinWithServer().catch(() => null);
+      syncKellyFractionWithServer().catch(() => null);
     }
   });
 

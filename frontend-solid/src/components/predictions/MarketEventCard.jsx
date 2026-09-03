@@ -20,13 +20,11 @@ import {
 import { deriveTradeSide } from '../../lib/tradeBelief';
 import {
   KELLY_FRACTIONS,
-  DEFAULT_KELLY_FRACTION,
   fullKellyFromSuggestion,
   stakeForFraction,
-  beliefTrackGradient,
-  normalizeKellyFraction
+  beliefTrackGradient
 } from '../../lib/kellyStake';
-import { createPersistedSignal } from '../../lib/persistedState';
+import { kellyFraction, setKellyFractionPreference } from '../../services/kellyPreference';
 
 const KELLY_FRACTION_LABELS = { 0.25: '¼', 0.5: '½', 1: '1×' };
 const BELIEF_TRACK_COLORS = { no: 'var(--error-color, #d00)', mid: '#ffffff', yes: 'var(--success-color, #080)' };
@@ -60,7 +58,6 @@ export default function MarketEventCard(props) {
   // against. The stake field auto-fills at the remembered fraction of it.
   const [fullKelly, setFullKelly] = createSignal(0);
   const [kellyBalance, setKellyBalance] = createSignal(0);
-  const [kellyFraction, setKellyFraction] = createPersistedSignal('kellyFraction', DEFAULT_KELLY_FRACTION);
   // Once the user types a stake, the slider stops overwriting it.
   const [stakeTouched, setStakeTouched] = createSignal(false);
   const [busyAction, setBusyAction] = createSignal('');
@@ -396,7 +393,7 @@ export default function MarketEventCard(props) {
   };
 
   const chooseFraction = (fraction) => {
-    setKellyFraction(normalizeKellyFraction(fraction));
+    void setKellyFractionPreference(fraction);
     setStakeTouched(false);
     setStakeAmount(stakeForFraction(fullKelly(), kellyFraction(), kellyBalance()));
     const input = stakeInputRef();
