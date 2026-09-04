@@ -25,7 +25,6 @@ export default function HomePage() {
   const [hasMore, setHasMore] = createSignal(true);
   const [nextCursor, setNextCursor] = createSignal(null);
   const [usingFeed, setUsingFeed] = createSignal(isAuthenticated());
-  const [discoverMode, setDiscoverMode] = createSignal(false);
   const [feedWeights, setFeedWeights] = createSignal(null);
 
   // Reorder the loaded feed by the user's saved weight mix. rankPosts returns
@@ -50,38 +49,7 @@ export default function HomePage() {
       const normalized = getPostsPaging(response);
       const nextPosts = getPostsPayloadItems(normalized.items);
 
-      // Empty following-feed on a reset load: fall back to the discover feed
-      // (top predictors in the caller's topics) so the home page is never blank.
-      // The feed endpoint inlines the fallback payload to save a round trip;
-      // the separate request remains for older backend responses without it.
-      if (reset && usingFeed() && nextPosts.length === 0) {
-        const inlineItems = getPostsPayloadItems(response?.discover?.items);
-        if (inlineItems.length > 0) {
-          setDiscoverMode(true);
-          setPosts(inlineItems);
-          setHasMore(false);
-          setNextCursor(null);
-          return;
-        }
-        if (!response?.discover) {
-          try {
-            const discover = await api.discover.feed();
-            const discoverItems = getPostsPayloadItems(discover?.items);
-            if (discoverItems.length > 0) {
-              setDiscoverMode(true);
-              setPosts(discoverItems);
-              setHasMore(false);
-              setNextCursor(null);
-              return;
-            }
-          } catch (discoverErr) {
-            console.error('Discover feed fallback failed:', discoverErr);
-          }
-        }
-      }
-
       if (reset) {
-        setDiscoverMode(false);
         setPosts(nextPosts);
       } else {
         setPosts((current) => appendUniqueById(current, nextPosts));
@@ -200,9 +168,6 @@ export default function HomePage() {
         <p>Loading posts…</p>
       </Show>
       <Show when={!loading()}>
-        <Show when={discoverMode()}>
-          <p class="discover-notice">Showing top predictors in your topics — follow people to make this feed yours.</p>
-        </Show>
         <PostsList
           posts={rankedPosts}
           onPostUpdate={updatePost}
@@ -210,7 +175,6 @@ export default function HomePage() {
           loading={loading}
           loadingMore={loadingMore}
           hasMore={hasMore}
-          discoverMode={discoverMode}
           onFollowed={handleFollowed}
         />
         <div class="form-actions">

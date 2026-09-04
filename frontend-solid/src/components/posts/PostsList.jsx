@@ -10,7 +10,6 @@ export default function PostsList(props) {
             post={post}
             onPostUpdate={props.onPostUpdate}
             onPostDelete={props.onPostDelete}
-            discoverMode={props.discoverMode?.()}
             onFollowed={props.onFollowed}
           />
         )}

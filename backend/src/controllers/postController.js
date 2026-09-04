@@ -62,6 +62,46 @@ const getViewerIdFromAuthHeader = async (req) => {
 const isAdminViewer = (req) => req.user?.role === 'admin';
 const MAX_REPOST_CHAIN_DEPTH = 8;
 
+// --- Blended home feed -------------------------------------------------------
+// The feed is not follow-only. Three scoped sources are blended, in priority
+// order, and a global fall-through keeps thin feeds from rendering blank:
+//   following    — people you follow (and yourself)
+//   topic_market — posts tied to a market carrying one of your topics
+//   topic_user   — posts by users who share at least one topic with you
+//   global       — everyone, included only while the scoped sources are thin
+// Below this many scoped posts the fall-through turns on. The decision is made
+// once per feed and carried in the cursor so paging stays consistent.
+const FEED_GLOBAL_FALLTHROUGH_MIN = 10;
+
+const FEED_MY_TOPICS = '(SELECT ut_me.topic_id FROM user_topics ut_me WHERE ut_me.user_id = $1)';
+
+const FEED_SOURCE_CONDITIONS = {
+  following: '(p.user_id = $1 OR p.user_id IN (SELECT following_id FROM follows WHERE follower_id = $1))',
+  topic_market: `EXISTS (
+         SELECT 1 FROM post_market_links pml
+         JOIN event_topics et ON et.event_id = pml.event_id
+         WHERE pml.post_id = p.id AND et.topic_id IN ${FEED_MY_TOPICS}
+       )`,
+  topic_user: `EXISTS (
+         SELECT 1 FROM user_topics ut_author
+         WHERE ut_author.user_id = p.user_id AND ut_author.topic_id IN ${FEED_MY_TOPICS}
+       )`
+};
+
+// Priority order matters: a post reachable through several sources is labelled
+// with the strongest one, which is what the client shows as "why you see this".
+const buildFeedSourceExpression = () => `CASE
+                WHEN ${FEED_SOURCE_CONDITIONS.following} THEN 'following'
+                WHEN ${FEED_SOURCE_CONDITIONS.topic_market} THEN 'topic_market'
+                WHEN ${FEED_SOURCE_CONDITIONS.topic_user} THEN 'topic_user'
+                ELSE 'global'
+              END AS feed_source`;
+
+const buildFeedScopeClause = () =>
+  `(${FEED_SOURCE_CONDITIONS.following}
+        OR ${FEED_SOURCE_CONDITIONS.topic_market}
+        OR ${FEED_SOURCE_CONDITIONS.topic_user})`;
+
 const buildPostVisibilityClauseForAlias = (postAlias = 'p', viewerIdParamName = '$3') => {
   return `
        ${postAlias}.is_hidden = FALSE
@@ -191,7 +231,8 @@ const parsePostCursor = (cursorRaw, scope) => {
     if (!Number.isFinite(createdAt.getTime()) || !Number.isInteger(id)) {
       throw new Error('Invalid cursor');
     }
-    return { createdAt, id };
+    // `g` carries the feed's global-fall-through decision across pages.
+    return { createdAt, id, includeGlobal: decoded.g === true };
   } catch {
     return null;
   }
@@ -968,12 +1009,33 @@ exports.getFeed = async (req, res) => {
     // $1 = the authenticated user (feed scoping, likes, reposts); $3 = nullable
     // viewer id for the block-visibility clause only (NULL = admin bypass).
     const params = [userId, limit + 1, viewerId];
-    const whereClauses = [
-      '(p.user_id IN (SELECT following_id FROM follows WHERE follower_id = $1) OR p.user_id = $1)',
+    const baseClauses = [
       'p.parent_id IS NULL',
       'p.is_comment = FALSE',
       buildPostVisibilityClause('$3')
     ];
+
+    // Decide once per feed whether the global fall-through is on: with few
+    // scoped posts a follow/topic-only feed would render near-blank. Later
+    // pages inherit the decision from the cursor so paging cannot flip mid-scroll.
+    let includeGlobal;
+    if (cursor) {
+      includeGlobal = cursor.includeGlobal;
+    } else {
+      const scopedCount = await db.query(
+        `SELECT COUNT(*)::int AS count FROM (
+           SELECT 1
+           FROM posts p
+           JOIN users u ON p.user_id = u.id
+           WHERE ${[buildFeedScopeClause(), ...baseClauses].join('\n             AND ')}
+           LIMIT $2
+         ) scoped`,
+        [userId, FEED_GLOBAL_FALLTHROUGH_MIN, viewerId]
+      );
+      includeGlobal = Number(scopedCount.rows[0]?.count || 0) < FEED_GLOBAL_FALLTHROUGH_MIN;
+    }
+
+    const whereClauses = includeGlobal ? [...baseClauses] : [buildFeedScopeClause(), ...baseClauses];
 
     if (searchQuery) {
       const term = `%${searchQuery}%`;
@@ -990,6 +1052,7 @@ exports.getFeed = async (req, res) => {
     const result = await db.query(
       `SELECT p.*, u.username, u.avatar_url,
               lm.url as link_meta_url, lm.title as link_meta_title, lm.description as link_meta_description, lm.image_url as link_meta_image_url, lm.site_name as link_meta_site_name, lm.content as link_meta_content,
+              ${buildFeedSourceExpression()},
               CASE WHEN EXISTS (SELECT 1 FROM likes
                                 WHERE post_id = p.id AND user_id = $1)
                    THEN true
@@ -1051,7 +1114,11 @@ exports.getFeed = async (req, res) => {
     const items = hasMore ? rows.slice(0, limit) : rows;
     const last = items[items.length - 1];
     const nextCursor = hasMore && last
-      ? Buffer.from(JSON.stringify({ createdAt: new Date(last.created_at).toISOString(), id: last.id })).toString('base64url')
+      ? Buffer.from(JSON.stringify({
+        createdAt: new Date(last.created_at).toISOString(),
+        id: last.id,
+        g: includeGlobal
+      })).toString('base64url')
       : null;
 
     await hydrateRepostedPosts(items, viewerId);
@@ -1065,23 +1132,9 @@ exports.getFeed = async (req, res) => {
       });
     }
 
-    const payload = { items, hasMore, nextCursor };
-
-    // Empty first page of the unfiltered following-feed: inline the discover
-    // fallback (top predictors in the caller's topics) so clients don't need a
-    // second round trip to render a non-blank home page.
-    if (items.length === 0 && !cursor && !searchQuery) {
-      try {
-        // Lazy require: discoverController requires this module at load time,
-        // so a top-level require here would create a circular import.
-        const { discoverFeedFor } = require('./discoverController');
-        payload.discover = await discoverFeedFor(userId);
-      } catch (discoverErr) {
-        console.error('Inline discover fallback failed:', discoverErr);
-      }
-    }
-
-    res.status(200).json(payload);
+    // The blended sources plus the global fall-through replace the old
+    // discover-mode payload: there is no separate feed to switch into.
+    res.status(200).json({ items, hasMore, nextCursor });
   } catch (err) {
     console.error("Error getting feed:", err);
     res.status(500).json({ message: "Internal server error" });

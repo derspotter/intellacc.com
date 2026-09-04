@@ -130,19 +130,12 @@ export const FeedPanel = () => {
     return (
         <Panel title="[1] FEED // LIVE" class="h-full flex flex-col">
             <PostComposer />
-            <Show when={feedStore.state.discoverMode}>
-                <div data-testid="feed-discover-banner" class="px-2 py-1 text-xxs text-bb-tmux border-b border-bb-border/40 bg-bb-panel/60 uppercase">
-                    [DISCOVER MODE] TOP PREDICTORS IN YOUR TOPICS — FOLLOW TO BUILD YOUR FEED
-                </div>
-            </Show>
             <div class="flex-1 overflow-y-auto">
                 <Show when={!feedStore.state.loading} fallback={<div class="p-2 text-bb-muted font-mono animate-pulse">Running query...</div>}>
                     <Show
                         when={rankedPosts().length > 0}
                         fallback={
-                            <Show when={!feedStore.state.discoverMode}>
-                                <div data-testid="feed-empty" class="p-4 text-bb-muted font-mono text-xs">FEED EMPTY // FOLLOW USERS OR CHECK BACK LATER</div>
-                            </Show>
+                            <div data-testid="feed-empty" class="p-4 text-bb-muted font-mono text-xs">FEED EMPTY // FOLLOW USERS OR CHECK BACK LATER</div>
                         }
                     >
                         <div class="flex flex-col">

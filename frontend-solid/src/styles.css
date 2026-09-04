@@ -355,12 +355,18 @@ input[type="submit"]:disabled {
   text-align: center;
 }
 
-.discover-notice {
-  margin: 0.75rem 0;
-  padding: 0.6rem 0.85rem;
-  border: 1px dashed var(--border-color);
+
+/* "Why you see this" chip on blended-feed rows the viewer did not follow. */
+.post-source-label {
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
   color: var(--secondary-text);
-  text-align: center;
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  white-space: nowrap;
 }
 
 .follow-btn {

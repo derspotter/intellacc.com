@@ -1,6 +1,7 @@
 import { For, Show, createSignal, createEffect, onCleanup } from "solid-js";
 import { feedStore } from "../../store/feedStore";
 import { api, getPostComments, createComment, requestBlob, followUser } from "../../services/api";
+import { feedSourceLabel } from '../../lib/feedSource';
 
 const CommentItem = (props) => (
     <div data-testid="comment-row" class="pl-3 border-l border-bb-border/40 py-1">
@@ -125,7 +126,14 @@ const PostItem = (props) => {
     return (
         <div data-testid="feed-post" class="p-2 border-b border-bb-border/30 hover:bg-white/5 text-sm transition-colors">
             <div class="flex justify-between items-baseline mb-1">
-                <span class="font-bold text-bb-accent text-xs">@{props.post.username}</span>
+                <span class="font-bold text-bb-accent text-xs">
+                    @{props.post.username}
+                    <Show when={feedSourceLabel(props.post.feed_source)}>
+                        <span class="ml-2 font-normal uppercase text-xxs text-bb-muted border border-bb-border/60 px-1">
+                            {feedSourceLabel(props.post.feed_source)}
+                        </span>
+                    </Show>
+                </span>
                 <span class="text-xxs text-bb-muted font-mono">{new Date(props.post.created_at).toLocaleTimeString()}</span>
             </div>
             <p class="text-bb-text mb-2 break-words whitespace-pre-wrap">{props.post.content}</p>
@@ -196,7 +204,7 @@ const PostItem = (props) => {
                     >
                         [{isLiked() ? 'LIKED' : 'LIKE'}:{likeCount()}]
                     </button>
-                    <Show when={!props.disableFeedStore && feedStore.state.discoverMode}>
+                    <Show when={!props.disableFeedStore && feedSourceLabel(props.post.feed_source)}>
                         <button
                             type="button"
                             data-testid="discover-follow"

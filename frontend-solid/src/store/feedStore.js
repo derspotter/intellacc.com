@@ -13,7 +13,6 @@ const [state, setState] = createStore({
     loadingMore: false,
     error: null,
     usingFeed: true,
-    discoverMode: false
 });
 
 const guard = createEpochGuard();
@@ -25,7 +24,7 @@ const appendUnique = (current, next) => {
 
 const fetchPage = async ({ reset }) => {
     if (!getToken()) {
-        setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: false, discoverMode: false });
+        setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: false });
         return;
     }
     const token = guard.begin();
@@ -53,37 +52,11 @@ const fetchPage = async ({ reset }) => {
         if (!guard.isCurrent(token)) return; // superseded by a newer request
         const paging = getPostsPaging(response);
 
-        // Empty following-feed on reset: discover fallback (top predictors).
-        // The feed endpoint inlines the fallback payload to save a round trip;
-        // the separate request remains for older backend responses without it.
-        if (reset && usingFeed && paging.items.length === 0) {
-            let items = Array.isArray(response?.discover?.items) ? response.discover.items : [];
-            if (items.length === 0 && !response?.discover) {
-                try {
-                    const discover = await api.discover.feed();
-                    if (!guard.isCurrent(token)) return;
-                    items = Array.isArray(discover?.items) ? discover.items : [];
-                } catch (err) {
-                    console.error('Discover fallback failed', err);
-                }
-                if (!guard.isCurrent(token)) return; // superseded while discover was in flight
-            }
-            if (items.length > 0) {
-                setState({
-                    posts: items, usingFeed, discoverMode: true,
-                    hasMore: false, nextCursor: null,
-                    loading: false, loadingMore: false
-                });
-                return;
-            }
-        }
-
         setState({
             posts: reset ? paging.items : appendUnique(state.posts, paging.items),
             hasMore: paging.hasMore,
             nextCursor: paging.nextCursor,
             usingFeed,
-            discoverMode: reset ? false : state.discoverMode,
             loading: false,
             loadingMore: false
         });
@@ -184,7 +157,7 @@ const unrepostPost = (postId) => {
 
 const clear = () => {
     guard.invalidate(); // invalidate any in-flight fetch so it can't repopulate cleared state
-    setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: true, discoverMode: false });
+    setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: true });
 };
 
 export const feedStore = {

@@ -23,6 +23,7 @@ import PostCritiques from './PostCritiques';
 import MarketPicker from './MarketPicker';
 import { RenderTextWithLinks } from '../../utils/text';
 import { userHash, goToUser } from '../../lib/profileLinks';
+import { feedSourceLabel } from '../../lib/feedSource';
 
 const normalizePosts = (payload) => {
   if (!payload) return [];
@@ -150,6 +151,9 @@ export default function PostItem(props) {
     return repostCount() > 0 ? `${label} (${repostCount()})` : label;
   };
   const postDate = () => (post().created_at ? new Date(post().created_at).toLocaleDateString() : '');
+  // Rows that did not come from a follow explain themselves.
+  const sourceLabel = () => feedSourceLabel(post().feed_source);
+
   const isLongContent = () => {
     const content = String(post().content || '');
     return content.length > 240 || content.split('\n').length > 6;
@@ -607,7 +611,8 @@ export default function PostItem(props) {
             ) : (
               <span class="username-link">{author()}</span>
             )}
-            <Show when={props.discoverMode}>
+            <Show when={sourceLabel()}>
+              <span class="post-source-label" title="Why you see this">{sourceLabel()}</span>
               <button type="button" class="follow-btn" onClick={handleFollow} disabled={followBusy()}>
                 {followBusy() ? '…' : 'Follow'}
               </button>
