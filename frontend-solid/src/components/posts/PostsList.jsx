@@ -18,9 +18,6 @@ export default function PostsList(props) {
       <Show when={props.loadingMore()}>
         <p class="loading-inline">Loading more posts…</p>
       </Show>
-      <Show when={props.hasMore() === false && props.posts().length > 0}>
-        <p class="end-of-feed">End of feed</p>
-      </Show>
       <Show when={props.posts().length === 0 && !props.loading()}>
         <p class="empty-feed">No posts yet.</p>
       </Show>
