@@ -275,9 +275,6 @@ export default function SearchPage(props) {
         
         <Show when={activeTab() === 'posts'}>
           <div class="search-post-results">
-            <Show when={!query() && showHints}>
-              <p class="search-hint">Type a term to search posts.</p>
-            </Show>
             <Show when={loadingPosts() && posts().length === 0}>
               <div class="loading">Searching posts...</div>
             </Show>
