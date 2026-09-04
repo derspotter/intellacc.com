@@ -2,7 +2,9 @@ const request = require('supertest');
 const { app } = require('../src/index');
 const db = require('../src/db');
 
-jest.setTimeout(30000);
+// Registers users (bcrypt) and round-trips several HTTP calls: ~11s alone, but
+// well past 30s when the whole suite is contending for the shared database.
+jest.setTimeout(60000);
 
 const makeUser = async (label) => {
   const unique = `${label}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;

@@ -80,11 +80,21 @@ const getProposal = async (proposalId) => {
   return r.rows[0];
 };
 
-const propose = (token, eventId, body = {}) =>
-  request(app)
+// Scene ownership, so the jury pool can be re-isolated at draw time: someone
+// (a real user, a parallel session) can become active between building the
+// scene and proposing, and the draw happens at propose time.
+const sceneUsersByEvent = new Map();
+
+const propose = async (token, eventId, body = {}) => {
+  const sceneUsers = sceneUsersByEvent.get(eventId);
+  if (sceneUsers) {
+    await isolateJuryPool(eventId, sceneUsers);
+  }
+  return request(app)
     .post(`/api/events/${eventId}/resolution-proposals`)
     .set('Authorization', `Bearer ${token}`)
     .send({ outcome: 'yes', source_url: 'https://example.com/proof', ...body });
+};
 
 const vote = (token, proposalId, voteValue) =>
   request(app)
@@ -92,9 +102,33 @@ const vote = (token, proposalId, voteValue) =>
     .set('Authorization', `Bearer ${token}`)
     .send({ vote: voteValue });
 
+// The jury draw is "recently active, not the proposer, not involved in THIS
+// market", then `ORDER BY random() LIMIT 9`. The database is shared, so on a
+// developer machine or any prod-like copy real accounts are recently active
+// too and the draw seats them instead of this scene's bystanders — and the
+// flow tests cannot log in as a real account, so everything downstream fails.
+//
+// Isolate the pool per market instead of touching global user state: a
+// zero-share position on this scene's throwaway event makes a user "involved",
+// which the draw already excludes. The rows cascade away with the event, and
+// no real user's activity, balance or profile is modified.
+const EXCLUSION_ACTIVITY_DAYS = 30; // wider than JURY_ACTIVITY_DAYS (7) on purpose
+
+const isolateJuryPool = async (eventId, sceneUserIds) => {
+  await db.query(
+    `INSERT INTO user_shares (user_id, event_id, yes_shares, no_shares)
+     SELECT u.id, $1, 0, 0
+     FROM users u
+     WHERE u.deleted_at IS NULL
+       AND u.last_active_at > NOW() - ($3 || ' days')::interval
+       AND NOT (u.id = ANY($2::int[]))
+     ON CONFLICT (user_id, event_id) DO NOTHING`,
+    [eventId, sceneUserIds, String(EXCLUSION_ACTIVITY_DAYS)]
+  );
+};
+
 // Standard scene: closed market, a proposer, and enough active bystanders to
-// form a jury. Stales out users from earlier tests first so this scene's
-// users are the only eligible jurors (the DB is shared across tests).
+// form a jury. The scene's bystanders are the ONLY users the draw can seat.
 const buildScene = async ({ bystanders = 4 } = {}) => {
   if (cleanup.users.size) {
     await db.query(
@@ -108,6 +142,8 @@ const buildScene = async ({ bystanders = 4 } = {}) => {
   for (let i = 0; i < bystanders; i++) {
     others.push(await createUser());
   }
+  sceneUsersByEvent.set(eventId, [proposer.id, ...others.map((o) => o.id)]);
+  await isolateJuryPool(eventId, sceneUsersByEvent.get(eventId));
   return { eventId, proposer, others };
 };
 
@@ -161,10 +197,29 @@ describe('Community market resolution flow', () => {
     );
     const jurorIds = jurors.rows.map((r) => r.user_id);
     expect(jurorIds).not.toContain(proposer.id);
-    // All active bystanders get a seat (pool smaller than the draw cap).
-    for (const o of others) {
-      expect(jurorIds).toContain(o.id);
-    }
+    // The scene owns the whole eligible pool, and it is smaller than the draw
+    // cap, so the jury is exactly this scene's bystanders — no more, no less.
+    expect(jurorIds.slice().sort()).toEqual(others.map((o) => o.id).sort());
+  });
+
+  test('active users outside the scene are never seated on its jury', async () => {
+    // Regression: the draw used to pull in whichever accounts happened to be
+    // active in the shared database, which made every flow test below fail on
+    // a machine with real data.
+    const bystander = await createUser();
+    const { eventId, proposer, others } = await buildScene();
+    await db.query('UPDATE users SET last_active_at = NOW() WHERE id = $1', [bystander.id]);
+
+    const res = await propose(await login(proposer.email), eventId);
+    expect(res.statusCode).toBe(201);
+
+    const jurors = await db.query(
+      'SELECT user_id FROM market_resolution_jurors WHERE proposal_id = $1',
+      [res.body.proposal.id]
+    );
+    const jurorIds = jurors.rows.map((r) => r.user_id);
+    expect(jurorIds).not.toContain(bystander.id);
+    expect(jurorIds.slice().sort()).toEqual(others.map((o) => o.id).sort());
   });
 
   test('rejects proposals on markets that have not closed yet', async () => {
