@@ -1,5 +1,6 @@
 import { createSignal, lazy, onCleanup, onMount, Show } from 'solid-js';
 import Layout from './components/Layout';
+import { installPostHoverExpand } from './lib/postHoverExpand';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import SignUpPage from './pages/SignUpPage';
@@ -162,6 +163,9 @@ export default function App() {
   window.addEventListener('solid-auth-changed', handleAuthChange);
 
   onMount(() => {
+    // Hover-to-expand for clamped posts (delegated once for the whole skin).
+    const uninstallHoverExpand = installPostHoverExpand(document.body);
+    onCleanup(uninstallHoverExpand);
     checkTopics();
     if (!window.location.hash) {
       setPage('home');
