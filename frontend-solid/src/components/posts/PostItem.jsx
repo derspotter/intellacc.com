@@ -83,9 +83,10 @@ export default function PostItem(props) {
     setFollowBusy(true);
     try {
       await followUser(props.post.user_id);
-      props.onFollowed?.();
+      props.onFollowed?.(props.post.user_id);
     } catch (err) {
       console.error('Follow failed:', err);
+    } finally {
       setFollowBusy(false);
     }
   };

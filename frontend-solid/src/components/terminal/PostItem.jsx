@@ -223,7 +223,7 @@ const PostItem = (props) => {
                             data-testid="discover-follow"
                             class="text-bb-accent hover:text-white uppercase"
                             onClick={async () => {
-                                try { await followUser(props.post.user_id); feedStore.loadPosts(); } catch (err) { console.error('Follow failed', err); }
+                                try { await followUser(props.post.user_id); feedStore.markAuthorFollowed(props.post.user_id); } catch (err) { console.error('Follow failed', err); }
                             }}
                         >
                             [FOLLOW]

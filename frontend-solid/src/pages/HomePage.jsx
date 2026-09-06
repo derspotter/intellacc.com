@@ -6,6 +6,7 @@ import PostsList from '../components/posts/PostsList';
 import WeeklyQuestionCard from '../components/predictions/WeeklyQuestionCard';
 import { isAuthenticated } from '../services/auth';
 import SearchPage from './SearchPage';
+import { markAuthorFollowed } from '../lib/feedSource';
 
 const DEFAULT_PAGE_LIMIT = 20;
 
@@ -88,10 +89,11 @@ export default function HomePage() {
     await loadPosts({ reset: false });
   };
 
-  // After a follow the row's source becomes "following": reload so the
-  // label and Follow button disappear and the feed reflects the new follow.
-  const handleFollowed = async () => {
-    await loadPosts({ reset: true });
+  // A follow changes one fact about the loaded feed: that author's rows are
+  // now "following". Relabel them in place — no refetch, no reorder, no
+  // scroll jump.
+  const handleFollowed = (authorId) => {
+    setPosts((current) => markAuthorFollowed(current, authorId));
   };
 
   const handlePostCreated = (post) => {

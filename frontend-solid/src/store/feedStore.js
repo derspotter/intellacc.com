@@ -2,6 +2,7 @@ import { createStore } from "solid-js/store";
 import { api, getPostsPaging } from "../services/api";
 import { getToken } from "../services/tokenService";
 import { createEpochGuard } from "../lib/requestEpoch";
+import { markAuthorFollowed as relabelAuthorFollowed } from '../lib/feedSource';
 
 const PAGE_LIMIT = 20;
 
@@ -79,6 +80,11 @@ const addPost = (post) => {
     // community group. Those belong on the group's feed, not the home feed.
     if (post?.community_group_id != null) return;
     setState("posts", (prev) => [post, ...prev]);
+};
+
+// After a follow: relabel that author's rows in place instead of reloading.
+const markAuthorFollowed = (userId) => {
+    setState("posts", (prev) => relabelAuthorFollowed(prev, userId));
 };
 
 const updatePost = (post) => {
@@ -165,6 +171,7 @@ export const feedStore = {
     loadPosts,
     loadMore,
     addPost,
+    markAuthorFollowed,
     updatePost,
     addComment,
     createPost,
