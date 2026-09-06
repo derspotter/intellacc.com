@@ -88,8 +88,9 @@ export default function HomePage() {
     await loadPosts({ reset: false });
   };
 
+  // After a follow the row's source becomes "following": reload so the
+  // label and Follow button disappear and the feed reflects the new follow.
   const handleFollowed = async () => {
-    setDiscoverMode(false);
     await loadPosts({ reset: true });
   };
 
