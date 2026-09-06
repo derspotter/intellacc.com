@@ -67,9 +67,11 @@ export default function MarketQuestionHub() {
   const [eventType, setEventType, clearEventType] = field('eventType', 'binary');
   const [outcomeLabels, setOutcomeLabels, clearOutcomeLabels] = field('outcomeLabels', ['', '']);
   const [bucketBoundaries, setBucketBoundaries, clearBucketBoundaries] = field('bucketBoundaries', '');
+  // Set by "Propose market" on a post; the approved market links back to it.
+  const [sourcePostId, , clearSourcePostId] = field('sourcePostId', null);
   const clearFormDrafts = () => {
     clearTitle(); clearDetails(); clearCategory(); clearClosingDate();
-    clearEventType(); clearOutcomeLabels(); clearBucketBoundaries();
+    clearEventType(); clearOutcomeLabels(); clearBucketBoundaries(); clearSourcePostId();
   };
   const [reviewNotes, setReviewNotes] = createSignal({});
 
@@ -218,7 +220,8 @@ export default function MarketQuestionHub() {
         title: String(title()).trim(),
         details: String(details()).trim(),
         category: String(category()).trim() || null,
-        closing_date: new Date(closingDate()).toISOString()
+        closing_date: new Date(closingDate()).toISOString(),
+        source_post_id: sourcePostId() || null
       };
       const result = await createMarketQuestion(payload);
       setSuccess(`Submitted. Bond withheld: ${result?.creator_bond_rp ?? '10'} RP`);
@@ -331,6 +334,12 @@ export default function MarketQuestionHub() {
           onInput={(event) => setCategory(event.target.value)}
           placeholder="Politics, Crypto, Sports, etc."
         />
+        <Show when={sourcePostId()}>
+          <p class="mq-source-post" data-testid="mq-source-post">
+            Proposed from post #{sourcePostId()} — the post will be linked to this market once it is approved.
+            <button type="button" class="button-reset mq-source-post-clear" onClick={clearSourcePostId}>Detach</button>
+          </p>
+        </Show>
         <label for="mq-closing-date">Closing Date</label>
         <input
           id="mq-closing-date"

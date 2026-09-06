@@ -39,6 +39,7 @@ const parseBool = (value) => value === '1' || value === 'true' || value === true
 
 const normalizeSubmission = (row) => ({
   ...row,
+  source_post_id: row.source_post_id == null ? null : Number(row.source_post_id),
   creator_bond_rp: fromLedger(row.creator_bond_ledger || 0),
   approvals: Number(row.approvals || 0),
   rejections: Number(row.rejections || 0),
@@ -266,8 +267,23 @@ exports.createSubmission = async (req, res) => {
     closing_date: closingDate,
     event_type: rawEventType,
     outcomes,
-    numeric_buckets: numericBuckets
+    numeric_buckets: numericBuckets,
+    source_post_id: rawSourcePostId
   } = req.body || {};
+
+  // Optional: the post this question was proposed from. Validated up front so
+  // a stale or malformed id is a clean 400 rather than a failed insert.
+  let sourcePostId = null;
+  if (rawSourcePostId !== undefined && rawSourcePostId !== null && rawSourcePostId !== '') {
+    if (!/^[1-9]\d*$/.test(String(rawSourcePostId))) {
+      return res.status(400).json({ message: 'source_post_id must be a positive integer' });
+    }
+    const postRes = await db.query('SELECT id FROM posts WHERE id = $1', [Number(rawSourcePostId)]);
+    if (postRes.rows.length === 0) {
+      return res.status(400).json({ message: 'source_post_id does not reference an existing post' });
+    }
+    sourcePostId = Number(rawSourcePostId);
+  }
 
   if (!title || !String(title).trim()) {
     return res.status(400).json({ message: 'title is required' });
@@ -332,8 +348,8 @@ exports.createSubmission = async (req, res) => {
 
     const insertRes = await client.query(
       `INSERT INTO market_question_submissions
-        (creator_user_id, title, details, category, closing_date, creator_bond_ledger, required_validators, required_approvals, event_type, outcome_rows)
-       VALUES ($1, $2, $3, $4, $5, $6::bigint, $7, $8, $9, $10::jsonb)
+        (creator_user_id, title, details, category, closing_date, creator_bond_ledger, required_validators, required_approvals, event_type, outcome_rows, source_post_id)
+       VALUES ($1, $2, $3, $4, $5, $6::bigint, $7, $8, $9, $10::jsonb, $11)
        RETURNING *`,
       [
         creatorUserId,
@@ -345,7 +361,8 @@ exports.createSubmission = async (req, res) => {
         REQUIRED_VALIDATORS,
         REQUIRED_APPROVALS,
         eventType,
-        outcomeRows ? JSON.stringify(outcomeRows) : null
+        outcomeRows ? JSON.stringify(outcomeRows) : null,
+        sourcePostId
       ]
     );
 
@@ -611,6 +628,22 @@ exports.submitReview = async (req, res) => {
        RETURNING *`,
       [submissionId, finalStatus, totalReviews, approvals, rejections, approvedEventId, approved]
     );
+
+    // Proposed from a post: link that post to the new market so the chip
+    // appears without a manual attach. The proposer's relation to the post
+    // decides the provenance the link carries.
+    if (approved && approvedEventId && submission.source_post_id) {
+      const postRes = await client.query('SELECT user_id FROM posts WHERE id = $1', [submission.source_post_id]);
+      if (postRes.rows.length > 0) {
+        const linkSource = postRes.rows[0].user_id === submission.creator_user_id ? 'author_confirmed' : 'reader_suggested';
+        await client.query(
+          `INSERT INTO post_market_links (post_id, event_id, stance, source, confirmed, match_method, confirmed_count)
+           VALUES ($1, $2, 'related', $3, TRUE, 'manual', 1)
+           ON CONFLICT (post_id, event_id) DO NOTHING`,
+          [submission.source_post_id, approvedEventId, linkSource]
+        );
+      }
+    }
 
     await client.query('COMMIT');
 

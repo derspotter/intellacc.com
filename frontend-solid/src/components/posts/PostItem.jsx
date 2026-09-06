@@ -24,6 +24,7 @@ import MarketPicker from './MarketPicker';
 import { RenderTextWithLinks } from '../../utils/text';
 import { userHash, goToUser } from '../../lib/profileLinks';
 import { feedSourceLabel } from '../../lib/feedSource';
+import { proposeMarketFromPost } from '../../lib/proposeFromPost';
 
 const normalizePosts = (payload) => {
   if (!payload) return [];
@@ -843,6 +844,16 @@ export default function PostItem(props) {
           >
             Comment
           </button>
+          <Show when={isAuthenticated() && !post().is_temp}>
+            <button
+              type="button"
+              class="post-action propose-market-button"
+              title="Turn this post into a market question"
+              onClick={() => proposeMarketFromPost(post(), getCurrentUserId())}
+            >
+              Propose market
+            </button>
+          </Show>
         </div>
       </div>
 

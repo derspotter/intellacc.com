@@ -548,7 +548,24 @@ input[type="submit"]:disabled {
   flex-wrap: wrap;
 }
 
-.trade-direction .post-action {
+.trade-direction /* "Proposed from post" note on the market question form. */
+.mq-source-post {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px dashed var(--border-color);
+  font-size: 0.85rem;
+  color: var(--secondary-text);
+}
+
+.mq-source-post-clear {
+  margin-left: 0.5rem;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  cursor: pointer;
+  color: var(--text-color);
+}
+
+.post-action {
   flex: 1;
   min-height: 40px;
   border: 1px solid var(--border-color);

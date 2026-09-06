@@ -2,6 +2,8 @@ import { For, Show, createSignal, createEffect, onCleanup } from "solid-js";
 import { feedStore } from "../../store/feedStore";
 import { api, getPostComments, createComment, requestBlob, followUser } from "../../services/api";
 import { feedSourceLabel } from '../../lib/feedSource';
+import { proposeMarketFromPost } from '../../lib/proposeFromPost';
+import { getCurrentUserId } from '../../services/auth';
 
 const CommentItem = (props) => (
     <div data-testid="comment-row" class="pl-3 border-l border-bb-border/40 py-1">
@@ -204,6 +206,17 @@ const PostItem = (props) => {
                     >
                         [{isLiked() ? 'LIKED' : 'LIKE'}:{likeCount()}]
                     </button>
+                    <Show when={!props.post.is_temp && getCurrentUserId()}>
+                        <button
+                            type="button"
+                            data-testid="propose-market"
+                            class="text-bb-muted hover:text-white uppercase"
+                            title="Turn this post into a market question"
+                            onClick={() => proposeMarketFromPost(props.post, getCurrentUserId(), { viaVanSkin: true })}
+                        >
+                            [PROPOSE MKT]
+                        </button>
+                    </Show>
                     <Show when={!props.disableFeedStore && feedSourceLabel(props.post.feed_source)}>
                         <button
                             type="button"
