@@ -10,12 +10,13 @@ import {
   getFollowers,
   getFollowing,
   getFollowingStatus,
-  getPredictions,
+  getUserPositions,
   getUser,
   unfollowUser,
   updateProfile
 } from '../services/api';
 import { getCurrentUserId, isAuthenticated } from '../services/auth';
+import { groupPositions, summarizeHoldings, positionStatus } from '../lib/positionGroups';
 
 const MAX_PREVIEW_PREDICTIONS = 5;
 const EMPTY_BIO_TEXT = 'No bio provided yet.';
@@ -70,40 +71,6 @@ const extractRows = (payload) => {
     return payload.following;
   }
   return [];
-};
-
-const extractPredictionItems = (payload) => {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-  if (Array.isArray(payload?.items)) {
-    return payload.items;
-  }
-  if (Array.isArray(payload?.predictions)) {
-    return payload.predictions;
-  }
-  if (Array.isArray(payload?.data)) {
-    return payload.data;
-  }
-  return [];
-};
-
-const getPredictionLabel = (prediction) => {
-  const value = prediction?.prediction_value;
-  if (value === null || value === undefined) {
-    return 'Unknown';
-  }
-  if (typeof value === 'number') {
-    return `${value}`;
-  }
-  return `${value}`;
-};
-
-const getPredictionOutcome = (prediction) => {
-  if (prediction?.outcome) {
-    return prediction.outcome;
-  }
-  return 'Pending';
 };
 
 export default function ProfilePage(props) {
@@ -176,8 +143,11 @@ export default function ProfilePage(props) {
       setNetworkLoaded(false);
 
       const isSelf = String(normalizedProfile.id) === String(getCurrentUserId() || '');
-      const predictionRows = isSelf ? await getPredictions().catch(() => []) : [];
-      setPredictions(extractPredictionItems(predictionRows));
+      // "Your predictions" are the live LMSR positions, the same rows the
+      // Positions tab shows — the legacy predictions table is not written by
+      // trading and went stale.
+      const positionRows = isSelf ? await getUserPositions(normalizedProfile.id).catch(() => []) : [];
+      setPredictions(groupPositions(positionRows).all);
 
       if (isAuthenticated() && !isSelf) {
         const status = await getFollowingStatus(normalizedProfile.id).catch(() => null);
@@ -185,6 +155,9 @@ export default function ProfilePage(props) {
       } else {
         setFollowingStatus(false);
       }
+      // Followers/following used to sit behind a button and read 0 until
+      // clicked; load them with the profile so the counts are never stale.
+      void loadNetworkData();
     } catch (err) {
       setError(err?.message || 'Failed to load profile.');
       setProfile(null);
@@ -277,13 +250,9 @@ export default function ProfilePage(props) {
         await followUser(userId);
         setFollowingStatus(true);
       }
-      if (networkLoaded()) {
-        setFollowers((current) =>
-          followingStatus()
-            ? current.filter((entry) => String(entry.id) !== String(getCurrentUserId() || ''))
-            : current
-        );
-      }
+      // Re-read both lists so the counts reflect the follow just made.
+      setNetworkLoaded(false);
+      await loadNetworkData();
     } catch (err) {
       setActionError(err?.message || 'Unable to update follow status.');
     } finally {
@@ -566,17 +535,21 @@ export default function ProfilePage(props) {
                     <Show when={predictionCount > 0}>
                       <div class="prediction-list-compact">
                         <For each={predictions().slice(0, MAX_PREVIEW_PREDICTIONS)}>
-                          {(prediction) => (
-                            <div class={`prediction-item ${prediction.outcome ? 'resolved' : 'pending'}`}>
+                          {(group) => (
+                            <div
+                              class={`prediction-item ${group.kind === 'resolved' ? 'resolved' : 'pending'}`}
+                              role="link"
+                              tabindex="0"
+                              onClick={() => { window.location.hash = `predictions/${group.event.id}`; }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') window.location.hash = `predictions/${group.event.id}`; }}
+                            >
                               <div class="prediction-event">
-                                {prediction.event || prediction.title || 'Unknown event'}
+                                {group.event.title || `Market #${group.event.id}`}
                               </div>
                               <div class="prediction-details">
-                                <span>
-                                  {getPredictionLabel(prediction)} ({prediction.confidence || 0}%)
-                                </span>
-                                <span class={`prediction-outcome ${prediction.outcome ? 'resolved' : 'pending'}`}>
-                                  {getPredictionOutcome(prediction)}
+                                <span>{summarizeHoldings(group)}</span>
+                                <span class={`prediction-outcome ${group.kind === 'resolved' ? 'resolved' : 'pending'}`}>
+                                  {positionStatus(group)}
                                 </span>
                               </div>
                             </div>
@@ -604,14 +577,9 @@ export default function ProfilePage(props) {
 
               <Show when={isSelf || networkLoaded()}>
                 <Card title={isSelf ? 'Your Network' : 'Network'} className="network-tabs">
-                  <button
-                    type="button"
-                    class="load-network-button"
-                    onClick={loadNetworkData}
-                    disabled={networkLoading()}
-                  >
-                    {networkLoading() ? 'Loading...' : 'Load Network Data'}
-                  </button>
+                  <Show when={networkLoading() && !networkLoaded()}>
+                    <p class="muted">Loading network…</p>
+                  </Show>
 
                   <div class="network-stats">
                     <button

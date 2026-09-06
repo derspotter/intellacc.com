@@ -5,6 +5,7 @@ import OutcomeMarketCard from './OutcomeMarketCard';
 import DistributionMarketCard from './DistributionMarketCard';
 import { isAuthenticated, getCurrentUserId } from '../../services/auth';
 import { activateOnKey } from '../../utils/keyboard';
+import { groupPositions } from '../../lib/positionGroups';
 
 const formatProbability = (value) => {
   const parsed = Number(value);
@@ -88,54 +89,9 @@ export default function MyPositions(props) {
 
   // One entry per invested market. Open positions sorted most-urgent-first,
   // recently resolved ones after, newest resolution first.
-  const positionGroups = createMemo(() => {
-    const byId = new Map();
-    for (const row of userPositions() || []) {
-      const key = String(row.event_id);
-      if (!byId.has(key)) {
-        byId.set(key, {
-          event: {
-            id: row.event_id,
-            title: row.event_title,
-            closing_date: row.closing_date,
-            market_prob: row.market_prob,
-            cumulative_stake: row.cumulative_stake,
-            liquidity_b: row.liquidity_b,
-            event_type: row.event_type,
-            outcome: row.outcome
-          },
-          kind: row.position_kind === 'resolved' ? 'resolved' : 'open',
-          hidden: !!row.hidden_at,
-          resolvedAt: row.resolved_at,
-          resolutionLabel: row.resolution_outcome_label,
-          outcomes: [],
-          numericBins: 0,
-          numericShares: 0
-        });
-      }
-      const group = byId.get(key);
-      if (group.event.event_type === 'numeric') {
-        if (row.outcome_label && Number(row.outcome_shares) > 0) {
-          group.numericBins += 1;
-          group.numericShares += Number(row.outcome_shares);
-        }
-      } else {
-        if (row.outcome_label && Number(row.outcome_shares) > 0) {
-          group.outcomes.push({ label: row.outcome_label, shares: Number(row.outcome_shares) });
-        }
-        if (Number(row.yes_shares) > 0) group.outcomes.push({ label: 'YES', shares: Number(row.yes_shares) });
-        if (Number(row.no_shares) > 0) group.outcomes.push({ label: 'NO', shares: Number(row.no_shares) });
-      }
-    }
-    const groups = [...byId.values()];
-    const open = groups
-      .filter((g) => g.kind === 'open')
-      .sort((a, b) => new Date(a.event.closing_date) - new Date(b.event.closing_date));
-    const resolved = groups
-      .filter((g) => g.kind === 'resolved')
-      .sort((a, b) => new Date(b.resolvedAt) - new Date(a.resolvedAt));
-    return { byId, open, resolved, all: [...open, ...resolved] };
-  });
+  // One entry per invested market (open first by closing date, then resolved
+  // newest first) — shared with the profile pages via lib/positionGroups.
+  const positionGroups = createMemo(() => groupPositions(userPositions()));
 
   // Stable row identity for <For>: iterate primitive string ids (in the same
   // open-then-resolved order as positionGroups().all) instead of the

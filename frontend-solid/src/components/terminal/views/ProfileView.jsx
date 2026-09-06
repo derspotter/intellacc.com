@@ -6,7 +6,7 @@ import {
   getFollowers,
   getFollowing,
   getFollowingStatus,
-  getPredictions,
+  getUserPositions,
   getUser,
   unfollowUser
 } from '../../../services/api';
@@ -14,6 +14,7 @@ import { getCurrentUserId } from '../../../services/auth';
 import { isLoggedIn } from '../../../services/tokenService';
 import { createEpochGuard } from '../../../lib/requestEpoch';
 import { goToUser } from '../../../lib/profileLinks';
+import { groupPositions, summarizeHoldings, positionStatus } from '../../../lib/positionGroups';
 
 const fmtRP = (v) => `${(Number(v) || 0).toFixed(2)} RP`;
 
@@ -55,10 +56,10 @@ export default function ProfileView(props) {
         if (!guard.isCurrent(token)) return;
         setProfile(p?.user || p);
         if (isOwn()) {
-          getPredictions().then((rows) => {
+          // Live LMSR positions, not the legacy predictions table.
+          getUserPositions(p?.user?.id || p?.id).then((rows) => {
             if (!guard.isCurrent(token)) return;
-            const items = Array.isArray(rows) ? rows : (rows?.items || rows?.predictions || []);
-            setPredictions(items.slice(0, 5));
+            setPredictions(groupPositions(rows).all.slice(0, 5));
           }).catch(() => {});
         } else if (isLoggedIn()) {
           getFollowingStatus(id).then((s) => {
@@ -176,10 +177,14 @@ export default function ProfileView(props) {
             <div class="text-bb-accent font-bold uppercase text-xs border-b border-bb-border pb-1 mb-2">[RECENT PREDICTIONS]</div>
             <For each={predictions()}>
               {(p) => (
-                <div class="flex justify-between gap-3 py-1 border-b border-bb-border/20 text-xs">
-                  <span class="truncate">{p.event || p.title || `EVENT ${p.event_id}`}</span>
-                  <span class="text-bb-muted shrink-0 uppercase">{p.outcome || 'PENDING'}</span>
-                </div>
+                <button
+                  type="button"
+                  class="w-full flex justify-between gap-3 py-1 border-b border-bb-border/20 text-xs text-left hover:text-bb-accent"
+                  onClick={() => { window.location.hash = `predictions/${p.event.id}`; }}
+                >
+                  <span class="truncate">{p.event.title || `EVENT ${p.event.id}`}</span>
+                  <span class="text-bb-muted shrink-0 uppercase">{summarizeHoldings(p)} · {positionStatus(p)}</span>
+                </button>
               )}
             </For>
           </div>
