@@ -125,6 +125,8 @@ router.post("/users", signupRateLimit, userController.createUser);
 router.post("/users/register", signupRateLimit, userController.createUser); // Alias for registration
 router.get('/admin/users/approve', userController.approveRegistration);
 router.post('/admin/users/approve', userController.approveRegistration);
+router.get('/admin/users/reject', userController.rejectRegistration);
+router.post('/admin/users/reject', express.urlencoded({ extended: false }), userController.rejectRegistration);
 router.get("/users/search", authenticateJWT, userController.searchUsers); // User search (before :id to avoid conflict)
 router.post('/users/:id/block', authenticateJWT, userController.blockUser);
 router.delete('/users/:id/block', authenticateJWT, userController.unblockUser);

@@ -209,6 +209,18 @@ if (require.main === module) {
   startActivityPubDeliveryWorker({ intervalMs: apIntervalMs });
   startAtprotoDeliveryWorker({ intervalMs: atprotoIntervalMs });
 
+  // Registration-approval signup context: keep the offline IP lookup data
+  // fresh and scrub ip/ua from decided or expired approval rows once a day.
+  if (String(process.env.IP_INTEL_REFRESH_ENABLED || 'true').toLowerCase() !== 'false') {
+    require('./services/ipIntelService').startRefreshLoop();
+  }
+  const { scrubStaleSignupContext } = require('./services/registrationApprovalService');
+  const scrub = () => scrubStaleSignupContext()
+    .then((n) => { if (n) console.log(`[RegistrationApproval] scrubbed signup context from ${n} row(s)`); })
+    .catch((err) => console.warn('[RegistrationApproval] scrub failed:', err.message));
+  scrub();
+  setInterval(scrub, 24 * 60 * 60 * 1000).unref();
+
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running with Socket.IO on port ${PORT}`);
   });

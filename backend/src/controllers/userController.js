@@ -15,7 +15,12 @@ const {
 } = require('../utils/registration');
 const notificationService = require('../services/notificationService');
 const emailVerificationService = require('../services/emailVerificationService');
-const { createApprovalRequest, approveByToken } = require('../services/registrationApprovalService');
+const {
+  createApprovalRequest,
+  approveByToken,
+  previewRejectByToken,
+  rejectByToken
+} = require('../services/registrationApprovalService');
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
 
@@ -256,7 +261,12 @@ exports.createUser = async (req, res) => {
     const newUser = result.rows[0];
 
     if (approvalRequired) {
-      await createApprovalRequest(newUser.id, newUser).catch((err) => {
+      // Client address + browser go into the approval email only; they are
+      // wiped from the pending row the moment the request is decided.
+      await createApprovalRequest(newUser.id, newUser, {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+      }).catch((err) => {
         console.error(`[Signup] Failed to create admin approval request for user ${newUser.id}:`, err);
       });
     }
@@ -592,6 +602,70 @@ const renderApprovalPage = (message) => {
         </div>
       </body>
     </html>`;
+};
+
+const renderRejectConfirmPage = ({ user, token }) => {
+  const esc = (value) => String(value ?? '').replace(/[&<>"]|'/g, (match) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[match]);
+  return `<!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8" />
+        <title>Reject Registration</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px; }
+          .card { max-width: 640px; margin: 0 auto; padding: 24px; border: 1px solid #ddd; border-radius: 8px; background: #f8f9fa; }
+          h1 { margin-top: 0; color: #111827; font-size: 1.4rem; }
+          p { color: #374151; }
+          button { background: #b91c1c; color: #fff; border: 0; padding: 12px 18px; border-radius: 6px; font-weight: 600; font-size: 1rem; cursor: pointer; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>Reject this registration?</h1>
+          <p>This deletes the pending account <strong>${esc(user.username)}</strong> (${esc(user.email)}, ID ${Number(user.id)}) permanently. The person is not notified.</p>
+          <form method="post" action="${esc(process.env.FRONTEND_URL || '')}/api/admin/users/reject">
+            <input type="hidden" name="token" value="${esc(token)}" />
+            <button type="submit">Reject and delete</button>
+          </form>
+        </div>
+      </body>
+    </html>`;
+};
+
+// Reject a pending account from the email link. GET only shows a confirmation
+// form (link prefetchers must not delete anything); POST performs the delete.
+exports.rejectRegistration = async (req, res) => {
+  const token = req.method === 'GET' ? req.query.token : req.body?.token;
+  const normalizedToken = String(token || '').trim();
+  const wantsHtml = req.accepts('html');
+  const respond = (status, result) => {
+    const message = result.message || 'Unable to process rejection.';
+    if (wantsHtml) {
+      return res.status(status).type('html').send(renderApprovalPage({ success: result.success, message }));
+    }
+    return res.status(status).json({ success: !!result.success, code: result.code, message, userId: result.userId });
+  };
+
+  if (!normalizedToken) {
+    return respond(400, { success: false, code: 'TOKEN_REQUIRED', message: 'Approval token is required.' });
+  }
+
+  try {
+    if (req.method === 'GET') {
+      const preview = await previewRejectByToken(normalizedToken);
+      if (!preview.success) return respond(preview.status || 400, preview);
+      if (!wantsHtml) return res.json({ success: true, user: preview.user });
+      return res.type('html').send(renderRejectConfirmPage({ user: preview.user, token: normalizedToken }));
+    }
+    const result = await rejectByToken(normalizedToken);
+    return respond(result.status || (result.success ? 200 : 400), result);
+  } catch (err) {
+    console.error('[RegistrationApproval] reject failed:', err);
+    return respond(500, { success: false, message: err?.message || 'Failed to process rejection.' });
+  }
 };
 
 // Approve a pending account from email link (no auth required).

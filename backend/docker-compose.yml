@@ -137,6 +137,9 @@ services:
       - ./test:/usr/src/app/test  # for testing
       - ./migrations:/usr/src/app/migrations  # mount migrations for auto-run
       - ./uploads:/usr/src/app/uploads
+      # Offline IP lookup data (iptoasn ranges + Tor exits) for the signup
+      # approval email; refreshed by the backend itself, see services/ipIntelService.
+      - ./data/ip-intel:/usr/src/app/data/ip-intel
       # Keep in-container test runs on the same jest config as CI. NOTE:
       # single-file bind mount — edits that replace the inode are invisible
       # to the container until it is recreated.

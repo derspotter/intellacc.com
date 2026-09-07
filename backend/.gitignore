@@ -13,3 +13,6 @@ npm-debug.log*
 
 # Docker
 docker-compose.override.yml
+
+# Downloaded IP lookup datasets (services/ipIntelService)
+data/ip-intel/
