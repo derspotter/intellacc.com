@@ -5,6 +5,7 @@ import {
   onCleanup,
   Show
 } from 'solid-js';
+import { createStore, reconcile } from 'solid-js/store';
 import {
   requestBlob,
   getPostComments,
@@ -60,7 +61,12 @@ export default function PostItem(props) {
   const [commentFormVisible, setCommentFormVisible] = createSignal(false);
   const [commentsLoading, setCommentsLoading] = createSignal(false);
   const [commentsLoaded, setCommentsLoaded] = createSignal(false);
-  const [comments, setComments] = createSignal([]);
+  const [commentState, setCommentState] = createStore({ comments: [] });
+  const comments = () => commentState.comments;
+  // Preserve reply cards and their open threads when a comment is updated.
+  const setComments = (next) => setCommentState('comments', reconcile(
+    typeof next === 'function' ? next(comments()) : next
+  ));
   const [actionError, setActionError] = createSignal('');
   const [commentsError, setCommentsError] = createSignal('');
   const [contentExpanded, setContentExpanded] = createSignal(false);
@@ -376,6 +382,7 @@ export default function PostItem(props) {
       setCommentsError('');
       const newComment = await createComment(post().id, content);
       setComments((current) => [newComment, ...current]);
+      setCommentListVisible(true);
       setCommentFormVisible(false);
       clearCommentForm();
       const nextCount = commentCount() + 1;
@@ -531,34 +538,26 @@ export default function PostItem(props) {
   };
 
   const renderComments = () => {
-    if (commentsLoading()) {
-      return <p class="loading-inline muted">Loading comments…</p>;
-    }
-
-    if (!commentsLoaded() && comments().length === 0) {
-      return <p class="empty-comments">No comments yet.</p>;
-    }
-
-    if (comments().length === 0) {
-      return <p class="empty-comments">No comments yet.</p>;
-    }
-
     return (
-      <ul class="comments-list">
-        <For each={comments()}>
-          {(comment) => (
-            <li>
-              <PostItem
-                post={comment}
-                nested
-                onPostUpdate={updateCommentInList}
-                onPostDelete={removeCommentFromList}
-                autoExpand={allCommentsExpanded()}
-              />
-            </li>
-          )}
-        </For>
-      </ul>
+      <Show when={!commentsLoading()} fallback={<p class="loading-inline muted">Loading comments…</p>}>
+        <Show when={comments().length > 0} fallback={<p class="empty-comments">No comments yet.</p>}>
+          <ul class="comments-list">
+            <For each={comments()}>
+              {(comment) => (
+                <li>
+                  <PostItem
+                    post={comment}
+                    nested
+                    onPostUpdate={updateCommentInList}
+                    onPostDelete={removeCommentFromList}
+                    autoExpand={allCommentsExpanded()}
+                  />
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
+      </Show>
     );
   };
 

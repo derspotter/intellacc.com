@@ -1,10 +1,15 @@
-import { For, Show } from 'solid-js';
+import { createEffect, For, Show } from 'solid-js';
+import { createStore, reconcile } from 'solid-js/store';
 import PostItem from './PostItem';
 
 export default function PostsList(props) {
+  // Keep cards mounted when a post's counts or content change.
+  const [state, setState] = createStore({ posts: [] });
+  createEffect(() => setState('posts', reconcile(props.posts())));
+
   return (
     <section class="posts-list" data-primary-list>
-      <For each={props.posts()}>
+      <For each={state.posts}>
         {(post) => (
           <PostItem
             post={post}
