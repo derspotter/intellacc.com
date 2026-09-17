@@ -1,55 +1,12 @@
-import { createSignal, createResource, createEffect, onCleanup, Show, For } from 'solid-js';
-import { A } from '@solidjs/router';
+import { createSignal, Show, For } from 'solid-js';
 import api from '../../services/api';
-import { getCurrentUserId, isAuthenticated } from '../../services/auth';
-
-const fetchAnalysis = async (postId) => {
-  if (!isAuthenticated()) {
-    return { status: null, link: null, markets: [] };
-  }
-  try {
-    const [statusRes, linkRes, marketsRes] = await Promise.all([
-      api.posts.getAnalysisStatus(postId).catch(() => null),
-      api.posts.getMarketLink(postId).catch(() => null),
-      api.posts.getMarkets(postId).catch(() => [])
-    ]);
-
-    const markets = Array.isArray(marketsRes?.markets)
-      ? marketsRes.markets
-      : Array.isArray(marketsRes)
-        ? marketsRes
-        : [];
-    
-    return {
-      status: statusRes || null,
-      link: (linkRes && linkRes.linked_market) ? linkRes.linked_market : null,
-      markets
-    };
-  } catch (err) {
-    console.error('Failed to load analysis for post', postId, err);
-    return { status: null, link: null, markets: [] };
-  }
-};
+import { getCurrentUserId } from '../../services/auth';
 
 export default function PostCritiques(props) {
-  const [data, { refetch }] = createResource(
-    () => [props.postId, props.refresh ?? 0],
-    ([postId]) => fetchAnalysis(postId)
-  );
   const [isConfirming, setIsConfirming] = createSignal(false);
-  const currentData = () => data() || data.latest || null;
+  const currentData = () => props.data;
+  const refetch = () => props.onRefresh?.();
   const loadingMessageStyle = { color: "var(--text-muted, #888)", "font-size": "0.85em", "font-style": "italic" };
-
-  createEffect(() => {
-    const nextData = currentData();
-    if (nextData && nextData.status) {
-      const status = nextData.status.processing_status;
-      if (['pending', 'retrieving', 'reasoning'].includes(status)) {
-        const timer = setTimeout(refetch, 5000);
-        onCleanup(() => clearTimeout(timer));
-      }
-    }
-  });
 
   const isAuthor = () => {
     const currentUserId = getCurrentUserId();
@@ -82,7 +39,7 @@ export default function PostCritiques(props) {
   };
 
   const handleConfirm = async (action) => {
-    const currentData = data();
+    const currentData = props.data;
     if (!currentData || !currentData.link) return;
     
     setIsConfirming(true);

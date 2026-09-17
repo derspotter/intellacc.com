@@ -24,7 +24,12 @@ backend code, using the normal startup migration flow. Drain or stop old backend
 matching jobs before switching versions: old code does not check run IDs.
 
 The migration is additive. A code rollback can leave the column in place.
-This batch has been built and tested in isolation; it has not been deployed.
+Commit `b0cfbc8` was deployed on 2026-09-17. The backend was restarted, the
+migration record and UUID column were verified, and the public health endpoint
+returned 200. The live frontend index, entry JavaScript, and Van shell JavaScript
+matched the tested isolated build byte for byte. Previous frontend assets were
+retained, with a rollback archive at
+`/tmp/intellacc-frontend-before-step1-20260917.tar.gz`.
 
 ## Verification
 

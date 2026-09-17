@@ -377,6 +377,9 @@ router.get("/predictions/assigned", authenticateJWT, predictionsController.getAs
 router.post("/assignments/:id/bet", authenticateJWT, requirePhoneVerified, predictionsController.placeBet);
 router.get("/bets/stats", authenticateJWT, predictionsController.getMonthlyBettingStats);
 
+// Bounded, viewer-filtered feed metadata (read only).
+router.post('/posts/metadata', authenticateJWT, require('../controllers/postMetadataController').getBatch);
+
 // Post Routes (require email verification - Tier 1)
 router.post("/posts", authenticateJWT, requireEmailVerified, requireScope('social:post'), idempotent, postController.createPost);
 router.post("/posts/:postId/market-click", authenticateJWT, persuasiveAlphaController.createPostMarketClick);

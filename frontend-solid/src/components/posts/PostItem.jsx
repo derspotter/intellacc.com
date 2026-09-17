@@ -20,6 +20,7 @@ import {
 import api from '../../services/api';
 import { getCurrentUserId, isAdmin, isAuthenticated } from '../../services/auth';
 import PostMarkets from './PostMarkets';
+import { usePostMetadata } from '../../services/postMetadata';
 import PostCritiques from './PostCritiques';
 import MarketPicker from './MarketPicker';
 import { RenderTextWithLinks } from '../../utils/text';
@@ -134,6 +135,7 @@ export default function PostItem(props) {
   const isMine = () => String(post().user_id) === getCurrentUserId();
   const [showMarketPicker, setShowMarketPicker] = createSignal(false);
   const [marketsVersion, setMarketsVersion] = createSignal(0);
+  const [metadata, refreshMetadata] = usePostMetadata(() => post().id, marketsVersion);
 
   const handleAttachMarket = async (market, stance) => {
     try {
@@ -788,8 +790,8 @@ export default function PostItem(props) {
         </Show>
       </Show>
 
-      <PostMarkets postId={post().id} />
-      <PostCritiques postId={post().id} authorId={post().user_id} refresh={marketsVersion()} />
+      <PostMarkets signal={metadata()?.signal} />
+      <PostCritiques postId={post().id} authorId={post().user_id} data={metadata()} onRefresh={refreshMetadata} />
       <Show when={showMarketPicker()}>
         <MarketPicker
           seedText={post().content}

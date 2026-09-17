@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><title>Feed metadata regression fixture</title></head>
+  <body>
+    <main id="fixture"></main>
+    <script type="module">
+      import { createComponent, createSignal, For } from 'solid-js';
+      import { render } from 'solid-js/web';
+      import PostItem from '/src/components/posts/PostItem.jsx';
+      import { saveToken, clearToken } from '/src/services/auth.js';
+      const [posts, setPosts] = createSignal(Array.from({ length: 20 }, (_, index) => ({
+        id: index + 1, user_id: 42, username: 'fixture', content: `Post ${index + 1}`,
+        created_at: '2026-01-01T00:00:00Z'
+      })));
+      window.removePosts = () => setPosts([]);
+      window.setAccount = (token) => token ? saveToken(token) : clearToken();
+      window.unmountPosts = render(() => createComponent(For, {
+        get each() { return posts(); },
+        children: (post) => createComponent(PostItem, { post })
+      }), document.getElementById('fixture'));
+    </script>
+  </body>
+</html>

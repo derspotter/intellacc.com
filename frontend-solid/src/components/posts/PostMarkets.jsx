@@ -1,23 +1,10 @@
-import { createResource, Show } from 'solid-js';
-import api from '../../services/api';
-import { isAuthenticated } from '../../services/auth';
+import { Show } from 'solid-js';
 
 // Persuasive Alpha attribution badge: did trades referred by this post move
 // markets? (Market chips themselves render in PostCritiques, which owns the
 // linked market + candidate list in one place.)
-const fetchSignalSummary = async (postId) => {
-  if (!isAuthenticated()) {
-    return null;
-  }
-  try {
-    return await api.posts.getSignalSummary(postId);
-  } catch (err) {
-    return null;
-  }
-};
-
 export default function PostMarkets(props) {
-  const [signal] = createResource(() => props.postId, fetchSignalSummary);
+  const signal = () => props.signal;
 
   const movedMarkets = () => Number(signal()?.episode_count || 0) > 0;
   const moveLabel = () => {

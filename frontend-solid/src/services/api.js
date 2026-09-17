@@ -588,6 +588,9 @@ export const api = {
     getMarketLink: (postId) =>
       request(`/posts/${postId}/market-link`),
 
+    getMetadata: (postIds, statusOnly = false) =>
+      request('/posts/metadata', { method: 'POST', body: { post_ids: postIds, status_only: statusOnly } }),
+
     getAnalysisStatus: (postId) =>
       request(`/posts/${postId}/analysis-status`),
 
