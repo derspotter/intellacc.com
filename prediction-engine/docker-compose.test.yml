@@ -6,6 +6,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+      - ../backend/migrations:/backend/migrations:ro
     environment:
       - TEST_DB_ADMIN_URL=postgresql://postgres:password@db:5432/postgres
       - TEST_DB_URL=postgresql://postgres:password@db:5432/test_intellacc

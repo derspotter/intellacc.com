@@ -51,16 +51,13 @@ const proposeFromPost = (token, postId, extra = {}) =>
       ...extra
     });
 
-const approveWithFiveValidators = async (submissionId) => {
-  let last = null;
-  for (let i = 0; i < 5; i += 1) {
-    const v = await createUser(`mqfp_val${i}`);
-    last = await request(app)
-      .post(`/api/market-questions/${submissionId}/reviews`)
-      .set('Authorization', `Bearer ${await login(v.email)}`)
-      .send({ vote: i < 4 ? 'approve' : 'reject', note: `vote-${i}` });
-    expect(last.statusCode).toBe(200);
-  }
+const approveWithValidator = async (submissionId) => {
+  const validator = await createUser('mqfp_validator');
+  const last = await request(app)
+    .post(`/api/market-questions/${submissionId}/reviews`)
+    .set('Authorization', `Bearer ${await login(validator.email)}`)
+    .send({ vote: 'approve', note: 'Approve source-post market' });
+  expect(last.statusCode).toBe(200);
   expect(last.body.finalized).toBe(true);
   expect(last.body.approved).toBe(true);
   cleanup.events.add(last.body.approved_event_id);
@@ -105,7 +102,7 @@ describe('Market question proposed from a post', () => {
 
     const res = await proposeFromPost(await login(reader.email), postId);
     expect(res.statusCode).toBe(201);
-    const eventId = await approveWithFiveValidators(res.body.submission.id);
+    const eventId = await approveWithValidator(res.body.submission.id);
 
     const link = await linkFor(postId, eventId);
     expect(link).toEqual({ stance: 'related', source: 'reader_suggested', confirmed: true });
@@ -117,7 +114,7 @@ describe('Market question proposed from a post', () => {
 
     const res = await proposeFromPost(await login(author.email), postId);
     expect(res.statusCode).toBe(201);
-    const eventId = await approveWithFiveValidators(res.body.submission.id);
+    const eventId = await approveWithValidator(res.body.submission.id);
 
     const link = await linkFor(postId, eventId);
     expect(link).toEqual({ stance: 'related', source: 'author_confirmed', confirmed: true });
@@ -130,14 +127,12 @@ describe('Market question proposed from a post', () => {
     const res = await proposeFromPost(await login(reader.email), postId);
     expect(res.statusCode).toBe(201);
 
-    let last = null;
-    for (let i = 0; i < 5; i += 1) {
-      const v = await createUser(`mqfp_rej${i}`);
-      last = await request(app)
-        .post(`/api/market-questions/${res.body.submission.id}/reviews`)
-        .set('Authorization', `Bearer ${await login(v.email)}`)
-        .send({ vote: 'reject', note: `vote-${i}` });
-    }
+    const validator = await createUser('mqfp_rejector');
+    const last = await request(app)
+      .post(`/api/market-questions/${res.body.submission.id}/reviews`)
+      .set('Authorization', `Bearer ${await login(validator.email)}`)
+      .send({ vote: 'reject', note: 'Reject source-post market' });
+    expect(last.statusCode).toBe(200);
     expect(last.body.finalized).toBe(true);
     expect(last.body.approved).toBe(false);
     const links = await db.query('SELECT 1 FROM post_market_links WHERE post_id = $1', [postId]);
