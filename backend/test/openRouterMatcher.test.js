@@ -60,6 +60,14 @@ describe('openRouter post match pipeline hardening', () => {
         throw new Error('simulated proposition insert failure');
       }
 
+      if (String(sql).includes('INSERT INTO post_analysis')
+          || String(sql).includes('SELECT post_id FROM post_analysis')) {
+        return { rows: [{ post_id: 1234 }] };
+      }
+      if (String(sql).includes('SELECT id FROM posts')) {
+        return { rows: [{ id: 1234 }] };
+      }
+
       return { rows: [] };
     };
   };

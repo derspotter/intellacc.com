@@ -1,4 +1,5 @@
 const db = require('../../db');
+const { randomUUID } = require('crypto');
 const config = require('./config');
 const { runSafeGate } = require('./claimGate');
 const { retrieveCandidateMarkets } = require('./marketRetrieval');
@@ -244,8 +245,8 @@ const mapCandidatesByEventId = (candidates) => {
   return map;
 };
 
-const upsertAnalysis = async (client, postId, values) => {
-  await client.query(
+const upsertAnalysis = async (client, postId, values, run, claim = false) => {
+  const result = await client.query(
     `INSERT INTO post_analysis (
        post_id,
        has_claim,
@@ -267,9 +268,12 @@ const upsertAnalysis = async (client, postId, values) => {
        reasoning_tokens,
        cached_tokens,
        cost_credits,
+       processing_run_id,
        updated_at
      )
-     VALUES ($1, $2, $3, $4, $5::text[], $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW())
+     SELECT $1, $2, $3, $4, $5::text[], $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW()
+     FROM (SELECT id FROM posts WHERE id = $1 AND COALESCE(content, '') = $23 FOR UPDATE) current_post
+     WHERE TRUE
      ON CONFLICT (post_id) DO UPDATE SET
        has_claim = EXCLUDED.has_claim,
        domain = EXCLUDED.domain,
@@ -290,7 +294,10 @@ const upsertAnalysis = async (client, postId, values) => {
        reasoning_tokens = EXCLUDED.reasoning_tokens,
        cached_tokens = EXCLUDED.cached_tokens,
        cost_credits = EXCLUDED.cost_credits,
-       updated_at = NOW()`,
+       processing_run_id = EXCLUDED.processing_run_id,
+       updated_at = NOW()
+     WHERE $22::boolean OR post_analysis.processing_run_id = EXCLUDED.processing_run_id
+     RETURNING post_id`,
     [
       postId,
       values.has_claim,
@@ -311,9 +318,13 @@ const upsertAnalysis = async (client, postId, values) => {
       values.total_tokens ?? 0,
       values.reasoning_tokens ?? 0,
       values.cached_tokens ?? 0,
-      values.cost_credits ?? 0
+      values.cost_credits ?? 0,
+      run.id,
+      claim,
+      run.content
     ]
   );
+  return result.rows.length > 0;
 };
 
 const persistUsageRecords = async ({ postId, records }) => {
@@ -638,423 +649,200 @@ const persistReasonerOutput = async (client, postId, argumentResult, candidates)
   }
 };
 
+// Acquire a client only for final database writes. The row locks fence out a
+// newer run and a concurrent post edit until the result commits.
+const persistPipelineResult = async ({ postId, run, analysis, candidates, argumentResult }) => {
+  const client = await db.getPool().connect();
+  try {
+    await client.query('BEGIN');
+    // Always lock the post before its analysis, matching progress/claim writes.
+    const post = await client.query(
+      "SELECT id FROM posts WHERE id = $1 AND COALESCE(content, '') = $2 FOR UPDATE",
+      [postId, run.content]
+    );
+    const current = await client.query(
+      `SELECT post_id FROM post_analysis
+       WHERE post_id = $1 AND processing_run_id = $2 FOR UPDATE`,
+      [postId, run.id]
+    );
+    if (post.rows.length === 0 || current.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    analysis.candidates_count = await updateCandidates(client, postId, candidates);
+    let hasMatch = false;
+    if (argumentResult !== undefined) {
+      try {
+        const result = await persistReasonerOutput(client, postId, argumentResult, candidates);
+        hasMatch = result.hasMatch;
+      } catch (error) {
+        // persistReasonerOutput rolls back its savepoint, preserving candidates.
+        const reasonError = normalizeResultError(error, 'reasoner failed');
+        analysis.processing_errors = analysis.processing_errors
+          ? `${analysis.processing_errors}; ${reasonError}` : reasonError;
+      }
+    }
+    await upsertAnalysis(client, postId, analysis, run);
+    await client.query('COMMIT');
+    return { hasMatch };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally {
+    // Usage/run logging uses pool queries and must happen after this release.
+    client.release();
+  }
+};
+
 const runPipeline = async (postId, content) => {
   const start = Date.now();
-  const normalizedContent = String(content || '').trim();
+  const run = { id: randomUUID(), content: String(content || '') };
+  const normalizedContent = run.content.trim();
   const matchMethod = config.matchMethod || MATCH_METHOD_DEFAULT;
   const normalizedPostId = toPostId(postId);
-  if (normalizedPostId === null) {
-    throw new Error('Invalid post id');
-  }
+  if (normalizedPostId === null) throw new Error('Invalid post id');
 
-  if (!config.isEnabled) {
-    await logPipelineResult({
-      postId: normalizedPostId,
-      status: 'not_started',
-      candidateCount: 0,
-      durationMs: Date.now() - start,
-      processingErrors: 'matching disabled',
-      reasonerAttempted: false,
-      reasonerMatch: false
-    });
-    return {
-      post_id: normalizedPostId,
-      status: 'not_started',
-      duration_ms: 0
-    };
-  }
-
-  if (!config.gate.enabled) {
-    await logPipelineResult({
-      postId: normalizedPostId,
-      status: 'not_started',
-      candidateCount: 0,
-      durationMs: Date.now() - start,
-      processingErrors: 'gate disabled',
-      reasonerAttempted: false,
-      reasonerMatch: false
-    });
-    return {
-      post_id: normalizedPostId,
-      status: 'not_started',
-      duration_ms: 0
-    };
-  }
-
-  const pool = db.getPool();
-  const client = await pool.connect();
-  // The client MUST go back to the pool before any pool-based follow-up
-  // (logPipelineResult, persistUsageRecords, failure upserts). Holding it
-  // across those awaits deadlocked the pool: concurrent pipelines held every
-  // client while their follow-ups waited for a free one.
-  let clientReleased = false;
-  const releaseClient = () => {
-    if (!clientReleased) {
-      clientReleased = true;
-      client.release();
-    }
-  };
   const usageRecords = [];
-  const usageRecorder = async (record) => {
-    usageRecords.push(normalizeUsageRecord(record));
-  };
+  const usageRecorder = async (record) => { usageRecords.push(normalizeUsageRecord(record)); };
   const currentUsageSummary = () => summarizeUsageRecords(usageRecords);
+  let reasonerAttempted = false;
+  let hasReasonerMatch = false;
+  const analysis = {
+    has_claim: false, domain: null, claim_summary: null, entities: [],
+    processing_status: 'pending', processing_errors: null, candidates_count: 0,
+    gate_model: null, reason_model: null, gate_latency_ms: null, reason_latency_ms: null
+  };
+  const finish = async (status, processingErrors = analysis.processing_errors) => {
+    await persistUsageRecords({ postId: normalizedPostId, records: usageRecords });
+    await logPipelineResult({
+      postId: normalizedPostId,
+      // Run logs predate supersession. Keep their existing status constraint.
+      status: status === 'superseded' ? 'not_started' : status,
+      candidateCount: status === 'superseded' ? 0 : analysis.candidates_count,
+      durationMs: Date.now() - start,
+      processingErrors: status === 'superseded' ? 'superseded' : processingErrors,
+      usageSummary: currentUsageSummary(), reasonerAttempted, reasonerMatch: hasReasonerMatch
+    });
+    return {
+      post_id: normalizedPostId, status,
+      candidate_count: status === 'superseded' ? 0 : analysis.candidates_count,
+      reasoner_match: hasReasonerMatch, duration_ms: Date.now() - start
+    };
+  };
 
+  if (!config.isEnabled) return finish('not_started', 'matching disabled');
+  if (!config.gate.enabled) return finish('not_started', 'gate disabled');
+
+  // Capability discovery itself uses the pool: do not reserve a client first.
   let capabilities;
   try {
     capabilities = await loadPipelineCapabilities();
-  } catch (capabilitiesError) {
-    releaseClient();
-    console.error('[PostMatchPipeline] Failed to load matching capabilities:', capabilitiesError.message || capabilitiesError);
-    await logPipelineResult({
-      postId: normalizedPostId,
-      status: 'not_started',
-      candidateCount: 0,
-      durationMs: Date.now() - start,
-      processingErrors: normalizeErrorClass(capabilitiesError),
-      usageSummary: currentUsageSummary(),
-      reasonerAttempted: false,
-      reasonerMatch: false
-    });
-    return {
-      post_id: normalizedPostId,
-      status: 'not_started',
-      duration_ms: 0
-    };
+  } catch (error) {
+    console.error('[PostMatchPipeline] Failed to load matching capabilities:', error.message || error);
+    return finish('not_started', normalizeErrorClass(error));
   }
-
   if (!canRunPipeline(capabilities)) {
-    releaseClient();
-    await logPipelineResult({
-      postId: normalizedPostId,
-      status: 'not_started',
-      candidateCount: 0,
-      durationMs: Date.now() - start,
-      processingErrors: 'matching schema incomplete',
-      reasonerAttempted: false,
-      reasonerMatch: false
-    });
-    return {
-      post_id: normalizedPostId,
-      status: 'not_started',
-      reason: 'matching_schema_incomplete',
-      duration_ms: 0
-    };
+    return { ...await finish('not_started', 'matching schema incomplete'), reason: 'matching_schema_incomplete' };
   }
 
-  const reasonerTablesReady = canPersistReasoning(capabilities);
-
+  // Each progress write is autocommitted and visible to the polling endpoint.
+  // The UUID guard also works across backend processes: a superseded run cannot
+  // change progress, final results, or a newer run's failure state.
+  const progress = (claim = false) => upsertAnalysis(
+    db, normalizedPostId, { ...analysis, ...currentUsageSummary() }, run, claim
+  );
   try {
-    await client.query('BEGIN');
-    await upsertAnalysis(client, normalizedPostId, {
-      has_claim: false,
-      domain: null,
-      claim_summary: null,
-      entities: [],
-      processing_status: 'pending',
-      processing_errors: null,
-      candidates_count: 0,
-      gate_model: null,
-      reason_model: null,
-      gate_latency_ms: null,
-      reason_latency_ms: null,
-      ...currentUsageSummary()
-    });
-
-    if (!normalizedContent) {
-      await upsertAnalysis(client, normalizedPostId, {
-        has_claim: false,
-        domain: null,
-        claim_summary: null,
-        entities: [],
-        processing_status: 'gated_out',
-        processing_errors: null,
-        candidates_count: 0,
-        gate_model: null,
-        reason_model: null,
-        gate_latency_ms: null,
-        reason_latency_ms: null,
-        ...currentUsageSummary()
-      });
-      await updateCandidates(client, normalizedPostId, []);
-      await client.query('COMMIT');
-      releaseClient();
-      await logPipelineResult({
-        postId: normalizedPostId,
-        status: 'gated_out',
-        candidateCount: 0,
-        durationMs: Date.now() - start,
-        processingErrors: null,
-        usageSummary: currentUsageSummary(),
-        reasonerAttempted: false,
-        reasonerMatch: false
-      });
-      return {
-        post_id: normalizedPostId,
-        status: 'gated_out',
-        duration_ms: Date.now() - start
-      };
-    }
-
-    let gateResult = {
-      has_claim: false,
-      domain: null,
-      claim_summary: null,
-      entities: []
-    };
-
+    if (!await progress(true)) return finish('superseded');
     let candidates = [];
-    let processingErrors = null;
-    let reasonerAttempted = false;
-    let hasReasonerMatch = false;
-    let candidateCount = 0;
-    let gateLatencyMs = null;
-    let reasonLatencyMs = null;
+    let argumentResult;
 
-    let augmentedContent = normalizedContent;
-    let extractedLink = extractFirstUrl(normalizedContent);
-
-    if (extractedLink && config.gate.enabled) {
-      try {
-        const articleText = await fetchArticleContent(extractedLink);
-        if (articleText && articleText.length > 50) {
-          // Truncate article to ~10,000 chars to avoid blowing out context limits/budgets
-          const truncatedArticle = articleText.length > 10000 
-            ? articleText.substring(0, 10000) + '... (truncated)'
-            : articleText;
-          augmentedContent = `User's Post:\n${normalizedContent}\n\nLinked Article Content:\n${truncatedArticle}`;
+    if (normalizedContent) {
+      let augmentedContent = normalizedContent;
+      const extractedLink = extractFirstUrl(normalizedContent);
+      if (extractedLink) {
+        try {
+          const articleText = await fetchArticleContent(extractedLink);
+          if (articleText && articleText.length > 50) {
+            const truncated = articleText.length > 10000 ? `${articleText.substring(0, 10000)}... (truncated)` : articleText;
+            augmentedContent = `User's Post:\n${normalizedContent}\n\nLinked Article Content:\n${truncated}`;
+          }
+        } catch (error) {
+          console.warn('[PostMatchPipeline] Failed to augment content with article:', error.message);
         }
-      } catch (err) {
-        console.warn('[PostMatchPipeline] Failed to augment content with article:', err.message);
       }
-    }
 
-    await upsertAnalysis(client, normalizedPostId, {
-      has_claim: false,
-      domain: null,
-      claim_summary: null,
-      entities: [],
-      processing_status: 'retrieving',
-      processing_errors: null,
-      candidates_count: 0,
-      gate_model: config.gate.model,
-      reason_model: null,
-      gate_latency_ms: null,
-      reason_latency_ms: null,
-      ...currentUsageSummary()
-    });
-
-    if (config.gate.enabled) {
+      analysis.processing_status = 'retrieving';
+      analysis.gate_model = config.gate.model;
+      if (!await progress()) return finish('superseded');
+      let gateResult = { has_claim: false };
       try {
         const gateStart = Date.now();
-        gateResult = await runSafeGate({
-          postContent: augmentedContent,
-          usageRecorder
-        });
-        gateLatencyMs = Date.now() - gateStart;
+        gateResult = await runSafeGate({ postContent: augmentedContent, usageRecorder });
+        analysis.gate_latency_ms = Date.now() - gateStart;
       } catch (error) {
-        processingErrors = normalizeResultError(error, 'gate failed');
+        analysis.processing_errors = normalizeResultError(error, 'gate failed');
       }
-    }
 
-    if (gateResult.has_claim) {
-      candidates = await retrieveCandidateMarkets(
-        gateResult.claim_summary || augmentedContent,
-        gateResult.entities,
-        gateResult.domain,
-        { usageRecorder }
-      );
-      candidates = withMatchMethod(candidates, matchMethod);
-      candidateCount = await updateCandidates(client, normalizedPostId, candidates);
-      await upsertAnalysis(client, normalizedPostId, {
-        has_claim: true,
-        domain: gateResult.domain || null,
-        claim_summary: gateResult.claim_summary || null,
-        entities: gateResult.entities || [],
-        processing_status: candidates.length > 0 ? 'reasoning' : 'complete',
-        processing_errors: processingErrors,
-        candidates_count: candidateCount,
-        gate_model: config.gate.model,
-        reason_model: config.reasoner.enabled ? config.reasoner.model : null,
-        gate_latency_ms: gateLatencyMs,
-        reason_latency_ms: reasonLatencyMs,
-        ...currentUsageSummary()
-      });
+      if (gateResult.has_claim) {
+        analysis.has_claim = true;
+        analysis.domain = gateResult.domain || null;
+        analysis.claim_summary = gateResult.claim_summary || null;
+        analysis.entities = gateResult.entities || [];
+        if (!await progress()) return finish('superseded');
+        candidates = withMatchMethod(await retrieveCandidateMarkets(
+          gateResult.claim_summary || augmentedContent, gateResult.entities,
+          gateResult.domain, { usageRecorder }
+        ), matchMethod);
+        analysis.candidates_count = normalizeCandidates(candidates).length;
 
-      let wordCount = 0;
-      if (candidates.length > 0 && config.reasoner.enabled && reasonerTablesReady) {
-        try {
+        const shouldReason = candidates.length > 0 && config.reasoner.enabled && canPersistReasoning(capabilities);
+        analysis.processing_status = shouldReason ? 'reasoning' : 'retrieving';
+        analysis.reason_model = shouldReason ? config.reasoner.model : null;
+        if (!await progress()) return finish('superseded');
+        if (shouldReason) {
           reasonerAttempted = true;
-          const reasonStart = Date.now();
-          wordCount = augmentedContent.split(/\s+/).filter(Boolean).length;
-          const isHeavy = wordCount > 400;
-
-          const argumentResult = await runSafeReasoner({
-            postContent: augmentedContent,
-            candidates,
-            overrideModel: isHeavy ? config.reasoner.heavyModel : null,
-            overrideFallbackModels: isHeavy ? config.reasoner.heavyFallbackModels : null,
-            usageRecorder
-          });
-          reasonLatencyMs = Date.now() - reasonStart;
-
-          const reasonerResult = await persistReasonerOutput(
-            client,
-            normalizedPostId,
-            argumentResult,
-            candidates
-          );
-          hasReasonerMatch = reasonerResult.hasMatch;
-        } catch (error) {
-          const reasoningError = normalizeResultError(error, 'reasoner failed');
-          processingErrors = processingErrors
-            ? `${processingErrors}; ${reasoningError}`
-            : reasoningError;
+          const isHeavy = augmentedContent.split(/\s+/).filter(Boolean).length > 400;
+          analysis.reason_model = isHeavy ? config.reasoner.heavyModel : config.reasoner.model;
+          try {
+            const reasonStart = Date.now();
+            argumentResult = await runSafeReasoner({
+              postContent: augmentedContent, candidates,
+              overrideModel: isHeavy ? config.reasoner.heavyModel : null,
+              overrideFallbackModels: isHeavy ? config.reasoner.heavyFallbackModels : null,
+              usageRecorder
+            });
+            analysis.reason_latency_ms = Date.now() - reasonStart;
+          } catch (error) {
+            const reasonError = normalizeResultError(error, 'reasoner failed');
+            analysis.processing_errors = analysis.processing_errors
+              ? `${analysis.processing_errors}; ${reasonError}` : reasonError;
+          }
         }
       }
-
-      await upsertAnalysis(client, normalizedPostId, {
-        has_claim: true,
-        domain: gateResult.domain || null,
-        claim_summary: gateResult.claim_summary || null,
-        entities: gateResult.entities || [],
-        processing_status: 'complete',
-        processing_errors: processingErrors,
-        candidates_count: candidateCount,
-        gate_model: config.gate.model,
-        reason_model: reasonerAttempted ? (wordCount > 400 ? config.reasoner.heavyModel : config.reasoner.model) : null,
-        gate_latency_ms: gateLatencyMs,
-        reason_latency_ms: reasonLatencyMs,
-        ...currentUsageSummary()
-      });
-
-      await client.query('COMMIT');
-      releaseClient();
-      await persistUsageRecords({
-        postId: normalizedPostId,
-        records: usageRecords
-      });
-      await logPipelineResult({
-        postId: normalizedPostId,
-        status: 'complete',
-        candidateCount,
-        durationMs: Date.now() - start,
-        processingErrors,
-        usageSummary: currentUsageSummary(),
-        reasonerAttempted,
-        reasonerMatch: hasReasonerMatch
-      });
-      return {
-        post_id: normalizedPostId,
-        status: 'complete',
-        candidate_count: candidateCount,
-        reasoner_match: hasReasonerMatch,
-        duration_ms: Date.now() - start
-      };
     }
 
-    await upsertAnalysis(client, normalizedPostId, {
-      has_claim: false,
-      domain: null,
-      claim_summary: null,
-      entities: [],
-      processing_status: 'gated_out',
-      processing_errors: processingErrors,
-      candidates_count: 0,
-      gate_model: config.gate.model,
-      reason_model: null,
-      gate_latency_ms: gateLatencyMs,
-      reason_latency_ms: reasonLatencyMs,
-      ...currentUsageSummary()
+    analysis.processing_status = analysis.has_claim ? 'complete' : 'gated_out';
+    Object.assign(analysis, currentUsageSummary());
+    const persisted = await persistPipelineResult({
+      postId: normalizedPostId, run, analysis, candidates, argumentResult
     });
-    await updateCandidates(client, normalizedPostId, []);
-    await client.query('COMMIT');
-    releaseClient();
-    await persistUsageRecords({
-      postId: normalizedPostId,
-      records: usageRecords
-    });
-    await logPipelineResult({
-      postId: normalizedPostId,
-      status: 'gated_out',
-      candidateCount: 0,
-      durationMs: Date.now() - start,
-      processingErrors,
-      usageSummary: currentUsageSummary(),
-      reasonerAttempted: false,
-      reasonerMatch: false
-    });
-
-    return {
-      post_id: normalizedPostId,
-      status: 'gated_out',
-      duration_ms: Date.now() - start
-    };
+    if (!persisted) return finish('superseded');
+    hasReasonerMatch = persisted.hasMatch;
+    return finish(analysis.processing_status);
   } catch (error) {
-    if (!clientReleased) {
-      try {
-        await client.query('ROLLBACK');
-      } catch {}
-    }
-    releaseClient();
-    const durationMs = Date.now() - start;
-    const usageSummary = currentUsageSummary();
-
+    // No transaction/client remains here, even after persistence fails.
+    analysis.processing_status = 'failed';
+    analysis.has_claim = false;
+    analysis.candidates_count = 0;
+    analysis.processing_errors = clampError(error);
     try {
-      await db.query(
-        `INSERT INTO post_analysis (
-           post_id, has_claim, processing_status, processing_errors, candidates_count,
-           api_call_count, api_success_count, prompt_tokens, completion_tokens,
-           total_tokens, reasoning_tokens, cached_tokens, cost_credits, updated_at
-         ) VALUES ($1, FALSE, 'failed', $2, 0, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-         ON CONFLICT (post_id) DO UPDATE SET
-           has_claim = FALSE,
-           processing_status = 'failed',
-           processing_errors = EXCLUDED.processing_errors,
-           api_call_count = EXCLUDED.api_call_count,
-           api_success_count = EXCLUDED.api_success_count,
-           prompt_tokens = EXCLUDED.prompt_tokens,
-           completion_tokens = EXCLUDED.completion_tokens,
-           total_tokens = EXCLUDED.total_tokens,
-           reasoning_tokens = EXCLUDED.reasoning_tokens,
-           cached_tokens = EXCLUDED.cached_tokens,
-           cost_credits = EXCLUDED.cost_credits,
-           updated_at = NOW()`,
-        [
-          normalizedPostId,
-          clampError(error),
-          usageSummary.api_call_count,
-          usageSummary.api_success_count,
-          usageSummary.prompt_tokens,
-          usageSummary.completion_tokens,
-          usageSummary.total_tokens,
-          usageSummary.reasoning_tokens,
-          usageSummary.cached_tokens,
-          usageSummary.cost_credits
-        ]
-      );
-    } catch (statusErr) {
-      console.error('[PostMatchPipeline] Failed to persist error status:', statusErr.message || statusErr);
+      await progress();
+    } catch (statusError) {
+      console.error('[PostMatchPipeline] Failed to persist error status:', statusError.message || statusError);
     }
-
-    await persistUsageRecords({
-      postId: normalizedPostId,
-      records: usageRecords
-    });
-    await logPipelineResult({
-      postId: normalizedPostId,
-      status: 'failed',
-      candidateCount: 0,
-      durationMs,
-      processingErrors: clampError(error),
-      usageSummary,
-      reasonerAttempted: false,
-      reasonerMatch: false
-    });
-
+    await finish('failed');
     throw error;
-  } finally {
-    releaseClient();
   }
 };
 

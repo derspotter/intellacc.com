@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><title>Post attachment regression fixture</title></head>
+  <body>
+    <main id="fixture"></main>
+    <script type="module">
+      import { createComponent, createSignal } from 'solid-js';
+      import { render } from 'solid-js/web';
+      import PostItem from '/src/components/posts/PostItem.jsx';
+      const [post, setPost] = createSignal({
+        id: 7001, user_id: 42, username: 'fixture', content: 'Attachment fixture',
+        created_at: '2026-01-01T00:00:00Z', image_attachment_id: 1
+      });
+      window.updatePost = (patch) => setPost({ ...post(), ...patch });
+      window.unmountPost = render(
+        () => createComponent(PostItem, { get post() { return post(); } }),
+        document.getElementById('fixture')
+      );
+    </script>
+  </body>
+</html>

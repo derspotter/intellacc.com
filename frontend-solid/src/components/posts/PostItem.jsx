@@ -1,5 +1,6 @@
 import {
   createEffect,
+  createMemo,
   createSignal,
   For,
   onCleanup,
@@ -46,7 +47,8 @@ const safeUrl = () => {
 
 export default function PostItem(props) {
   const post = () => props.post || {};
-  const hasAttachment = () => !!post().image_attachment_id;
+  const attachmentId = createMemo(() => post().image_attachment_id || null);
+  const hasAttachment = () => !!attachmentId();
   const [attachmentSrc, setAttachmentSrc] = createSignal(null);
   const [likeCount, setLikeCount] = createSignal(0);
   const [likedByUser, setLikedByUser] = createSignal(false);
@@ -563,34 +565,36 @@ export default function PostItem(props) {
   };
 
   createEffect(() => {
-    const nextAttachmentId = post().image_attachment_id || null;
-    const current = attachmentSrc();
+    const nextAttachmentId = attachmentId();
+    // The effect owns the URL. Reading attachmentSrc here would subscribe to
+    // our own download completion and start another request on every response.
+    let disposed = false;
+    let objectUrl = null;
+    const controller = new AbortController();
+    setAttachmentSrc(null);
 
-    if (current) {
-      URL.revokeObjectURL(current);
-      setAttachmentSrc(null);
-    }
+    onCleanup(() => {
+      disposed = true;
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    });
 
     if (!nextAttachmentId) {
       return;
     }
 
-    requestBlob(`/attachments/${nextAttachmentId}`)
+    requestBlob(`/attachments/${nextAttachmentId}`, { signal: controller.signal })
       .then((blob) => {
-        const nextUrl = URL.createObjectURL(blob);
-        setAttachmentSrc(nextUrl);
+        if (disposed) return;
+        objectUrl = URL.createObjectURL(blob);
+        setAttachmentSrc(objectUrl);
       })
       .catch((error) => {
-        console.error('Failed to load post attachment', error);
+        if (!disposed) console.error('Failed to load post attachment', error);
       });
   });
 
   onCleanup(() => {
-    const attachment = attachmentSrc();
-    if (attachment) {
-      URL.revokeObjectURL(attachment);
-    }
-
     const preview = editAttachmentPreview();
     if (preview) {
       URL.revokeObjectURL(preview);
