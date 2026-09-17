@@ -31,6 +31,11 @@
   - From host using compose service: `docker exec intellacc_frontend sh -lc 'cd /app && npm run build'`
   - From host using vite explicitly: `docker exec intellacc_frontend sh -lc '/app/node_modules/.bin/vite --version'`.
 
+## Visual Identity (CI)
+- Match the existing page's visual identity when adding or changing UI.
+- Use square corners (`border-radius: 0`) for panels, cards, inputs, selects, buttons, and selection controls. Do not introduce rounded cards or pill-shaped controls unless the user explicitly requests them.
+- Reuse the existing typography, colors, borders, and theme variables so new UI fits the surrounding page.
+
 ## Coding Style & Naming Conventions
 - JavaScript uses 2-space indentation, semicolons, and single quotes; match existing file style.
 - Frontend components use `PascalCase` filenames (for example, `UserCard.js`).

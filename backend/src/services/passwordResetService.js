@@ -217,7 +217,6 @@ exports.sendPasswordResetEmail = async (userId, email) => {
         <style>
           body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
           .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .button { display: inline-block; background: #0a66c2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; }
           .warning { background: #fff3cd; color: #664d03; padding: 12px; border-radius: 4px; border: 1px solid #ffecb5; }
           .footer { margin-top: 30px; font-size: 12px; color: #666; text-align: center; }
         </style>
@@ -231,7 +230,7 @@ exports.sendPasswordResetEmail = async (userId, email) => {
             You will need to be re-invited to encrypted conversations.
           </div>
           <p style="text-align: center; margin: 30px 0;">
-            <a href="${resetUrl}" class="button">Reset Password</a>
+            <a href="${resetUrl}" style="display: inline-block; background-color: #0a66c2; color: #ffffff !important; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;"><span style="color: #ffffff !important;">Reset Password</span></a>
           </p>
           <p>Or copy and paste this link into your browser:</p>
           <p style="word-break: break-all; background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 12px;">${resetUrl}</p>

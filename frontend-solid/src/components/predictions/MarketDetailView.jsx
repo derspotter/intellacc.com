@@ -92,8 +92,6 @@ export default function MarketDetailView(props) {
     void loadAll(String(props.marketId || '').trim());
   };
 
-  const prob = () => Number(event()?.market_prob ?? 0.5);
-
   const activity = createMemo(() => trades().slice(0, ACTIVITY_COUNT));
 
   // Probability history as an SVG step line. Binary markets only —
@@ -102,7 +100,7 @@ export default function MarketDetailView(props) {
   const CHART_H = 180;
   const CHART_PAD = 10;
 
-  const chartPoints = createMemo(() => {
+  const chartData = createMemo(() => {
     const row = event();
     if (!row || isMultiOutcome(row)) return null;
 
@@ -140,7 +138,7 @@ export default function MarketDetailView(props) {
       prevY = y.toFixed(1);
       coords.push(`${x.toFixed(1)},${prevY}`);
     }
-    return coords.join(' ');
+    return { points: coords.join(' '), start: t0 };
   });
 
   const gridY = (p) => CHART_PAD + (1 - p) * (CHART_H - 2 * CHART_PAD);
@@ -176,11 +174,6 @@ export default function MarketDetailView(props) {
               <span class="market-detail-prob">{formatProbability(event().market_prob)}</span>
             </Show>
           </div>
-          <Show when={!isNumeric(event())}>
-            <div class="event-prob-bar" aria-hidden="true">
-              <div class="event-prob-bar-fill" style={{ width: `${Math.round(prob() * 100)}%` }} />
-            </div>
-          </Show>
           <div class="market-detail-meta">
             <span class="event-category">{categoryLabel()}</span>
             <span class="event-date">{`Closes: ${formatDate(event().closing_date)}`}</span>
@@ -191,31 +184,10 @@ export default function MarketDetailView(props) {
         </header>
 
         <Show when={String(event().details || '').trim()}>
-          <div class="market-detail-description">{event().details}</div>
-        </Show>
-
-        <Show when={chartPoints()}>
-          <div class="market-detail-chart">
-            <h3>Probability history</h3>
-            <div class="market-detail-chart-body">
-              <div class="chart-y-labels" aria-hidden="true">
-                <span>100%</span>
-                <span>50%</span>
-                <span>0%</span>
-              </div>
-              <svg
-                viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-                preserveAspectRatio="none"
-                role="img"
-                aria-label="Market probability over time"
-              >
-                <line class="chart-grid" x1={CHART_PAD} y1={gridY(0.75)} x2={CHART_W - CHART_PAD} y2={gridY(0.75)} />
-                <line class="chart-grid" x1={CHART_PAD} y1={gridY(0.5)} x2={CHART_W - CHART_PAD} y2={gridY(0.5)} />
-                <line class="chart-grid" x1={CHART_PAD} y1={gridY(0.25)} x2={CHART_W - CHART_PAD} y2={gridY(0.25)} />
-                <polyline class="chart-line" points={chartPoints()} />
-              </svg>
-            </div>
-          </div>
+          <details class="market-detail-info">
+            <summary>Market details &amp; resolution rules</summary>
+            <div class="market-detail-description">{event().details}</div>
+          </details>
         </Show>
 
         <div class="market-detail-trade">
@@ -254,8 +226,8 @@ export default function MarketDetailView(props) {
         <ResolutionPanel event={event()} />
 
         <Show when={activity().length > 0}>
-          <div class="market-detail-activity">
-            <h3>Recent activity</h3>
+          <details class="market-detail-activity">
+            <summary>Recent activity ({activity().length} trades)</summary>
             <ul>
               <For each={activity()}>
                 {(trade) => (
@@ -271,8 +243,34 @@ export default function MarketDetailView(props) {
                 )}
               </For>
             </ul>
+          </details>
+        </Show>
+        <Show when={chartData()}>
+          <div class="market-detail-chart">
+            <h3>Probability history</h3>
+            <p class="market-detail-chart-help">Market YES probability over time. Steps mark trades (up to the latest 200).</p>
+            <div class="market-detail-chart-body">
+              <div class="chart-y-labels" aria-hidden="true">
+                <span>100%</span>
+                <span>50%</span>
+                <span>0%</span>
+              </div>
+              <svg
+                viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+                preserveAspectRatio="none"
+                role="img"
+                aria-label="Market probability over time"
+              >
+                <line class="chart-grid" x1={CHART_PAD} y1={gridY(0.75)} x2={CHART_W - CHART_PAD} y2={gridY(0.75)} />
+                <line class="chart-grid" x1={CHART_PAD} y1={gridY(0.5)} x2={CHART_W - CHART_PAD} y2={gridY(0.5)} />
+                <line class="chart-grid" x1={CHART_PAD} y1={gridY(0.25)} x2={CHART_W - CHART_PAD} y2={gridY(0.25)} />
+                <polyline class="chart-line" points={chartData().points} />
+              </svg>
+            </div>
+            <div class="market-detail-chart-times"><span>{formatTradeTime(chartData().start)}</span><span>Now</span></div>
           </div>
         </Show>
+
       </Show>
     </section>
   );

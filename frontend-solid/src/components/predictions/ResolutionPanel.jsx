@@ -87,10 +87,13 @@ export default function ResolutionPanel(props) {
   };
 
   const submitProposal = () =>
-    run(() => api.resolutionProposals.create(eventId(), {
-      outcome: outcome(),
-      source_url: sourceUrl().trim()
-    }));
+    run(async () => {
+      await api.resolutionProposals.create(eventId(), {
+        outcome: outcome(),
+        source_url: sourceUrl().trim()
+      });
+      window.dispatchEvent(new Event('resolution-proposal-created'));
+    });
 
   const submitVote = (vote) =>
     run(() => api.resolutionProposals.vote(activeProposal().id, { vote }));

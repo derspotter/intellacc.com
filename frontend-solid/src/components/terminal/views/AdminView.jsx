@@ -1,3 +1,4 @@
+import AdminMarketDashboard from '../../predictions/AdminMarketDashboard';
 import { For, Show, createEffect, createMemo, createSignal, onMount } from 'solid-js';
 import { isAdmin } from '../../../services/auth';
 import {
@@ -459,13 +460,11 @@ export default function AdminView() {
       )}
     >
       <div class="font-mono text-sm">
+        <AdminMarketDashboard />
         <Section title="CREATE EVENT">
           <CreateEventSection onCreated={() => setEventsRefresh((v) => v + 1)} />
         </Section>
-        <Section title="RESOLVE MARKET">
-          <ResolveMarketSection refreshToken={eventsRefresh} />
-        </Section>
-        <Section title="REVIEW QUEUE"><ReviewQueueSection /></Section>
+
         <Section title="MAINTENANCE"><MaintenanceSection /></Section>
       </div>
     </Show>

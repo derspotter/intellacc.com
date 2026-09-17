@@ -81,7 +81,7 @@ describe('Market question submission and validation', () => {
     }
   });
 
-  test('5 validators with 4/5 approval publishes market and settles payouts', async () => {
+  test('1 independent validator publishes a market and settle payouts', async () => {
     const ts = Date.now();
     const password = 'testpass123';
 
@@ -94,7 +94,7 @@ describe('Market question submission and validation', () => {
 
     const validatorIds = [];
     const validatorEmails = [];
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 1; i += 1) {
       const email = `mq_validator_${i}_${ts}@example.com`;
       validatorEmails.push(email);
       const id = await createUser({
@@ -121,6 +121,8 @@ describe('Market question submission and validation', () => {
     expect(createRes.body.submission).toBeTruthy();
     expect(createRes.body.submission.status).toBe('pending');
     expect(createRes.body.creator_bond_rp).toBe(10);
+    expect(createRes.body.submission.required_validators).toBe(1);
+    expect(createRes.body.submission.required_approvals).toBe(1);
 
     const submissionId = createRes.body.submission.id;
     const creatorBalanceAfterBond = await getBalanceLedger(creatorId);
@@ -129,18 +131,14 @@ describe('Market question submission and validation', () => {
     let finalReviewResponse = null;
     for (let i = 0; i < validatorEmails.length; i += 1) {
       const token = await login(validatorEmails[i], password);
-      const vote = i < 4 ? 'approve' : 'reject';
+      const vote = 'approve';
       const reviewRes = await request(app)
         .post(`/api/market-questions/${submissionId}/reviews`)
         .set('Authorization', `Bearer ${token}`)
         .send({ vote, note: `vote-${i}` });
 
       expect(reviewRes.statusCode).toBe(200);
-      if (i < 4) {
-        expect(reviewRes.body.finalized).toBe(false);
-      } else {
-        finalReviewResponse = reviewRes;
-      }
+      finalReviewResponse = reviewRes;
     }
 
     expect(finalReviewResponse).toBeTruthy();
@@ -154,7 +152,7 @@ describe('Market question submission and validation', () => {
 
     for (let i = 0; i < validatorIds.length; i += 1) {
       const balance = await getBalanceLedger(validatorIds[i]);
-      if (i < 4) {
+      if (i < 1) {
         expect(balance).toBe(1_003n * LEDGER_SCALE);
       } else {
         expect(balance).toBe(998n * LEDGER_SCALE);
@@ -166,8 +164,8 @@ describe('Market question submission and validation', () => {
       [submissionId]
     );
     expect(submissionRow.rows[0].status).toBe('approved');
-    expect(Number(submissionRow.rows[0].approvals)).toBe(4);
-    expect(Number(submissionRow.rows[0].rejections)).toBe(1);
+    expect(Number(submissionRow.rows[0].approvals)).toBe(1);
+    expect(Number(submissionRow.rows[0].rejections)).toBe(0);
     expect(submissionRow.rows[0].approved_event_id).toBe(finalReviewResponse.body.approved_event_id);
   });
 
@@ -191,7 +189,7 @@ describe('Market question submission and validation', () => {
 
     const validatorIds = [];
     const validatorEmails = [];
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 1; i += 1) {
       const email = `mq_validator_auto_${i}_${ts}@example.com`;
       validatorEmails.push(email);
       const id = await createUser({
@@ -204,7 +202,7 @@ describe('Market question submission and validation', () => {
     }
 
     const bettorIds = [];
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 1; i += 1) {
       const email = `mq_bettor_auto_${i}_${ts}@example.com`;
       const id = await createUser({
         email,
@@ -252,12 +250,12 @@ describe('Market question submission and validation', () => {
     const approvedEventId = approvedEventRes.body.submission.approved_event_id;
     cleanup.events.add(approvedEventId);
 
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 1; i += 1) {
       const userId = validatorIds[i];
       await createMarketUpdate({
         userId,
         eventId: approvedEventId,
-        stakeAmount: 1
+        stakeAmount: 50
       });
     }
 
@@ -265,7 +263,7 @@ describe('Market question submission and validation', () => {
       await createMarketUpdate({
         userId: bettorIds[i],
         eventId: approvedEventId,
-        stakeAmount: 1
+        stakeAmount: 50
       });
     }
 

@@ -7,6 +7,7 @@ import { MarketTicker } from "./market/MarketTicker";
 import { marketStore } from "../store/marketStore";
 import { api } from "../services/api";
 import { getCurrentUserId } from "../services/auth";
+import ResolutionAssignmentQueue from './predictions/ResolutionAssignmentQueue';
 
 const MarketSearchRow = () => {
     let debounceTimer;
@@ -103,6 +104,11 @@ export const MarketPanel = () => {
                     <MarketTicker />
                 </div>
                 <WeeklySlot />
+                <Show when={getCurrentUserId()}>
+                    <div class="bb-embed shrink-0 max-h-48 overflow-y-auto">
+                        <ResolutionAssignmentQueue />
+                    </div>
+                </Show>
                 <MarketSearchRow />
                 <div class="flex-1 min-h-0">
                     <Show when={!marketStore.state.loading} fallback={<div class="p-4 text-bb-muted animate-pulse">Loading Markets...</div>}>

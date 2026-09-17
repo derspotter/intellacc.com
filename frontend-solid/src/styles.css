@@ -2861,18 +2861,14 @@ body.dark-mode .post-action.liked:hover {
 }
 
 .withdrawal-btn.primary {
-  background: var(--error-color);
-  border-color: var(--error-color);
-  color: white;
+  background: #fff;
+  border: 2px solid #000;
+  color: #000;
+  margin-left: auto;
 }
 
 .withdrawal-btn.primary:hover {
-  background: #cc0000;
-  border-color: #cc0000;
-}
-
-.withdrawal-btn.primary {
-  margin-left: auto;
+  background: #f2f2f2;
 }
 
 .withdrawal-btn:disabled {
@@ -3592,14 +3588,14 @@ body.dark-mode .weekly-assignment-badge.pending {
 
 /* Specific colors for NO and YES buttons when active */
 .direction-btn.no-btn.active {
-  border-color: #0066ff;
-  background-color: #0066ff;
+  border-color: var(--error-color, #ff0000);
+  background-color: var(--error-color, #ff0000);
   color: white;
 }
 
 .direction-btn.yes-btn.active {
-  border-color: #ff0000;
-  background-color: #ff0000;
+  border-color: var(--signature-blue, #0000ff);
+  background-color: var(--signature-blue, #0000ff);
   color: white;
 }
 
@@ -4262,7 +4258,7 @@ body.dark-mode .balance-note {
   border-radius: 4px;
   /* Track colour is set inline: NO colour → white at the market price → YES
      colour, so the neutral spot moves with the market (see beliefTrackGradient). */
-  background: linear-gradient(to right, var(--error-color, #d00) 0%, #fff 50%, var(--success-color, #080) 100%);
+  background: linear-gradient(#000, #000) center / 2px 100% no-repeat, linear-gradient(to right, var(--error-color, #d00) 0%, #fff 50%, var(--signature-blue, #0000ff) 100%);
   border: 1px solid var(--border-color, #000);
   outline: none;
   -webkit-appearance: none;
@@ -4299,18 +4295,45 @@ body.dark-mode .balance-note {
 
 /* Stake size toggles: fraction of full Kelly that auto-fills the stake. */
 .kelly-fraction-toggles {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin-top: 0.4rem;
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  justify-self: center;
+  gap: 0.5rem 0.35rem;
 }
 
 .kelly-fraction-caption {
-  font-size: 0.75rem;
-  color: var(--secondary-text);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-right: 0.15rem;
+  grid-column: 1 / -1;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-color);
+}
+
+.horizontal-row.stake-trade-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 13.5rem) minmax(0, 1fr);
+  align-items: end !important;
+}
+
+.predictions-page .stake-amount-field .stake-input {
+  min-width: 0;
+  height: 44px !important;
+  min-height: 44px !important;
+}
+
+.stake-trade-row > .stake-amount-field {
+  width: 100%;
+  max-width: 13.5rem;
+  justify-self: end;
+}
+
+@media (max-width: 600px) {
+  .horizontal-row.stake-trade-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .stake-trade-row > .form-field:first-child {
+    grid-column: 1 / -1;
+  }
 }
 
 .kelly-fraction-btn {
@@ -4327,9 +4350,10 @@ body.dark-mode .balance-note {
 }
 
 .kelly-fraction-btn.active {
-  background: var(--primary-color);
-  border-color: var(--primary-color);
-  color: #fff;
+  background: #eee;
+  border-color: #000;
+  color: #000;
+  box-shadow: inset 0 0 0 1px #000;
 }
 
 .kelly-fraction-btn:disabled {
@@ -4348,6 +4372,23 @@ body.dark-mode .balance-note {
   font-weight: 700;
   color: var(--primary-color, #007bff);
   font-size: 1.1rem;
+}
+
+.belief-probability-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.belief-probability-input[type="number"] {
+  width: 6rem;
+  min-height: 44px;
+  padding: 0.25rem 0.5rem;
+  color: inherit;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  font: inherit;
 }
 
 .belief-hint {
@@ -4449,8 +4490,8 @@ body.dark-mode .balance-note {
 /* Force betting row alignment + sharp edges */
 .predictions-page .direction-btn {
   border-radius: 2px !important;
-  height: 38px !important;
-  min-height: 38px !important;
+  height: 44px !important;
+  min-height: 44px !important;
 }
 
 .predictions-page .stake-input {
@@ -4789,7 +4830,7 @@ body.dark-mode .belief-slider::-moz-range-thumb {
 .market-detail {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.75rem;
   padding: 1rem;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
@@ -4835,6 +4876,17 @@ body.dark-mode .belief-slider::-moz-range-thumb {
 .market-detail-description {
   white-space: pre-wrap;
   line-height: 1.5;
+  margin-top: 0.5rem;
+}
+
+.market-detail-info > summary,
+.market-detail-activity > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.market-detail .market-state {
+  margin-top: 0;
 }
 
 /* Community resolution panel (market detail) + jury queue */
@@ -4964,7 +5016,7 @@ body.dark-mode .belief-slider::-moz-range-thumb {
 .market-detail-chart svg {
   flex: 1;
   min-width: 0;
-  height: 180px;
+  height: 110px;
   display: block;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
@@ -4987,6 +5039,22 @@ body.dark-mode .belief-slider::-moz-range-thumb {
   justify-content: space-between;
   font-size: 0.7rem;
   opacity: 0.7;
+}
+
+.market-detail-chart-help,
+.market-detail-chart-times {
+  font-size: 0.75rem;
+  color: var(--secondary-text);
+}
+
+.market-detail-chart-help {
+  margin: 0 0 0.35rem;
+}
+
+.market-detail-chart-times {
+  display: flex;
+  justify-content: space-between;
+  margin: 0.25rem 0 0 2.5rem;
 }
 
 .back-button {

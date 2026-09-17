@@ -28,6 +28,7 @@ mod db_adapter;
 mod lmsr_api; // Clean LMSR API using lmsr_core directly
 mod lmsr_core;
 mod lmsr_multi_core;
+mod managed_positions;
 mod market_import;
 mod metaculus; // Configuration management
 mod numeric_transform;
@@ -174,6 +175,40 @@ async fn main() -> anyhow::Result<()> {
         auth_token,
     };
 
+    // Durable management runs on wall-clock intervals, never on price events.
+    let manager_state = app_state.clone();
+    tokio::spawn(async move {
+        let seconds = managed_positions::interval_seconds();
+        let period = Duration::from_secs(seconds);
+        let now_ms = chrono::Utc::now().timestamp_millis() as u64;
+        let delay = Duration::from_millis(seconds * 1000 - now_ms % (seconds * 1000));
+        let mut timer = tokio::time::interval_at(tokio::time::Instant::now() + delay, period);
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            // Catch up one missed daily check after restart. The persisted slot
+            // guard excludes today's new settings and already checked policies.
+            match managed_positions::run_due(&manager_state.db, &manager_state.config, seconds)
+                .await
+            {
+                Ok(changes) => {
+                    for change in changes {
+                        invalidate_and_broadcast(
+                            &manager_state,
+                            "market_update",
+                            json!({
+                                "event_id": change.event_id, "user_id": change.user_id,
+                                "new_prob": change.new_prob, "market_prob": change.new_prob,
+                                "action": "managed_rebalance"
+                            }),
+                        );
+                    }
+                }
+                Err(error) => tracing::warn!(error = %error, "Managed position interval failed"),
+            }
+            timer.tick().await;
+        }
+    });
+
     // Create our web application routes with shared state.
     let app = Router::new()
         .route("/", get(hello_world))
@@ -207,6 +242,10 @@ async fn main() -> anyhow::Result<()> {
             post(update_market_outcome_endpoint),
         )
         .route("/events/:id/kelly", get(kelly_suggestion_endpoint))
+        .route(
+            "/events/:id/managed-position",
+            get(get_managed_position_endpoint).post(save_managed_position_endpoint),
+        )
         .route("/events/:id/sell", post(sell_shares_endpoint))
         .route(
             "/events/:id/sell-outcome",
@@ -885,6 +924,62 @@ async fn get_event_trades_endpoint(
     }
 }
 
+fn managed_error(error: anyhow::Error) -> (StatusCode, Json<Value>) {
+    let message = error.to_string();
+    let status = match message.as_str() {
+        "Event not found" => StatusCode::NOT_FOUND,
+        "Phone verification required for automatic management" => StatusCode::FORBIDDEN,
+        "Invalid event or user id"
+        | "Probability required"
+        | "Kelly fraction required"
+        | "Probability must be between 0 and 1, exclusive"
+        | "Choose quarter, half, or full Kelly"
+        | "Management supports binary markets only"
+        | "Market is closed or resolved" => StatusCode::BAD_REQUEST,
+        _ => return internal_error(&format!("Managed position error: {error}")),
+    };
+    (status, Json(json!({"error": message})))
+}
+
+fn managed_response(policy: managed_positions::Policy) -> Json<Value> {
+    let interval = managed_positions::interval_seconds() as i64;
+    let next = (chrono::Utc::now().timestamp() / interval + 1) * interval;
+    let mut value = json!(policy);
+    value["check_interval_seconds"] = json!(interval);
+    value["next_check_at"] = json!(chrono::DateTime::<chrono::Utc>::from_timestamp(next, 0));
+    Json(value)
+}
+
+async fn get_managed_position_endpoint(
+    State(state): State<AppState>,
+    Path(event): Path<i32>,
+    Query(params): Query<HashMap<String, String>>,
+) -> ApiResult<Value> {
+    let user = params
+        .get("user_id")
+        .and_then(|s| s.parse::<i32>().ok())
+        .filter(|id| *id > 0)
+        .ok_or_else(|| bad_request_error("Invalid user id"))?;
+    if event <= 0 {
+        return Err(bad_request_error("Invalid event id"));
+    }
+    let policy = managed_positions::get(&state.db, user, event)
+        .await
+        .map_err(managed_error)?;
+    Ok(managed_response(policy))
+}
+
+async fn save_managed_position_endpoint(
+    State(state): State<AppState>,
+    Path(event): Path<i32>,
+    ExtractJson(settings): ExtractJson<managed_positions::Settings>,
+) -> ApiResult<Value> {
+    let policy = managed_positions::save(&state.db, event, settings)
+        .await
+        .map_err(managed_error)?;
+    Ok(managed_response(policy))
+}
+
 // Update market with new stake
 async fn update_market_endpoint(
     State(app_state): State<AppState>,
@@ -990,6 +1085,9 @@ async fn update_market_endpoint(
                 return Err(bad_request_error(
                     "Use /events/:id/update-outcome for this market type",
                 ));
+            }
+            if msg == managed_positions::MANUAL_BLOCKED {
+                return Err((StatusCode::CONFLICT, Json(json!({"error": msg}))));
             }
             Err(internal_error(&format!("Market update error: {}", msg)))
         }
@@ -1644,6 +1742,9 @@ async fn sell_shares_endpoint(
             }
             if msg_lower.contains("market closed") {
                 return Err(bad_request_error("Market closed"));
+            }
+            if msg == managed_positions::MANUAL_BLOCKED {
+                return Err((StatusCode::CONFLICT, Json(json!({"error": msg}))));
             }
             Err(internal_error(&format!("Share sale error: {}", msg)))
         }

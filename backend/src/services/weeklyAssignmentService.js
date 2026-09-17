@@ -165,14 +165,20 @@ class WeeklyAssignmentService {
 
       // Assign one random event to each user
       for (const user of usersResult.rows) {
-        // Pick a random event that the user hasn't predicted on yet
-        const userPredictionsResult = await client.query(`
+        // Never repeat an assignment, even if it was skipped or completed via
+        // market trades rather than a legacy prediction row. Include the user
+        // pointer as a fallback for assignments predating durable history.
+        const excludedEventsResult = await client.query(`
           SELECT event_id FROM predictions WHERE user_id = $1
+          UNION
+          SELECT event_id FROM weekly_user_assignments WHERE user_id = $1
+          UNION
+          SELECT weekly_assigned_event_id AS event_id FROM users WHERE id = $1
         `, [user.id]);
 
-        const userPredictedEvents = userPredictionsResult.rows.map((row) => row.event_id);
+        const excludedEvents = new Set(excludedEventsResult.rows.map((row) => row.event_id));
         const availableForUser = availableEvents.filter((event) =>
-          !userPredictedEvents.includes(event.id)
+          !excludedEvents.has(event.id)
         );
 
         if (availableForUser.length === 0) {

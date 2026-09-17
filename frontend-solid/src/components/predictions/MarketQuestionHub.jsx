@@ -1,3 +1,4 @@
+import EditMarketProposal from './EditMarketProposal';
 import { createEffect, createSignal, For, Index, Show } from 'solid-js';
 import { isAuthenticated, isAdmin } from '../../services/auth';
 import {
@@ -29,8 +30,16 @@ const formatDateTime = (value) => {
 const getValidationError = (title, details, closingDate) => {
   const trimmedTitle = String(title || '').trim();
   const trimmedDetails = String(details || '').trim();
-  if (!trimmedTitle || !trimmedDetails || !closingDate) {
-    return 'Title, details, and closing date are required';
+  const missingFields = [];
+  if (!trimmedTitle) missingFields.push('title');
+  if (!trimmedDetails) missingFields.push('details');
+  if (!closingDate) missingFields.push('closing date');
+  if (missingFields.length) {
+    const fields = missingFields.length === 3
+      ? `${missingFields[0]}, ${missingFields[1]}, and ${missingFields[2]}`
+      : missingFields.join(' and ');
+    const verb = missingFields.length === 1 && missingFields[0] !== 'details' ? 'is' : 'are';
+    return `${fields[0].toUpperCase()}${fields.slice(1)} ${verb} required`;
   }
   const parsedDate = new Date(closingDate);
   if (Number.isNaN(parsedDate.getTime())) {
@@ -544,6 +553,9 @@ export default function MarketQuestionHub() {
                   <span>{`Closes: ${formatDateTime(submission.closing_date)}`}</span>
                 </div>
                 <p class="market-question-details">{submission.details || ''}</p>
+                <Show when={Number(submission.creator_user_id) === Number(getCurrentUserId()) && submission.status === 'pending' && !submission.approved_event_id && !Number(submission.total_reviews) && !Number(submission.approvals) && !Number(submission.rejections)}>
+                  <EditMarketProposal submission={submission} onSaved={loadSubmissions} />
+                </Show>
                 <Show when={submission.approved_event_id}>
                   <div class="market-question-submission-meta">
                     <div class="market-question-status-note">Linked event: #{submission.approved_event_id}</div>

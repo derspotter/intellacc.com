@@ -1,0 +1,19 @@
+.managed-position {
+  margin: 0.8rem 0;
+  padding: 0.8rem;
+  border: 1px solid var(--border-color, #777);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.managed-position-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.managed-position-toggle input { width: auto; margin: 0; }
+.managed-position p { margin: 0.45rem 0 0; line-height: 1.45; }
+.managed-position-help { opacity: 0.8; font-size: 0.8rem; }
+.managed-position-save { margin-top: 0.5rem; }
+.managed-position [role="alert"] { color: var(--error-color, #d33); }

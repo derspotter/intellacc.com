@@ -51,7 +51,10 @@ function App() {
       // which must not overwrite the remembered destination.
       setPendingRoute(value);
     }
-    if (PANE_ROUTES[route]) {
+    if (route === 'predictions' && param === 'admin' && isAdmin()) {
+      setActiveView({ key: 'admin', param: null });
+      setAuthRoute(null);
+    } else if (PANE_ROUTES[route]) {
       setActivePane(PANE_ROUTES[route]);
       setActiveView(null);
       setAuthRoute(null);

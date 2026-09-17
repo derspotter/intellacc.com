@@ -618,6 +618,270 @@ async fn cleanup_test_database(pool: PgPool, db_name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::managed_positions::{self as managed, Settings};
+
+    async fn managed_fixture() -> Result<(TestDatabase, i32, i32)> {
+        let db = setup_test_database().await?;
+        sqlx::query("ALTER TABLE users ADD COLUMN verification_tier INTEGER NOT NULL DEFAULT 2")
+            .execute(&db.pool)
+            .await?;
+        let path = env::var("MANAGED_POSITION_MIGRATION_PATH")
+            .unwrap_or_else(|_| "../backend/migrations/20260907_managed_positions.sql".into());
+        sqlx::raw_sql(&std::fs::read_to_string(path)?)
+            .execute(&db.pool)
+            .await?;
+        let user = create_test_users(&db.pool, 1).await?[0].id;
+        let event = create_test_event(&db.pool, "Managed daily belief").await?;
+        let market = crate::lmsr_core::Market {
+            q_yes: 100.0 * (0.2_f64 / 0.8).ln(),
+            q_no: 0.0,
+            b: 100.0,
+        };
+        sqlx::query("UPDATE events SET q_yes=$2,market_prob=$3,cumulative_stake=$4 WHERE id=$1")
+            .bind(event)
+            .bind(market.q_yes)
+            .bind(market.prob_yes())
+            .bind(market.cost())
+            .execute(&db.pool)
+            .await?;
+        managed::save(
+            &db.pool,
+            event,
+            Settings {
+                user_id: user,
+                enabled: true,
+                belief_prob: Some(0.3),
+                kelly_fraction: Some(0.25),
+            },
+        )
+        .await?;
+        Ok((db, user, event))
+    }
+
+    #[tokio::test]
+    async fn managed_daily_rebalance_pause_and_reversal() -> Result<()> {
+        let (db, user, event) = managed_fixture().await?;
+        let pool = &db.pool;
+        let config = test_config();
+        // Saving schedules a position; it does not buy anything immediately.
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM user_shares")
+                .fetch_one(pool)
+                .await?,
+            0
+        );
+        assert!(managed::rebalance(pool, &config, user, event, 0)
+            .await?
+            .is_some());
+        assert!(managed::get(pool, user, event)
+            .await?
+            .last_trade_summary
+            .unwrap()
+            .contains("Bought"));
+        let first = capture_initial_state(pool).await?;
+        assert!(managed::rebalance(pool, &config, user, event, 0)
+            .await?
+            .is_none());
+        assert_eq!(first, capture_initial_state(pool).await?);
+        assert!(managed::rebalance(pool, &config, user, event, 86400)
+            .await?
+            .is_none());
+        let manual = lmsr_api::update_market(
+            pool,
+            &config,
+            user,
+            MarketUpdate {
+                event_id: event,
+                target_prob: 0.4,
+                stake: 1.0,
+                referral_post_id: None,
+                referral_click_id: None,
+            },
+        )
+        .await;
+        assert!(manual
+            .unwrap_err()
+            .to_string()
+            .contains(managed::MANUAL_BLOCKED));
+        assert!(
+            lmsr_api::sell_shares(pool, &config, user, event, "yes", 1.0)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains(managed::MANUAL_BLOCKED)
+        );
+        // Model another participant moving this market to 50%.
+        sqlx::query("UPDATE events SET q_yes=q_no,market_prob=0.5,cumulative_stake=liquidity_b*ln(2.0)+q_no WHERE id=$1").bind(event).execute(pool).await?;
+        assert!(managed::rebalance(pool, &config, user, event, 0)
+            .await?
+            .is_some());
+        let shares = sqlx::query(
+            "SELECT yes_shares,no_shares FROM user_shares WHERE user_id=$1 AND event_id=$2",
+        )
+        .bind(user)
+        .bind(event)
+        .fetch_one(pool)
+        .await?;
+        assert!(shares.get::<f64, _>("yes_shares") < 1e-6);
+        assert!(shares.get::<f64, _>("no_shares") > 0.0);
+        verify_staked_invariant(pool).await?;
+        assert!(managed::rebalance(pool, &config, user, event, 0)
+            .await?
+            .is_none());
+        managed::save(
+            pool,
+            event,
+            Settings {
+                user_id: user,
+                enabled: false,
+                belief_prob: None,
+                kelly_fraction: None,
+            },
+        )
+        .await?;
+        let paused = capture_initial_state(pool).await?;
+        assert!(managed::rebalance(pool, &config, user, event, 0)
+            .await?
+            .is_none());
+        assert_eq!(paused, capture_initial_state(pool).await?);
+        lmsr_api::sell_shares(pool, &config, user, event, "no", 1.0).await?;
+        cleanup_test_database(db.pool, &db.db_name).await
+    }
+
+    #[tokio::test]
+    async fn managed_hold_closure_verification_and_overlap() -> Result<()> {
+        let (db, user, event) = managed_fixture().await?;
+        let pool = &db.pool;
+        let mut config = test_config();
+        config.market.enable_hold_period = true;
+        config.market.hold_period_hours = 24.0;
+        sqlx::query("UPDATE managed_positions SET updated_at=NOW()-INTERVAL '2 days'")
+            .execute(pool)
+            .await?;
+        let (a, b) = tokio::join!(
+            managed::rebalance(pool, &config, user, event, 86400),
+            managed::rebalance(pool, &config, user, event, 86400)
+        );
+        assert_eq!([a?, b?].iter().filter(|v| v.is_some()).count(), 1);
+        let held = capture_initial_state(pool).await?;
+        assert!(managed::rebalance(pool, &config, user, event, 0)
+            .await?
+            .is_none());
+        assert_eq!(managed::get(pool, user, event).await?.status, "holding");
+        assert_eq!(held, capture_initial_state(pool).await?);
+        sqlx::query("UPDATE events SET closing_date=NOW()-INTERVAL '1 day' WHERE id=$1")
+            .bind(event)
+            .execute(pool)
+            .await?;
+        assert!(managed::rebalance(pool, &config, user, event, 0)
+            .await?
+            .is_none());
+        assert!(!managed::get(pool, user, event).await?.enabled);
+        assert!(managed::save(
+            pool,
+            event,
+            Settings {
+                user_id: user,
+                enabled: true,
+                belief_prob: Some(0.3),
+                kelly_fraction: Some(0.25)
+            }
+        )
+        .await
+        .is_err());
+        sqlx::query("UPDATE events SET closing_date=NOW()+INTERVAL '1 day' WHERE id=$1")
+            .bind(event)
+            .execute(pool)
+            .await?;
+        managed::save(
+            pool,
+            event,
+            Settings {
+                user_id: user,
+                enabled: true,
+                belief_prob: Some(0.3),
+                kelly_fraction: Some(0.25),
+            },
+        )
+        .await?;
+        sqlx::query("UPDATE users SET verification_tier=0 WHERE id=$1")
+            .bind(user)
+            .execute(pool)
+            .await?;
+        managed::rebalance(pool, &config, user, event, 0).await?;
+        assert!(!managed::get(pool, user, event).await?.enabled);
+        assert!(managed::save(
+            pool,
+            event,
+            Settings {
+                user_id: user,
+                enabled: true,
+                belief_prob: Some(0.3),
+                kelly_fraction: Some(0.25)
+            }
+        )
+        .await
+        .is_err());
+        managed::save(
+            pool,
+            event,
+            Settings {
+                user_id: user,
+                enabled: false,
+                belief_prob: None,
+                kelly_fraction: None,
+            },
+        )
+        .await?;
+        verify_staked_invariant(pool).await?;
+        cleanup_test_database(db.pool, &db.db_name).await
+    }
+
+    #[tokio::test]
+    async fn managed_worker_daily_slots_and_transaction_rollback() -> Result<()> {
+        let (db, user, event) = managed_fixture().await?;
+        let pool = &db.pool;
+        let config = test_config();
+        // Today's settings wait until the next daily boundary, including on restart.
+        assert!(managed::run_due(pool, &config, 86400).await?.is_empty());
+        sqlx::query("UPDATE managed_positions SET updated_at=NOW()-INTERVAL '2 days'")
+            .execute(pool)
+            .await?;
+        assert_eq!(managed::run_due(pool, &config, 86400).await?.len(), 1);
+        assert!(managed::run_due(pool, &config, 86400).await?.is_empty());
+        // Force the final audit insert to fail after a sell + buy reversal.
+        sqlx::query("UPDATE events SET q_yes=q_no,market_prob=0.5,cumulative_stake=liquidity_b*ln(2.0)+q_no WHERE id=$1")
+            .bind(event).execute(pool).await?;
+        sqlx::query("ALTER TABLE managed_position_activity ADD CONSTRAINT reject_test_sale CHECK (summary NOT LIKE 'Sold%')")
+            .execute(pool).await?;
+        let before_cash = capture_initial_state(pool).await?;
+        let before_shares: (f64, f64) = sqlx::query_as(
+            "SELECT yes_shares,no_shares FROM user_shares WHERE user_id=$1 AND event_id=$2",
+        )
+        .bind(user)
+        .bind(event)
+        .fetch_one(pool)
+        .await?;
+        assert!(managed::rebalance(pool, &config, user, event, 0)
+            .await
+            .is_err());
+        assert_eq!(before_cash, capture_initial_state(pool).await?);
+        let after_shares: (f64, f64) = sqlx::query_as(
+            "SELECT yes_shares,no_shares FROM user_shares WHERE user_id=$1 AND event_id=$2",
+        )
+        .bind(user)
+        .bind(event)
+        .fetch_one(pool)
+        .await?;
+        assert_eq!(before_shares, after_shares);
+        let probability: f64 = sqlx::query_scalar("SELECT market_prob FROM events WHERE id=$1")
+            .bind(event)
+            .fetch_one(pool)
+            .await?;
+        assert_eq!(probability, 0.5);
+        verify_staked_invariant(pool).await?;
+        cleanup_test_database(db.pool, &db.db_name).await
+    }
 
     /// The trade request's target_prob is the user's stated belief; it must be
     /// stored on the audit row so calibration can be computed later.

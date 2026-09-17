@@ -129,7 +129,11 @@ pub async fn sync_all_markets(pool: &PgPool, full: bool) -> Result<Vec<ImportRun
     Ok(results)
 }
 
-pub async fn sync_provider_named(pool: &PgPool, provider: &str, full: bool) -> Result<ImportRunStats> {
+pub async fn sync_provider_named(
+    pool: &PgPool,
+    provider: &str,
+    full: bool,
+) -> Result<ImportRunStats> {
     ensure_import_tables(pool).await?;
     sync_provider(pool, ImportProvider::try_from(provider)?, full).await
 }
@@ -171,7 +175,11 @@ pub async fn get_recent_import_runs(pool: &PgPool, limit: i64) -> Result<Vec<Val
     Ok(result)
 }
 
-async fn sync_provider(pool: &PgPool, provider: ImportProvider, full: bool) -> Result<ImportRunStats> {
+async fn sync_provider(
+    pool: &PgPool,
+    provider: ImportProvider,
+    full: bool,
+) -> Result<ImportRunStats> {
     let started_at = Utc::now();
     let mut stats = ImportRunStats {
         provider: provider.as_str().to_string(),
@@ -185,9 +193,15 @@ async fn sync_provider(pool: &PgPool, provider: ImportProvider, full: bool) -> R
     };
 
     let markets = match provider {
-        ImportProvider::Metaculus => crate::metaculus::fetch_open_markets(provider_fetch_limit(provider, full)).await,
-        ImportProvider::Manifold => fetch_manifold_markets(provider_fetch_limit(provider, full)).await,
-        ImportProvider::Polymarket => fetch_polymarket_markets(provider_fetch_limit(provider, full)).await,
+        ImportProvider::Metaculus => {
+            crate::metaculus::fetch_open_markets(provider_fetch_limit(provider, full)).await
+        }
+        ImportProvider::Manifold => {
+            fetch_manifold_markets(provider_fetch_limit(provider, full)).await
+        }
+        ImportProvider::Polymarket => {
+            fetch_polymarket_markets(provider_fetch_limit(provider, full)).await
+        }
         ImportProvider::Kalshi => fetch_kalshi_markets(provider_fetch_limit(provider, full)).await,
     };
 
@@ -304,7 +318,7 @@ async fn write_import_run(
 }
 
 #[derive(Debug, Clone, Copy)]
-enum PersistOutcome {
+pub(crate) enum PersistOutcome {
     LinkedExisting,
     Merged,
     Created,
@@ -319,7 +333,7 @@ struct Candidate {
     text_sim: f64,
 }
 
-async fn upsert_market(
+pub(crate) async fn upsert_market(
     pool: &PgPool,
     topic_id: i32,
     market: &ImportedMarket,
@@ -532,8 +546,23 @@ pub(crate) async fn seed_numeric_bins_if_missing(
     event_id: i32,
     market: &ImportedMarket,
 ) -> Result<()> {
-    let (Some(range_min), Some(range_max)) =
-        (market.numeric_range_min, market.numeric_range_max)
+    let mut tx = pool.begin().await?;
+    seed_numeric_bins(tx.as_mut(), event_id, market).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn seed_numeric_bins(
+    conn: &mut sqlx::PgConnection,
+    event_id: i32,
+    market: &ImportedMarket,
+) -> Result<()> {
+    // Serialize seeding with trades and repair on the same event.
+    sqlx::query("SELECT id FROM events WHERE id = $1 FOR UPDATE")
+        .bind(event_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let (Some(range_min), Some(range_max)) = (market.numeric_range_min, market.numeric_range_max)
     else {
         return Ok(());
     };
@@ -553,7 +582,7 @@ pub(crate) async fn seed_numeric_bins_if_missing(
         "SELECT COUNT(*)::bigint FROM event_outcomes WHERE event_id = $1 AND is_active = TRUE",
     )
     .bind(event_id)
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await?;
     if existing_count > 0 {
         return Ok(());
@@ -561,7 +590,7 @@ pub(crate) async fn seed_numeric_bins_if_missing(
 
     let event_row = sqlx::query("SELECT outcome FROM events WHERE id = $1")
         .bind(event_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *conn)
         .await?;
     let Some(row) = event_row else {
         return Ok(());
@@ -588,8 +617,6 @@ pub(crate) async fn seed_numeric_bins_if_missing(
     let b_numeric = subsidy_rp / (outcome_count as f64).ln();
     let default_prob = 1.0 / outcome_count as f64;
 
-    let mut tx = pool.begin().await?;
-
     sqlx::query(
         r#"
         UPDATE events
@@ -604,23 +631,23 @@ pub(crate) async fn seed_numeric_bins_if_missing(
     )
     .bind(default_prob)
     .bind(event_id)
-    .execute(tx.as_mut())
+    .execute(&mut *conn)
     .await?;
 
     // Defensive: mirror the multiple_choice branch's clean-slate behavior in
     // case a previous partial/aborted seed left rows behind.
     sqlx::query("DELETE FROM event_outcome_states WHERE event_id = $1")
         .bind(event_id)
-        .execute(tx.as_mut())
+        .execute(&mut *conn)
         .await?;
     sqlx::query("DELETE FROM event_outcomes WHERE event_id = $1")
         .bind(event_id)
-        .execute(tx.as_mut())
+        .execute(&mut *conn)
         .await?;
 
     // One insert helper for outcome + state, used by bins and tails alike.
     async fn insert_outcome(
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        conn: &mut sqlx::PgConnection,
         event_id: i32,
         outcome_key: &str,
         label: &str,
@@ -645,7 +672,7 @@ pub(crate) async fn seed_numeric_bins_if_missing(
         .bind(lower)
         .bind(upper)
         .bind(bucket_kind)
-        .fetch_one(tx.as_mut())
+        .fetch_one(&mut *conn)
         .await?;
         sqlx::query(
             r#"
@@ -658,7 +685,7 @@ pub(crate) async fn seed_numeric_bins_if_missing(
         .bind(event_id)
         .bind(outcome_id)
         .bind(default_prob)
-        .execute(tx.as_mut())
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -667,8 +694,15 @@ pub(crate) async fn seed_numeric_bins_if_missing(
     for (idx, (lower, upper)) in edges.iter().enumerate() {
         let label = crate::lmsr_multi_core::format_bin_label(*lower, *upper, unit);
         insert_outcome(
-            &mut tx, event_id, &format!("bin_{idx}"), &label, idx as i32,
-            Some(*lower), Some(*upper), "inbound", default_prob,
+            &mut *conn,
+            event_id,
+            &format!("bin_{idx}"),
+            &label,
+            idx as i32,
+            Some(*lower),
+            Some(*upper),
+            "inbound",
+            default_prob,
         )
         .await?;
     }
@@ -684,8 +718,15 @@ pub(crate) async fn seed_numeric_bins_if_missing(
             crate::lmsr_multi_core::format_bin_number(range_min)
         ));
         insert_outcome(
-            &mut tx, event_id, "tail_low", &label, sort,
-            None, Some(range_min), "lower_tail", default_prob,
+            &mut *conn,
+            event_id,
+            "tail_low",
+            &label,
+            sort,
+            None,
+            Some(range_min),
+            "lower_tail",
+            default_prob,
         )
         .await?;
         sort += 1;
@@ -696,8 +737,15 @@ pub(crate) async fn seed_numeric_bins_if_missing(
             crate::lmsr_multi_core::format_bin_number(range_max)
         ));
         insert_outcome(
-            &mut tx, event_id, "tail_high", &label, sort,
-            Some(range_max), None, "upper_tail", default_prob,
+            &mut *conn,
+            event_id,
+            "tail_high",
+            &label,
+            sort,
+            Some(range_max),
+            None,
+            "upper_tail",
+            default_prob,
         )
         .await?;
     }
@@ -720,12 +768,126 @@ pub(crate) async fn seed_numeric_bins_if_missing(
     .bind(open_upper)
     .bind(&market.numeric_unit)
     .bind(NUMERIC_BIN_COUNT as i32)
-    .bind(if market.numeric_zero_point.is_some() { "log" } else { "linear" })
+    .bind(if market.numeric_zero_point.is_some() {
+        "log"
+    } else {
+        "linear"
+    })
     .bind(b_numeric)
-    .execute(tx.as_mut())
+    .execute(&mut *conn)
     .await?;
 
-    tx.commit().await?;
+    Ok(())
+}
+
+/// Explicit maintenance operation for untouched legacy Metaculus YES/NO imports.
+/// The row lock, history checks, replacement and seeding share one transaction.
+/// Dry runs execute the full repair and then roll it back.
+pub async fn repair_legacy_numeric_market(
+    pool: &PgPool,
+    event_id: i32,
+    market: &ImportedMarket,
+    apply: bool,
+) -> Result<()> {
+    if market.source != "metaculus" || !matches!(market.event_type.as_str(), "numeric" | "discrete")
+    {
+        return Err(anyhow!("repair requires a numeric Metaculus question"));
+    }
+    let mut tx = pool.begin().await?;
+    let event = sqlx::query(
+        "SELECT event_type, details, outcome, resolved_at, q_yes, q_no FROM events WHERE id = $1 FOR UPDATE",
+    ).bind(event_id).fetch_one(tx.as_mut()).await?;
+    let details: String = event.get("details");
+    if !details
+        .lines()
+        .any(|line| line == format!("Metaculus ID: {}", market.external_id))
+    {
+        return Err(anyhow!("provider question ID does not match legacy event"));
+    }
+    let kind: String = event.get("event_type");
+    if kind == "numeric" {
+        let configured: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM numeric_market_config WHERE event_id=$1)",
+        )
+        .bind(event_id)
+        .fetch_one(tx.as_mut())
+        .await?;
+        if configured {
+            return Ok(());
+        }
+    }
+    if kind != "binary"
+        || event.get::<Option<String>, _>("outcome").is_some()
+        || event
+            .get::<Option<DateTime<Utc>>, _>("resolved_at")
+            .is_some()
+        || event.get::<f64, _>("q_yes") != 0.0
+        || event.get::<f64, _>("q_no") != 0.0
+    {
+        return Err(anyhow!(
+            "event is not an untouched unresolved binary import"
+        ));
+    }
+    // Optional feature table: an enabled future rebalance is also a position intent.
+    let has_manager: bool =
+        sqlx::query_scalar("SELECT to_regclass('managed_positions') IS NOT NULL")
+            .fetch_one(tx.as_mut())
+            .await?;
+    if has_manager {
+        let managed: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM managed_positions WHERE event_id=$1)")
+                .bind(event_id)
+                .fetch_one(tx.as_mut())
+                .await?;
+        if managed {
+            return Err(anyhow!(
+                "event has managed positions; manual review required"
+            ));
+        }
+    }
+    // Do not reinterpret even a zeroed/withdrawn position or historical trade.
+    let used: bool = sqlx::query_scalar(r#"
+        SELECT EXISTS(SELECT 1 FROM user_shares WHERE event_id=$1)
+            OR EXISTS(SELECT 1 FROM user_outcome_shares WHERE event_id=$1)
+            OR EXISTS(SELECT 1 FROM predictions WHERE event_id=$1)
+            OR EXISTS(SELECT 1 FROM market_updates WHERE event_id=$1)
+            OR EXISTS(SELECT 1 FROM market_outcome_updates WHERE event_id=$1)
+            OR EXISTS(SELECT 1 FROM distribution_trades WHERE event_id=$1)
+            OR EXISTS(SELECT 1 FROM numeric_position_basis WHERE event_id=$1)
+            OR EXISTS(SELECT 1 FROM numeric_market_config WHERE event_id=$1)
+            OR EXISTS(SELECT 1 FROM market_resolution_proposals WHERE event_id=$1)
+            OR EXISTS(SELECT 1 FROM event_outcome_states WHERE event_id=$1 AND q_value <> 0)
+            OR EXISTS(SELECT 1 FROM event_outcomes WHERE event_id=$1 AND upper(label) NOT IN ('YES','NO'))
+    "#).bind(event_id).fetch_one(tx.as_mut()).await?;
+    if used {
+        return Err(anyhow!(
+            "event has positions, history or non-binary configuration; manual review required"
+        ));
+    }
+    sqlx::query("DELETE FROM event_outcome_states WHERE event_id=$1")
+        .bind(event_id)
+        .execute(tx.as_mut())
+        .await?;
+    sqlx::query("DELETE FROM event_outcomes WHERE event_id=$1")
+        .bind(event_id)
+        .execute(tx.as_mut())
+        .await?;
+    seed_numeric_bins(tx.as_mut(), event_id, market).await?;
+    let configured: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM numeric_market_config WHERE event_id=$1)")
+            .bind(event_id)
+            .fetch_one(tx.as_mut())
+            .await?;
+    if !configured {
+        return Err(anyhow!(
+            "provider range cannot seed a numeric market; repair rolled back"
+        ));
+    }
+    if apply {
+        tx.commit().await?;
+    } else {
+        tx.rollback().await?;
+    }
     Ok(())
 }
 
@@ -1190,7 +1352,12 @@ fn provider_enabled_for_sync_all(provider: ImportProvider) -> bool {
     let default = !matches!(provider, ImportProvider::Kalshi);
     env::var(&key)
         .ok()
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(default)
 }
 
@@ -1661,7 +1828,11 @@ fn parse_manifold_outcomes(row: &Value) -> Vec<ImportedOutcome> {
         });
     }
 
-    parsed.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then_with(|| a.key.cmp(&b.key)));
+    parsed.sort_by(|a, b| {
+        a.sort_order
+            .cmp(&b.sort_order)
+            .then_with(|| a.key.cmp(&b.key))
+    });
     ensure_unique_outcome_keys(&mut parsed);
     parsed
 }
@@ -1699,7 +1870,6 @@ fn ensure_unique_outcome_keys(outcomes: &mut [ImportedOutcome]) {
         outcome.sort_order = idx as i32;
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1748,7 +1918,10 @@ mod tests {
     #[test]
     fn manifold_non_predictive_types_are_skipped() {
         for t in ["STONK", "POLL", "BOUNTIED_QUESTION", "QUADRATIC_FUNDING"] {
-            assert!(!super::manifold_type_is_predictive(t), "{t} must be skipped");
+            assert!(
+                !super::manifold_type_is_predictive(t),
+                "{t} must be skipped"
+            );
         }
         for t in ["BINARY", "MULTIPLE_CHOICE", "PSEUDO_NUMERIC", "NUMBER", ""] {
             assert!(super::manifold_type_is_predictive(t), "{t} must pass");

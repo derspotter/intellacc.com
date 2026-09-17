@@ -4,9 +4,10 @@ import MarketDetailView from '../components/predictions/MarketDetailView';
 import MyPositions from '../components/predictions/MyPositions';
 import LeaderboardCard from '../components/predictions/LeaderboardCard';
 import MarketQuestionHub from '../components/predictions/MarketQuestionHub';
+import ResolutionAssignmentQueue from '../components/predictions/ResolutionAssignmentQueue';
 import ResolutionJuryQueue from '../components/predictions/ResolutionJuryQueue';
 import AdminEventManagement from '../components/predictions/AdminEventManagement';
-import AdminMarketResolution from '../components/predictions/AdminMarketResolution';
+import AdminMarketDashboard from '../components/predictions/AdminMarketDashboard';
 import AdminTools from '../components/predictions/AdminTools';
 import RPBalance from '../components/predictions/RPBalance';
 import { isAdmin, isAuthenticated } from '../services/auth';
@@ -86,6 +87,7 @@ export default function PredictionsPage(props) {
       </nav>
 
       <div class="predictions-main">
+        <Show when={isAuthenticated()}><ResolutionAssignmentQueue /></Show>
         <Show when={activeTab() === 'positions'}>
           <MyPositions onVerificationNotice={handleVerificationNotice} />
         </Show>
@@ -117,9 +119,8 @@ export default function PredictionsPage(props) {
         </Show>
 
         <Show when={activeTab() === 'admin' && isAdmin()}>
+          <AdminMarketDashboard />
           <AdminTools />
-          <AdminMarketResolution />
-          <AdminEventManagement />
         </Show>
       </div>
     </section>

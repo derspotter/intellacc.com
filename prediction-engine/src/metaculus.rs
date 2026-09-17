@@ -349,6 +349,16 @@ impl MetaculusClient {
         }
     }
 
+    /// Parse a saved provider response without guessing bounds from the title.
+    pub fn market_from_post_json(&self, json: &str) -> Result<ImportedMarket> {
+        let post: MetaculusPost = serde_json::from_str(json)?;
+        let question = post
+            .question
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("post has no single question"))?;
+        Ok(self.convert_to_imported_market(question, &post))
+    }
+
     // Store fetched questions in our database
     async fn store_questions_in_db(
         &self,
@@ -362,17 +372,22 @@ impl MetaculusClient {
 
         for (question, post) in questions_with_posts {
             let market = self.convert_to_imported_market(&question, &post);
+            // A provider's open-list response may contain terminal questions.
+            // The shared importer initializes open events, so never reopen these.
+            if market.status != "open" {
+                continue;
+            }
 
             // Check if we already have this question by Metaculus ID (more reliable)
             let metaculus_id_pattern = format!("Metaculus ID: {}", market.external_id);
             let source_pattern = format!("Source: {}", market.source);
             let external_id_pattern = format!("External ID: {}", market.external_id);
             let existing = sqlx::query(
-                "SELECT id FROM events WHERE details LIKE $1 OR (details LIKE $2 AND details LIKE $3)",
+                "SELECT id FROM events WHERE $1 = ANY(string_to_array(details, E'\\n')) OR ($2 = ANY(string_to_array(details, E'\\n')) AND $3 = ANY(string_to_array(details, E'\\n')))",
             )
-                .bind(format!("%{}%", metaculus_id_pattern))
-                .bind(format!("%{}%", source_pattern))
-                .bind(format!("%{}%", external_id_pattern))
+                .bind(metaculus_id_pattern)
+                .bind(source_pattern)
+                .bind(external_id_pattern)
                 .fetch_optional(pool)
                 .await?;
 
@@ -384,55 +399,12 @@ impl MetaculusClient {
                 continue;
             }
 
-            // Truncate title if too long
-            let truncated_title = if market.title.len() > 255 {
-                format!("{}...", &market.title[..252])
-            } else {
-                market.title.clone()
-            };
-
-            // Create details with Metaculus metadata
-            let enhanced_details = format!(
-                "{}\n\nSource: {}\nExternal ID: {}\nExternal URL: {}\nMetaculus ID: {}\nMetaculus URL: {}\nCategory: {}\nType: {}",
-                market.description,
-                market.source,
-                market.external_id,
-                market.external_url,
-                market.external_id,
-                market.external_url,
-                market.category,
-                market.event_type
-            );
-
-            // Insert new event with category
-            let result = sqlx::query(
-                r#"
-                INSERT INTO events (
-                    topic_id, title, details, closing_date, outcome, category
-                ) VALUES ($1, $2, $3, $4, $5, $6)
-                "#,
-            )
-            .bind(topic_id)
-            .bind(&truncated_title)
-            .bind(&enhanced_details)
-            .bind(market.close_time)
-            .bind(if market.status == "resolved" {
-                Some("pending")
-            } else {
-                None
-            })
-            .bind(&market.category)
-            .execute(pool)
-            .await;
-
-            match result {
-                Ok(_) => {
-                    println!("✅ Stored: {}", truncated_title);
-                    stored_count += 1;
-                }
-                Err(e) => {
-                    eprintln!("❌ Failed to store {}: {}", truncated_title, e);
-                }
+            // Use the same typed persistence/seeding path as provider sync.
+            // Omitting event_type here used to turn numeric questions into YES/NO.
+            match crate::market_import::upsert_market(pool, topic_id, &market, false).await {
+                Ok(crate::market_import::PersistOutcome::Created) => stored_count += 1,
+                Ok(_) => {}
+                Err(e) => eprintln!("Failed to store {}: {}", market.title, e),
             }
         }
 
@@ -621,6 +593,117 @@ pub async fn manual_category_sync(pool: &PgPool, categories: Vec<&str>) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires a disposable migrated PostgreSQL database in NUMERIC_REPAIR_TEST_URL"]
+    async fn legacy_numeric_regression() -> Result<()> {
+        use crate::market_import::repair_legacy_numeric_market;
+        let pool = PgPool::connect(&std::env::var("NUMERIC_REPAIR_TEST_URL")?).await?;
+        let db: String = sqlx::query_scalar("SELECT current_database()")
+            .fetch_one(&pool)
+            .await?;
+        assert!(db.ends_with("_test"), "use a disposable test database");
+        let client = client();
+        for (fixture, kind, count) in [
+            (NUMERIC_QUESTION_JSON, "numeric", 50i64),
+            (DISCRETE_QUESTION_JSON, "numeric", 52),
+            (MC_QUESTION_JSON, "multiple_choice", 9),
+        ] {
+            let (question, post) = make_post(fixture);
+            assert_eq!(
+                client
+                    .store_questions_in_db(&pool, vec![(question.clone(), post.clone())])
+                    .await?,
+                1
+            );
+            let row = sqlx::query("SELECT e.id,e.event_type FROM events e JOIN event_external_sources s ON s.event_id=e.id WHERE s.source='metaculus' AND s.external_id=$1")
+                .bind(question.id.to_string()).fetch_one(&pool).await?;
+            let id: i32 = row.get("id");
+            assert_eq!(row.get::<String, _>("event_type"), kind);
+            let actual: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM event_outcomes WHERE event_id=$1")
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await?;
+            assert_eq!(actual, count);
+            assert_eq!(
+                client
+                    .store_questions_in_db(&pool, vec![(question, post)])
+                    .await?,
+                0
+            );
+        }
+        let (q, post) = make_post(NUMERIC_QUESTION_JSON);
+        let mut market = client.convert_to_imported_market(&q, &post);
+        market.external_id = "40904".to_string();
+        market.numeric_range_min = Some(30.0);
+        market.numeric_range_max = Some(70.0);
+        market.numeric_open_lower = true;
+        market.numeric_open_upper = true;
+        market.numeric_unit = Some("%".to_string());
+        let id: i32 = sqlx::query_scalar("INSERT INTO events (title,details,closing_date,event_type) VALUES ('legacy turnout','Metaculus ID: 40904\nType: numeric',NOW()+INTERVAL '1 year','binary') RETURNING id")
+            .fetch_one(&pool).await?;
+        for label in ["YES", "NO"] {
+            sqlx::query("INSERT INTO event_outcomes(event_id,outcome_key,label,sort_order) VALUES ($1,$2,$2,0)")
+                .bind(id).bind(label).execute(&pool).await?;
+        }
+        // Wrong question ID must not change the event.
+        market.external_id = "4090".to_string();
+        assert!(repair_legacy_numeric_market(&pool, id, &market, true)
+            .await
+            .is_err());
+        market.external_id = "40904".to_string();
+        // Invalid bounds must roll back deletion of the old YES/NO rows.
+        market.numeric_range_max = Some(20.0);
+        assert!(repair_legacy_numeric_market(&pool, id, &market, true)
+            .await
+            .is_err());
+        market.numeric_range_max = Some(70.0);
+        repair_legacy_numeric_market(&pool, id, &market, false).await?;
+        let kind: String = sqlx::query_scalar("SELECT event_type FROM events WHERE id=$1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(kind, "binary");
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM event_outcomes WHERE event_id=$1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(count, 2);
+        // Even historical predictions disallow conversion.
+        let user_id: i32 = sqlx::query_scalar("INSERT INTO users(username,email,password_hash) VALUES ('numeric_repair_test','numeric-repair@example.invalid','unused') RETURNING id")
+            .fetch_one(&pool).await?;
+        sqlx::query(
+            "INSERT INTO user_shares(user_id,event_id,yes_shares,no_shares) VALUES ($1,$2,1,0)",
+        )
+        .bind(user_id)
+        .bind(id)
+        .execute(&pool)
+        .await?;
+        assert!(repair_legacy_numeric_market(&pool, id, &market, true)
+            .await
+            .is_err());
+        sqlx::query("DELETE FROM user_shares WHERE event_id=$1")
+            .bind(id)
+            .execute(&pool)
+            .await?;
+        repair_legacy_numeric_market(&pool, id, &market, true).await?;
+        repair_legacy_numeric_market(&pool, id, &market, true).await?;
+        let config = sqlx::query("SELECT range_min,range_max,bin_count,unit,open_lower_bound,open_upper_bound FROM numeric_market_config WHERE event_id=$1").bind(id).fetch_one(&pool).await?;
+        assert_eq!(config.get::<f64, _>("range_min"), 30.0);
+        assert_eq!(config.get::<f64, _>("range_max"), 70.0);
+        assert_eq!(config.get::<i32, _>("bin_count"), 50);
+        assert_eq!(config.get::<String, _>("unit"), "%");
+        assert!(
+            config.get::<bool, _>("open_lower_bound") && config.get::<bool, _>("open_upper_bound")
+        );
+        let row = sqlx::query("SELECT COUNT(*) AS n,SUM(s.prob)::float8 AS p FROM event_outcomes o JOIN event_outcome_states s ON s.outcome_id=o.id WHERE o.event_id=$1")
+            .bind(id).fetch_one(&pool).await?;
+        assert_eq!(row.get::<i64, _>("n"), 52);
+        assert!((row.get::<f64, _>("p") - 1.0).abs() < 1e-12);
+        Ok(())
+    }
 
     // Trimmed to the fields MetaculusQuestion deserializes; live-verified
     // 2026-07-14 against https://www.metaculus.com/api/posts/44539/

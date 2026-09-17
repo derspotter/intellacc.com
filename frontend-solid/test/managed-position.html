@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Managed position UI test</title></head>
+  <body>
+    <main id="fixture" style="max-width:640px;margin:24px auto;padding:12px"></main>
+    <script type="module">
+      import { createComponent, createSignal } from 'solid-js';
+      import { render } from 'solid-js/web';
+      import MarketEventCard from '/src/components/predictions/MarketEventCard.jsx';
+      import { TradeTicket } from '/src/components/market/MarketDetail.jsx';
+      import '/src/styles.css';
+      const terminal = new URLSearchParams(location.search).get('skin') === 'terminal';
+      document.body.dataset.skin = terminal ? 'terminal' : 'van';
+      const [market, setMarket] = createSignal({ id: 7001, title: 'Will the project finish this year?', event_type: 'binary',
+        market_prob: 0.2, liquidity_b: 5000, cumulative_stake: 3465.74, closing_date: '2099-01-01T00:00:00Z' });
+      window.moveMarketPrice = (price) => setMarket({ ...market(), market_prob: price });
+      render(() => createComponent(terminal ? TradeTicket : MarketEventCard,
+        terminal ? { market } : { get event() { return market(); } }), document.getElementById('fixture'));
+    </script>
+  </body>
+</html>

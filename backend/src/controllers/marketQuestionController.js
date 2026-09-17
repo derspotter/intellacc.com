@@ -16,8 +16,9 @@ const VALIDATOR_PAYOUT_RP = 5n; // Total returned to winning-side validators (in
 const CREATOR_APPROVAL_REWARD_RP = 10n;
 const CREATOR_TRACTION_REWARD_RP = 10n;
 const CREATOR_RESOLUTION_REWARD_RP = 10n;
-const REQUIRED_VALIDATORS = 5;
-const REQUIRED_APPROVALS = 4;
+// Bootstrap phase: one independent approval is enough.
+const REQUIRED_VALIDATORS = 1;
+const REQUIRED_APPROVALS = 1;
 const TRACTION_MIN_BETTORS = 10;
 const TRACTION_MIN_STAKE_LEDGER = 100n * LEDGER_SCALE; // 100 RP
 
@@ -462,6 +463,104 @@ exports.getReviewQueue = async (req, res) => {
   }
 };
 
+// Caller holds the submission row lock and owns the transaction.
+const finalizeSubmission = async (client, submission, { totalReviews, approvals, rejections }, approved, refundReviewers = false) => {
+  const submissionId = submission.id;
+  const validatorPayoutLedger = toLedgerString(VALIDATOR_PAYOUT_RP);
+  const finalStatus = approved ? 'approved' : 'rejected';
+  const winningVote = approved ? 'approve' : 'reject';
+  let approvedEventId = null;
+
+  if (approved) {
+    const submissionEventType = submission.event_type || 'binary';
+    const eventRes = await client.query(
+      `INSERT INTO events (title, details, closing_date, category, event_type)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [submission.title, submission.details, submission.closing_date, submission.category, submissionEventType]
+    );
+    approvedEventId = eventRes.rows[0].id;
+
+    if (submissionEventType !== 'binary' && Array.isArray(submission.outcome_rows)) {
+      await seedEventOutcomes(client, approvedEventId, submissionEventType, submission.outcome_rows);
+    }
+
+    const creatorApprovalPayoutLedger = (
+      BigInt(submission.creator_bond_ledger || 0) + toLedger(CREATOR_APPROVAL_REWARD_RP)
+    ).toString();
+
+    await client.query(
+      `UPDATE users
+       SET rp_balance_ledger = rp_balance_ledger + $1::bigint
+       WHERE id = $2`,
+      [creatorApprovalPayoutLedger, submission.creator_user_id]
+    );
+  }
+
+  if (refundReviewers) {
+    // Administrative decisions return review stakes rather than scoring votes.
+    await client.query(`WITH refunded AS (
+      UPDATE market_question_reviews SET payout_ledger = stake_ledger, settled_at = NOW()
+      WHERE submission_id = $1 AND settled_at IS NULL RETURNING reviewer_user_id, stake_ledger
+    ) UPDATE users SET rp_balance_ledger = rp_balance_ledger + refunded.stake_ledger
+      FROM refunded WHERE users.id = refunded.reviewer_user_id`, [submissionId]);
+  } else {
+  await client.query(
+    `UPDATE market_question_reviews
+     SET payout_ledger = CASE WHEN vote = $2 THEN $3::bigint ELSE 0 END,
+         settled_at = NOW()
+     WHERE submission_id = $1`,
+    [submissionId, winningVote, validatorPayoutLedger]
+  );
+
+  await client.query(
+    `UPDATE users
+     SET rp_balance_ledger = rp_balance_ledger + $2::bigint
+     WHERE id IN (
+       SELECT reviewer_user_id
+       FROM market_question_reviews
+       WHERE submission_id = $1 AND vote = $3
+     )`,
+    [submissionId, validatorPayoutLedger, winningVote]
+  );
+
+  }
+
+  const finalizedRes = await client.query(
+    `UPDATE market_question_submissions
+     SET status = $2,
+         total_reviews = $3,
+         approvals = $4,
+         rejections = $5,
+         approved_event_id = $6,
+         creator_approval_reward_paid = $7,
+         finalized_at = NOW(),
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [submissionId, finalStatus, totalReviews, approvals, rejections, approvedEventId, approved]
+  );
+
+  // Proposed from a post: link that post to the new market so the chip
+  // appears without a manual attach. The proposer's relation to the post
+  // decides the provenance the link carries.
+  if (approved && approvedEventId && submission.source_post_id) {
+    const postRes = await client.query('SELECT user_id FROM posts WHERE id = $1', [submission.source_post_id]);
+    if (postRes.rows.length > 0) {
+      const linkSource = postRes.rows[0].user_id === submission.creator_user_id ? 'author_confirmed' : 'reader_suggested';
+      await client.query(
+        `INSERT INTO post_market_links (post_id, event_id, stance, source, confirmed, match_method, confirmed_count)
+         VALUES ($1, $2, 'related', $3, TRUE, 'manual', 1)
+         ON CONFLICT (post_id, event_id) DO NOTHING`,
+        [submission.source_post_id, approvedEventId, linkSource]
+      );
+    }
+  }
+
+
+  return { approvedEventId, submission: normalizeSubmission(finalizedRes.rows[0]) };
+};
+
 exports.submitReview = async (req, res) => {
   const reviewerUserId = req.user.id;
   const submissionId = Number(req.params.id);
@@ -476,7 +575,6 @@ exports.submitReview = async (req, res) => {
 
   const validatorStakeLedger = toLedgerString(VALIDATOR_STAKE_RP);
   const validatorPayoutLedger = toLedgerString(VALIDATOR_PAYOUT_RP);
-  const creatorApprovalRewardLedger = toLedgerString(CREATOR_APPROVAL_REWARD_RP);
 
   const client = await db.getPool().connect();
   try {
@@ -565,85 +663,9 @@ exports.submitReview = async (req, res) => {
     }
 
     const approved = approvals >= requiredApprovals;
-    const finalStatus = approved ? 'approved' : 'rejected';
-    const winningVote = approved ? 'approve' : 'reject';
-    let approvedEventId = null;
-
-    if (approved) {
-      const submissionEventType = submission.event_type || 'binary';
-      const eventRes = await client.query(
-        `INSERT INTO events (title, details, closing_date, category, event_type)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id`,
-        [submission.title, submission.details, submission.closing_date, submission.category, submissionEventType]
-      );
-      approvedEventId = eventRes.rows[0].id;
-
-      if (submissionEventType !== 'binary' && Array.isArray(submission.outcome_rows)) {
-        await seedEventOutcomes(client, approvedEventId, submissionEventType, submission.outcome_rows);
-      }
-
-      const creatorApprovalPayoutLedger = (
-        BigInt(submission.creator_bond_ledger || 0) + toLedger(CREATOR_APPROVAL_REWARD_RP)
-      ).toString();
-
-      await client.query(
-        `UPDATE users
-         SET rp_balance_ledger = rp_balance_ledger + $1::bigint
-         WHERE id = $2`,
-        [creatorApprovalPayoutLedger, submission.creator_user_id]
-      );
-    }
-
-    await client.query(
-      `UPDATE market_question_reviews
-       SET payout_ledger = CASE WHEN vote = $2 THEN $3::bigint ELSE 0 END,
-           settled_at = NOW()
-       WHERE submission_id = $1`,
-      [submissionId, winningVote, validatorPayoutLedger]
+    const { approvedEventId, submission: finalizedSubmission } = await finalizeSubmission(
+      client, submission, { totalReviews, approvals, rejections }, approved
     );
-
-    await client.query(
-      `UPDATE users
-       SET rp_balance_ledger = rp_balance_ledger + $2::bigint
-       WHERE id IN (
-         SELECT reviewer_user_id
-         FROM market_question_reviews
-         WHERE submission_id = $1 AND vote = $3
-       )`,
-      [submissionId, validatorPayoutLedger, winningVote]
-    );
-
-    const finalizedRes = await client.query(
-      `UPDATE market_question_submissions
-       SET status = $2,
-           total_reviews = $3,
-           approvals = $4,
-           rejections = $5,
-           approved_event_id = $6,
-           creator_approval_reward_paid = $7,
-           finalized_at = NOW(),
-           updated_at = NOW()
-       WHERE id = $1
-       RETURNING *`,
-      [submissionId, finalStatus, totalReviews, approvals, rejections, approvedEventId, approved]
-    );
-
-    // Proposed from a post: link that post to the new market so the chip
-    // appears without a manual attach. The proposer's relation to the post
-    // decides the provenance the link carries.
-    if (approved && approvedEventId && submission.source_post_id) {
-      const postRes = await client.query('SELECT user_id FROM posts WHERE id = $1', [submission.source_post_id]);
-      if (postRes.rows.length > 0) {
-        const linkSource = postRes.rows[0].user_id === submission.creator_user_id ? 'author_confirmed' : 'reader_suggested';
-        await client.query(
-          `INSERT INTO post_market_links (post_id, event_id, stance, source, confirmed, match_method, confirmed_count)
-           VALUES ($1, $2, 'related', $3, TRUE, 'manual', 1)
-           ON CONFLICT (post_id, event_id) DO NOTHING`,
-          [submission.source_post_id, approvedEventId, linkSource]
-        );
-      }
-    }
 
     await client.query('COMMIT');
 
@@ -659,7 +681,7 @@ exports.submitReview = async (req, res) => {
       finalized: true,
       approved,
       approved_event_id: approvedEventId,
-      submission: normalizeSubmission(finalizedRes.rows[0]),
+      submission: finalizedSubmission,
       payouts: {
         creator_approval_reward_rp: approved ? Number(CREATOR_APPROVAL_REWARD_RP) : 0,
         validator_payout_rp: Number(VALIDATOR_PAYOUT_RP),
@@ -876,5 +898,43 @@ exports.runAutomaticRewards = async (_req, res) => {
     res.status(500).json({ success: false, message: err.message || 'Failed to run automatic rewards' });
   } finally {
     client.release();
+  }
+};
+
+// Administrative publication is an audited decision, not a fabricated community vote.
+exports.adminDecision = async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: 'Invalid submission id' });
+  const approved = req.params.decision === 'publish';
+  if (!['publish', 'reject'].includes(req.params.decision)) return res.status(400).json({ message: 'Invalid decision' });
+  let client;
+  try {
+    client = await db.getPool().connect();
+    await client.query('BEGIN');
+    const result = await client.query("SELECT *, closing_date <= NOW() AT TIME ZONE 'UTC' AS expired FROM market_question_submissions WHERE id = $1 FOR UPDATE", [id]);
+    const submission = result.rows[0];
+    if (!submission) throw httpError(404, 'Submission not found');
+    if (submission.status !== 'pending') throw httpError(409, `Submission is already ${submission.status}`);
+    if (approved && submission.expired && req.body?.acknowledge_expired !== true) {
+      throw httpError(409, 'This proposal has expired. Confirm publication as an already closed market.');
+    }
+    const tally = await client.query(`SELECT COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE vote = 'approve')::int AS approvals,
+      COUNT(*) FILTER (WHERE vote = 'reject')::int AS rejections
+      FROM market_question_reviews WHERE submission_id = $1`, [id]);
+    const row = tally.rows[0];
+    const finalized = await finalizeSubmission(client, submission, {
+      totalReviews: Number(row.total), approvals: Number(row.approvals), rejections: Number(row.rejections)
+    }, approved, true);
+    await client.query(`UPDATE market_question_submissions
+      SET admin_reviewed_by = $2, admin_reviewed_at = NOW() WHERE id = $1`, [id, req.user.id]);
+    await client.query('COMMIT');
+    if (approved) eventEnrichmentService.enrichEventInBackground({ id: finalized.approvedEventId, title: submission.title, details: submission.details });
+    return res.json({ submission: finalized.submission, approved_event_id: finalized.approvedEventId });
+  } catch (err) {
+    if (client) await client.query('ROLLBACK');
+    return res.status(err.status || 500).json({ message: err.message || 'Publication failed' });
+  } finally {
+    client?.release();
   }
 };

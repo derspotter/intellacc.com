@@ -515,32 +515,38 @@ exports.resolveEvent = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "Provide one of: outcome ('yes'/'no'), outcome_id, or numerical_outcome" });
   }
 
-  const existingEvent = await db.query('SELECT id, outcome, event_type FROM events WHERE id = $1', [eventId]);
-  if (existingEvent.rows.length === 0) {
-    return res.status(404).json({ message: 'Event not found' });
-  }
-  if (existingEvent.rows[0].outcome) {
-    return res.status(409).json({ message: 'Event already resolved' });
-  }
-
-  let settled;
+  const client = await db.getPool().connect();
   try {
-    settled = await require('../services/marketSettlementService').settleEvent(eventId, {
+    await client.query('BEGIN');
+    // Serialize direct settlement with creation of a community proposal.
+    // Do not lock the events row: the separate engine transaction needs it.
+    await client.query('SELECT pg_advisory_xact_lock(73109, $1)', [eventId]);
+    const existingEvent = await client.query('SELECT id, outcome, event_type FROM events WHERE id = $1', [eventId]);
+    if (!existingEvent.rows.length || existingEvent.rows[0].outcome) {
+      await client.query('ROLLBACK');
+      return res.status(existingEvent.rows.length ? 409 : 404).json({ message: existingEvent.rows.length ? 'Event already resolved' : 'Event not found' });
+    }
+    const active = await client.query(`SELECT id FROM market_resolution_proposals
+      WHERE event_id = $1 AND status IN ('voting', 'challenge_window', 'escalated') LIMIT 1`, [eventId]);
+    if (active.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'A community resolution is active. Refresh the dashboard and use its admin ruling.', proposal_id: active.rows[0].id });
+    }
+    const settled = await require('../services/marketSettlementService').settleEvent(eventId, {
       outcome: outcomeValue,
       outcomeId: hasOutcomeId ? outcomeId : null,
       numericalOutcome: hasNumericalOutcome ? numericalValue : null
     }, req.app.get('io'));
+    await client.query('COMMIT');
+    return res.status(200).json({ event: settled.event, message: settled.engineResult.message || `Market ${eventId} resolved` });
   } catch (err) {
-    if (err.status) {
-      return res.status(err.status).json(err.body || { message: err.message });
-    }
+    await client.query('ROLLBACK');
+    if (err.status) return res.status(err.status).json(err.body || { message: err.message });
     throw err;
+  } finally {
+    client.release();
   }
 
-  return res.status(200).json({
-    event: settled.event,
-    message: settled.engineResult.message || `Market ${eventId} resolved`
-  });
 });
 
 // Get assigned predictions for current user

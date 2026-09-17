@@ -3,6 +3,23 @@
 // price there is no edge to trade on, so no side is derived.
 export const TRADE_EPS = 0.005;
 
+// Pointer slider movements snap. Typed percentages stay exact.
+export const snapBeliefToMarket = (belief, marketProb) => {
+  const market = Number(marketProb);
+  return market >= 0.01 && market <= 0.99 && Math.abs(belief - market) <= 0.01 + Number.EPSILON
+    ? market
+    : belief;
+};
+
+export const parseBeliefPercent = (text) => {
+  if (String(text).trim() === '') return null;
+  const value = Number(text);
+  return Number.isFinite(value) && value >= 1 && value <= 99 ? value / 100 : null;
+};
+
+export const formatBeliefPercent = (belief, marketProb) =>
+  belief === marketProb ? (belief * 100).toFixed(1) : String(Number((belief * 100).toFixed(4)));
+
 export const deriveTradeSide = (belief, marketProb, eps = TRADE_EPS) => {
   const b = Number(belief);
   const p = Number(marketProb);

@@ -273,12 +273,13 @@ pub async fn update_market(
     }
 
     with_optimistic_tx!(pool, tx, {
+        crate::managed_positions::ensure_manual(&mut tx, user_id, update.event_id).await?;
         update_market_transaction(&mut tx, config, user_id, &update).await
     })
 }
 
 // Internal transaction logic extracted for concurrency control
-async fn update_market_transaction(
+pub(crate) async fn update_market_transaction(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     config: &Config,
     user_id: i32,
@@ -812,12 +813,13 @@ pub async fn sell_shares(
     }
 
     with_optimistic_tx!(pool, tx, {
+        crate::managed_positions::ensure_manual(&mut tx, user_id, event_id).await?;
         sell_shares_transaction(&mut tx, config, user_id, event_id, side, amount).await
     })
 }
 
 // Internal transaction logic for sell_shares
-async fn sell_shares_transaction(
+pub(crate) async fn sell_shares_transaction(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     config: &Config,
     user_id: i32,

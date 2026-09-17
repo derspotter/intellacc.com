@@ -48,10 +48,11 @@ export const stakeForFraction = (fullKelly, fraction, balance) => {
  * Track background for the belief slider: NO colour at 0, neutral exactly at
  * the current market price, YES colour at 1. The neutral spot therefore moves
  * with the market, and distance from it is the user's edge.
+ * A black tick marks the market price, independent of the user's handle.
  */
 export const beliefTrackGradient = (marketProb, { no, mid, yes }) => {
   const p = toFinite(marketProb, 0.5);
   const clamped = Math.min(1, Math.max(0, p));
   const pct = Math.round(clamped * 1000) / 10;
-  return `linear-gradient(to right, ${no} 0%, ${mid} ${pct}%, ${yes} 100%)`;
+  return `linear-gradient(#000, #000) calc(${pct}% - 1px) center / 2px 100% no-repeat, linear-gradient(to right, ${no} 0%, ${mid} ${pct}%, ${yes} 100%)`;
 };

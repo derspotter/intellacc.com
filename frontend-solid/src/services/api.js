@@ -615,6 +615,7 @@ export const api = {
 
   // Community market question workflow
   marketQuestions: {
+    update: (id, payload) => request(`/market-questions/${id}`, { method: 'PATCH', body: payload }),
     getConfig: () =>
       request('/market-questions/config'),
 
@@ -652,6 +653,9 @@ export const api = {
   },
 
   resolutionProposals: {
+    assignmentQueue: () => request('/resolution-proposals/assignment-queue'),
+    declineAssignment: (id) =>
+      request(`/resolution-proposals/assignments/${id}/decline`, { method: 'POST' }),
     getConfig: () => request('/resolution-proposals/config'),
     getForEvent: (eventId) => request(`/events/${eventId}/resolution-proposal`),
     create: (eventId, payload) =>
@@ -727,6 +731,12 @@ export const api = {
 
     getKelly: (eventId, belief) =>
       request(`/events/${eventId}/kelly?belief=${encodeURIComponent(belief)}`),
+
+    getManagedPosition: (eventId) =>
+      request(`/events/${eventId}/managed-position`),
+
+    setManagedPosition: (eventId, policy) =>
+      request(`/events/${eventId}/managed-position`, { method: 'POST', body: policy }),
 
     update: (eventId, { stake, target_prob }) =>
       request(`/events/${eventId}/update`, { method: 'POST', body: { stake, target_prob } }),
@@ -1312,3 +1322,13 @@ export const getUiPreferences = () => api.users.getUiPreferences();
 export const updateUiPreferences = (skin) => api.users.updateUiPreferences(skin);
 
 export { requestBlob };
+
+export const getAdminMarketQueue = (params) => request(`/admin/markets?${new URLSearchParams(params)}`);
+export const publishAdminMarket = (id, acknowledgeExpired = false) => request(`/admin/markets/proposals/${id}/publish`, {
+  method: 'POST', body: { acknowledge_expired: acknowledgeExpired }
+});
+export const ruleOnAdminResolution = (id, body) => request(`/resolution-proposals/${id}/admin-ruling`, { method: 'POST', body });
+
+export const rejectAdminMarket = (id) => request(`/admin/markets/proposals/${id}/reject`, { method: 'POST' });
+
+export const updateMarketQuestion = (id, payload) => api.marketQuestions.update(id, payload);

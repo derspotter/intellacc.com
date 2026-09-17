@@ -63,15 +63,12 @@ const isAdminViewer = (req) => req.user?.role === 'admin';
 const MAX_REPOST_CHAIN_DEPTH = 8;
 
 // --- Blended home feed -------------------------------------------------------
-// The feed is not follow-only. Three scoped sources are blended, in priority
-// order, and a global fall-through keeps thin feeds from rendering blank:
+// All users' visible posts are eligible. Follow and topic relationships label
+// the source for the client without restricting which authors can appear.
 //   following    — people you follow (and yourself)
 //   topic_market — posts tied to a market carrying one of your topics
 //   topic_user   — posts by users who share at least one topic with you
-//   global       — everyone, included only while the scoped sources are thin
-// Below this many scoped posts the fall-through turns on. The decision is made
-// once per feed and carried in the cursor so paging stays consistent.
-const FEED_GLOBAL_FALLTHROUGH_MIN = 10;
+//   global       — everyone else
 
 const FEED_MY_TOPICS = '(SELECT ut_me.topic_id FROM user_topics ut_me WHERE ut_me.user_id = $1)';
 
@@ -96,11 +93,6 @@ const buildFeedSourceExpression = () => `CASE
                 WHEN ${FEED_SOURCE_CONDITIONS.topic_user} THEN 'topic_user'
                 ELSE 'global'
               END AS feed_source`;
-
-const buildFeedScopeClause = () =>
-  `(${FEED_SOURCE_CONDITIONS.following}
-        OR ${FEED_SOURCE_CONDITIONS.topic_market}
-        OR ${FEED_SOURCE_CONDITIONS.topic_user})`;
 
 const buildPostVisibilityClauseForAlias = (postAlias = 'p', viewerIdParamName = '$3') => {
   return `
@@ -231,8 +223,8 @@ const parsePostCursor = (cursorRaw, scope) => {
     if (!Number.isFinite(createdAt.getTime()) || !Number.isInteger(id)) {
       throw new Error('Invalid cursor');
     }
-    // `g` carries the feed's global-fall-through decision across pages.
-    return { createdAt, id, includeGlobal: decoded.g === true };
+    // Legacy cursors may contain `g`; all feeds now include global posts.
+    return { createdAt, id };
   } catch {
     return null;
   }
@@ -993,7 +985,7 @@ exports.deletePost = async (req, res) => {
   }
 };
 
-// Get personalized feed of posts from followed users
+// Get the single home feed with visible posts from all users
 exports.getFeed = async (req, res) => {
   const userId = req.user.id; // Using standardized user object
   const viewerId = isAdminViewer(req) ? null : userId;
@@ -1006,7 +998,7 @@ exports.getFeed = async (req, res) => {
       return res.status(400).json({ message: 'Invalid cursor' });
     }
 
-    // $1 = the authenticated user (feed scoping, likes, reposts); $3 = nullable
+    // $1 = the authenticated user (source labels, likes, reposts); $3 = nullable
     // viewer id for the block-visibility clause only (NULL = admin bypass).
     const params = [userId, limit + 1, viewerId];
     const baseClauses = [
@@ -1015,27 +1007,7 @@ exports.getFeed = async (req, res) => {
       buildPostVisibilityClause('$3')
     ];
 
-    // Decide once per feed whether the global fall-through is on: with few
-    // scoped posts a follow/topic-only feed would render near-blank. Later
-    // pages inherit the decision from the cursor so paging cannot flip mid-scroll.
-    let includeGlobal;
-    if (cursor) {
-      includeGlobal = cursor.includeGlobal;
-    } else {
-      const scopedCount = await db.query(
-        `SELECT COUNT(*)::int AS count FROM (
-           SELECT 1
-           FROM posts p
-           JOIN users u ON p.user_id = u.id
-           WHERE ${[buildFeedScopeClause(), ...baseClauses].join('\n             AND ')}
-           LIMIT $2
-         ) scoped`,
-        [userId, FEED_GLOBAL_FALLTHROUGH_MIN, viewerId]
-      );
-      includeGlobal = Number(scopedCount.rows[0]?.count || 0) < FEED_GLOBAL_FALLTHROUGH_MIN;
-    }
-
-    const whereClauses = includeGlobal ? [...baseClauses] : [buildFeedScopeClause(), ...baseClauses];
+    const whereClauses = [...baseClauses];
 
     if (searchQuery) {
       const term = `%${searchQuery}%`;
@@ -1117,7 +1089,7 @@ exports.getFeed = async (req, res) => {
       ? Buffer.from(JSON.stringify({
         createdAt: new Date(last.created_at).toISOString(),
         id: last.id,
-        g: includeGlobal
+        g: true
       })).toString('base64url')
       : null;
 
@@ -1132,8 +1104,7 @@ exports.getFeed = async (req, res) => {
       });
     }
 
-    // The blended sources plus the global fall-through replace the old
-    // discover-mode payload: there is no separate feed to switch into.
+    // All sources share one feed, with no separate discover payload.
     res.status(200).json({ items, hasMore, nextCursor });
   } catch (err) {
     console.error("Error getting feed:", err);

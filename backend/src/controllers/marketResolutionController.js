@@ -5,11 +5,17 @@
 // timeouts escalate to admin. Mirrors marketQuestionController's economics.
 const db = require('../db');
 const { settleEvent } = require('../services/marketSettlementService');
+const assignmentService = require('../services/resolutionAssignmentService');
+const {
+  LEDGER_SCALE,
+  PROPOSER_STAKE_RP,
+  PROPOSER_COOLDOWN_DAYS,
+  ACTIVITY_DAYS,
+  toLedgerString,
+  involvementSql,
+  isUserInvolved
+} = require('../utils/marketResolutionEligibility');
 
-const LEDGER_SCALE = 1_000_000n;
-// Resolution moves real market payouts, so its stakes sit far above the
-// 10 RP question-creation bond: propose at 50, judge at 10.
-const PROPOSER_STAKE_RP = 50n;
 const PROPOSER_REWARD_RP = 10n; // Paid on top of the refund when confirmed
 const VOTER_STAKE_RP = 10n;
 const VOTER_PAYOUT_RP = 25n; // Returned to winning-side voters (includes stake)
@@ -18,32 +24,8 @@ const CONFIRMS_TO_PASS = 3;
 const REJECTS_TO_ESCALATE = 2;
 const VOTING_WINDOW_HOURS = 72;
 const CHALLENGE_WINDOW_HOURS = 24;
-const JURY_ACTIVITY_DAYS = 7;
-const PROPOSER_COOLDOWN_DAYS = 7;
-
-const toLedgerString = (rp) => (rp * LEDGER_SCALE).toString();
-
-// A user is "involved" in a market when they hold shares, traded it, or
-// predicted on it — involvement disqualifies both proposing and jury duty.
-const INVOLVEMENT_SQL = `(
-  EXISTS (SELECT 1 FROM user_shares x WHERE x.event_id = $EVENT AND x.user_id = $USER)
-  OR EXISTS (SELECT 1 FROM user_outcome_shares x WHERE x.event_id = $EVENT AND x.user_id = $USER)
-  OR EXISTS (SELECT 1 FROM market_updates x WHERE x.event_id = $EVENT AND x.user_id = $USER)
-  OR EXISTS (SELECT 1 FROM market_outcome_updates x WHERE x.event_id = $EVENT AND x.user_id = $USER)
-  OR EXISTS (SELECT 1 FROM distribution_trades x WHERE x.event_id = $EVENT AND x.user_id = $USER)
-  OR EXISTS (SELECT 1 FROM predictions x WHERE x.event_id = $EVENT AND x.user_id = $USER)
-)`;
-
-const involvementSql = (eventParam, userParam) =>
-  INVOLVEMENT_SQL.replaceAll('$EVENT', eventParam).replaceAll('$USER', userParam);
-
-const isUserInvolved = async (client, eventId, userId) => {
-  const res = await client.query(
-    `SELECT ${involvementSql('$1', '$2')} AS involved`,
-    [eventId, userId]
-  );
-  return res.rows[0].involved === true;
-};
+// Jury duty and proposer assignment share one activity window.
+const JURY_ACTIVITY_DAYS = ACTIVITY_DAYS;
 
 const normalizeProposal = (row) => ({
   id: row.id,
@@ -84,6 +66,7 @@ exports.createProposal = async (req, res) => {
   const client = await db.getPool().connect();
   try {
     await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(73109, $1)', [eventId]);
 
     const eventRes = await client.query(
       'SELECT id, outcome, closing_date, event_type FROM events WHERE id = $1 FOR UPDATE',
@@ -185,8 +168,21 @@ exports.createProposal = async (req, res) => {
       );
     }
 
+    // Any valid proposal retires this market's pending assignment in the same
+    // transaction: completed when the assignee proposed, cancelled when a
+    // volunteer beat them to it (volunteers are never blocked by assignment).
+    const assignment = await assignmentService.settleAssignmentsForProposal(client, {
+      eventId,
+      proposerUserId,
+      proposalId: proposal.id
+    });
+
     await client.query('COMMIT');
-    return res.status(201).json({ proposal: normalizeProposal(proposal), jurors: jurorIds.length });
+    return res.status(201).json({
+      proposal: normalizeProposal(proposal),
+      jurors: jurorIds.length,
+      assignment_completed: assignment.completed > 0
+    });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error creating resolution proposal:', err);
@@ -426,6 +422,16 @@ exports.sweepDueProposals = async (io = null) => {
   );
   stats.escalated = timedOut.rows.length;
 
+  // Same daily pass hands unproposed closed markets to random eligible users
+  // and retires assignments that expired or lost their market.
+  try {
+    stats.assignments = await assignmentService.runAssignmentSweep();
+  } catch (err) {
+    stats.errors += 1;
+    stats.assignments = { error: err.message };
+    console.error('Resolution sweep: assignment pass failed:', err.message);
+  }
+
   return stats;
 };
 
@@ -600,6 +606,44 @@ exports.getConfig = (req, res) => {
     votingWindowHours: VOTING_WINDOW_HOURS,
     challengeWindowHours: CHALLENGE_WINDOW_HOURS,
     juryActivityDays: JURY_ACTIVITY_DAYS,
-    proposerCooldownDays: PROPOSER_COOLDOWN_DAYS
+    proposerCooldownDays: PROPOSER_COOLDOWN_DAYS,
+    assignmentWindowHours: assignmentService.ASSIGNMENT_WINDOW_HOURS,
+    maxActiveAssignmentsPerUser: assignmentService.MAX_ACTIVE_ASSIGNMENTS_PER_USER,
+    assignmentReassignExclusionDays: assignmentService.REASSIGN_EXCLUSION_DAYS
   });
+};
+
+// Assignment queue: markets this user was randomly asked to resolve.
+// Reads run a small, best-effort maintenance pass first, so a queue that the
+// cron has not swept yet still shows only live, still-eligible assignments.
+exports.getAssignmentQueue = async (req, res) => {
+  try {
+    await assignmentService.runQueueMaintenance();
+    return res.json(await assignmentService.listAssignmentsForUser(req.user.id));
+  } catch (err) {
+    console.error('Error loading resolution assignment queue:', err);
+    return res.status(500).json({ message: 'Failed to load resolution assignments' });
+  }
+};
+
+// Hand an assignment back. Owner-only; the market is immediately re-drawn to
+// someone else (this user is skipped for it for the exclusion window).
+exports.declineAssignment = async (req, res) => {
+  const assignmentId = Number(req.params.id);
+  if (!Number.isInteger(assignmentId) || assignmentId <= 0) {
+    return res.status(400).json({ message: 'Invalid assignment id' });
+  }
+  try {
+    const result = await assignmentService.declineAssignment({
+      userId: req.user.id,
+      assignmentId
+    });
+    if (result.status === 200 && result.eventId) {
+      await assignmentService.runQueueMaintenance({ eventIds: [result.eventId] });
+    }
+    return res.status(result.status).json(result.body);
+  } catch (err) {
+    console.error('Error declining resolution assignment:', err);
+    return res.status(500).json({ message: 'Failed to decline assignment' });
+  }
 };

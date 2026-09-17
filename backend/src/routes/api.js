@@ -292,6 +292,8 @@ router.patch("/events/:id", authenticateJWT, requireAdmin, predictionsController
 router.put("/events/:id/outcomes", authenticateJWT, requireAdmin, predictionsController.setEventOutcomes);
 router.get("/predictions", authenticateJWT, predictionsController.getUserPredictions);
 
+router.use('/admin/markets', require('./adminMarkets'));
+
 // Community market question submission + validation
 router.get('/market-questions/config', authenticateJWT, marketQuestionController.getConfig);
 router.post('/market-questions', authenticateJWT, marketQuestionController.createSubmission);
@@ -299,6 +301,7 @@ router.get('/market-questions', authenticateJWT, marketQuestionController.listSu
 router.get('/market-questions/review-queue', authenticateJWT, marketQuestionController.getReviewQueue);
 router.post('/market-questions/rewards/run', authenticateJWT, requireAdmin, marketQuestionController.runAutomaticRewards);
 router.get('/market-questions/:id', authenticateJWT, marketQuestionController.getSubmission);
+router.patch('/market-questions/:id', authenticateJWT, require('../controllers/marketQuestionEditController').updateSubmission);
 router.post('/market-questions/:id/reviews', authenticateJWT, marketQuestionController.submitReview);
 router.post('/market-questions/:id/rewards/traction', authenticateJWT, requireAdmin, marketQuestionController.rewardTraction);
 router.post('/market-questions/:id/rewards/resolution', authenticateJWT, requireAdmin, marketQuestionController.rewardResolution);
@@ -307,6 +310,8 @@ router.post('/market-questions/:id/rewards/resolution', authenticateJWT, require
 const marketResolutionController = require('../controllers/marketResolutionController');
 router.get('/resolution-proposals/config', authenticateJWT, marketResolutionController.getConfig);
 router.get('/resolution-proposals/jury-queue', authenticateJWT, marketResolutionController.getJuryQueue);
+router.get('/resolution-proposals/assignment-queue', authenticateJWT, marketResolutionController.getAssignmentQueue);
+router.post('/resolution-proposals/assignments/:id/decline', authenticateJWT, marketResolutionController.declineAssignment);
 router.get('/resolution-proposals/escalations', authenticateJWT, requireAdmin, marketResolutionController.getEscalations);
 router.post('/resolution-proposals/sweep', authenticateJWT, requireAdmin, marketResolutionController.runSweep);
 router.post('/resolution-proposals/:id/votes', authenticateJWT, marketResolutionController.submitVote);
@@ -509,6 +514,8 @@ router.get("/events/:eventId/shares", authenticateJWT, requirePhoneVerified, asy
         res.status(500).json({ error: 'Failed to fetch user shares' });
     }
 });
+
+router.use('/events/:eventId/managed-position', require('./managedPositions'));
 
 router.get("/events/:eventId/kelly", authenticateJWT, requirePhoneVerified, async (req, res) => {
     try {

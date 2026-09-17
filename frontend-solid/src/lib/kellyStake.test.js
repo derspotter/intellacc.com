@@ -44,9 +44,11 @@ test('stakeForFraction scales full Kelly and caps at balance', () => {
   assert.equal(stakeForFraction(NaN, 0.5, 1000), '');
 });
 
-test('beliefTrackGradient puts the neutral colour exactly at the market price', () => {
-  const css = beliefTrackGradient(0.3, { no: '#d00', mid: '#fff', yes: '#0a0' });
-  assert.equal(css, 'linear-gradient(to right, #d00 0%, #fff 30%, #0a0 100%)');
+test('beliefTrackGradient places the tick and neutral colour at the market price', () => {
+  for (const [marketProb, pct] of [[0.3, 30], [0.571, 57.1], [0.8, 80]]) {
+    const css = beliefTrackGradient(marketProb, { no: '#d00', mid: '#fff', yes: '#00f' });
+    assert.equal(css, `linear-gradient(#000, #000) calc(${pct}% - 1px) center / 2px 100% no-repeat, linear-gradient(to right, #d00 0%, #fff ${pct}%, #00f 100%)`);
+  }
 });
 
 test('beliefTrackGradient clamps and falls back to 50% for bad input', () => {

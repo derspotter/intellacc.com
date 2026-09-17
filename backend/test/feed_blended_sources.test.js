@@ -4,10 +4,7 @@ const db = require('../src/db');
 
 jest.setTimeout(60000);
 
-// The home feed is no longer follow-only: it blends posts from people you
-// follow, posts tied to markets in your topics, and posts by users who share
-// your topics. When those sources are thin the feed falls through to everyone
-// so a new account never sees a blank page.
+// One home feed includes all users, retaining relationship-based source labels.
 
 const createUser = async (label) => {
   const unique = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
@@ -119,22 +116,54 @@ describe('Blended home feed sources', () => {
     expect(sourceOf(body, topicPeerPostId)).toBe('topic_user');
   });
 
-  test('an unrelated post only appears through the global fall-through', async () => {
+  test('an unrelated post appears as global', async () => {
     const body = await fetchFeed(viewer.token);
-    const source = sourceOf(body, strangerPostId);
-    // Present today (thin network) — but never as one of the scoped sources.
-    expect([null, 'global']).toContain(source);
+    expect(sourceOf(body, strangerPostId)).toBe('global');
   });
 
-  test('once the scoped sources are rich the feed stops falling through to everyone', async () => {
-    // Seed more in-topic posts than the fall-through threshold.
+  test('unrelated users remain visible when scoped sources are rich, including search and pagination', async () => {
     for (let i = 0; i < 12; i += 1) {
       cleanup.postIds.push(await insertPost(topicPeer.id, `in-topic filler post ${i}`));
     }
     const body = await fetchFeed(viewer.token, '?limit=50');
-    expect(sourceOf(body, strangerPostId)).toBeNull();
+    expect(sourceOf(body, strangerPostId)).toBe('global');
     expect(sourceOf(body, topicPeerPostId)).toBe('topic_user');
     expect(sourceOf(body, marketPostId)).toBe('topic_market');
+
+    const search = await fetchFeed(viewer.token, '?q=unrelated%20stranger');
+    expect(sourceOf(search, strangerPostId)).toBe('global');
+
+    const firstPage = await fetchFeed(viewer.token, '?limit=12');
+    expect(firstPage.hasMore).toBe(true);
+    const legacyCursor = JSON.parse(Buffer.from(firstPage.nextCursor, 'base64url').toString());
+    legacyCursor.g = false;
+    const cursor = Buffer.from(JSON.stringify(legacyCursor)).toString('base64url');
+    const nextPage = await fetchFeed(viewer.token, `?limit=50&cursor=${cursor}`);
+    expect(sourceOf(nextPage, strangerPostId)).toBe('global');
+    const firstIds = firstPage.items.map((item) => item.id);
+    expect(nextPage.items.every((item) => !firstIds.includes(item.id))).toBe(true);
+  });
+
+  test('hidden global posts stay excluded', async () => {
+    const hiddenId = await insertPost(stranger.id, 'hidden global post');
+    cleanup.postIds.push(hiddenId);
+    await db.query('UPDATE posts SET is_hidden = TRUE WHERE id = $1', [hiddenId]);
+    const body = await fetchFeed(viewer.token, '?limit=50');
+    expect(sourceOf(body, hiddenId)).toBeNull();
+    expect(sourceOf(body, strangerPostId)).toBe('global');
+  });
+
+  test.each(['outgoing', 'incoming'])('%s blocks exclude unrelated authors', async (direction) => {
+    const blockerId = direction === 'outgoing' ? viewer.id : stranger.id;
+    const blockedId = direction === 'outgoing' ? stranger.id : viewer.id;
+    await db.query('INSERT INTO user_blocks (blocker_id, blocked_user_id) VALUES ($1, $2)', [blockerId, blockedId]);
+    try {
+      const body = await fetchFeed(viewer.token, '?limit=50');
+      expect(sourceOf(body, strangerPostId)).toBeNull();
+      expect(sourceOf(body, topicPeerPostId)).toBe('topic_user');
+    } finally {
+      await db.query('DELETE FROM user_blocks WHERE blocker_id = $1 AND blocked_user_id = $2', [blockerId, blockedId]);
+    }
   });
 
   test('the discover fallback payload is gone', async () => {

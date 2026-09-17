@@ -1,19 +1,22 @@
+import ResolutionPanel from '../predictions/ResolutionPanel';
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import { api } from "../../services/api";
 import { marketStore } from "../../store/marketStore";
 import { getToken } from "../../services/tokenService";
 import { deriveTradeSide } from "../../lib/tradeBelief";
+import ProbabilityInput from "../predictions/ProbabilityInput";
+import BeliefSlider from "../predictions/BeliefSlider";
+import ManagedPositionControl from "../predictions/ManagedPositionControl";
 import {
     KELLY_FRACTIONS,
     fullKellyFromSuggestion,
     stakeForFraction,
-    beliefTrackGradient,
 } from "../../lib/kellyStake";
 import { kellyFraction, setKellyFractionPreference } from "../../services/kellyPreference";
 
 const KELLY_FRACTION_LABELS = { 0.25: "1/4", 0.5: "1/2", 1: "1x" };
 // Terminal palette: market-down / white / market-up (see tailwind theme).
-const BELIEF_TRACK_COLORS = { no: "#FF3D00", mid: "#ffffff", yes: "#00FF41" };
+const BELIEF_TRACK_COLORS = { no: "#FF3D00", mid: "#ffffff", yes: "var(--signature-blue, #0000ff)" };
 import DistributionMarketCard from "../predictions/DistributionMarketCard";
 import OutcomeMarketCard from "../predictions/OutcomeMarketCard";
 import { createPhoneGate } from "../../services/verificationGate";
@@ -54,7 +57,7 @@ const FlashValueBig = (props) => {
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-const TradeTicket = (props) => {
+export const TradeTicket = (props) => {
     const market = () => props.market?.();
 
     const [stakeShares, setStakeShares] = createSignal("");
@@ -67,6 +70,9 @@ const TradeTicket = (props) => {
     const [fullKelly, setFullKelly] = createSignal(0);
     const [kellyBalance, setKellyBalance] = createSignal(0);
     const [stakeTouched, setStakeTouched] = createSignal(false);
+    const [ticketFraction, setTicketFraction] = createSignal(kellyFraction());
+    const [management, setManagement] = createSignal({ enabled: false, loading: true });
+    const manualBlocked = () => management().enabled || management().loading;
     const phoneGate = createPhoneGate();
     let kellyTimeout;
 
@@ -90,6 +96,7 @@ const TradeTicket = (props) => {
         if (id != null && id !== beliefInitId) {
             beliefInitId = id;
             setBelief(marketProb());
+            setTicketFraction(kellyFraction());
             setStakeTouched(false);
             setStakeShares("");
         }
@@ -143,7 +150,7 @@ const TradeTicket = (props) => {
     // Auto-fill: the Kelly stake is in RP, the ticket trades shares, so
     // convert at the current price of the derived side.
     const suggestedShares = () => {
-        const rp = Number(stakeForFraction(fullKelly(), kellyFraction(), kellyBalance()));
+        const rp = Number(stakeForFraction(fullKelly(), ticketFraction(), kellyBalance()));
         const price = selectedPrice();
         if (!(rp > 0) || !(price > 0)) return "";
         return (rp / price).toFixed(2);
@@ -154,6 +161,7 @@ const TradeTicket = (props) => {
         setStakeShares(next);
     });
     const chooseFraction = (fraction) => {
+        setTicketFraction(fraction);
         void setKellyFractionPreference(fraction);
         setStakeTouched(false);
         setStakeShares(suggestedShares());
@@ -173,6 +181,7 @@ const TradeTicket = (props) => {
     const estimatedCost = createMemo(() => sharesNum() * selectedPrice());
 
     const canTrade = createMemo(() => {
+        if (manualBlocked()) return false;
         if (submitting()) return false;
         if (!market()?.id) return false;
         if (!side()) return false;
@@ -186,6 +195,7 @@ const TradeTicket = (props) => {
 
     const submit = async (e) => {
         e?.preventDefault();
+        if (manualBlocked()) return;
         setError(null);
         setLastFill(null);
 
@@ -269,17 +279,13 @@ const TradeTicket = (props) => {
             <div class="mb-3">
                 <div class="flex justify-between text-xxs text-bb-muted uppercase mb-1">
                     <span>Your Belief</span>
-                    <span class="text-bb-accent">{(belief() * 100).toFixed(0)}%</span>
+                    <label class="text-bb-accent belief-probability-field"><ProbabilityInput value={belief()} marketProb={marketProb()} onChange={handleBeliefChange} /> %</label>
                 </div>
-                <input
-                    type="range"
-                    min="0.01"
-                    max="0.99"
-                    step="0.01"
+                <BeliefSlider
+                    marketProb={marketProb()}
+                    colors={BELIEF_TRACK_COLORS}
                     value={belief()}
-                    onInput={(e) => handleBeliefChange(parseFloat(e.currentTarget.value))}
-                    style={{ background: beliefTrackGradient(marketProb(), BELIEF_TRACK_COLORS) }}
-                    aria-label="Your belief probability"
+                    onChange={handleBeliefChange}
                     class="belief-slider terminal-belief-slider w-full touch-none"
                 />
             </div>
@@ -293,6 +299,7 @@ const TradeTicket = (props) => {
                         min="0"
                         step="0.01"
                         value={stakeShares()}
+                        disabled={manualBlocked()}
                         onInput={(e) => handleStakeInput(e.currentTarget.value)}
                         placeholder="e.g. 10"
                         class="w-full bg-black border border-bb-border px-2 py-2 text-bb-text"
@@ -304,11 +311,11 @@ const TradeTicket = (props) => {
                                 <button
                                     type="button"
                                     data-testid={`kelly-fraction-${fraction}`}
-                                    disabled={!side() || !(fullKelly() > 0)}
-                                    aria-pressed={!stakeTouched() && kellyFraction() === fraction}
+                                    disabled={submitting()}
+                                    aria-pressed={(!stakeTouched() || management().enabled) && ticketFraction() === fraction}
                                     onClick={() => chooseFraction(fraction)}
                                     class={`px-1.5 py-0.5 border uppercase font-bold disabled:opacity-40 ${
-                                        !stakeTouched() && kellyFraction() === fraction
+                                        (!stakeTouched() || management().enabled) && ticketFraction() === fraction
                                             ? "border-bb-accent bg-bb-accent/20 text-bb-accent"
                                             : "border-bb-border text-bb-muted hover:border-bb-accent/60"
                                     }`}
@@ -326,6 +333,22 @@ const TradeTicket = (props) => {
                     </div>
                 </div>
             </div>
+
+            <Show when={getToken()}>
+                <ManagedPositionControl
+                    eventId={market()?.id}
+                    belief={belief()}
+                    fraction={ticketFraction()}
+                    closed={!!market()?.outcome || (market()?.closing_date && new Date(market().closing_date).getTime() <= Date.now())}
+                    onState={setManagement}
+                    onRestore={(policy) => {
+                        handleBeliefChange(policy.belief_prob);
+                        setTicketFraction(policy.kelly_fraction);
+                        setStakeTouched(false);
+                    }}
+                    onTrade={() => marketStore.refreshMarket(market()?.id)}
+                />
+            </Show>
 
             <button
                 type="submit"
@@ -416,6 +439,9 @@ export const MarketDetail = () => {
                     </div>
                 </div>
 
+                <Show when={market()?.event_type === 'binary' && !market()?.outcome && new Date(market()?.closing_date) <= new Date()}>
+                    <div class="bb-embed"><ResolutionPanel event={market()} /></div>
+                </Show>
                 {/* Trade UI by market type, mirroring the van skin's
                     MarketDetailView: numeric -> distribution trading,
                     multiple_choice -> per-outcome trading, binary -> ticket.

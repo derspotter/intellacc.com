@@ -9,6 +9,7 @@ pub mod db_adapter;
 pub mod lmsr_api;
 pub mod lmsr_core;
 pub mod lmsr_multi_core;
+pub mod managed_positions;
 pub mod market_import;
 pub mod metaculus;
 pub mod numeric_transform;

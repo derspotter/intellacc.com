@@ -18,16 +18,18 @@ import {
   getProbabilityColor
 } from './marketCardShared';
 import { deriveTradeSide } from '../../lib/tradeBelief';
+import ProbabilityInput from './ProbabilityInput';
+import BeliefSlider from './BeliefSlider';
+import ManagedPositionControl from './ManagedPositionControl';
 import {
   KELLY_FRACTIONS,
   fullKellyFromSuggestion,
-  stakeForFraction,
-  beliefTrackGradient
+  stakeForFraction
 } from '../../lib/kellyStake';
 import { kellyFraction, setKellyFractionPreference } from '../../services/kellyPreference';
 
 const KELLY_FRACTION_LABELS = { 0.25: '¼', 0.5: '½', 1: '1×' };
-const BELIEF_TRACK_COLORS = { no: 'var(--error-color, #d00)', mid: '#ffffff', yes: 'var(--success-color, #080)' };
+const BELIEF_TRACK_COLORS = { no: 'var(--error-color, #d00)', mid: '#ffffff', yes: 'var(--signature-blue, #0000ff)' };
 
 export default function MarketEventCard(props) {
   const event = () => props.event || {};
@@ -60,6 +62,9 @@ export default function MarketEventCard(props) {
   const [kellyBalance, setKellyBalance] = createSignal(0);
   // Once the user types a stake, the slider stops overwriting it.
   const [stakeTouched, setStakeTouched] = createSignal(false);
+  const [ticketFraction, setTicketFraction] = createSignal(kellyFraction());
+  const [management, setManagement] = createSignal({ enabled: false, loading: true });
+  const manualBlocked = () => management().enabled || management().loading;
   const [busyAction, setBusyAction] = createSignal('');
   const [error, setError] = createSignal('');
   const [isVerificationError, setIsVerificationError] = createSignal(false);
@@ -181,7 +186,7 @@ export default function MarketEventCard(props) {
   // Auto-fill the stake at the chosen fraction of full Kelly whenever the
   // sizing inputs change, unless the user has typed their own amount.
   createEffect(() => {
-    const suggested = stakeForFraction(fullKelly(), kellyFraction(), kellyBalance());
+    const suggested = stakeForFraction(fullKelly(), ticketFraction(), kellyBalance());
     if (untrack(stakeTouched)) return;
     setStakeAmount(suggested);
   });
@@ -211,6 +216,7 @@ export default function MarketEventCard(props) {
 
   const handleStake = async (eventObj) => {
     eventObj?.preventDefault?.();
+    if (manualBlocked()) return;
     if (!isOpen()) {
       setError('Market is closed or resolved.');
       return;
@@ -259,6 +265,7 @@ export default function MarketEventCard(props) {
   };
 
   const executeSell = async (shareType, amount) => {
+    if (manualBlocked()) return;
     const amountValue = safeNumber(amount, 0);
     if (!isOpen()) {
       setError('Market is closed or resolved.');
@@ -317,6 +324,7 @@ export default function MarketEventCard(props) {
   };
 
   const handleFullExit = async () => {
+    if (manualBlocked()) return;
     const current = position();
     if (!current) {
       return;
@@ -378,8 +386,7 @@ export default function MarketEventCard(props) {
     }
   };
 
-  const handleBeliefChange = (eventInput) => {
-    const value = safeNumber(eventInput.target.value, 0.5);
+  const handleBeliefChange = (value) => {
     setBeliefProb(value);
 
     if (kellyTimeout) {
@@ -393,9 +400,10 @@ export default function MarketEventCard(props) {
   };
 
   const chooseFraction = (fraction) => {
+    setTicketFraction(fraction);
     void setKellyFractionPreference(fraction);
     setStakeTouched(false);
-    setStakeAmount(stakeForFraction(fullKelly(), kellyFraction(), kellyBalance()));
+    setStakeAmount(stakeForFraction(fullKelly(), ticketFraction(), kellyBalance()));
     const input = stakeInputRef();
     if (input) {
       input.classList.remove('kelly-flash');
@@ -424,6 +432,7 @@ export default function MarketEventCard(props) {
     // Start the belief at the market price: the neutral no-trade state. Any
     // movement is then an explicit disagreement with the market.
     setBeliefProb(safeNumber(nextEvent.market_prob, 0.5));
+    setTicketFraction(kellyFraction());
     setStakeTouched(false);
     setStakeAmount('');
 
@@ -445,6 +454,15 @@ export default function MarketEventCard(props) {
         clearPosition();
       }
     }
+  });
+
+  createEffect(() => {
+    const nextEvent = event();
+    setMarketState({
+      market_prob: safeNumber(nextEvent.market_prob, 0.5),
+      cumulative_stake: safeNumber(nextEvent.cumulative_stake, 0),
+      liquidity_b: safeNumber(nextEvent.liquidity_b, 5000),
+    });
   });
 
   createEffect(() => {
@@ -521,19 +539,16 @@ export default function MarketEventCard(props) {
                 <div class="form-row">
                   <label>Your Belief Probability:</label>
                   <div class="belief-slider-container">
-                    <input
-                      type="range"
-                      min="0.01"
-                      max="0.99"
-                      step="0.01"
-                      class="belief-slider"
-                      style={{ background: beliefTrackGradient(marketState().market_prob, BELIEF_TRACK_COLORS) }}
-                      aria-label="Your belief probability"
+                    <BeliefSlider
+                      marketProb={marketState().market_prob}
+                      colors={BELIEF_TRACK_COLORS}
                       value={beliefProb()}
-                      onInput={handleBeliefChange}
+                      onChange={handleBeliefChange}
                     />
                     <div class="belief-display">
-                      <span class="belief-percentage">{formatProbability(beliefProb())}</span>
+                      <label class="belief-percentage belief-probability-field">
+                        <ProbabilityInput value={beliefProb()} marketProb={marketState().market_prob} onChange={handleBeliefChange} /> %
+                      </label>
                       <small class="belief-hint">
                         {`Market: ${formatProbability(marketState().market_prob)}`}
                       </small>
@@ -541,7 +556,7 @@ export default function MarketEventCard(props) {
                   </div>
                 </div>
 
-                <div class="form-row horizontal-row">
+                <div class="form-row horizontal-row stake-trade-row">
                   <div class="form-field">
                     <label>This Trade:</label>
                     <Show
@@ -560,7 +575,23 @@ export default function MarketEventCard(props) {
                     </Show>
                   </div>
 
-                  <div class="form-field">
+                  <div class="kelly-fraction-toggles" role="group" aria-label="Stake size as a fraction of Kelly">
+                    <span class="kelly-fraction-caption">Kelly</span>
+                    <For each={KELLY_FRACTIONS}>
+                      {(fraction) => (
+                        <button
+                          type="button"
+                          class={`kelly-fraction-btn ${(!stakeTouched() || management().enabled) && ticketFraction() === fraction ? 'active' : ''}`}
+                          disabled={!!busyAction()}
+                          aria-pressed={(!stakeTouched() || management().enabled) && ticketFraction() === fraction}
+                          onClick={() => chooseFraction(fraction)}
+                        >
+                          {KELLY_FRACTION_LABELS[fraction]}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                  <div class="form-field stake-amount-field">
                     <label for={`stake-${eventId()}`}>Stake Amount (RP):</label>
                     <input
                       ref={setStakeInputRef}
@@ -570,25 +601,10 @@ export default function MarketEventCard(props) {
                       min="0.01"
                       step="0.01"
                       placeholder="Enter stake amount"
+                      disabled={manualBlocked()}
                       value={stakeAmount()}
                       onInput={handleStakeInput}
                     />
-                    <div class="kelly-fraction-toggles" role="group" aria-label="Stake size as a fraction of Kelly">
-                      <span class="kelly-fraction-caption">Kelly</span>
-                      <For each={KELLY_FRACTIONS}>
-                        {(fraction) => (
-                          <button
-                            type="button"
-                            class={`kelly-fraction-btn ${!stakeTouched() && kellyFraction() === fraction ? 'active' : ''}`}
-                            disabled={!tradeSide() || !(fullKelly() > 0)}
-                            aria-pressed={!stakeTouched() && kellyFraction() === fraction}
-                            onClick={() => chooseFraction(fraction)}
-                          >
-                            {KELLY_FRACTION_LABELS[fraction]}
-                          </button>
-                        )}
-                      </For>
-                    </div>
                   </div>
                 </div>
 
@@ -597,7 +613,7 @@ export default function MarketEventCard(props) {
                     <button
                       type="submit"
                       class="button primary"
-                      disabled={!stakeAmount() || !tradeSide() || !!busyAction()}
+                      disabled={manualBlocked() || !stakeAmount() || !tradeSide() || !!busyAction()}
                     >
                       {busyAction() === 'stake' ? 'Placing Stake...' : 'Place Stake'}
                     </button>
@@ -608,6 +624,25 @@ export default function MarketEventCard(props) {
           </Show>
         </Show>
       </div>
+
+      <Show when={isLoggedIn()}>
+        <ManagedPositionControl
+          eventId={eventId()}
+          belief={beliefProb()}
+          fraction={ticketFraction()}
+          closed={!isOpen()}
+          onState={setManagement}
+          onRestore={(policy) => {
+            handleBeliefChange(policy.belief_prob);
+            setTicketFraction(policy.kelly_fraction);
+            setStakeTouched(false);
+          }}
+          onTrade={async () => {
+            await loadUserPosition();
+            await onTrade()?.(eventId());
+          }}
+        />
+      </Show>
 
       <div style={{ flex: '0 0 auto', marginTop: 'auto' }}>
         <div class="user-position" style={{ display: positionHasData() ? 'block' : 'none' }}>
@@ -633,7 +668,7 @@ export default function MarketEventCard(props) {
           </div>
         </div>
 
-        <Show when={isOpen() && positionHasData()}>
+        <Show when={isOpen() && positionHasData() && !manualBlocked()}>
           <div class="withdrawal-actions">
             <button
               type="button"
