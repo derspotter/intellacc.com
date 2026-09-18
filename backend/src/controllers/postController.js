@@ -1082,7 +1082,7 @@ exports.getFeed = async (req, res) => {
     const rows = result.rows || [];
     const hasMore = rows.length > candidateLimit;
     const candidates = rows.slice(0, candidateLimit);
-    const items = selectFeedPosts(candidates, weights, limit);
+    const items = selectFeedPosts(candidates, weights, limit, userId);
     // Advance past the whole candidate window, including unselected posts.
     // Every next-page candidate is older than every post already returned.
     const last = candidates[candidates.length - 1];

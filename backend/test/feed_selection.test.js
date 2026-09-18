@@ -21,4 +21,20 @@ describe('feed inclusion without reordering', () => {
     expect(selectFeedPosts(posts, { likes: 100 }, 20)).toEqual(posts);
     expect(selectFeedPosts([{ id: 3 }, { id: 2 }, { id: 1 }], { likes: 100 }, 2).map(p => p.id)).toEqual([3, 2]);
   });
+
+  test('own posts bypass score filtering without being moved ahead of newer posts', () => {
+    const candidates = posts.map(p => ({ ...p, user_id: p.id === 3 ? '42' : 7 }));
+    expect(selectFeedPosts(candidates, { likes: 100 }, 2, 42).map(p => p.id)).toEqual([4, 3, 2]);
+    expect(selectFeedPosts(candidates, { likes: 100 }, 2, 99).map(p => p.id)).toEqual([4, 2]);
+  });
+
+  test('all own posts survive even when they exceed the page target', () => {
+    const candidates = posts.map(p => ({ ...p, user_id: 42 }));
+    expect(selectFeedPosts(candidates, { likes: 100 }, 2, 42)).toEqual(candidates);
+  });
+
+  test('an own post already selected by score appears only once', () => {
+    const candidates = posts.map(p => ({ ...p, user_id: p.id === 4 ? 42 : 7 }));
+    expect(selectFeedPosts(candidates, { likes: 100 }, 2, 42).map(p => p.id)).toEqual([4, 2]);
+  });
 });

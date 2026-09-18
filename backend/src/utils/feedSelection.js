@@ -4,7 +4,7 @@ const SIGNALS = {
 };
 
 // Candidates arrive newest first. Scores select membership only, never order.
-function selectFeedPosts(candidates, weights, limit) {
+function selectFeedPosts(candidates, weights, limit, userId) {
   if (!weights || candidates.length <= limit) return candidates.slice(0, limit);
   const scores = candidates.map(() => 0);
   for (const [key, field] of Object.entries(SIGNALS)) {
@@ -21,7 +21,10 @@ function selectFeedPosts(candidates, weights, limit) {
   }
   const selected = new Set(candidates.map((_, i) => i)
     .sort((a, b) => scores[b] - scores[a] || a - b).slice(0, limit));
-  return candidates.filter((_, i) => selected.has(i));
+  // Include every own post in the scanned window, even when that exceeds the
+  // page target. Otherwise advancing the cursor would permanently skip it.
+  return candidates.filter((post, i) => selected.has(i)
+    || (userId != null && post.user_id != null && String(post.user_id) === String(userId)));
 }
 
 module.exports = { selectFeedPosts };

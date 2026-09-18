@@ -67,3 +67,31 @@ test('a small candidate pool returns every post and has no next page', async () 
   await getFeed({ user: { id: 42 }, query: {} }, res);
   expect(res.json.mock.calls[0][0]).toEqual({ items: posts.slice(0, 2), hasMore: false, nextCursor: null });
 });
+
+test('every own post survives across candidate windows, including cursor boundaries', async () => {
+  const ownIndexes = [0, 8, 10, 19, 20];
+  const candidates = posts.map((post, i) => ({ ...post, user_id: ownIndexes.includes(i) ? 42 : 7 }));
+  let page = 0;
+  db.query.mockImplementation(async sql => {
+    if (sql.includes('FROM user_feed_weights')) return { rows: [{ w_likes: 100 }] };
+    if (sql.includes('ORDER BY p.created_at DESC, p.id DESC')) {
+      const start = page++ * 10;
+      return { rows: candidates.slice(start, start + 11) };
+    }
+    return { rows: [] };
+  });
+  const all = [];
+  let cursor;
+  for (let i = 0; i < 3; i++) {
+    const res = response();
+    await getFeed({ user: { id: 42 }, query: { limit: '2', cursor } }, res);
+    expect(res.status).toHaveBeenCalledWith(200);
+    const body = res.json.mock.calls[0][0];
+    all.push(...body.items);
+    cursor = body.nextCursor;
+    expect(body.hasMore).toBe(i < 2);
+  }
+  expect(all.filter(p => p.user_id === 42).map(p => p.id)).toEqual([200, 192, 190, 181, 180]);
+  expect(all.map(p => p.id)).toEqual([200, 199, 197, 192, 190, 188, 185, 181, 180]);
+  expect(new Set(all.map(p => p.id)).size).toBe(all.length);
+});
