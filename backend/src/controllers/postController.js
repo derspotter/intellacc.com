@@ -10,6 +10,8 @@ const { previewUrl, enqueuePreview } = require('../services/metadata/linkPreview
 const { getRequestBaseUrl } = require('../services/activitypub/url');
 const { verifyToken, getUserFromToken } = require('../utils/jwt');
 const { selectFeedPosts } = require('../utils/feedSelection');
+const { buildPostVisibilityClauseForAlias, buildPostVisibilityClause } = require('../utils/postVisibility');
+const aiPublicReplyService = require('../services/ai/aiPublicReplyService');
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
 const USER_POST_SEEN_RETENTION_DAYS = 90;
@@ -95,19 +97,7 @@ const buildFeedSourceExpression = () => `CASE
                 ELSE 'global'
               END AS feed_source`;
 
-const buildPostVisibilityClauseForAlias = (postAlias = 'p', viewerIdParamName = '$3') => {
-  return `
-       ${postAlias}.is_hidden = FALSE
-       AND (${viewerIdParamName}::int IS NULL OR NOT EXISTS (
-         SELECT 1
-         FROM user_blocks ub
-         WHERE (ub.blocker_id = ${postAlias}.user_id AND ub.blocked_user_id = ${viewerIdParamName}::int)
-            OR (ub.blocker_id = ${viewerIdParamName}::int AND ub.blocked_user_id = ${postAlias}.user_id)
-       ))`;
-};
-
-const buildPostVisibilityClause = (viewerIdParamName = '$3') =>
-  buildPostVisibilityClauseForAlias('p', viewerIdParamName);
+// Visibility clause lives in utils/postVisibility (shared with the AI services).
 
 const buildNestedRepostObject = (chainRows) => {
   if (!Array.isArray(chainRows) || chainRows.length === 0) return null;
@@ -490,6 +480,21 @@ exports.createPost = async (req, res) => {
       }).catch((err) => {
         console.error('[ATProto] Failed to enqueue outbound post:', err?.message || err);
       });
+    }
+
+    // Public @ai summon: queue a durable job (never inline inference). The
+    // post itself is already published; a missing setup only adds a notice.
+    const aiReply = await aiPublicReplyService.enqueueForPost({
+      postId: newPost.id,
+      userId,
+      content,
+      isBot: isBot || Boolean(req.user?.isAgent),
+      repostId: repost_id || null,
+      communityGroupId
+    });
+    if (aiReply) {
+      returnedPost = { ...returnedPost, aiReplyStatus: aiReply.queued ? 'queued' : 'declined' };
+      if (aiReply.notice) returnedPost.aiNotice = aiReply.notice;
     }
 
     console.log('Post/comment created successfully:', returnedPost);

@@ -460,6 +460,9 @@ router.get("/weekly/user/:userId/status", authenticateJWT, weeklyAssignmentContr
 // MLS Routes (Messaging Layer Security - E2EE)
 router.use('/mls', authenticateJWT, requireEmailVerified, mlsRoutes);
 
+// Personal BYOK AI assistant: JWT sessions only, never agent API keys.
+router.use('/ai', authenticateJWT, rejectAgentKeys, require('./ai'));
+
 // Attachments (pre-signed URL scaffold)
 router.post('/attachments/presign-upload', authenticateJWT, attachmentsController.presignUpload);
 router.get('/attachments/presign-download', authenticateJWT, attachmentsController.presignDownload);

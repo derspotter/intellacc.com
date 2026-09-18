@@ -127,7 +127,11 @@ async function request(endpoint, options = {}) {
 
     // Parse JSON response (handle empty responses)
     try {
-      return await response.json();
+      const data = await response.json();
+      if (data?.aiNotice && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ai-notice', { detail: data.aiNotice }));
+      }
+      return data;
     } catch (e) {
       return null;
     }
@@ -1335,3 +1339,18 @@ export const ruleOnAdminResolution = (id, body) => request(`/resolution-proposal
 export const rejectAdminMarket = (id) => request(`/admin/markets/proposals/${id}/reject`, { method: 'POST' });
 
 export const updateMarketQuestion = (id, payload) => api.marketQuestions.update(id, payload);
+
+export const aiApi = {
+  publicReply: (postId) => request(`/ai/public-replies/${encodeURIComponent(postId)}`),
+  settings: () => request('/ai/settings'),
+  saveSettings: (body) => request('/ai/settings', { method: 'PUT', body }),
+  removeSettings: () => request('/ai/settings', { method: 'DELETE' }),
+  test: () => request('/ai/test', { method: 'POST' }),
+  conversations: () => request('/ai/conversations'),
+  createConversation: (postId) => request('/ai/conversations', { method: 'POST', body: postId ? { postId } : {} }),
+  conversation: (id) => request(`/ai/conversations/${encodeURIComponent(id)}`),
+  send: (id, message, requestId) => request(`/ai/conversations/${encodeURIComponent(id)}/messages`, {
+    method: 'POST', body: { message, requestId }
+  }),
+  removeConversation: (id) => request(`/ai/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+};

@@ -12,6 +12,7 @@ import DangerZone from '../components/settings/DangerZone';
 import AiFlaggedContent from '../components/admin/AiFlaggedContent';
 import { isAdmin } from '../services/auth';
 import { legalReady } from '../legal/legalConfig';
+import AiSettings from '../components/ai/AiSettings';
 
 export default function SettingsPage() {
   const [isDarkMode, setIsDarkMode] = createSignal(false);
@@ -76,6 +77,7 @@ export default function SettingsPage() {
       <DeviceManager />
       <VerificationSettings />
       <ApiKeysManager />
+      <AiSettings />
       <Show when={isAdmin()}>
         <AiFlaggedContent />
       </Show>

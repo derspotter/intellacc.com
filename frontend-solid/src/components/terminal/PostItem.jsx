@@ -6,6 +6,8 @@ import { proposeMarketFromPost } from '../../lib/proposeFromPost';
 import { getCurrentUserId } from '../../services/auth';
 import LinkPreviews from '../posts/LinkPreviews';
 import { RenderTextWithLinks } from '../../utils/text';
+import ai from '../../store/aiStore';
+import AiReplyStatus from '../ai/AiReplyStatus';
 
 const CommentItem = (props) => (
     <div data-testid="comment-row" class="pl-3 border-l border-bb-border/40 py-1">
@@ -16,6 +18,11 @@ const CommentItem = (props) => (
             </span>
         </div>
         <p class="text-bb-text text-xs break-words whitespace-pre-wrap">{props.comment.content}</p>
+        <AiReplyStatus post={props.comment} />
+        <Show when={getCurrentUserId()}>
+            <button type="button" class="text-bb-muted text-xxs" aria-label="Ask AI about this comment"
+                onClick={() => ai.open(props.comment.id)}>✧ AI</button>
+        </Show>
         <Show when={Array.isArray(props.comment.replies) && props.comment.replies.length > 0}>
             <For each={props.comment.replies}>
                 {(reply) => <CommentItem comment={reply} />}
@@ -142,6 +149,7 @@ const PostItem = (props) => {
             </div>
             <p class="text-bb-text mb-2 break-words whitespace-pre-wrap"><RenderTextWithLinks text={props.post.content || ''} /></p>
             <LinkPreviews post={props.post} />
+            <AiReplyStatus post={props.post} />
             <Show when={attachmentSrc()}>
                 <img src={attachmentSrc()} alt="" class="max-w-full max-h-64 border border-bb-border my-1" />
             </Show>
@@ -163,6 +171,10 @@ const PostItem = (props) => {
                     </Show>
                 </div>
                 <div class="flex gap-2">
+                    <Show when={getCurrentUserId() && !props.post.is_temp}>
+                        <button type="button" class="text-bb-muted hover:text-white uppercase" aria-label="Ask AI about this post"
+                            onClick={() => ai.open(props.post.id)}>✧ AI</button>
+                    </Show>
                     <Show when={!props.disableFeedStore}>
                         <button
                             type="button"
