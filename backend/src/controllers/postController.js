@@ -9,6 +9,7 @@ const postMatchPipeline = require('../services/openRouterMatcher/postMatchPipeli
 const { previewUrl, enqueuePreview } = require('../services/metadata/linkPreviewWorker');
 const { getRequestBaseUrl } = require('../services/activitypub/url');
 const { verifyToken, getUserFromToken } = require('../utils/jwt');
+const { selectFeedPosts } = require('../utils/feedSelection');
 
 const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'uploads');
 const USER_POST_SEEN_RETENTION_DAYS = 90;
@@ -983,9 +984,21 @@ exports.getFeed = async (req, res) => {
       return res.status(400).json({ message: 'Invalid cursor' });
     }
 
+    const weightResult = await db.query(
+      'SELECT w_accuracy, w_followers, w_likes, w_views FROM user_feed_weights WHERE user_id = $1',
+      [userId]
+    );
+    const saved = weightResult.rows[0];
+    const weights = saved ? {
+      accuracy: saved.w_accuracy, followers: saved.w_followers,
+      likes: saved.w_likes, views: saved.w_views
+    } : null;
+    // Rank a bounded window for inclusion, then retain its chronological order.
+    const candidateLimit = weights ? limit * 5 : limit;
+
     // $1 = the authenticated user (source labels, likes, reposts); $3 = nullable
     // viewer id for the block-visibility clause only (NULL = admin bypass).
-    const params = [userId, limit + 1, viewerId];
+    const params = [userId, candidateLimit + 1, viewerId];
     const baseClauses = [
       'p.parent_id IS NULL',
       'p.is_comment = FALSE',
@@ -1067,9 +1080,12 @@ exports.getFeed = async (req, res) => {
     );
 
     const rows = result.rows || [];
-    const hasMore = rows.length > limit;
-    const items = hasMore ? rows.slice(0, limit) : rows;
-    const last = items[items.length - 1];
+    const hasMore = rows.length > candidateLimit;
+    const candidates = rows.slice(0, candidateLimit);
+    const items = selectFeedPosts(candidates, weights, limit, userId);
+    // Advance past the whole candidate window, including unselected posts.
+    // Every next-page candidate is older than every post already returned.
+    const last = candidates[candidates.length - 1];
     const nextCursor = hasMore && last
       ? Buffer.from(JSON.stringify({
         createdAt: new Date(last.created_at).toISOString(),
@@ -1081,7 +1097,7 @@ exports.getFeed = async (req, res) => {
     await hydrateRepostedPosts(items, viewerId);
 
     if (userId) {
-      recordPostViews(userId, rows).catch((err) => {
+      recordPostViews(userId, items).catch((err) => {
         console.error('[Posts] Failed to record seen posts:', err);
       });
       pruneOldPostViews(userId).catch((err) => {

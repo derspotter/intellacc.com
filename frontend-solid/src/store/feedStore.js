@@ -8,6 +8,7 @@ const PAGE_LIMIT = 20;
 
 const [state, setState] = createStore({
     posts: [],
+    submittedPostIds: [],
     hasMore: false,
     nextCursor: null,
     loading: false,
@@ -25,7 +26,7 @@ const appendUnique = (current, next) => {
 
 const fetchPage = async ({ reset }) => {
     if (!getToken()) {
-        setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: false });
+        setState({ posts: [], submittedPostIds: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: false });
         return;
     }
     const token = guard.begin();
@@ -54,7 +55,9 @@ const fetchPage = async ({ reset }) => {
         const paging = getPostsPaging(response);
 
         setState({
-            posts: reset ? paging.items : appendUnique(state.posts, paging.items),
+            posts: reset
+                ? appendUnique(state.posts.filter(p => state.submittedPostIds.includes(String(p.id))), paging.items)
+                : appendUnique(state.posts, paging.items),
             hasMore: paging.hasMore,
             nextCursor: paging.nextCursor,
             usingFeed,
@@ -75,11 +78,14 @@ const loadMore = () => {
     return fetchPage({ reset: false });
 };
 
-const addPost = (post) => {
+const addPost = (post, { submitted = false } = {}) => {
     // The backend broadcasts 'new_post' globally, including posts made in a
     // community group. Those belong on the group's feed, not the home feed.
-    if (post?.community_group_id != null) return;
-    setState("posts", (prev) => [post, ...prev]);
+    if (!post || post.community_group_id != null) return;
+    if (submitted) {
+        setState('submittedPostIds', (prev) => [...new Set([...prev, String(post.id)])]);
+    }
+    setState("posts", (prev) => [post, ...prev.filter(p => String(p.id) !== String(post.id))]);
 };
 
 // After a follow: relabel that author's rows in place instead of reloading.
@@ -126,7 +132,8 @@ const createPost = async (content, image_attachment_id = null, image_url = null,
     try {
         const newPost = await api.posts.create(content, image_attachment_id, image_url, repost_id);
         // Replace temp post with real one
-        setState("posts", (prev) => prev.map(p => p.id === tempId ? newPost : p));
+        setState("posts", (prev) => prev.filter(p => p.id !== tempId));
+        addPost(newPost, { submitted: true });
         return newPost;
     } catch (err) {
         // Revert optimistic add
@@ -163,7 +170,7 @@ const unrepostPost = (postId) => {
 
 const clear = () => {
     guard.invalidate(); // invalidate any in-flight fetch so it can't repopulate cleared state
-    setState({ posts: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: true });
+    setState({ posts: [], submittedPostIds: [], hasMore: false, nextCursor: null, loading: false, loadingMore: false, error: null, usingFeed: true });
 };
 
 export const feedStore = {

@@ -45,6 +45,7 @@ export default function FeedMixSection() {
 
   return (
     <div class="text-xs">
+      <p class="text-bb-muted mb-2">Weights select which recent posts appear. Selected posts are always shown newest first.</p>
       <For each={KEYS}>
         {(key) => (
           <div class="flex items-center gap-3 py-1.5">
