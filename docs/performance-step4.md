@@ -69,10 +69,23 @@ histories still require a one-time IndexedDB index/backfill pass on upgrade.
 
 ## Rollout
 
-Prepared in `/tmp/intellacc-chat-history-20260918` on
-`codex/performance-chat-history`; not deployed. This is a frontend-only change.
-Integrate with the current main branch before building and deploying, preserving
-any intervening changes. No backend or PostgreSQL migration is required.
+Implemented as `ab2a956` on `codex/performance-chat-history`, then integrated
+with main's newer feed fixes as `648e19c`. The combined release passed all 18
+chat/feed browser regressions and the containerized production build. Main was
+fast-forwarded, preserving unrelated working-tree edits.
+
+Deployed on 2026-09-18 at 18:42 UTC from the isolated worktree build. The public
+index, entry JavaScript, both layout bundles, vault bundle, CSS, WASM and service
+worker matched the tested files exactly. The public API health check passed;
+fresh anonymous browsers loaded both layouts with zero page errors or failed
+asset requests. Authenticated chat behavior was verified in isolated fixtures,
+not by writing messages to production accounts.
+
+This frontend-only release required no backend restart or PostgreSQL migration.
+The previous site is archived at
+`/tmp/intellacc-before-chat-20260918T184241Z.tar.gz`. Publication checked the
+live index and main-branch version before replacing assets to avoid overwriting
+an intervening release. The live entry bundle is `index-vXEGXlqH.js`.
 
 An older open tab can block IndexedDB's version upgrade. The new client reports
 that the user must close other Intellacc tabs and reload. New clients close
