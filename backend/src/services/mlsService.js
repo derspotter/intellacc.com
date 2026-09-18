@@ -6,6 +6,14 @@ const RELAY_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // hourly
 let io = null;
 let cleanupWorkerStarted = false;
 
+// A relay-only transaction lock avoids coupling fanout to group/device row
+// locks acquired by account deletion or an encryption reset. Hash collisions
+// only serialize unrelated groups; the lock is always released on transaction end.
+const lockRelayGroup = (client, groupId) => client.query(
+  'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+  [`mls-relay:${groupId}`]
+);
+
 const mlsService = {
   setSocketIo(socketIo) {
     io = socketIo;
@@ -405,6 +413,11 @@ const mlsService = {
     try {
         await client.query('BEGIN');
 
+        // Serialize fanout with welcome acknowledgement/backfill. Otherwise
+        // each transaction can miss the other's uncommitted row, leaving a
+        // message permanently without a recipient for the joining member.
+        await lockRelayGroup(client, groupId);
+
         const parsedEpoch = Number(options.epoch);
         const epoch = Number.isSafeInteger(parsedEpoch) ? parsedEpoch : null;
         if (messageType === 'commit') {
@@ -548,6 +561,21 @@ const mlsService = {
     const client = await db.getPool().connect();
     try {
       await client.query('BEGIN');
+
+      // Lock before updating recipient rows, in a stable order for batches.
+      // Ordinary acks also take the lock so their cleanup cannot delete a
+      // queued message while a welcome acknowledgement backfills recipients.
+      const groupsToLock = await client.query(
+        `SELECT DISTINCT q.group_id
+         FROM mls_relay_queue q
+         JOIN mls_relay_recipients r ON r.queue_id = q.id
+         WHERE q.id = ANY($1) AND r.recipient_device_id = ANY($2)
+         ORDER BY q.group_id`,
+        [normalizedMessageIds, normalizedDeviceIds]
+      );
+      for (const group of groupsToLock.rows) {
+        await lockRelayGroup(client, group.group_id);
+      }
 
       const ackRes = await client.query(
         `WITH updated AS (
