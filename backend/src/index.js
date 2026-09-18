@@ -208,6 +208,7 @@ if (require.main === module) {
   const atprotoIntervalMs = parseInt(process.env.ATPROTO_WORKER_INTERVAL_MS || '15000', 10) || 15000;
   startActivityPubDeliveryWorker({ intervalMs: apIntervalMs });
   startAtprotoDeliveryWorker({ intervalMs: atprotoIntervalMs });
+  require('./services/metadata/linkPreviewWorker').createPreviewWorker({ io }).start();
 
   // Registration-approval signup context: keep the offline IP lookup data
   // fresh and scrub ip/ua from decided or expired approval rows once a day.

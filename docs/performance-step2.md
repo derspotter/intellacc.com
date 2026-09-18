@@ -56,7 +56,12 @@ does not show links or reward badges for hidden markets.
 
 This batch requires no migration or configuration change. Deploy the backend
 endpoint before the frontend that calls it. The change is prepared on
-`codex/performance-feed-metadata` and has not been deployed. Step 1 is live.
+`codex/performance-feed-metadata`. Commit `78e6be2` was deployed on 2026-09-18:
+the public health endpoint passed, unauthenticated metadata requests returned
+401, and both metadata query modes passed a read-only production check against
+nine visible posts. The live index, entry JavaScript, and Van shell JavaScript
+matched the tested build. The previous frontend is archived at
+`/tmp/intellacc-frontend-before-step2-20260918.tar.gz`. Step 1 remains live.
 
 Request reduction is verified using a component fixture and mocked HTTP data;
 production latency and throughput have not been benchmarked.

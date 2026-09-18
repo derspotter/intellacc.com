@@ -6,7 +6,7 @@ const pangramService = require('../services/pangramService');
 const activitypubOutbound = require('../services/activitypub/outboundService');
 const atprotoOutbound = require('../services/atproto/outboundService');
 const postMatchPipeline = require('../services/openRouterMatcher/postMatchPipeline');
-const { extractFirstUrl, fetchMetadata } = require('../services/metadata/metadataService');
+const { previewUrl, enqueuePreview } = require('../services/metadata/linkPreviewWorker');
 const { getRequestBaseUrl } = require('../services/activitypub/url');
 const { verifyToken, getUserFromToken } = require('../utils/jwt');
 
@@ -359,35 +359,7 @@ exports.createPost = async (req, res) => {
       }
     }
 
-    // Extract link and fetch metadata
-    let linkUrl = extractFirstUrl(content);
-    let linkMetadataId = null;
-    
-    if (linkUrl) {
-      try {
-        const metadata = await fetchMetadata(linkUrl);
-        if (metadata && (metadata.title || metadata.description || metadata.image_url)) {
-          // Store the metadata
-          const metaRes = await db.query(
-            `INSERT INTO link_metadata (url, title, description, image_url, site_name, content) 
-             VALUES ($1, $2, $3, $4, $5, $6) 
-             ON CONFLICT (url) DO UPDATE 
-             SET title = EXCLUDED.title, 
-                 description = EXCLUDED.description, 
-                 image_url = EXCLUDED.image_url, 
-                 site_name = EXCLUDED.site_name,
-                 content = EXCLUDED.content,
-                 updated_at = NOW()
-             RETURNING id`,
-            [metadata.url, metadata.title, metadata.description, metadata.image_url, metadata.site_name, metadata.content]
-          );
-          linkMetadataId = metaRes.rows[0].id;
-          linkUrl = metadata.url; // Use resolved URL
-        }
-      } catch (err) {
-        console.warn(`Error processing link metadata for ${linkUrl}:`, err.message);
-      }
-    }
+    const linkUrl = previewUrl(content);
 
     let communityGroupId = null;
     if (community_group_id !== undefined && community_group_id !== null) {
@@ -403,8 +375,14 @@ exports.createPost = async (req, res) => {
 
     // Insert the post or comment
     const result = await db.query(
-      'INSERT INTO posts (user_id, content, image_url, image_attachment_id, parent_id, depth, is_comment, is_bot, link_url, link_metadata_id, repost_id, community_group_id, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()) RETURNING *',
-      [userId, content || '', image_url || null, image_attachment_id || null, parentId, depth, isComment, isBot, linkUrl || null, linkMetadataId || null, repost_id || null, communityGroupId]
+      `WITH inserted AS (
+        INSERT INTO posts (user_id, content, image_url, image_attachment_id, parent_id, depth, is_comment, is_bot, link_url, repost_id, community_group_id, created_at, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW()) RETURNING *
+      ), queued AS (
+        INSERT INTO post_link_preview_jobs (post_id, url)
+        SELECT id, link_url FROM inserted WHERE link_url IS NOT NULL
+      ) SELECT * FROM inserted`,
+      [userId, content || '', image_url || null, image_attachment_id || null, parentId, depth, isComment, isBot, linkUrl, repost_id || null, communityGroupId]
     );
 
     const newPost = result.rows[0];
@@ -818,7 +796,7 @@ exports.updatePost = async (req, res) => {
 
     // First, check if the post exists and get its owner
     const postCheck = await client.query(
-      'SELECT user_id, is_comment, repost_id, image_attachment_id, image_url FROM posts WHERE id = $1 FOR UPDATE',
+      'SELECT user_id, is_comment, repost_id, image_attachment_id, image_url, link_url, link_metadata_id FROM posts WHERE id = $1 FOR UPDATE',
       [postId]
     );
 
@@ -869,10 +847,17 @@ exports.updatePost = async (req, res) => {
       }
     }
 
+    const nextLinkUrl = previewUrl(content);
     const result = await client.query(
-      'UPDATE posts SET content = $1, image_url = $2, image_attachment_id = $3, updated_at = NOW() WHERE id = $4 RETURNING *',
-      [content, nextImageUrl, nextImageAttachmentId, postId]
+      `UPDATE posts SET content = $1, image_url = $2, image_attachment_id = $3,
+        link_metadata_id = CASE WHEN link_url IS DISTINCT FROM $5 THEN NULL ELSE link_metadata_id END,
+        link_url = $5, updated_at = NOW() WHERE id = $4 RETURNING *`,
+      [content, nextImageUrl, nextImageAttachmentId, postId, nextLinkUrl]
     );
+
+    if (nextLinkUrl !== postCheck.rows[0].link_url || !postCheck.rows[0].link_metadata_id) {
+      await enqueuePreview(client, postId, nextLinkUrl);
+    }
 
     if (isNewAttachment) {
       await client.query(
