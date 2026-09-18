@@ -1,8 +1,8 @@
-import { For, Show, createSignal, createMemo, onMount } from "solid-js";
+import { For, Show, createSignal, createMemo } from "solid-js";
 import { Panel } from "./ui/Panel";
 import { feedStore } from "../store/feedStore";
-import { api, ApiError, getFeedWeights } from "../services/api";
-import { rankPosts, normalizeWeights } from "../lib/feedRanking";
+import { api, ApiError } from "../services/api";
+import { chronologicalPosts } from "../lib/chronologicalPosts";
 import PostItem from "./terminal/PostItem";
 import { createDraftSignal, draftKey } from "../lib/persistedState";
 import { getCurrentUserId } from "../services/auth";
@@ -119,13 +119,7 @@ const PostComposer = () => {
 };
 
 export const FeedPanel = () => {
-    const [weights, setWeights] = createSignal(null);
-    onMount(() => {
-        // Normalize to a 100-sum before ranking; null (no usable weights,
-        // e.g. { weights: null } for a fresh user) keeps the server order.
-        getFeedWeights().then(w => setWeights(normalizeWeights(w?.weights ?? w))).catch(() => {});
-    });
-    const rankedPosts = createMemo(() => rankPosts(feedStore.state.posts, weights(), feedStore.state.submittedPostIds));
+    const orderedPosts = createMemo(() => chronologicalPosts(feedStore.state.posts));
 
     return (
         <Panel title="[1] FEED // LIVE" class="h-full flex flex-col">
@@ -133,13 +127,13 @@ export const FeedPanel = () => {
             <div class="flex-1 overflow-y-auto">
                 <Show when={!feedStore.state.loading} fallback={<div class="p-2 text-bb-muted font-mono animate-pulse">Running query...</div>}>
                     <Show
-                        when={rankedPosts().length > 0}
+                        when={orderedPosts().length > 0}
                         fallback={
                             <div data-testid="feed-empty" class="p-4 text-bb-muted font-mono text-xs">FEED EMPTY // FOLLOW USERS OR CHECK BACK LATER</div>
                         }
                     >
                         <div class="flex flex-col">
-                            <For each={rankedPosts()}>
+                            <For each={orderedPosts()}>
                                 {(post) => <PostItem post={post} />}
                             </For>
                         </div>

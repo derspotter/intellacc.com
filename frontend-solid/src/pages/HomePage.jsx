@@ -1,6 +1,6 @@
 import { createSignal, createMemo, onMount, Show } from 'solid-js';
-import { api, getFeedPage, getPostsPage, getPostsPayloadItems, getPostsPaging, getFeedWeights } from '../services/api';
-import { rankPosts } from '../lib/feedRanking';
+import { getFeedPage, getPostsPage, getPostsPayloadItems, getPostsPaging } from '../services/api';
+import { chronologicalPosts } from '../lib/chronologicalPosts';
 import CreatePostForm from '../components/posts/CreatePostForm';
 import PostsList from '../components/posts/PostsList';
 import WeeklyQuestionCard from '../components/predictions/WeeklyQuestionCard';
@@ -26,16 +26,9 @@ export default function HomePage() {
   const [hasMore, setHasMore] = createSignal(true);
   const [nextCursor, setNextCursor] = createSignal(null);
   const [usingFeed, setUsingFeed] = createSignal(isAuthenticated());
-  const [feedWeights, setFeedWeights] = createSignal(null);
   const [submittedPostIds, setSubmittedPostIds] = createSignal([]);
 
-  // Reorder the loaded feed by the user's saved weight mix. rankPosts returns
-  // the input order unchanged when no weights are saved (opt-in), so users who
-  // never set a mix see the normal chronological feed. Ranking the full
-  // accumulated list re-sorts on "Load more"; acceptable for v1 (the primary
-  // requirement is reorder-on-open) — a rank-appended-page-only refinement is a
-  // possible follow-up.
-  const rankedPosts = createMemo(() => rankPosts(posts(), feedWeights(), submittedPostIds()));
+  const orderedPosts = createMemo(() => chronologicalPosts(posts()));
 
   const loadPosts = async ({ reset = true } = {}) => {
     if (reset) {
@@ -127,9 +120,6 @@ export default function HomePage() {
 
   onMount(() => {
     loadPosts({ reset: true });
-    getFeedWeights()
-      .then((res) => { if (res && res.weights) setFeedWeights(res.weights); })
-      .catch(() => { /* no saved mix -> chronological feed */ });
   });
 
   return (
@@ -178,7 +168,7 @@ export default function HomePage() {
       </Show>
       <Show when={!loading()}>
         <PostsList
-          posts={rankedPosts}
+          posts={orderedPosts}
           onPostUpdate={updatePost}
           onPostDelete={removePost}
           loading={loading}

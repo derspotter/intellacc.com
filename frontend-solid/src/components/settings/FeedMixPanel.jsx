@@ -80,8 +80,9 @@ export default function FeedMixPanel() {
 
   return (
     <Card title="Feed Mix" className="feed-mix">
-      <p class="feed-mix-help">Weight your home feed. The four always add up to 100% — drag one and the
-        unlocked others rebalance; lock one to pin it.</p>
+      <p class="feed-mix-help">Choose which recent posts appear in your feed. Selected posts are always
+        shown newest first. The four weights add up to 100% — drag one and the unlocked others
+        rebalance; lock one to pin it.</p>
       <div class="feed-mix-channels">
         <For each={KEYS}>
           {(key) => {

@@ -85,7 +85,7 @@ const LOG_SIGNALS = new Set(['followers', 'likes', 'views']);
 
 // Reorder the loaded posts by the weighted, normalized signal mix. Pure: never
 // mutates the input. null/absent weights => input order unchanged.
-export function rankPosts(posts, weights, submittedPostIds = []) {
+export function rankPosts(posts, weights) {
   if (!Array.isArray(posts) || posts.length === 0) return [];
   if (!weights) return [...posts];
 
@@ -112,15 +112,6 @@ export function rankPosts(posts, weights, submittedPostIds = []) {
     for (const w of KEYS) s += ((Number(weights[w]) || 0) / 100) * norm[w][i];
     return { p, i, s };
   });
-  // Keep this session's successful submissions visible above the ranked feed.
-  // They have no engagement yet, and create responses omit author signals.
-  const submitted = new Set(submittedPostIds.map(String));
-  scored.sort((a, b) => {
-    const aSubmitted = submitted.has(String(a.p.id));
-    const bSubmitted = submitted.has(String(b.p.id));
-    if (aSubmitted !== bSubmitted) return aSubmitted ? -1 : 1;
-    if (aSubmitted) return a.i - b.i;
-    return (b.s - a.s) || (a.i - b.i);
-  });
+  scored.sort((a, b) => (b.s - a.s) || (a.i - b.i));
   return scored.map((o) => o.p);
 }
