@@ -28,3 +28,26 @@ Validation:
 
 Provider availability and actual remote playback are not asserted by the
 mocked browser suite.
+
+## Deployment
+
+Commit `17bc708` was integrated into main and deployed on 2026-09-18 from
+the isolated worktree after a successful container production build. The
+previous release is backed up at
+`/tmp/intellacc-before-media-previews-20260918T191556Z.tar.gz`.
+Publication checked the previous live index and main revision before switching
+the entry file, and retained older hashed assets for existing browser tabs.
+
+All 50 public build files (index, service worker, JavaScript, CSS and WASM)
+matched the release byte-for-byte. The entry is `index-Bbsl0rDj.js`.
+The public API health check passed. The real Cybersocialism post, ID 2208,
+displayed its YouTube thumbnail and opened/closed the inline player in the Van
+layout without page errors or failed application assets. YouTube requested
+sign-in for an anti-bot check in the server's browser, so remote playback itself
+could not be confirmed. The terminal shell loaded without errors. Its feed
+requires login, and its preview behavior was verified in the isolated browser
+suite rather than with a production account. Both layouts passed the five
+browser tests, alongside six URL unit tests, before deployment.
+
+No backend restart or database migration was required. Unrelated backend
+working-tree changes were preserved.
