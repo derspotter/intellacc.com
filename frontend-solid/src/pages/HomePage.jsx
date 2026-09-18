@@ -27,6 +27,7 @@ export default function HomePage() {
   const [nextCursor, setNextCursor] = createSignal(null);
   const [usingFeed, setUsingFeed] = createSignal(isAuthenticated());
   const [feedWeights, setFeedWeights] = createSignal(null);
+  const [submittedPostIds, setSubmittedPostIds] = createSignal([]);
 
   // Reorder the loaded feed by the user's saved weight mix. rankPosts returns
   // the input order unchanged when no weights are saved (opt-in), so users who
@@ -34,7 +35,7 @@ export default function HomePage() {
   // accumulated list re-sorts on "Load more"; acceptable for v1 (the primary
   // requirement is reorder-on-open) — a rank-appended-page-only refinement is a
   // possible follow-up.
-  const rankedPosts = createMemo(() => rankPosts(posts(), feedWeights()));
+  const rankedPosts = createMemo(() => rankPosts(posts(), feedWeights(), submittedPostIds()));
 
   const loadPosts = async ({ reset = true } = {}) => {
     if (reset) {
@@ -51,7 +52,11 @@ export default function HomePage() {
       const nextPosts = getPostsPayloadItems(normalized.items);
 
       if (reset) {
-        setPosts(nextPosts);
+        // A feed request started before submission must not erase the new post.
+        setPosts((current) => appendUniqueById(
+          current.filter((post) => submittedPostIds().includes(String(post.id))),
+          nextPosts
+        ));
       } else {
         setPosts((current) => appendUniqueById(current, nextPosts));
       }
@@ -74,7 +79,7 @@ export default function HomePage() {
         setError(bodyMessage);
       }
       if (reset) {
-        setPosts([]);
+        setPosts((current) => current.filter((post) => submittedPostIds().includes(String(post.id))));
       }
       setHasMore(false);
       setNextCursor(null);
@@ -98,6 +103,7 @@ export default function HomePage() {
 
   const handlePostCreated = (post) => {
     if (!post) return;
+    setSubmittedPostIds((current) => [...current, String(post.id)]);
     setPosts((current) => {
       const filtered = current.filter((item) => String(item.id) !== String(post.id));
       return [post, ...filtered];

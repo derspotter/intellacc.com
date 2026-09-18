@@ -5,6 +5,24 @@ import { redistribute, rankPosts, normalizeWeights, KEYS } from './feedRanking.j
 const sum = (w) => w.accuracy + w.followers + w.likes + w.views;
 const noLocks = { accuracy: false, followers: false, likes: false, views: false };
 
+test('successful submissions stay ahead of engaged posts in newest-first order', () => {
+  const posts = [
+    { id: 3, content: 'Newest submission' },
+    { id: 2, content: 'Previous submission' },
+    { id: 1, like_count: 20, view_count: 100, author_accuracy: 90, author_followers: 200 }
+  ];
+  const weights = { accuracy: 25, followers: 25, likes: 25, views: 25 };
+  assert.deepEqual(rankPosts(posts, weights).map(p => p.id), [1, 3, 2]);
+  assert.deepEqual(rankPosts(posts, weights, ['2', '3']).map(p => p.id), [3, 2, 1]);
+  assert.deepEqual(posts.map(p => p.id), [3, 2, 1]);
+});
+
+test('submission priority preserves custom ranking for the rest of the feed', () => {
+  const posts = [{ id: 3 }, { id: 1, like_count: 1 }, { id: 2, like_count: 10 }];
+  assert.deepEqual(rankPosts(posts, { likes: 100 }, ['3', 'missing']).map(p => p.id), [3, 2, 1]);
+  assert.deepEqual(rankPosts(posts, null, ['3']).map(p => p.id), [3, 1, 2]);
+});
+
 test('redistribute splits freed budget equally among equal others', () => {
   const out = redistribute({ accuracy: 25, followers: 25, likes: 25, views: 25 }, noLocks, 'accuracy', 40);
   assert.equal(out.accuracy, 40);

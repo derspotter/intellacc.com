@@ -23,7 +23,7 @@ const PostComposer = () => {
         try {
             // Call the API directly first to catch 403 before any optimistic UI
             const newPost = await api.posts.create(content());
-            feedStore.addPost(newPost);
+            feedStore.addPost(newPost, { submitted: true });
             clearDraft();
             setVerifyBanner(null);
         } catch (err) {
@@ -125,7 +125,7 @@ export const FeedPanel = () => {
         // e.g. { weights: null } for a fresh user) keeps the server order.
         getFeedWeights().then(w => setWeights(normalizeWeights(w?.weights ?? w))).catch(() => {});
     });
-    const rankedPosts = createMemo(() => rankPosts(feedStore.state.posts, weights()));
+    const rankedPosts = createMemo(() => rankPosts(feedStore.state.posts, weights(), feedStore.state.submittedPostIds));
 
     return (
         <Panel title="[1] FEED // LIVE" class="h-full flex flex-col">

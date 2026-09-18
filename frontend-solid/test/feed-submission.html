@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><title>Feed submission regression fixture</title></head>
+  <body>
+    <main id="fixture"></main>
+    <script type="module">
+      import { createComponent } from 'solid-js';
+      import { render } from 'solid-js/web';
+      import HomePage from '/src/pages/HomePage.jsx';
+      import { FeedPanel } from '/src/components/FeedPanel.jsx';
+      import { feedStore } from '/src/store/feedStore.js';
+      import '/src/styles.css';
+      const terminal = new URLSearchParams(location.search).has('terminal');
+      if (terminal) feedStore.loadPosts();
+      render(() => createComponent(terminal ? FeedPanel : HomePage), document.getElementById('fixture'));
+    </script>
+  </body>
+</html>
