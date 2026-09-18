@@ -1,6 +1,7 @@
 import { createSignal, Show, For, createEffect, onCleanup } from "solid-js";
 import { Panel } from "./ui/Panel";
 import vaultService from "../services/mls/vaultService";
+import { createMessageHistory, mergeOptimisticMessages } from "../services/mls/messageHistory";
 import vaultStore from "../store/vaultStore";
 import { joinVaultBootstrap } from "../services/mls/vaultBootstrap";
 import { userData, getToken } from "../services/tokenService";
@@ -46,6 +47,29 @@ export const ChatPanel = () => {
     const [searching, setSearching] = createSignal(false);
 
     const getConversationId = (conv) => String(conv?.group_id || conv?.groupId || conv?.id || '');
+
+    const [historyState, setHistoryState] = createSignal({ hasMore: false, loading: false });
+    let messageList;
+    const history = createMessageHistory(vaultService, {
+        onChange: (state) => {
+            setHistoryState(state);
+            if (state.reset) {
+                setMessages([]);
+            } else if (!vaultStore.state.isLocked && state.groupId === getConversationId(selectedConversation())) {
+                setMessages((previous) => mergeOptimisticMessages(state.messages, previous));
+            }
+        }
+    });
+    const loadOlderMessages = async () => {
+        const list = messageList;
+        const groupId = getConversationId(selectedConversation());
+        const height = list?.scrollHeight || 0;
+        const top = list?.scrollTop || 0;
+        await history.loadOlder();
+        if (list && groupId === getConversationId(selectedConversation())) {
+            list.scrollTop = top + list.scrollHeight - height;
+        }
+    };
 
     // ---- Safety numbers / TOFU verification (DMs only) ----
     const [safetyNumbersOpen, setSafetyNumbersOpen] = createSignal(false);
@@ -191,8 +215,8 @@ export const ChatPanel = () => {
     const refreshConversationMessages = async (convId) => {
         if (!convId) return;
         try {
-            const msgs = await vaultService.getMessages(convId);
-            setMessages(msgs);
+            if (vaultStore.state.isLocked || convId !== getConversationId(selectedConversation())) return;
+            await history.select(convId);
         } catch (err) {
             console.error('[ChatPanel] Failed to load messages:', err);
         }
@@ -209,8 +233,10 @@ export const ChatPanel = () => {
             })();
         }
         if (!wasLocked && locked) {
+            history.clear();
             setSelectedConversation(null);
             setMessages([]);
+            setMsgInput('');
             setUnreadCounts({});
         }
         wasLocked = locked;
@@ -267,6 +293,7 @@ export const ChatPanel = () => {
 
     onCleanup(() => {
         disposed = true;
+        history.dispose();
         if (mlsSyncTimer) clearTimeout(mlsSyncTimer);
         try { unsubMsg?.(); } catch {}
         try { unsubWelcome?.(); } catch {}
@@ -304,12 +331,12 @@ export const ChatPanel = () => {
     const selectConversation = async (conv) => {
         setSelectedConversation(conv);
         setSidebarOpen(false);
-        setMessages([]);
 
         try {
             const convId = getConversationId(conv);
             clearUnread(convId);
-            // Ensure pending MLS messages are drained before we fetch history.
+            void history.select(convId);
+            // Relay commits incrementally update the selected history window.
             await processPendingQueue().catch(() => {});
             await refreshConversationMessages(convId);
         } catch (err) {
@@ -340,7 +367,12 @@ export const ChatPanel = () => {
         setMsgInput("");
 
         try {
-            await coreCryptoClient.sendMessage(convId, text);
+            const result = await coreCryptoClient.sendMessage(convId, text);
+            if (!vaultStore.state.isLocked && convId === getConversationId(selectedConversation())) {
+                setMessages((previous) => previous.some((row) => String(row.id) === String(result?.id))
+                    ? previous.filter((row) => row.id !== optimisticId)
+                    : previous.map((row) => row.id === optimisticId ? { ...row, id: result?.id || row.id } : row));
+            }
         } catch (err) {
             console.warn('[ChatPanel] Send failed:', err?.message || err);
             setMessages(prev => (prev || []).filter(m => m?.id !== optimisticId));
@@ -680,7 +712,15 @@ export const ChatPanel = () => {
                         </Show>
 
                         {/* Messages Area */}
-                        <div class="flex-1 overflow-y-auto p-3 sm:p-4 font-mono text-xs custom-scrollbar">
+                        <div ref={messageList} class="flex-1 overflow-y-auto p-3 sm:p-4 font-mono text-xs custom-scrollbar">
+                            <Show when={historyState().error}>
+                                <p role="alert" class="text-market-down">{historyState().error}</p>
+                            </Show>
+                            <Show when={historyState().hasMore}>
+                                <button type="button" class="bg-bb-bg border border-bb-border text-bb-text px-2 py-1 mb-3 text-[10px]" disabled={historyState().loading} onClick={loadOlderMessages}>
+                                    {historyState().loading ? 'LOADING…' : 'LOAD OLDER MESSAGES'}
+                                </button>
+                            </Show>
                             <Show when={!selectedConversation()}>
                                 <div class="text-bb-muted text-center mt-12 text-xs">
                                     // AWAITING SELECTION...
@@ -703,7 +743,7 @@ export const ChatPanel = () => {
                                             </span>
                                         </div>
                                         <div class="text-bb-text text-xs leading-relaxed pl-2 border-l border-bb-border">
-                                            <span class="break-words">{msg.content || msg.plaintext || '[ENCRYPTED DATA]'}</span>
+                                            <span class="break-words">{msg.deleted ? 'Message deleted' : (msg.content || msg.plaintext || '[ENCRYPTED DATA]')}</span>
                                         </div>
                                     </div>
                                 )}

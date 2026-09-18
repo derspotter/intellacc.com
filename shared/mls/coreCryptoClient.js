@@ -114,7 +114,9 @@ class CoreCryptoClient {
         this.processedMessageIds.add(id);
         this.processingMessageIds.delete(id);
 
+        const processingClient = this.client;
         this.getVaultService().then(vault => {
+            if (this.client !== processingClient) return;
             vault.markMessageProcessed(id).catch(e => console.warn('[MLS] Failed to save processed ID:', e));
         });
 
@@ -1804,6 +1806,23 @@ class CoreCryptoClient {
             // To check if it's own message, we compare with our own deviceId.
             const vault = await this.getVaultService();
             const myDeviceId = vault.getDeviceId();
+            const applicationClient = this.client;
+            const applicationEpoch = vault.historyEpoch;
+            const assertApplicationSession = () => {
+                if (!applicationClient || this.client !== applicationClient || !vault.isUnlocked()
+                    || vault.getDeviceId() !== myDeviceId || vault.historyEpoch !== applicationEpoch) {
+                    throw new Error('Vault locked');
+                }
+            };
+            assertApplicationSession();
+            // A relay ID becomes processed only after its local write succeeds.
+            // Locking while decrypting/persisting must leave it eligible for
+            // redelivery after the vault restores its durable MLS state.
+            const completeApplication = (result) => {
+                assertApplicationSession();
+                this.markProcessed(id);
+                return result;
+            };
 
             // We need to resolve deviceId to identityName if UI expects it, 
             // or just use deviceId for now.
@@ -1844,8 +1863,6 @@ class CoreCryptoClient {
                 }
             }
 
-            this.markProcessed(id);
-
             if (plaintext && plaintext !== '[Encrypted Message]') {
                 let payload = null;
                 try {
@@ -1853,7 +1870,7 @@ class CoreCryptoClient {
                 } catch (e) { }
                 if (payload && payload.__mls_type === 'confirmation_tag') {
                     await this.handleConfirmationTagMessage(group_id, payload, senderUserId);
-                    return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
+                    return completeApplication({ id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true });
                 }
                 if (payload && payload.__mls_type === 'edit' && payload.target_id != null) {
                     // Only the original sender may edit; authorized against the
@@ -1865,7 +1882,7 @@ class CoreCryptoClient {
                     if (!editResult?.ok && editResult?.reason === 'sender_mismatch') {
                         console.warn('[MLS] Rejected edit from non-author:', { groupId: group_id, senderUserId });
                     }
-                    return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
+                    return completeApplication({ id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true });
                 }
                 if (payload && payload.__mls_type === 'delete' && payload.target_id != null) {
                     const deleteResult = await vault.markMessageDeleted(
@@ -1875,17 +1892,17 @@ class CoreCryptoClient {
                     if (!deleteResult?.ok && deleteResult?.reason === 'sender_mismatch') {
                         console.warn('[MLS] Rejected delete from non-author:', { groupId: group_id, senderUserId });
                     }
-                    return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
+                    return completeApplication({ id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true });
                 }
                 if (payload && payload.__mls_type === 'read_receipt') {
                     await vault.saveReadReceipt(group_id, senderUserId, payload.last_read_id);
-                    return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
+                    return completeApplication({ id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true });
                 }
                 if (payload && payload.__mls_type === 'expiration') {
                     // Any group member may change the disappearing-message TTL
                     // (applies to new messages only, never retroactively).
                     await vault.setGroupExpiration(group_id, payload.ttl_seconds, senderUserId);
-                    return { id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true };
+                    return completeApplication({ id, groupId: group_id, senderId: senderUserId, senderDeviceId: sender_id, type: 'system', skipped: true });
                 }
             }
 
@@ -1905,7 +1922,7 @@ class CoreCryptoClient {
                 await vault.persistMessage(messageObj);
             }
 
-            return messageObj;
+            return completeApplication(messageObj);
         } else if (content_type === 'proposal') {
             const proposalResult = await this.processProposal(group_id, data);
             this.markProcessed(id);

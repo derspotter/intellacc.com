@@ -7,6 +7,7 @@
 // 4. Provides defense-in-depth for offline DB-only or browser-profile-only compromise.
 
 import init, { MlsClient } from '@openmls';
+import { messageIndexFields, upgradeMessageHistory, captureSession, assertSession, readMessagePage, readMessage, findMessageRecord } from './messageHistoryStorage.js';
 import vaultStore from '../../store/vaultStore.js';
 import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import messagingStore from '../../store/messagingStore.js';
@@ -22,7 +23,7 @@ import {
 let wasmInitialized = false;
 
 const KEYSTORE_DB_NAME = 'intellacc_keystore';
-const KEYSTORE_DB_VERSION = 11; // Bump for group_settings store
+const KEYSTORE_DB_VERSION = 12; // Indexed, device-scoped message history
 const MESSAGE_RECEIPTS_STORE = 'message_receipts';
 const GROUP_SETTINGS_STORE = 'group_settings';
 const KEYSTORE_STORE_NAME = 'device_keystore';
@@ -54,6 +55,10 @@ const serializePrfInput = (input) => {
 class VaultService {
     constructor() {
         this.db = null;
+        this.dbOpening = null;
+        this.historyEpoch = 0;
+        this.messageListeners = new Set();
+        this.messageChannel = null;
         this.compositeKey = null; // The actual encryption key
         this.masterKey = null;
         this.localKey = null;
@@ -78,6 +83,7 @@ class VaultService {
     }
 
     setDeviceId(deviceId) {
+        if (this.deviceId !== deviceId) this.invalidateHistory();
         this.deviceId = deviceId;
         setDeviceIdStore(deviceId);
         if (deviceId) {
@@ -86,16 +92,33 @@ class VaultService {
     }
 
     clearDeviceId() {
+        this.invalidateHistory();
         this.deviceId = null;
         clearDeviceIdStore();
     }
 
     async initDB() {
         if (this.db) return;
-        return new Promise((resolve, reject) => {
+        if (this.dbOpening) return this.dbOpening;
+        this.dbOpening = new Promise((resolve, reject) => {
+            let blocked = false;
             const request = indexedDB.open(KEYSTORE_DB_NAME, KEYSTORE_DB_VERSION);
             request.onerror = () => reject(request.error);
-            request.onsuccess = () => { this.db = request.result; resolve(); };
+            request.onblocked = () => {
+                blocked = true;
+                reject(new Error('Close other Intellacc tabs, then reload to upgrade message history.'));
+            };
+            request.onsuccess = () => {
+                const db = request.result;
+                if (blocked) { db.close(); return; }
+                this.db = db;
+                db.onversionchange = () => {
+                    db.close();
+                    if (this.db === db) this.db = null;
+                    void this.lockKeys();
+                };
+                resolve();
+            };
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
                 if (event.oldVersion < 6) {
@@ -112,6 +135,9 @@ class VaultService {
                     store.createIndex('groupId', 'groupId', { unique: false });
                     store.createIndex('deviceId', 'deviceId', { unique: false });
                     store.createIndex('timestamp', 'timestamp', { unique: false });
+                }
+                if (event.oldVersion < 12) {
+                    upgradeMessageHistory(event.target.transaction.objectStore(MESSAGES_STORE_NAME));
                 }
                 // V7: Granular MLS storage - each entity stored separately
                 if (!db.objectStoreNames.contains(MLS_GRANULAR_STORE_NAME)) {
@@ -145,7 +171,8 @@ class VaultService {
                     store.createIndex('deviceId', 'deviceId', { unique: false });
                 }
             };
-        });
+        }).finally(() => { this.dbOpening = null; });
+        return this.dbOpening;
     }
 
     // DeviceLinkModal persists the approved device id after linking; it is
@@ -461,70 +488,91 @@ class VaultService {
         });
     }
 
+    invalidateHistory() {
+        this.historyEpoch++;
+        this.notifyMessageChange({ kind: 'reset' }, false);
+    }
+
+    subscribeMessageChanges(listener) {
+        this.messageListeners.add(listener);
+        if (!this.messageChannel && typeof BroadcastChannel !== 'undefined') {
+            this.messageChannel = new BroadcastChannel('intellacc-message-history');
+            this.messageChannel.onmessage = ({ data }) => {
+                if (data?.deviceId === this.deviceId && ['insert', 'update'].includes(data.kind)) {
+                    this.notifyMessageChange(data, false);
+                }
+            };
+        }
+        return () => {
+            this.messageListeners.delete(listener);
+            if (!this.messageListeners.size) {
+                this.messageChannel?.close();
+                this.messageChannel = null;
+            }
+        };
+    }
+
+    notifyMessageChange(change, broadcast = true) {
+        const event = { deviceId: this.deviceId, ...change };
+        for (const listener of this.messageListeners) {
+            try { listener(event); } catch (error) { console.warn('[Keystore] History listener failed', error); }
+        }
+        // Only identifiers cross tabs. Plaintext and keys remain in the vault.
+        if (broadcast && typeof BroadcastChannel !== 'undefined') {
+            const channel = this.messageChannel || new BroadcastChannel('intellacc-message-history');
+            channel.postMessage(event);
+            if (channel !== this.messageChannel) channel.close();
+        }
+    }
+
     async persistMessage(message) {
-        if (!this.compositeKey || !this.deviceId) return;
+        const session = captureSession(this);
         await this.initDB();
+        assertSession(this, session);
         const payload = JSON.stringify({
             plaintext: message.plaintext, senderId: message.senderId, type: message.type,
             ...(message.expiresAt ? { expiresAt: message.expiresAt } : {})
         });
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
-        const encryptedBuffer = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, this.compositeKey, new TextEncoder().encode(payload));
-        const record = {
-            groupId: message.groupId, timestamp: message.timestamp, messageId: message.id, deviceId: this.deviceId,
-            encryptedData: { iv: Array.from(iv), ciphertext: Array.from(new Uint8Array(encryptedBuffer)) }
-        };
-        return new Promise((resolve, reject) => {
+        const encryptedBuffer = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, session.key, new TextEncoder().encode(payload));
+        assertSession(this, session);
+        const record = messageIndexFields({
+            groupId: message.groupId, timestamp: message.timestamp, messageId: message.id, deviceId: session.deviceId,
+            encryptedData: { iv, ciphertext: new Uint8Array(encryptedBuffer) }
+        });
+        await new Promise((resolve, reject) => {
             const tx = this.db.transaction([MESSAGES_STORE_NAME], 'readwrite');
             tx.objectStore(MESSAGES_STORE_NAME).add(record);
-            tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error);
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+            tx.onabort = () => reject(tx.error);
         });
+        assertSession(this, session);
+        this.notifyMessageChange({ kind: 'insert', groupId: record.groupId, messageId: record.messageId });
     }
 
+    getMessagePage(groupId, options) {
+        return readMessagePage(this, groupId, options);
+    }
+
+    getMessage(groupId, messageId) {
+        return readMessage(this, groupId, messageId);
+    }
+
+    // Compatibility for callers that explicitly need a full export. Chat views
+    // use getMessagePage and committed message notifications instead.
     async getMessages(groupId) {
-        if (!this.compositeKey || !this.deviceId) throw new Error('Vault locked');
-        await this.initDB();
-        const records = await new Promise((resolve, reject) => {
-            const tx = this.db.transaction([MESSAGES_STORE_NAME], 'readonly');
-            const req = tx.objectStore(MESSAGES_STORE_NAME).index('groupId').getAll(groupId);
-            req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
-        });
-        const deviceRecords = records.filter(r => r.deviceId === this.deviceId);
-        const now = Date.now();
-        const expiredKeys = [];
-        const messages = await Promise.all(deviceRecords.map(async (rec) => {
-            try {
-                const iv = new Uint8Array(rec.encryptedData.iv);
-                const ciphertext = new Uint8Array(rec.encryptedData.ciphertext);
-                const plainBuffer = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, this.compositeKey, ciphertext);
-                const payload = JSON.parse(new TextDecoder().decode(plainBuffer));
-                if (payload.expiresAt && Number(payload.expiresAt) <= now) {
-                    expiredKeys.push(rec.id);
-                    return null;
-                }
-                return {
-                    id: rec.messageId, groupId: rec.groupId, timestamp: rec.timestamp,
-                    senderId: payload.senderId, plaintext: payload.plaintext, type: payload.type,
-                    editedAt: payload.editedAt || null, deleted: !!payload.deleted,
-                    expiresAt: payload.expiresAt || null
-                };
-            } catch (e) { return null; }
-        }));
-        // Disappearing messages: hard-delete anything past its TTL.
-        if (expiredKeys.length > 0) {
-            await new Promise((resolve) => {
-                try {
-                    const tx = this.db.transaction([MESSAGES_STORE_NAME], 'readwrite');
-                    const store = tx.objectStore(MESSAGES_STORE_NAME);
-                    for (const key of expiredKeys) store.delete(key);
-                    tx.oncomplete = () => resolve();
-                    tx.onerror = () => resolve(); // Non-fatal
-                } catch (e) {
-                    resolve();
-                }
-            });
-        }
-        return messages.filter(m => m !== null).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        const session = captureSession(this);
+        let before = null;
+        let messages = [];
+        let page;
+        do {
+            page = await this.getMessagePage(groupId, { before });
+            assertSession(this, session);
+            messages = [...page.messages, ...messages];
+            before = page.before;
+        } while (page.hasMore);
+        return messages;
     }
 
     /**
@@ -533,7 +581,10 @@ class VaultService {
      */
     async markMessageProcessed(messageId) {
         if (!this.deviceId) return;
+        const deviceId = this.deviceId;
+        const epoch = this.historyEpoch;
         await this.initDB();
+        if (this.deviceId !== deviceId || this.historyEpoch !== epoch) return;
         return new Promise((resolve) => {
             try {
                 const tx = this.db.transaction([PROCESSED_MESSAGES_STORE], 'readwrite');
@@ -575,40 +626,37 @@ class VaultService {
         });
     }
 
-    async _findMessageRecord(groupId, messageId) {
-        await this.initDB();
-        const records = await new Promise((resolve, reject) => {
-            const tx = this.db.transaction([MESSAGES_STORE_NAME], 'readonly');
-            const req = tx.objectStore(MESSAGES_STORE_NAME).index('groupId').getAll(groupId);
-            req.onsuccess = () => resolve(req.result || []);
-            req.onerror = () => reject(req.error);
-        });
-        return records.find(
-            (rec) => rec.deviceId === this.deviceId && String(rec.messageId) === String(messageId)
-        ) || null;
+    _findMessageRecord(groupId, messageId) {
+        return findMessageRecord(this, groupId, messageId);
     }
 
-    async _decryptMessagePayload(record) {
+    async _decryptMessagePayload(record, session = captureSession(this)) {
         const iv = new Uint8Array(record.encryptedData.iv);
         const ciphertext = new Uint8Array(record.encryptedData.ciphertext);
-        const plainBuffer = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, this.compositeKey, ciphertext);
+        const plainBuffer = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, session.key, ciphertext);
+        assertSession(this, session);
         return JSON.parse(new TextDecoder().decode(plainBuffer));
     }
 
-    async _rewriteMessagePayload(record, payload) {
+    async _rewriteMessagePayload(record, payload, session = captureSession(this)) {
+        assertSession(this, session);
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
         const encryptedBuffer = await window.crypto.subtle.encrypt(
             { name: 'AES-GCM', iv },
-            this.compositeKey,
+            session.key,
             new TextEncoder().encode(JSON.stringify(payload))
         );
-        record.encryptedData = { iv: Array.from(iv), ciphertext: Array.from(new Uint8Array(encryptedBuffer)) };
-        return new Promise((resolve, reject) => {
+        assertSession(this, session);
+        record.encryptedData = { iv, ciphertext: new Uint8Array(encryptedBuffer) };
+        await new Promise((resolve, reject) => {
             const tx = this.db.transaction([MESSAGES_STORE_NAME], 'readwrite');
             tx.objectStore(MESSAGES_STORE_NAME).put(record);
             tx.oncomplete = () => resolve();
             tx.onerror = () => reject(tx.error);
+            tx.onabort = () => reject(tx.error);
         });
+        assertSession(this, session);
+        this.notifyMessageChange({ kind: 'update', groupId: record.groupId, messageId: record.messageId });
     }
 
     /**
@@ -618,16 +666,18 @@ class VaultService {
      */
     async applyMessageEdit(groupId, messageId, newText, { requireSenderId = null } = {}) {
         if (!this.compositeKey || !this.deviceId) return { ok: false, reason: 'locked' };
+        const session = captureSession(this);
         const record = await this._findMessageRecord(groupId, messageId);
+        assertSession(this, session);
         if (!record) return { ok: false, reason: 'not_found' };
-        const payload = await this._decryptMessagePayload(record);
+        const payload = await this._decryptMessagePayload(record, session);
         if (requireSenderId !== null && String(payload.senderId) !== String(requireSenderId)) {
             return { ok: false, reason: 'sender_mismatch' };
         }
         if (payload.deleted) return { ok: false, reason: 'deleted' };
         payload.plaintext = newText;
         payload.editedAt = Date.now();
-        await this._rewriteMessagePayload(record, payload);
+        await this._rewriteMessagePayload(record, payload, session);
         return { ok: true };
     }
 
@@ -636,16 +686,18 @@ class VaultService {
      */
     async markMessageDeleted(groupId, messageId, { requireSenderId = null } = {}) {
         if (!this.compositeKey || !this.deviceId) return { ok: false, reason: 'locked' };
+        const session = captureSession(this);
         const record = await this._findMessageRecord(groupId, messageId);
+        assertSession(this, session);
         if (!record) return { ok: false, reason: 'not_found' };
-        const payload = await this._decryptMessagePayload(record);
+        const payload = await this._decryptMessagePayload(record, session);
         if (requireSenderId !== null && String(payload.senderId) !== String(requireSenderId)) {
             return { ok: false, reason: 'sender_mismatch' };
         }
         payload.plaintext = '';
         payload.deleted = true;
         payload.deletedAt = Date.now();
-        await this._rewriteMessagePayload(record, payload);
+        await this._rewriteMessagePayload(record, payload, session);
         return { ok: true };
     }
 
@@ -1374,6 +1426,7 @@ class VaultService {
     }
 
     async lockKeys() {
+        this.invalidateHistory();
         stopIdleAutoLock();
 
         // SECURITY: Wipe ALL decrypted data from memory

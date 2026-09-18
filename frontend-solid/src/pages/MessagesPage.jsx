@@ -3,6 +3,7 @@ import { getDirectMessages, getUser, getUserByUsername, searchUsers } from '../s
 import { getCurrentUserId as getAuthUserId, isAuthenticated } from '../services/auth';
 import vaultStore from '../store/vaultStore';
 import vaultService from '../services/mls/vaultService';
+import { createMessageHistory, mergeOptimisticMessages } from '../services/mls/messageHistory';
 import { joinVaultBootstrap } from '../services/mls/vaultBootstrap';
 import coreCryptoClient from '@shared/mls/coreCryptoClient.js';
 import { onMlsMessage, onMlsWelcome } from '../services/socket';
@@ -20,16 +21,6 @@ const normalizeRows = (payload) => {
   }
   if (Array.isArray(payload?.directMessages)) {
     return payload.directMessages;
-  }
-  return [];
-};
-
-const normalizeMessageRows = (payload) => {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-  if (Array.isArray(payload?.items)) {
-    return payload.items;
   }
   return [];
 };
@@ -175,6 +166,28 @@ export default function MessagesPage() {
   });
 
   const isLocked = () => vaultStore.state?.isLocked === true;
+
+  const [historyState, setHistoryState] = createSignal({ hasMore: false, loading: false });
+  let messageList;
+  const history = createMessageHistory(vaultService, {
+    onChange: (state) => {
+      setHistoryState(state);
+      if (state.reset) setGroupMessages([]);
+      else if (!isLocked() && state.groupId === selectedGroup()) {
+        setGroupMessages((previous) => mergeOptimisticMessages(state.messages, previous));
+      }
+    },
+    onError: (err) => { if (!isLocked()) setGroupError(err?.message || 'Failed to load message history.'); }
+  });
+  const loadOlderMessages = async () => {
+    const list = messageList;
+    const groupId = selectedGroup();
+    const height = list?.scrollHeight || 0;
+    const top = list?.scrollTop || 0;
+    await history.loadOlder();
+    if (list && groupId === selectedGroup()) list.scrollTop = top + list.scrollHeight - height;
+    if (groupId === selectedGroup()) void resolveUsernames(groupMessages().map(getSenderId).filter(Boolean));
+  };
 
   const visibleConversations = createMemo(() => {
     const query = searchQuery().trim().toLowerCase();
@@ -332,11 +345,17 @@ export default function MessagesPage() {
     }
 
     try {
-      const response = await vaultService.getMessages(groupId);
-      const rows = normalizeMessageRows(response);
-      setGroupMessages(rows);
-      setReadReceipts(await vaultService.getReadReceipts(groupId).catch(() => ({})));
-      setDisappearingTtl(await coreCryptoClient.getDisappearingTimer(groupId).catch(() => 0));
+      if (isLocked() || groupId !== selectedGroup() || disposed) return;
+      const epoch = vaultService.historyEpoch;
+      await history.select(groupId);
+      const [receipts, ttl] = await Promise.all([
+        vaultService.getReadReceipts(groupId).catch(() => ({})),
+        coreCryptoClient.getDisappearingTimer(groupId).catch(() => 0)
+      ]);
+      if (isLocked() || groupId !== selectedGroup() || disposed || epoch !== vaultService.historyEpoch) return;
+      const rows = groupMessages();
+      setReadReceipts(receipts);
+      setDisappearingTtl(ttl);
       refreshGroupMembers(groupId);
       void resolveUsernames(rows.map((message) => getSenderId(message)).filter(Boolean));
       setError('');
@@ -355,6 +374,7 @@ export default function MessagesPage() {
           .catch((err) => console.warn('[MessagesPage] Failed to send read receipt:', err?.message || err));
       }
     } catch (err) {
+      if (disposed || groupId !== selectedGroup() || isLocked()) return;
       if (err?.message === 'Vault locked') {
         setGroupError('Unlock your vault to load messages for this conversation.');
       } else {
@@ -370,12 +390,14 @@ export default function MessagesPage() {
       return;
     }
 
+    if (isLocked() || groupId !== selectedGroup() || disposed) return;
+    void history.select(groupId);
     setLoadingMessages(true);
     try {
       await processPendingQueue();
       await refreshConversationMessages(groupId);
     } finally {
-      setLoadingMessages(false);
+      if (groupId === selectedGroup() && !disposed) setLoadingMessages(false);
     }
   };
 
@@ -452,7 +474,7 @@ export default function MessagesPage() {
       const idsToRefresh = groupIds.length ? groupIds : (current ? [current] : []);
       for (const id of idsToRefresh) {
         if (String(id) === String(current)) {
-          await loadMessages(id);
+          await refreshConversationMessages(id);
         }
       }
     }, 150);
@@ -474,6 +496,7 @@ export default function MessagesPage() {
 
   onCleanup(() => {
     disposed = true;
+    history.dispose();
     if (mlsSyncTimer) {
       clearTimeout(mlsSyncTimer);
       mlsSyncTimer = null;
@@ -501,8 +524,14 @@ export default function MessagesPage() {
     if (!wasLocked && locked) {
       setError('');
       setGroupError('');
+      history.clear();
       setGroupMessages([]);
       setSelectedGroup('');
+      setReadReceipts({});
+      setDisappearingTtl(0);
+      setEditingMessageId(null);
+      setEditText('');
+      setLoadingMessages(false);
       setSendingMessage(false);
       setMessageText('');
     }
@@ -667,6 +696,7 @@ export default function MessagesPage() {
     const next = String(groupId || '');
     setSelectedGroup(next);
     setEditingMessageId(null);
+    setEditText('');
     setConfirmDeleteId(null);
     setConfirmLeave(false);
     void loadMessages(next);
@@ -886,6 +916,7 @@ export default function MessagesPage() {
       ...current,
       {
         id: optimisticId,
+        optimistic: true,
         senderId: currentUserId(),
         plaintext: text,
         content: text,
@@ -898,15 +929,13 @@ export default function MessagesPage() {
     try {
       const result = await coreCryptoClient.sendMessage(conversationId, text);
       const sentId = result?.id;
-      if (sentId) {
-        setGroupMessages((current) => current.map((msg) => {
-          if (msg.id !== optimisticId) {
-            return msg;
-          }
-          return { ...msg, id: String(sentId) };
-        }));
+      if (sentId && !isLocked() && conversationId === selectedGroup()) {
+        setGroupMessages((current) => current.some((row) => String(row.id) === String(sentId))
+          ? current.filter((row) => row.id !== optimisticId)
+          : current.map((row) => row.id === optimisticId ? { ...row, id: String(sentId) } : row));
       }
     } catch (err) {
+      if (isLocked() || conversationId !== selectedGroup() || disposed) return;
       if (isLinkRequiredError(err)) {
         vaultStore.setShowDeviceLinkModal(true);
       }
@@ -951,6 +980,8 @@ export default function MessagesPage() {
     const currentSelection = selectedGroup();
     if (isAuthenticated() && currentSelection && !isLocked()) {
       void loadMessages(currentSelection);
+    } else {
+      history.clear();
     }
   });
 
@@ -1282,7 +1313,15 @@ export default function MessagesPage() {
                 </div>
               </Show>
 
-              <div class="messages-list">
+              <div ref={messageList} class="messages-list">
+                <Show when={historyState().error}>
+                  <p role="alert">{historyState().error}</p>
+                </Show>
+                <Show when={historyState().hasMore}>
+                  <button type="button" class="post-action" disabled={historyState().loading} onClick={loadOlderMessages}>
+                    {historyState().loading ? 'Loading…' : 'Load older messages'}
+                  </button>
+                </Show>
                 <Show when={loadingMessages()}>
                   <div class="loading">Loading messages…</div>
                 </Show>

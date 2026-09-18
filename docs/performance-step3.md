@@ -69,5 +69,9 @@ queue table and index. Existing posts are not backfilled. No environment or
 frontend changes are required. The previous code can ignore the additive table
 if a rollback is needed.
 
-Prepared on `codex/performance-link-previews`; not deployed. Batches 1 and 2
-are live.
+Commit `96ad722` was deployed on 2026-09-18. The backend restarted successfully,
+the public health endpoint returned OK, and the migration was recorded in the
+production database. PostgreSQL activity confirmed the worker polling the new
+queue. The queue was empty at verification, so production job completion and
+publish latency were not measured. No frontend deployment was needed.
+Batches 1 and 2 remain live.
