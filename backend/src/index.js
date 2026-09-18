@@ -209,6 +209,7 @@ if (require.main === module) {
   startActivityPubDeliveryWorker({ intervalMs: apIntervalMs });
   startAtprotoDeliveryWorker({ intervalMs: atprotoIntervalMs });
   require('./services/metadata/linkPreviewWorker').createPreviewWorker({ io }).start();
+  require('./services/ai/aiPublicReplyService').createPublicReplyWorker({ io }).start();
 
   // Registration-approval signup context: keep the offline IP lookup data
   // fresh and scrub ip/ua from decided or expired approval rows once a day.

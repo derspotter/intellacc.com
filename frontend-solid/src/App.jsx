@@ -7,6 +7,7 @@ const VanApp = lazy(() => import('./VanApp'));
 import { getActiveSkin, syncSkinWithServer } from './services/skinProvider';
 import { syncKellyFractionWithServer } from './services/kellyPreference';
 import { isAuthenticated } from './services/auth';
+import AiDrawer from './components/ai/AiDrawer';
 
 export default function App() {
   const activeSkin = getActiveSkin;
@@ -19,8 +20,11 @@ export default function App() {
   });
 
   return (
-    <Show when={activeSkin() === 'terminal'} fallback={<VanApp />}>
-      <TerminalApp />
-    </Show>
+    <>
+      <Show when={activeSkin() === 'terminal'} fallback={<VanApp />}>
+        <TerminalApp />
+      </Show>
+      <AiDrawer />
+    </>
   );
 }

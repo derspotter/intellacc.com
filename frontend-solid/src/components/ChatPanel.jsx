@@ -11,6 +11,8 @@ import { onMlsMessage, onMlsWelcome } from "../services/socket";
 import { DeviceLinkModal } from "./vault/DeviceLinkModal";
 import { SafetyNumberModal } from "./vault/SafetyNumberModal";
 import messagingStore from "../store/messagingStore";
+import ai from '../store/aiStore';
+import AiConversation from './ai/AiConversation';
 
 export const ChatPanel = () => {
     const [password, setPassword] = createSignal("");
@@ -329,6 +331,7 @@ export const ChatPanel = () => {
     };
 
     const selectConversation = async (conv) => {
+        ai.showDm(false);
         setSelectedConversation(conv);
         setSidebarOpen(false);
 
@@ -483,7 +486,11 @@ export const ChatPanel = () => {
     };
 
     return (
-        <Panel title="[3] COMMS // E2EE" class="h-full flex flex-col font-mono text-xs">
+        <Panel title={ai.state.dm ? '[3] COMMS // PRIVATE AI' : '[3] COMMS // E2EE'} class="h-full flex flex-col font-mono text-xs">
+            <button type="button" class="ai-dm-entry" aria-pressed={ai.state.dm} onClick={() => ai.showDm(!ai.state.dm)}>
+                {ai.state.dm ? '← Encrypted conversations' : '✧ AI assistant · Private'}
+            </button>
+            <Show when={ai.state.dm} fallback={<>
             <Show when={vaultStore.state.isLocked}>
                 <div class="flex-1 flex flex-col items-center justify-center p-4 bg-bb-bg">
                     <Show when={vaultStore.state.bootstrapping}>
@@ -828,6 +835,7 @@ export const ChatPanel = () => {
                     onStatusChange={() => void refreshPeerVerification()}
                 />
             </Show>
+            </>}><AiConversation /></Show>
         </Panel>
     );
 };

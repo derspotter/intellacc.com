@@ -55,7 +55,9 @@ const RESERVED_USERNAMES = new Set([
   'mod',
   'root',
   'support',
-  'intellacc'
+  'intellacc',
+  'ai',
+  'ai_assistant'
 ]);
 
 const isReservedUsername = (username) =>

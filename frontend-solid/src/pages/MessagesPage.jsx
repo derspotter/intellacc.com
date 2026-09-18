@@ -11,6 +11,8 @@ import { DeviceLinkModal } from '../components/vault/DeviceLinkModal';
 import { SafetyNumberModal } from '../components/vault/SafetyNumberModal';
 import messagingStore from '../store/messagingStore';
 import { activateOnKey } from '../utils/keyboard';
+import ai from '../store/aiStore';
+import AiConversation from '../components/ai/AiConversation';
 
 const normalizeRows = (payload) => {
   if (Array.isArray(payload)) {
@@ -693,6 +695,7 @@ export default function MessagesPage() {
   };
 
   const selectConversation = (groupId) => {
+    ai.showDm(false);
     const next = String(groupId || '');
     setSelectedGroup(next);
     setEditingMessageId(null);
@@ -989,6 +992,9 @@ export default function MessagesPage() {
     <section class="messages-page">
       <div class="messages-container">
         <aside class="conversations-sidebar">
+          <button type="button" class="ai-dm-entry" aria-pressed={ai.state.dm} onClick={() => ai.showDm()}>
+            ✧ AI assistant · Private
+          </button>
           <div class="sidebar-header">
             <h2>Messages</h2>
             <button
@@ -1196,7 +1202,8 @@ export default function MessagesPage() {
         </aside>
 
         <div class="chat-area">
-          <Show when={!selectedGroup()}>
+          <Show when={ai.state.dm}><AiConversation /></Show>
+          <Show when={!ai.state.dm && !selectedGroup()}>
             <div class="no-conversation">
               <div class="empty-state">
                 <span class="icon-message" />
@@ -1206,7 +1213,7 @@ export default function MessagesPage() {
             </div>
           </Show>
 
-          <Show when={selectedGroup()}>
+          <Show when={!ai.state.dm && selectedGroup()}>
             <div class="conversation-view mls-conversation">
               <div class="chat-header">
                 <div class="chat-title">

@@ -27,6 +27,8 @@ import { RenderTextWithLinks } from '../../utils/text';
 import { userHash, goToUser } from '../../lib/profileLinks';
 import { feedSourceLabel } from '../../lib/feedSource';
 import { proposeMarketFromPost } from '../../lib/proposeFromPost';
+import ai from '../../store/aiStore';
+import AiReplyStatus from '../ai/AiReplyStatus';
 
 const normalizePosts = (payload) => {
   if (!payload) return [];
@@ -827,6 +829,10 @@ export default function PostItem(props) {
           </div>
         </Show>
         <div class="post-actions-main">
+          <Show when={isAuthenticated() && !post().is_temp}>
+            <button type="button" class="post-action ai-button" aria-label="Ask AI about this post"
+              onClick={() => ai.open(post().id)}>✧ AI</button>
+          </Show>
           <button
             type="button"
             class="post-action like-button"
@@ -864,6 +870,7 @@ export default function PostItem(props) {
         </div>
       </div>
 
+      <AiReplyStatus post={post()} />
       <div class="comments-section">
         <Show when={currentCommentCount() > 0 && !autoExpand()}>
           <div class="post-card-footer-meta">

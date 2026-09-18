@@ -9,6 +9,7 @@ import PasskeysSection from './settings/PasskeysSection';
 import VaultSection from './settings/VaultSection';
 import DevicesSection from './settings/DevicesSection';
 import DangerZoneSection from './settings/DangerZoneSection';
+import AiSettings from '../../ai/AiSettings';
 
 export default function SettingsView() {
   return (
@@ -19,6 +20,7 @@ export default function SettingsView() {
       <Section title="NOTIFICATIONS" code="SET·04"><NotificationsSection /></Section>
       <Section title="VERIFICATION" code="SET·05"><VerificationSection /></Section>
       <Section title="API KEYS" code="SET·06"><ApiKeysSection /></Section>
+      <Section title="AI ASSISTANT" code="SET·11"><AiSettings /></Section>
       <Section title="PASSKEYS" code="SET·07"><PasskeysSection /></Section>
       <Section title="VAULT" code="SET·08"><VaultSection /></Section>
       <Section title="DEVICES" code="SET·09"><DevicesSection /></Section>
