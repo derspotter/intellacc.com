@@ -1,21 +1,21 @@
 import { For } from 'solid-js';
+import { textLinkParts } from '../lib/linkPreviews';
 
 export function RenderTextWithLinks(props) {
   const parts = () => {
     const text = props.text;
     if (!text) return [];
     
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    return text.split(urlRegex);
+    return textLinkParts(text);
   };
   
   return (
     <For each={parts()}>
       {(part) => {
-        if (part.match(/^https?:\/\//)) {
-          return <a href={part} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent-color, #007bff)", "text-decoration": "underline" }}>{part}</a>;
+        if (part.url) {
+          return <a href={part.url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent-color, #007bff)", "text-decoration": "underline" }}>{part.text}</a>;
         }
-        return part;
+        return part.text;
       }}
     </For>
   );

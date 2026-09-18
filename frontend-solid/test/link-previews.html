@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Link preview fixture</title></head>
+  <body>
+    <main id="fixture"></main>
+    <script type="module">
+      import { createComponent, createSignal } from 'solid-js';
+      import { render } from 'solid-js/web';
+      import PostItem from '/src/components/posts/PostItem.jsx';
+      import TerminalPostItem from '/src/components/terminal/PostItem.jsx';
+      import '/src/index.css';
+      import '/src/styles.css';
+      document.body.className = new URLSearchParams(location.search).get('skin') === 'terminal' ? 'skin-terminal' : 'skin-van';
+      const [post, setPost] = createSignal({
+        id: 123, user_id: 5863, username: 'Philipp Dapprich',
+        content: 'Podcast discussion on Cybersocialism (in German): https://youtu.be/ebac4NojRsI?si=22t3dAYr9z37I63k Will there be global cybersocialism before 01/01/2027?',
+        created_at: '2026-08-31T12:00:00Z'
+      });
+      window.updatePost = (patch) => setPost((previous) => ({ ...previous, ...patch }));
+      render(() => createComponent(new URLSearchParams(location.search).get('skin') === 'terminal' ? TerminalPostItem : PostItem, {
+        get post() { return post(); }, disableFeedStore: true
+      }), document.getElementById('fixture'));
+    </script>
+  </body>
+</html>

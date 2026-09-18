@@ -1,0 +1,36 @@
+.post-link-previews { min-width: 0; }
+.post-link-previews:empty { display: none; }
+.link-preview {
+  margin: 0.75rem 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color, #454545);
+  border-radius: 0;
+  background: var(--bg-card, transparent);
+  color: inherit;
+  max-width: 100%;
+}
+.link-preview a { color: inherit; text-decoration: none; }
+.link-preview a:hover strong, .link-preview-controls a:hover { text-decoration: underline; }
+.link-preview-image { display: block; width: 100%; max-height: 20rem; object-fit: cover; }
+.link-preview-play {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 6rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: #fff;
+  background: #171717;
+  cursor: pointer;
+}
+.link-preview-play .link-preview-image { aspect-ratio: 16 / 9; object-fit: contain; }
+.link-preview-play-label { position: absolute; inset: 0; display: flex; gap: 0.5rem; align-items: center; justify-content: center; background: #0005; font-weight: 700; text-shadow: 0 1px 4px #000; }
+.link-preview-player { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; background: #000; }
+.link-preview-audio { display: block; width: 100%; }
+.link-preview-details { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.75rem; overflow-wrap: anywhere; }
+.link-preview-site, .link-preview-url { font-size: 0.8em; opacity: 0.7; }
+.link-preview-description { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 0.9em; }
+.link-preview-controls { display: flex; flex-wrap: wrap; gap: 1rem; padding: 0 0.75rem 0.75rem; font-size: 0.85em; }
+.link-preview-controls button { border: 1px solid var(--border-color, #454545); border-radius: 0; padding: 0.2rem 0.5rem; background: transparent; color: inherit; cursor: pointer; }
+.link-preview :focus-visible { outline: 2px solid var(--accent-color, #2684ff); outline-offset: -2px; }

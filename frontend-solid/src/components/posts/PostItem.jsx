@@ -20,6 +20,7 @@ import {
 import api from '../../services/api';
 import { getCurrentUserId, isAdmin, isAuthenticated } from '../../services/auth';
 import PostMarkets from './PostMarkets';
+import LinkPreviews from './LinkPreviews';
 import { usePostMetadata } from '../../services/postMetadata';
 import PostCritiques from './PostCritiques';
 import MarketPicker from './MarketPicker';
@@ -677,6 +678,7 @@ export default function PostItem(props) {
               <div class="edit-file-row browse-placeholder" />
             </div>
           </Show>
+          <LinkPreviews post={post()} />
           <Show when={post().reposted_post}>
             <div class="reposted-post" style="border: 1px solid var(--border-color); padding: 1rem; border-radius: var(--border-radius); margin-bottom: 0.5rem; background: var(--bg-card);">
               <div class="post-header" style="margin-bottom: 0.5rem;">
@@ -693,6 +695,7 @@ export default function PostItem(props) {
               <div class="post-content-text">
                 <RenderTextWithLinks text={post().reposted_post.content || ''} />
               </div>
+              <LinkPreviews post={post().reposted_post} />
             </div>
           </Show>
         </div>

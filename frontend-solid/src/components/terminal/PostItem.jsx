@@ -4,6 +4,8 @@ import { api, getPostComments, createComment, requestBlob, followUser } from "..
 import { feedSourceLabel } from '../../lib/feedSource';
 import { proposeMarketFromPost } from '../../lib/proposeFromPost';
 import { getCurrentUserId } from '../../services/auth';
+import LinkPreviews from '../posts/LinkPreviews';
+import { RenderTextWithLinks } from '../../utils/text';
 
 const CommentItem = (props) => (
     <div data-testid="comment-row" class="pl-3 border-l border-bb-border/40 py-1">
@@ -138,14 +140,16 @@ const PostItem = (props) => {
                 </span>
                 <span class="text-xxs text-bb-muted font-mono">{new Date(props.post.created_at).toLocaleTimeString()}</span>
             </div>
-            <p class="text-bb-text mb-2 break-words whitespace-pre-wrap">{props.post.content}</p>
+            <p class="text-bb-text mb-2 break-words whitespace-pre-wrap"><RenderTextWithLinks text={props.post.content || ''} /></p>
+            <LinkPreviews post={props.post} />
             <Show when={attachmentSrc()}>
                 <img src={attachmentSrc()} alt="" class="max-w-full max-h-64 border border-bb-border my-1" />
             </Show>
             <Show when={props.post.reposted_post}>
                 <div data-testid="repost-embed" class="border border-bb-border/60 bg-black/20 p-2 my-1 text-xs">
                     <span class="text-bb-accent font-bold text-xxs">RT @{props.post.reposted_post.username}</span>
-                    <p class="text-bb-text break-words whitespace-pre-wrap">{props.post.reposted_post.content}</p>
+                    <p class="text-bb-text break-words whitespace-pre-wrap"><RenderTextWithLinks text={props.post.reposted_post.content || ''} /></p>
+                    <LinkPreviews post={props.post.reposted_post} />
                 </div>
             </Show>
             <div class="flex justify-between items-center text-xxs font-mono">
