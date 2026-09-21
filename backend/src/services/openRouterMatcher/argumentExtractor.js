@@ -326,6 +326,56 @@ const toPostMatchOutput = (raw, candidates) => {
   return output;
 };
 
+class InvalidReasonerOutput extends Error {
+  constructor(field) {
+    super(`Invalid reasoner output at ${field}`);
+    this.code = 'MATCH_REASONER_INVALID_OUTPUT';
+  }
+}
+
+// Validate the same closed schema used by the provider, including on endpoints
+// which cannot enforce response_format. Only supports keywords in our schema.
+const matchesSchema = (value, schema) => {
+  if (schema.anyOf) return schema.anyOf.some((option) => matchesSchema(value, option));
+  if (schema.enum && !schema.enum.includes(value)) return false;
+  switch (schema.type) {
+    case 'null': return value === null;
+    case 'string': return typeof value === 'string';
+    case 'boolean': return typeof value === 'boolean';
+    case 'number': return typeof value === 'number' && Number.isFinite(value);
+    case 'integer': return Number.isSafeInteger(value);
+    case 'array': return Array.isArray(value) && value.every((item) => matchesSchema(item, schema.items));
+    case 'object':
+      return value !== null && typeof value === 'object' && !Array.isArray(value)
+        && schema.required.every((key) => Object.hasOwn(value, key))
+        && Object.keys(value).every((key) => Object.hasOwn(schema.properties, key))
+        && Object.entries(schema.properties).every(([key, property]) => matchesSchema(value[key], property));
+    default: return false;
+  }
+};
+
+const validateAndNormalize = (raw, candidates) => {
+  const schema = REASONER_JSON_SCHEMA.schema;
+  if (!matchesSchema(raw, schema)) {
+    const field = raw && typeof raw === 'object'
+      ? Object.entries(schema.properties).find(([key, property]) => !matchesSchema(raw[key], property))?.[0]
+      : null;
+    throw new InvalidReasonerOutput(field || 'response');
+  }
+  const normalized = toPostMatchOutput(raw, candidates);
+  if (raw.best_market !== null && (!normalized.best_market
+      || raw.best_market.confidence < 0 || raw.best_market.confidence > 1
+      || !raw.best_market.reasoning.trim())) {
+    throw new InvalidReasonerOutput('best_market');
+  }
+  // Duplicate labels, empty text, unknown references and invalid enum values
+  // must not disappear silently as an apparently successful empty analysis.
+  for (const key of ['propositions', 'relations', 'conditional_flags', 'critiques']) {
+    if (normalized[key].length !== raw[key].length) throw new InvalidReasonerOutput(key);
+  }
+  return normalized;
+};
+
 const buildPrompt = (postContent, candidates) => {
   const candidateText = candidates.map((candidate, index) => {
     const eventId = toInt(candidate.event_id);
@@ -337,7 +387,13 @@ const buildPrompt = (postContent, candidates) => {
   return `You are a reasoning engine and 'kind tutor' for a prediction platform.
 Analyze the post and map it to at most one best candidate market.
 Additionally, you must evaluate the logical, empirical, and methodological soundness of the post.
-Respond with JSON matching the response schema.
+Respond with one JSON object matching the following schema. This contract also
+applies when the API cannot enforce structured outputs. best_market must be
+null or an object with event_id, stance, confidence and reasoning, never a bare
+number or string. All five top-level fields are required. Use empty arrays when
+there are no items. Null means no suitable market, not a formatting failure.
+JSON SCHEMA:
+${JSON.stringify(REASONER_JSON_SCHEMA.schema)}
 
 POST:
 """
@@ -348,11 +404,12 @@ CANDIDATE MARKETS:
 ${candidateText}
 
 Rules for Market Matching:
+- stance describes how the POST relates to the chosen market's affirmative YES outcome, not whether you personally agree with the author. Use "agrees" when the post predicts YES, "disagrees" when it predicts NO, and "related" when it gives no directional prediction. For a market "Will X happen?", "X will not happen" is always "disagrees", even if the author's argument is convincing. Resolve negations before assigning stance.
 - best_market should be one of the provided market IDs in nearly all cases.
 - Use best_market: null only if the post has no predictive claim at all or if no candidates are even remotely related.
 - Even when uncertain, choose the closest market and lower confidence.
 - Include only propositions/relations explicitly grounded in the post.
-- Include at least 1 proposition and 1 relation when best_market is not null.
+- Include at least 1 proposition when best_market is not null. Only include relations between distinct propositions actually present in the post; a one-claim post may have no relations.
 
 Rules for Critiques (Act as a Helpful Tutor and Rigorous Reviewer):
 - **CRITICAL:** You MUST evaluate the text for critiques REGARDLESS of whether you find a matching best_market. The critique evaluation is entirely independent of market matching.
@@ -426,40 +483,29 @@ const runReasoner = async ({
     }
   );
 
-  let rawResult;
-  try {
-    // Preferred path: strict schema + reasoning output enabled.
-    rawResult = await runCall(buildReasonerExtraParams({
-      useSchema: true,
-      includeReasoning: true
-    }));
-  } catch (error) {
-    // Some OpenRouter privacy/data policies reject schema enforcement per endpoint.
-    if (!isDataPolicySchemaError(error) && !isLikelyEmptyContentError(error)) {
-      throw error;
+  let useSchema = true;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const rawResult = await runCall(buildReasonerExtraParams({
+        useSchema, includeReasoning: attempt === 0
+      }));
+      return validateAndNormalize(rawResult?.output ?? rawResult, candidates);
+    } catch (error) {
+      const schemaUnavailable = isDataPolicySchemaError(error);
+      const invalidOutput = error instanceof InvalidReasonerOutput
+        || error instanceof SyntaxError || isLikelyEmptyContentError(error);
+      if (!schemaUnavailable && !invalidOutput) throw error;
+      if (attempt === 1) {
+        if (invalidOutput) throw error instanceof InvalidReasonerOutput
+          ? error : new InvalidReasonerOutput('response');
+        throw error;
+      }
+      // Keep provider enforcement if possible. When unavailable, the complete
+      // textual schema and local validation still apply. Never echo bad output.
+      if (schemaUnavailable || isLikelyEmptyContentError(error)) useSchema = false;
+      messages.push({ role: 'user', content: 'Return a fresh complete JSON object following the JSON SCHEMA above exactly. Do not abbreviate fields or wrap the object. best_market must be an object with event_id, stance, confidence and reasoning, or null. Include all required arrays.' });
     }
-
-    // Recovery path: keep reasoning enabled, but don't require schema.
-    rawResult = await runCall(buildReasonerExtraParams({
-      useSchema: false,
-      includeReasoning: false
-    }));
   }
-
-  let raw = rawResult?.output ?? rawResult;
-  let normalized = toPostMatchOutput(raw, candidates);
-  if (normalized.best_market || normalized.propositions.length > 0 || normalized.critiques.length > 0) {
-    return normalized;
-  }
-
-  // One salvage retry for degenerate-but-valid empty outputs.
-  rawResult = await runCall(buildReasonerExtraParams({
-    useSchema: false,
-    includeReasoning: false
-  }));
-  raw = rawResult?.output ?? rawResult;
-  normalized = toPostMatchOutput(raw, candidates);
-  return normalized;
 };
 
 const runSafeReasoner = async ({

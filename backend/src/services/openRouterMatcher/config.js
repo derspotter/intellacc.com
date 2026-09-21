@@ -55,24 +55,27 @@ module.exports = {
   },
   reasoner: {
     enabled: toBool(process.env.POST_SIGNAL_MATCH_REASONER_ENABLED, false),
-    model: process.env.POST_SIGNAL_MATCH_REASONER_MODEL || 'z-ai/glm-5',
-    heavyModel: process.env.POST_SIGNAL_MATCH_REASONER_HEAVY_MODEL || 'google/gemini-3.1-pro-preview',
+    model: process.env.POST_SIGNAL_MATCH_REASONER_MODEL || 'openai/gpt-5.6-luna',
+    heavyModel: process.env.POST_SIGNAL_MATCH_REASONER_HEAVY_MODEL
+      || process.env.POST_SIGNAL_MATCH_REASONER_MODEL || 'openai/gpt-5.6-luna',
     fallbackModels: process.env.POST_SIGNAL_MATCH_REASONER_FALLBACK_MODELS
       ? process.env.POST_SIGNAL_MATCH_REASONER_FALLBACK_MODELS
         .split(',')
         .map((model) => model.trim())
         .filter(Boolean)
-      : [],
+      : ['google/gemini-3-flash-preview'],
     heavyFallbackModels: process.env.POST_SIGNAL_MATCH_REASONER_HEAVY_FALLBACK_MODELS
       ? process.env.POST_SIGNAL_MATCH_REASONER_HEAVY_FALLBACK_MODELS
         .split(',')
         .map((model) => model.trim())
         .filter(Boolean)
-      : [],
+      : process.env.POST_SIGNAL_MATCH_REASONER_FALLBACK_MODELS
+        ? process.env.POST_SIGNAL_MATCH_REASONER_FALLBACK_MODELS.split(',').map((model) => model.trim()).filter(Boolean)
+        : ['google/gemini-3-flash-preview'],
     temperature: Number(process.env.POST_SIGNAL_MATCH_REASONER_TEMPERATURE || '0'),
-    maxTokens: toInt(process.env.POST_SIGNAL_MATCH_REASONER_MAX_TOKENS, 1000),
-    timeoutMs: toInt(process.env.POST_SIGNAL_MATCH_REASONER_TIMEOUT_MS, 12000),
-    reasoningMaxTokens: toInt(process.env.POST_SIGNAL_MATCH_REASONING_MAX_TOKENS, 512)
+    maxTokens: toInt(process.env.POST_SIGNAL_MATCH_REASONER_MAX_TOKENS, 2500),
+    timeoutMs: toInt(process.env.POST_SIGNAL_MATCH_REASONER_TIMEOUT_MS, 20000),
+    reasoningMaxTokens: toInt(process.env.POST_SIGNAL_MATCH_REASONING_MAX_TOKENS, 256)
   },
   retrieval: {
     enabled: toBool(process.env.POST_SIGNAL_MATCH_PIPELINE_ENABLED, true),

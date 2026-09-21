@@ -127,6 +127,20 @@ describe('matching releases connections during external work', () => {
     expectPoolFree();
   });
 
+  test('invalid reasoner output records an error and preserves prior links and candidates', async () => {
+    const post = await makePost();
+    await pipeline.processPost(post.id, post.content);
+    reasoner.runSafeReasoner.mockRejectedValueOnce(Object.assign(
+      new Error('Invalid reasoner output at best_market'), { code: 'MATCH_REASONER_INVALID_OUTPUT' }
+    ));
+    await pipeline.processPost(post.id, post.content);
+    expect((await status(post.id)).processing_errors).toContain('Invalid reasoner output at best_market');
+    expect((await db.query('SELECT event_id FROM post_market_links WHERE post_id = $1', [post.id])).rows)
+      .toEqual([{ event_id: eventId }]);
+    expect((await db.query('SELECT event_id FROM post_market_matches WHERE post_id = $1', [post.id])).rows)
+      .toEqual([{ event_id: eventId }]);
+  });
+
   test('a later job wins even when an earlier reasoner completes last', async () => {
     const post = await makePost();
     const pause = deferred();
