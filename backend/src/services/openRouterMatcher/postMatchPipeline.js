@@ -4,6 +4,7 @@ const config = require('./config');
 const { runSafeGate } = require('./claimGate');
 const { retrieveCandidateMarkets } = require('./marketRetrieval');
 const { runSafeReasoner } = require('./argumentExtractor');
+const jevShadow = require('./jevShadow');
 const { extractFirstUrl, fetchArticleContent } = require('../metadata/metadataService');
 
 const MAX_ERROR_MESSAGE_LENGTH = 400;
@@ -651,7 +652,7 @@ const persistReasonerOutput = async (client, postId, argumentResult, candidates)
 
 // Acquire a client only for final database writes. The row locks fence out a
 // newer run and a concurrent post edit until the result commits.
-const persistPipelineResult = async ({ postId, run, analysis, candidates, argumentResult }) => {
+const persistPipelineResult = async ({ postId, run, analysis, candidates, argumentResult, shadowResult, reasonerAttempted }) => {
   const client = await db.getPool().connect();
   try {
     await client.query('BEGIN');
@@ -684,6 +685,21 @@ const persistPipelineResult = async ({ postId, run, analysis, candidates, argume
       }
     }
     await upsertAnalysis(client, postId, analysis, run);
+    await jevShadow.persist(client, { postId, run, result: shadowResult, baseline: {
+      has_claim: analysis.has_claim,
+      gate_model: analysis.gate_model,
+      reason_model: analysis.reason_model,
+      gate_latency_ms: analysis.gate_latency_ms,
+      reason_latency_ms: analysis.reason_latency_ms,
+      reasoner_attempted: reasonerAttempted,
+      proposed_event_id: argumentResult?.best_market?.event_id || null,
+      persisted_match: hasMatch,
+      processing_error: Boolean(analysis.processing_errors),
+      usage: {
+        prompt_tokens: analysis.prompt_tokens, completion_tokens: analysis.completion_tokens,
+        cost_credits: analysis.cost_credits
+      }
+    } });
     await client.query('COMMIT');
     return { hasMatch };
   } catch (error) {
@@ -756,6 +772,7 @@ const runPipeline = async (postId, content) => {
     if (!await progress(true)) return finish('superseded');
     let candidates = [];
     let argumentResult;
+    let shadowPromise;
 
     if (normalizedContent) {
       let augmentedContent = normalizedContent;
@@ -800,6 +817,9 @@ const runPipeline = async (postId, content) => {
         analysis.processing_status = shouldReason ? 'reasoning' : 'retrieving';
         analysis.reason_model = shouldReason ? config.reasoner.model : null;
         if (!await progress()) return finish('superseded');
+        shadowPromise = jevShadow.evaluate({
+          postId: normalizedPostId, content: run.content, postContent: augmentedContent, candidates
+        });
         if (shouldReason) {
           reasonerAttempted = true;
           const isHeavy = augmentedContent.split(/\s+/).filter(Boolean).length > 400;
@@ -820,12 +840,18 @@ const runPipeline = async (postId, content) => {
           }
         }
       }
+      if (!shadowPromise) {
+        shadowPromise = jevShadow.evaluate({
+          postId: normalizedPostId, content: run.content, postContent: augmentedContent, candidates
+        });
+      }
     }
 
+    const shadowResult = await shadowPromise;
     analysis.processing_status = analysis.has_claim ? 'complete' : 'gated_out';
     Object.assign(analysis, currentUsageSummary());
     const persisted = await persistPipelineResult({
-      postId: normalizedPostId, run, analysis, candidates, argumentResult
+      postId: normalizedPostId, run, analysis, candidates, argumentResult, shadowResult, reasonerAttempted
     });
     if (!persisted) return finish('superseded');
     hasReasonerMatch = persisted.hasMatch;

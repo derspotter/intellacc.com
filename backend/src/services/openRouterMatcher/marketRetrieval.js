@@ -31,6 +31,7 @@ const normalizeSearchText = (claimSummary, entities = []) => {
 const mapCandidateRows = (rows) => rows.map((row) => ({
   event_id: Number(row.event_id),
   title: row.title || '',
+  details: row.details || '',
   closing_date: row.closing_date || null,
   match_score: toNumber(row.match_score, 0),
   vec_score: toNumber(row.vec_score, 0),
@@ -181,6 +182,7 @@ const queryHybrid = async ({
     SELECT
       COALESCE(v.event_id, t.event_id) AS event_id,
       COALESCE(t.title, e.title) AS title,
+      e.details,
       COALESCE(v.closing_date, t.closing_date, e.closing_date) AS closing_date,
       COALESCE(v.vec_score, 0) AS vec_score,
       COALESCE(t.text_score, 0) AS text_score,
