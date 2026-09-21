@@ -7,12 +7,12 @@ integration, not an automatic replacement for the matcher.
 
 ## Configuration and deployment
 
-Set these in the backend Compose environment source (keep the key out of Git):
+Reuse the backend's existing `OPENROUTER_API_KEY`. No separate TypeSafe account
+or key is required. Set these in the backend Compose environment source:
 
 ```dotenv
 POST_SIGNAL_JEV_MODE=shadow
-POST_SIGNAL_JEV_MODEL=jev-1.13.0
-TYPESAFE_API_KEY=<your TypeSafe API key>
+POST_SIGNAL_JEV_MODEL=typesafe/jev-1.13
 ```
 
 The existing `POST_SIGNAL_AGENTIC_MATCH_ENABLED` and gate must also be enabled.
@@ -20,13 +20,15 @@ Deploy the backend code and additive `20260921_jev_shadow_matching.sql` migratio
 then recreate the backend to load its new environment. A restart alone does not
 load changed Compose variables. Use `POST_SIGNAL_JEV_MODE=off` and recreate to
 disable calls. No frontend build is needed. A missing key produces a diagnostic
-skip, never a request. API access must be obtained from TypeSafe.
+skip, never a request. Jev uses OpenRouter's alpha Decisions endpoint,
+`https://openrouter.ai/api/alpha/decisions`, not chat completions. The endpoint
+is fixed even if `OPENROUTER_BASE_URL` overrides the existing chat matcher.
 
 Only public, visible, top-level posts are sent. Group posts, comments, DMs and private AI
 history are excluded. Input includes the post, any article text already fetched
 by the existing pipeline, and candidate market titles, details and deadlines.
-Enabling this adds TypeSafe as a processor of that content. No user provider keys
-are reused. The endpoint is fixed and redirects are rejected.
+Enabling this sends that content to TypeSafe through OpenRouter using the
+server's shared key. Personal BYOK keys are not used. Redirects are rejected.
 
 ## Behavior and limits
 
@@ -52,10 +54,13 @@ The in-memory allowance resets on process restart and is not a billing cap.
 
 One observation per post is retained, replaced on reanalysis and removed on post
 deletion. It records input hashes, market snapshots, validated decisions, actual
-model version, prompt version, token usage, latency and the baseline result.
+model version, prompt version, token usage, OpenRouter-reported cost, latency and
+the baseline result. OpenRouter rounds probabilities to two decimal places;
+validation allows that rounding and preserves the returned distribution.
 Post/article bodies are not duplicated. The report excludes edited/superseded
 versions. Counts describe latest posts, not all billed attempts or historical runs.
-Jev usage stays separate from existing OpenRouter cost/usage accounting.
+Jev observations stay separate from existing chat-matcher usage tables, although
+the calls bill to the same OpenRouter account.
 
 ## Review
 
@@ -66,8 +71,9 @@ docker exec -i intellacc_db psql -U intellacc_user -d intellaccdb \
   < backend/scripts/jev-shadow-report.sql
 ```
 
-The cost estimate uses the published $0.042 per million input tokens, not an
-invoice. Missing usage remains unknown. Compare latency, failure/skip rate,
+The report includes OpenRouter-reported USD cost and a separate estimate using
+the published $0.042 per million input tokens. Neither is a complete account
+invoice. Missing usage or cost remains unknown. Compare latency, failure/skip rate,
 claim misses and match disagreements. Human-label a held-out set including
 unrelated posts, ambiguous wording and markets with differing deadlines. Include
 both easy agreements and disagreements; agreement with the old model is not
@@ -75,12 +81,24 @@ accuracy. Select thresholds only after reviewing labels. No thresholds currently
 turn these observations into user-visible decisions. Confidence is not a market
 outcome forecast.
 
-Contract checked against TypeSafe's official docs on 2026-09-21:
+Contract checked against official documentation on 2026-09-21:
 
+- https://openrouter.ai/typesafe/jev-1.13/api
+- https://github.com/OpenRouterTeam/ai-sdk-provider#decisions
+- https://openrouter.ai/labs/jev/compile
 - https://docs.typesafe.ai/introduction/quickstart
 - https://docs.typesafe.ai/primitives/choice
 - https://docs.typesafe.ai/primitives/noul
 - https://docs.typesafe.ai/confidence
 
-Tests use synthetic responses and an isolated PostgreSQL database. They do not
-establish live provider availability, latency, calibration or matching quality.
+Automated tests use synthetic responses and an isolated PostgreSQL database.
+A small live synthetic request using the existing backend OpenRouter key on
+2026-09-21 returned HTTP 200, resolved model `typesafe/jev-1.13-20260917`, and
+typed answers. It reported 365 input tokens and $0.00001533 cost, taking 699 ms
+in that single check. A second live check used this adapter's actual request
+builder and parser with two synthetic candidate markets: HTTP 200 in 639 ms,
+816 input tokens, $0.000034272 reported cost, and the matching candidate selected.
+The six focused matcher/adapter suites passed all 61 tests after the OpenRouter
+change. These checks verify access and integration, not calibration, production
+latency or matching quality. Deployment and shadow-mode activation are separate
+steps.

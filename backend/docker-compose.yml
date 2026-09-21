@@ -135,8 +135,7 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       # Optional Jev comparison only; does not control visible market links.
       POST_SIGNAL_JEV_MODE: ${POST_SIGNAL_JEV_MODE:-off}
-      POST_SIGNAL_JEV_MODEL: ${POST_SIGNAL_JEV_MODEL:-jev-1.13.0}
-      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      POST_SIGNAL_JEV_MODEL: ${POST_SIGNAL_JEV_MODEL:-typesafe/jev-1.13}
       # Topic classification via the local Gemma endpoint on debian (tailnet).
       # URL/MODEL fall back to in-code defaults when unset; the API key is required.
       GEMMA_API_KEY: ${GEMMA_API_KEY:-}

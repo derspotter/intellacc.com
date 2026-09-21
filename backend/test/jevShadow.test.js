@@ -5,25 +5,25 @@ const jev = require('../src/services/openRouterMatcher/jevShadow');
 const candidates = [{ event_id: 42, title: 'Will rates fall by December?', details: 'Policy rate lower than today.', closing_date: '2026-12-31T00:00:00Z' }];
 const input = { postId: 1, content: 'Rates will fall by December.', postContent: 'Rates will fall by December.', candidates };
 const responseData = () => ({
-  model: 'jev-1.13.0',
+  model: 'typesafe/jev-1.13',
   answers: {
     has_claim: { type: 'noul', noul: 0.97 },
     best_market: { type: 'choice', choice: 'market_42', confidence: 0.8, probabilities: { none: 0.1, market_42: 0.9 } },
     relevant_42: { type: 'noul', noul: 0.95 }
   },
-  usage: { input_tokens: 400, output_tokens: 80 }
+  usage: { input_tokens: 400, output_tokens: 80, cost: 0.0000168 }
 });
 const response = (data = responseData()) => new Response(JSON.stringify(data));
 
 beforeEach(() => {
   process.env.POST_SIGNAL_JEV_MODE = 'shadow';
-  process.env.TYPESAFE_API_KEY = 'secret-test-key';
+  process.env.OPENROUTER_API_KEY = 'secret-test-key';
   delete process.env.POST_SIGNAL_JEV_MODEL;
   db.query.mockReset().mockResolvedValue({ rows: [{ id: 1, shadow_table: 'post_match_jev_shadow' }] });
 });
 afterEach(() => {
   delete process.env.POST_SIGNAL_JEV_MODE;
-  delete process.env.TYPESAFE_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
   delete process.env.POST_SIGNAL_JEV_MODEL;
   jest.useRealTimers();
 });
@@ -38,7 +38,7 @@ test.each([undefined, 'off', 'enabled', 'SHADOW'])('mode %s makes no API or data
 });
 
 test('missing key records a skip without making requests', async () => {
-  delete process.env.TYPESAFE_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
   const fetchImpl = jest.fn();
   expect(await jev.evaluate(input, { fetchImpl })).toMatchObject({ status: 'skipped', error_code: 'missing_key' });
   expect(fetchImpl).not.toHaveBeenCalled();
@@ -47,11 +47,13 @@ test('missing key records a skip without making requests', async () => {
 test('sends exact market metadata, a none choice, and validates typed decisions', async () => {
   const fetchImpl = jest.fn().mockResolvedValue(response());
   const result = await jev.evaluate(input, { fetchImpl });
-  expect(result).toMatchObject({ status: 'ok', used_model: 'jev-1.13.0', input_tokens: 400, candidates });
+  expect(result).toMatchObject({ status: 'ok', provider: 'openrouter', used_model: 'typesafe/jev-1.13', input_tokens: 400, cost_usd: 0.0000168, candidates });
   const [url, options] = fetchImpl.mock.calls[0];
-  expect(url).toBe('https://api.typesafe.ai/v1/systemone');
+  expect(url).toBe('https://openrouter.ai/api/alpha/decisions');
   expect(options.redirect).toBe('error');
+  expect(options.headers.Authorization).toBe('Bearer secret-test-key');
   const request = JSON.parse(options.body);
+  expect(request.model).toBe('typesafe/jev-1.13');
   expect(request.questions.best_market.criteria).toMatchObject({ none: expect.any(String), market_42: expect.any(String) });
   expect(request.state.markets).toEqual(candidates);
   expect(JSON.stringify(result)).not.toContain('secret-test-key');
@@ -106,6 +108,31 @@ test('valid uncertainty and none are preserved without thresholding into a link'
   data.answers.best_market = { type: 'choice', choice: 'none', confidence: 0.01, probabilities: { none: 0.51, market_42: 0.49 } };
   const result = await jev.evaluate(input, { fetchImpl: jest.fn().mockResolvedValue(response(data)) });
   expect(result.answers.best_market).toEqual(data.answers.best_market);
+});
+
+test('OpenRouter two-decimal rounding is accepted without changing the distribution', () => {
+  const { request } = jev.buildRequest(input.content, [...candidates, { event_id: 43, title: 'Rates rise?' }], 'typesafe/jev-1.13');
+  const data = responseData();
+  data.answers.best_market = { type: 'choice', choice: 'none', confidence: 0, probabilities: { none: 0.33, market_42: 0.33, market_43: 0.33 } };
+  data.answers.relevant_43 = { type: 'noul', noul: 0.5 };
+  expect(jev.parseResponse(data, request).answers.best_market.probabilities).toEqual(data.answers.best_market.probabilities);
+  data.answers.best_market.probabilities = { none: 0.3, market_42: 0.3, market_43: 0.3 };
+  expect(() => jev.parseResponse(data, request)).toThrow('invalid_response');
+});
+
+test.each([undefined, null, '0.01', -1, Infinity])('missing or invalid OpenRouter cost %s remains unknown', (cost) => {
+  const { request } = jev.buildRequest(input.content, candidates, 'typesafe/jev-1.13');
+  const data = responseData();
+  data.usage.cost = cost;
+  expect(jev.parseResponse(data, request).cost_usd).toBeNull();
+});
+
+test('OpenRouter returns a resolved model version and zero cost is valid', () => {
+  const { request } = jev.buildRequest(input.content, candidates, 'typesafe/jev-1.13');
+  const data = responseData();
+  data.model = 'typesafe/jev-1.13-20260917';
+  data.usage.cost = 0;
+  expect(jev.parseResponse(data, request)).toMatchObject({ used_model: data.model, cost_usd: 0 });
 });
 
 test('oversized input, too many and duplicate candidates skip before requests', async () => {

@@ -23,7 +23,7 @@ let postId;
 let nativeFetch;
 const content = 'Rates will fall by December.';
 const makeResponse = () => new Response(JSON.stringify({
-  model: 'jev-1.13.0',
+  model: 'typesafe/jev-1.13',
   answers: {
     has_claim: { type: 'noul', noul: 0.8 },
     best_market: { type: 'choice', choice: 'none', confidence: 0.5, probabilities: { none: 0.8, [`market_${eventId}`]: 0.2 } },
@@ -42,7 +42,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   process.env.POST_SIGNAL_JEV_MODE = 'shadow';
-  process.env.TYPESAFE_API_KEY = 'test-only';
+  process.env.OPENROUTER_API_KEY = 'test-only';
   postId = (await db.query('INSERT INTO posts (user_id, content) VALUES ($1, $2) RETURNING id', [userId, content])).rows[0].id;
   gate.runSafeGate.mockReset().mockResolvedValue({ has_claim: true, claim_summary: content, domain: 'finance', entities: [] });
   retrieval.retrieveCandidateMarkets.mockReset().mockResolvedValue([{ event_id: eventId, title: 'Rates fall?', details: 'Test criteria', match_score: 0.9 }]);
@@ -55,7 +55,7 @@ beforeEach(async () => {
 afterEach(async () => {
   global.fetch = nativeFetch;
   delete process.env.POST_SIGNAL_JEV_MODE;
-  delete process.env.TYPESAFE_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
   await db.query('DELETE FROM posts WHERE user_id = $1', [userId]);
 });
 afterAll(async () => {

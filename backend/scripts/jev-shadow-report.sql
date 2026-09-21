@@ -25,6 +25,8 @@ SELECT result->>'used_model' AS model, result->>'prompt_version' AS prompt_versi
        percentile_cont(0.95) WITHIN GROUP (ORDER BY (result->>'latency_ms')::numeric) AS p95_latency_ms,
        SUM((result->>'input_tokens')::bigint) AS known_input_tokens,
        COUNT(*) FILTER (WHERE result->>'input_tokens' IS NULL) AS missing_usage_posts,
+       SUM((result->>'cost_usd')::numeric) AS reported_cost_usd,
+       COUNT(*) FILTER (WHERE result->>'cost_usd' IS NULL) AS missing_cost_posts,
        ROUND(SUM((result->>'input_tokens')::numeric) * 0.042 / 1000000, 6) AS estimated_input_usd
 FROM current_jev_shadow WHERE status = 'ok' GROUP BY 1, 2;
 

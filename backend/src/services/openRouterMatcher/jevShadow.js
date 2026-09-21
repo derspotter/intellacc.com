@@ -1,7 +1,7 @@
 const { createHash } = require('crypto');
 const db = require('../../db');
 
-const ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
+const ENDPOINT = 'https://openrouter.ai/api/alpha/decisions';
 const PROMPT_VERSION = 'post-market-v1';
 const LIMITS = Object.freeze({ timeoutMs: 3000, inputBytes: 48000, responseBytes: 65536, candidates: 15, concurrent: 2, dailyCalls: 500 });
 const hash = (text) => createHash('sha256').update(text).digest('hex');
@@ -20,8 +20,8 @@ let dailyCalls = 0;
 
 const settings = () => ({
   enabled: process.env.POST_SIGNAL_JEV_MODE === 'shadow',
-  key: process.env.TYPESAFE_API_KEY?.trim() || '',
-  model: process.env.POST_SIGNAL_JEV_MODEL?.trim() || 'jev-1.13.0'
+  key: process.env.OPENROUTER_API_KEY?.trim() || '',
+  model: process.env.POST_SIGNAL_JEV_MODEL?.trim() || 'typesafe/jev-1.13'
 });
 
 const buildRequest = (postContent, candidates, model) => {
@@ -80,14 +80,20 @@ const parseResponse = (data, request) => {
       const distribution = answer.probabilities;
       if (!distribution || Object.keys(distribution).length !== options.length
           || !options.every((key) => Object.hasOwn(distribution, key) && probability(distribution[key]))) fail('invalid_response', `${id}.probabilities`);
-      if (Math.abs(options.reduce((sum, key) => sum + distribution[key], 0) - 1) > 0.001
+      // OpenRouter rounds each probability to two decimals. Preserve the raw
+      // distribution, allowing only the accumulated per-option rounding error.
+      const total = options.reduce((sum, key) => sum + distribution[key], 0);
+      if (total <= 0 || Math.abs(total - 1) > options.length * 0.005 + 0.000001
           || options.some((key) => distribution[key] > distribution[answer.choice] + 0.000001)) fail('invalid_response', `${id}.distribution`);
       answers[id] = { type: 'choice', choice: answer.choice, confidence: answer.confidence,
         probabilities: Object.fromEntries(options.map((key) => [key, distribution[key]])) };
     }
   }
   const tokens = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
-  return { used_model: data.model, answers, input_tokens: tokens(data.usage?.input_tokens), output_tokens: tokens(data.usage?.output_tokens) };
+  const cost = data.usage?.cost;
+  return { used_model: data.model, answers, input_tokens: tokens(data.usage?.input_tokens),
+    output_tokens: tokens(data.usage?.output_tokens),
+    cost_usd: typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? cost : null };
 };
 
 const readResponse = async (response) => {
@@ -115,7 +121,7 @@ const readResponse = async (response) => {
 const evaluate = async ({ postId, content, postContent, candidates }, { fetchImpl = globalThis.fetch } = {}) => {
   const config = settings();
   if (!config.enabled) return null;
-  const result = { status: 'skipped', error_code: null, requested_model: config.model,
+  const result = { status: 'skipped', error_code: null, provider: 'openrouter', requested_model: config.model,
     prompt_version: PROMPT_VERSION, content_hash: hash(content), candidates: [], latency_ms: null };
   if (!config.key) return { ...result, error_code: 'missing_key' };
   if (!/^[\w./:-]{1,128}$/.test(config.model)) return { ...result, requested_model: null, error_code: 'invalid_model' };
