@@ -10,7 +10,7 @@ let sweepTimer = null;
 
 // Catch-all so every market always ends up embedded, whatever path created it
 // (direct create, question approval, engine imports, later unhides): embeds
-// all events still missing an embedding. Individual failures are logged and
+// live, visible events still missing an embedding. Individual failures are logged and
 // retried on the next sweep.
 const startEmbeddingSweepWorker = () => {
   if (process.env.NODE_ENV === 'test') return;

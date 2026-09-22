@@ -83,6 +83,11 @@ module.exports = {
     websearchToTsquery: toBool(process.env.POST_SIGNAL_MATCH_USE_WEBSEARCH_TSQUERY, true),
     minSimilarityThreshold: Number(process.env.POST_SIGNAL_MATCH_MIN_SIMILARITY || '0.50')
   },
+  marketEmbedding: {
+    provider: process.env.POST_SIGNAL_MARKET_EMBEDDING_PROVIDER || 'openrouter',
+    socketPath: process.env.POST_SIGNAL_BGE_SOCKET || '/var/run/intellacc-embeddings/tei.sock',
+    timeoutMs: toInt(process.env.POST_SIGNAL_BGE_TIMEOUT_MS, 2000)
+  },
   embedding: {
     model: process.env.POST_SIGNAL_MATCH_EMBEDDING_MODEL || 'text-embedding-3-small',
     dimensions: toInt(process.env.POST_SIGNAL_MATCH_EMBEDDING_DIMENSIONS, 768),

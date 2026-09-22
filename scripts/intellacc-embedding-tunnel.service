@@ -1,0 +1,16 @@
+[Unit]
+Description=Private Intellacc connection to Debian BGE-M3
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+UMask=0077
+ExecStartPre=/usr/bin/mkdir -p -m 0700 %h/.local/state/intellacc-embeddings
+ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StreamLocalBindUnlink=yes -o StreamLocalBindMask=0177 -L %h/.local/state/intellacc-embeddings/tei.sock:127.0.0.1:8085 justus@100.119.163.1
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

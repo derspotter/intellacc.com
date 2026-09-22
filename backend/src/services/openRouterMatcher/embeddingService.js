@@ -1,6 +1,7 @@
 const db = require('../../db');
 const config = require('./config');
 const { callEmbedding } = require('./llmClient');
+const bge = require('./bgeEmbeddings');
 
 const cleanText = (value) => String(value || '')
   .replace(/\s+/g, ' ')
@@ -53,6 +54,10 @@ const setEventEmbedding = async ({ eventId, title, details }) => {
     throw new Error('Invalid event id');
   }
 
+  // Separate vector space: topic classification still uses the OpenAI column.
+  try { await bge.setLiveMarketEmbedding(Number(eventId)); }
+  catch { console.warn('[BGE] Live market embedding deferred to sweep:', eventId); }
+
   const hasColumn = await hasEmbeddingColumn();
   if (!hasColumn) {
     return false;
@@ -79,10 +84,12 @@ const setEventEmbedding = async ({ eventId, title, details }) => {
 };
 
 const backfillEmbeddings = async () => {
+  const bgeCounts = await bge.backfillLiveMarketEmbeddings();
+  if (bgeCounts.failed) console.warn('[BGE] Live market sweep failures:', bgeCounts.failed);
   const result = await db.query(`
     SELECT id, title, details
     FROM events
-    WHERE embedding IS NULL
+    WHERE embedding IS NULL AND outcome IS NULL AND closing_date > NOW() AND hidden_at IS NULL
   `);
 
   for (const row of result.rows) {

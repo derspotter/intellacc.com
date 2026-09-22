@@ -138,6 +138,9 @@ services:
       # Optional Jev comparison only; does not control visible market links.
       POST_SIGNAL_JEV_MODE: ${POST_SIGNAL_JEV_MODE:-off}
       POST_SIGNAL_JEV_MODEL: ${POST_SIGNAL_JEV_MODEL:-typesafe/jev-1.13}
+      POST_SIGNAL_MARKET_EMBEDDING_PROVIDER: ${POST_SIGNAL_MARKET_EMBEDDING_PROVIDER:-openrouter}
+      POST_SIGNAL_BGE_SOCKET: /var/run/intellacc-embeddings/tei.sock
+      POST_SIGNAL_BGE_TIMEOUT_MS: ${POST_SIGNAL_BGE_TIMEOUT_MS:-2000}
       # Topic classification via the local Gemma endpoint on debian (tailnet).
       # URL/MODEL fall back to in-code defaults when unset; the API key is required.
       GEMMA_API_KEY: ${GEMMA_API_KEY:-}
@@ -147,6 +150,7 @@ services:
       - ./src:/usr/src/app/src    # Only mount source code for live updates
       - ./test:/usr/src/app/test  # for testing
       - ./migrations:/usr/src/app/migrations  # mount migrations for auto-run
+      - /home/jay/.local/state/intellacc-embeddings:/var/run/intellacc-embeddings:ro
       - ./uploads:/usr/src/app/uploads
       # Offline IP lookup data (iptoasn ranges + Tor exits) for the signup
       # approval email; refreshed by the backend itself, see services/ipIntelService.
