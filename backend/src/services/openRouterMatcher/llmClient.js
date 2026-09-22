@@ -230,7 +230,11 @@ const callLLMWithFallback = async (options, {
 
   for (let i = 0; i < candidates.length; i += 1) {
     try {
-      return await callLLM({ ...options, model: candidates[i] });
+      return await callLLM({
+        ...options,
+        model: candidates[i],
+        extraParams: { ...options.extraParams, ...options.extraParamsByModel?.[candidates[i]] }
+      });
     } catch (error) {
       lastErr = error;
       if (i >= candidates.length - 1) break;

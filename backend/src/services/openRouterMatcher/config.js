@@ -63,7 +63,7 @@ module.exports = {
         .split(',')
         .map((model) => model.trim())
         .filter(Boolean)
-      : ['google/gemini-3-flash-preview'],
+      : ['deepseek/deepseek-v4.1-flash'],
     heavyFallbackModels: process.env.POST_SIGNAL_MATCH_REASONER_HEAVY_FALLBACK_MODELS
       ? process.env.POST_SIGNAL_MATCH_REASONER_HEAVY_FALLBACK_MODELS
         .split(',')
@@ -71,7 +71,7 @@ module.exports = {
         .filter(Boolean)
       : process.env.POST_SIGNAL_MATCH_REASONER_FALLBACK_MODELS
         ? process.env.POST_SIGNAL_MATCH_REASONER_FALLBACK_MODELS.split(',').map((model) => model.trim()).filter(Boolean)
-        : ['google/gemini-3-flash-preview'],
+        : ['deepseek/deepseek-v4.1-flash'],
     temperature: Number(process.env.POST_SIGNAL_MATCH_REASONER_TEMPERATURE || '0'),
     maxTokens: toInt(process.env.POST_SIGNAL_MATCH_REASONER_MAX_TOKENS, 2500),
     timeoutMs: toInt(process.env.POST_SIGNAL_MATCH_REASONER_TIMEOUT_MS, 20000),

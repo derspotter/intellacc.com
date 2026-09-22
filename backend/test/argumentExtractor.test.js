@@ -1,7 +1,7 @@
 jest.mock('../src/services/openRouterMatcher/llmClient', () => ({ callLLMWithFallback: jest.fn() }));
 jest.mock('../src/services/openRouterMatcher/config', () => ({
   isEnabled: true, openRouterApiKey: 'test', reasoner: {
-    enabled: true, model: 'openai/gpt-5.6-luna', fallbackModels: ['google/gemini-3-flash-preview'],
+    enabled: true, model: 'openai/gpt-5.6-luna', fallbackModels: ['deepseek/deepseek-v4.1-flash'],
     maxTokens: 2500, temperature: 0, timeoutMs: 20000, reasoningMaxTokens: 256
   }
 }));
@@ -16,6 +16,16 @@ const valid = () => ({
 });
 const empty = () => ({ best_market: null, propositions: [], relations: [], conditional_flags: [], critiques: [] });
 beforeEach(() => callLLMWithFallback.mockReset());
+
+test('DeepSeek uses low effort while Luna retains the existing reasoning budget', async () => {
+  callLLMWithFallback.mockResolvedValueOnce({ output: valid() });
+  await runSafeReasoner(input);
+  const [options] = callLLMWithFallback.mock.calls[0];
+  expect(options.extraParams.reasoning).toEqual({ enabled: true, max_tokens: 256 });
+  expect(options.extraParamsByModel).toEqual({
+    'deepseek/deepseek-v4.1-flash': { reasoning: { effort: 'low' } }
+  });
+});
 
 test('schema-free recovery retains the full contract and correctly matches a negated prediction', async () => {
   callLLMWithFallback.mockRejectedValueOnce(new Error('No endpoints found matching your data policy'))

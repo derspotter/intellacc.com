@@ -102,3 +102,29 @@ The six focused matcher/adapter suites passed all 61 tests after the OpenRouter
 change. These checks verify access and integration, not calibration, production
 latency or matching quality. Deployment and shadow-mode activation are separate
 steps.
+
+## Paired speed check, 2026-09-22
+
+Five fresh synthetic/public cases used identical post and candidate inputs:
+MrBeast nomination negation, Greenland acquisition negation, an unrelated
+bicycle post, differing bridge-opening deadlines, and a related-topic-only
+MrBeast post. Both Jev and Luna selected the expected market or none in all
+five. This measures selection, not stance accuracy or critique quality.
+
+| Case | Jev ms | Luna ms | Jev USD | Luna USD |
+| --- | ---: | ---: | ---: | ---: |
+| MrBeast NO | 693 | 4708 | 0.000031626 | 0.00087735 |
+| Greenland NO | 330 | 4700 | 0.000031500 | 0.00094860 |
+| No match | 351 | 3086 | 0.000031248 | 0.00068720 |
+| Deadline | 327 | 5468 | 0.000031038 | 0.00103165 |
+| Related topic only | 381 | 2480 | 0.000031290 | 0.00059505 |
+
+Mean request latency was 416ms for Jev versus 4088ms for Luna (9.8x), with
+26.4x lower reported cost. Jev performs fewer tasks: the current adapter has
+no stance decision, argument extraction or written critiques. These times
+exclude the gate, retrieval, article fetch and persistence. They are not
+end-to-end production latency or a representative quality benchmark.
+
+A production matching replacement needs a stance decision, reviewed confidence
+thresholds, an uncertainty/error fallback, and separation of written critiques
+from the decision path. Simply changing the model name cannot do this.

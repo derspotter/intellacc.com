@@ -1,14 +1,14 @@
 # Post matcher response contract and models
 
 The LLM reasoner defaults to `openai/gpt-5.6-luna`, including posts longer than
-400 words. The fallback is `google/gemini-3-flash-preview`. The claim gate,
+400 words. The fallback is `deepseek/deepseek-v4.1-flash`. The claim gate,
 hybrid retrieval and optional Jev shadow comparison retain their own roles.
 
 Recommended backend environment:
 
 ```dotenv
 POST_SIGNAL_MATCH_REASONER_MODEL=openai/gpt-5.6-luna
-POST_SIGNAL_MATCH_REASONER_FALLBACK_MODELS=google/gemini-3-flash-preview
+POST_SIGNAL_MATCH_REASONER_FALLBACK_MODELS=deepseek/deepseek-v4.1-flash
 POST_SIGNAL_MATCH_REASONER_MAX_TOKENS=2500
 POST_SIGNAL_MATCH_REASONING_MAX_TOKENS=256
 POST_SIGNAL_MATCH_REASONER_TIMEOUT_MS=20000
@@ -64,3 +64,20 @@ This is a small task-specific check, not proof of universal model superiority
 or a production accuracy guarantee. The selection balances the observed
 behavior and cost. Continue evaluating disagreements, especially subtle scope
 and deadline differences and long arguments.
+
+## Fallback update, 2026-09-22
+
+DeepSeek V4.1 Flash replaces Gemini Flash as the configured fallback, including
+long posts. OpenRouter lists provider-dependent pricing, starting at $0.12 per
+million input and $0.48 per million output tokens at the time of this change:
+https://openrouter.ai/deepseek/deepseek-v4.1-flash
+The historical Gemini comparison above is retained as evaluation evidence.
+
+DeepSeek requests use `reasoning.effort=low`; Luna retains its existing budget.
+The full response schema is preserved when the fallback is used. DeepSeek's
+model catalog exposes low/high/max effort, with high as its default, rather
+than a hard reasoning-token budget. Live checks with the old token-budget
+request had two successes and two 20-second timeouts. Three low-effort checks
+had two successes (13.7s and 9.9s) and one timeout. The successful low-effort
+calls reported $0.0011304 and $0.00028476. Lower list prices do not guarantee
+lower total cost or better latency on every request. The timeout remains 20s.

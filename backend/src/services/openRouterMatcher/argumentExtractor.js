@@ -471,6 +471,11 @@ const runReasoner = async ({
       temperature: config.reasoner.temperature,
       timeoutMs: config.reasoner.timeoutMs,
       extraParams,
+      // DeepSeek exposes effort levels, not a hard reasoning-token budget.
+      // Keep its fallback from using the provider's high-effort default.
+      extraParamsByModel: {
+        'deepseek/deepseek-v4.1-flash': { reasoning: { effort: 'low' } }
+      },
       usageRecorder,
       usageContext: {
         stage: 'reasoner',
