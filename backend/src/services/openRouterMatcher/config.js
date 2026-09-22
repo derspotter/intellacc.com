@@ -55,9 +55,9 @@ module.exports = {
   },
   reasoner: {
     enabled: toBool(process.env.POST_SIGNAL_MATCH_REASONER_ENABLED, false),
-    model: process.env.POST_SIGNAL_MATCH_REASONER_MODEL || 'openai/gpt-5.6-luna',
+    model: process.env.POST_SIGNAL_MATCH_REASONER_MODEL || 'openai/gpt-6-luna',
     heavyModel: process.env.POST_SIGNAL_MATCH_REASONER_HEAVY_MODEL
-      || process.env.POST_SIGNAL_MATCH_REASONER_MODEL || 'openai/gpt-5.6-luna',
+      || process.env.POST_SIGNAL_MATCH_REASONER_MODEL || 'openai/gpt-6-luna',
     fallbackModels: process.env.POST_SIGNAL_MATCH_REASONER_FALLBACK_MODELS
       ? process.env.POST_SIGNAL_MATCH_REASONER_FALLBACK_MODELS
         .split(',')

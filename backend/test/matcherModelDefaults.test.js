@@ -7,7 +7,7 @@ afterAll(() => { names.forEach((name) => {
 }); });
 const read = () => require('../src/services/openRouterMatcher/config').reasoner;
 test('short and long posts share the inexpensive default and fallback', () => {
-  expect(read()).toMatchObject({ model: 'openai/gpt-5.6-luna', heavyModel: 'openai/gpt-5.6-luna',
+  expect(read()).toMatchObject({ model: 'openai/gpt-6-luna', heavyModel: 'openai/gpt-6-luna',
     fallbackModels: ['deepseek/deepseek-v4.1-flash'], heavyFallbackModels: ['deepseek/deepseek-v4.1-flash'] });
 });
 test('explicit primary and fallback overrides also govern long posts by default', () => {

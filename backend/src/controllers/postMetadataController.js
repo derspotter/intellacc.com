@@ -20,6 +20,7 @@ exports.getBatch = async (req, res) => {
         ${statusOnly ? '' : `,
         link.data AS link,
         COALESCE(markets.data, '[]'::jsonb) AS markets,
+        COALESCE(critiques.data, '[]'::jsonb) AS critiques,
         jsonb_build_object('episode_count', signal.episode_count,
           'market_count', signal.market_count, 'max_prob_move', signal.max_prob_move,
           'reward_rp', signal.reward_rp) AS signal`}
@@ -47,6 +48,14 @@ exports.getBatch = async (req, res) => {
           ORDER BY pm.match_score DESC, pm.event_id ASC LIMIT 3
         ) candidate
       ) markets ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT jsonb_agg(critique ORDER BY critique.id) AS data FROM (
+          SELECT pc.id, pc.critique_type, pc.description, pc.severity
+          FROM post_critiques pc WHERE pc.post_id = p.id
+            AND p.community_group_id IS NULL
+          ORDER BY pc.id LIMIT 10
+        ) critique
+      ) critiques ON TRUE
       LEFT JOIN LATERAL (
         SELECT COUNT(DISTINCT pse.id)::int AS episode_count, COUNT(DISTINCT pse.event_id)::int AS market_count,
           COALESCE(MAX(ABS(pse.p_after - pse.p_before)), 0)::double precision AS max_prob_move,

@@ -29,6 +29,9 @@ describe('batched post metadata', () => {
       posts.push((await db.query("INSERT INTO posts (user_id,content,is_hidden) VALUES ($1,'Metadata fixture',$2) RETURNING id",
         [i === 20 ? users[2] : i === 21 ? users[3] : users[1], i === 22])).rows[0].id);
     }
+    for (const postId of [posts[0], posts[2], ...posts.slice(20)]) {
+      await db.query("INSERT INTO post_critiques (post_id,critique_type,description,severity) VALUES ($1,'unsupported_assumption','Please explain the assumption.','warning')", [postId]);
+    }
     await db.query('INSERT INTO user_blocks (blocker_id,blocked_user_id) VALUES ($1,$2),($3,$1)', [users[0], users[2], users[3]]);
     for (let i = 0; i < 5; i++) {
       events.push((await db.query("INSERT INTO events (title,closing_date,event_type,hidden_at) VALUES ($1,NOW()+INTERVAL '1 day','binary',$2) RETURNING id", [`Market ${i}`, i === 4 ? new Date() : null])).rows[0].id);
@@ -62,6 +65,9 @@ describe('batched post metadata', () => {
       expect(result.status).toBe(200);
       expect(result.body.posts).toHaveLength(20);
       const first = result.body.posts[0];
+      expect(first.critiques).toEqual([expect.objectContaining({ critique_type: 'unsupported_assumption', description: 'Please explain the assumption.', severity: 'warning' })]);
+      expect(result.body.posts[1].critiques).toEqual([]);
+      expect(result.body.posts[2].critiques).toHaveLength(1);
       expect(first.status.processing_status).toBe('reasoning');
       expect(first.link).toMatchObject({ event_id: events[0], confirmed: true, match_method: 'manual' });
       expect(first.markets.map((m) => m.event_id)).toEqual([events[3], events[2], events[1]]);
@@ -84,6 +90,20 @@ describe('batched post metadata', () => {
     const result = await call({ post_ids: posts.slice(20) }, admin);
     expect(result.body.posts.map((p) => p.post_id)).toEqual(posts.slice(20, 22));
   });
+  test('does not expose community-group critiques through the public-post metadata batch', async () => {
+    const group = (await db.query(`INSERT INTO community_groups (slug,name,topic_id,created_by)
+      VALUES ($1,'Metadata group',(SELECT id FROM topics ORDER BY id LIMIT 1),$2) RETURNING id`,
+    [`metadata-${randomUUID()}`, users[1]])).rows[0].id;
+    try {
+      await db.query('UPDATE posts SET community_group_id=$1 WHERE id=$2', [group, posts[2]]);
+      const result = await call({ post_ids: [posts[2]] });
+      expect(result.status).toBe(200);
+      expect(result.body.posts[0].critiques).toEqual([]);
+    } finally {
+      await db.query('UPDATE posts SET community_group_id=NULL WHERE id=$1', [posts[2]]);
+      await db.query('DELETE FROM community_groups WHERE id=$1', [group]);
+    }
+  });
   test('status polls omit expensive metadata joins and expose completed status', async () => {
     await db.query("UPDATE post_analysis SET processing_status='complete' WHERE post_id=$1", [posts[0]]);
     const spy = jest.spyOn(db, 'query');
@@ -92,7 +112,7 @@ describe('batched post metadata', () => {
       expect(result.body.posts).toHaveLength(1);
       expect(result.body.posts[0].status.processing_status).toBe('complete');
       const metadataSql = spy.mock.calls.find(([sql]) => sql.includes('FROM posts p'))[0];
-      expect(metadataSql).not.toMatch(/post_market_links|post_signal_episodes|post_market_matches/);
+      expect(metadataSql).not.toMatch(/post_market_links|post_signal_episodes|post_market_matches|post_critiques/);
     } finally { spy.mockRestore(); }
   });
   test('requires authentication and rejects malformed or oversized batches', async () => {

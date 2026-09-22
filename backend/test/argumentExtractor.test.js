@@ -1,7 +1,7 @@
 jest.mock('../src/services/openRouterMatcher/llmClient', () => ({ callLLMWithFallback: jest.fn() }));
 jest.mock('../src/services/openRouterMatcher/config', () => ({
   isEnabled: true, openRouterApiKey: 'test', reasoner: {
-    enabled: true, model: 'openai/gpt-5.6-luna', fallbackModels: ['deepseek/deepseek-v4.1-flash'],
+    enabled: true, model: 'openai/gpt-6-luna', fallbackModels: ['deepseek/deepseek-v4.1-flash'],
     maxTokens: 2500, temperature: 0, timeoutMs: 20000, reasoningMaxTokens: 256
   }
 }));

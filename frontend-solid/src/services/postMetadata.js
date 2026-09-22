@@ -48,8 +48,10 @@ const fetchBatch = async (batch, statusOnly) => {
         entry.setData(null);
         entry.full = false;
         entry.due = Infinity;
-      } else if (statusOnly && !pending(row)) {
-        // Keep existing badges until their replacement arrives, then stop polling.
+      } else if (statusOnly && (!pending(row)
+          || row.status?.processing_status !== entry.data()?.status?.processing_status)) {
+        // Fetch Jev's early market link on the reasoning transition, and
+        // completed critiques when analysis finishes.
         entry.full = true;
         entry.due = 0;
       } else {

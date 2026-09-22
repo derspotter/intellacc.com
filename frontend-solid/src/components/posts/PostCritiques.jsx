@@ -150,31 +150,48 @@ export default function PostCritiques(props) {
     </span>
   );
 
+  const link = () => currentData()?.link;
+  const candidates = () => (currentData()?.markets || [])
+    .filter((market) => !link() || String(market.event_id) !== String(link().event_id));
+  const critiques = () => currentData()?.critiques || [];
+  const isPending = () => ['pending', 'retrieving', 'reasoning'].includes(currentData()?.status?.processing_status);
+  const critiqueLabel = (type) => String(type || 'Review note').replaceAll('_', ' ')
+    .replace(/^./, (letter) => letter.toUpperCase());
+
   return (
     <div class="post-critiques-container" style={{ "margin-top": "8px" }}>
-      <Show when={currentData()} keyed>
-        {(d) => {
-          const s = d.status;
-          const link = d.link;
-          const candidates = (Array.isArray(d.markets) ? d.markets : [])
-            .filter((market) => !link || String(market.event_id) !== String(link.event_id));
-
-          // A manually attached link renders regardless of analysis status
-          // (old posts may have no analysis row, casual ones gate out).
-          if (!link && candidates.length === 0) {
-            if (s && ['pending', 'retrieving', 'reasoning'].includes(s.processing_status)) {
-              return <div style={loadingMessageStyle}>AI is matching markets...</div>;
-            }
-            return null;
-          }
-
-          return (
-            <div style={{ display: "flex", "flex-wrap": "wrap", gap: "8px", "align-items": "center" }}>
-              <Show when={link}>{marketChip(link, true)}</Show>
-              <For each={candidates}>{(market) => marketChip(market, false)}</For>
-            </div>
-          );
-        }}
+      <Show when={link() || candidates().length > 0}>
+        <div style={{ display: "flex", "flex-wrap": "wrap", gap: "8px", "align-items": "center" }}>
+          <Show when={link()} keyed>{(market) => marketChip(market, true)}</Show>
+          <For each={candidates()}>{(market) => marketChip(market, false)}</For>
+        </div>
+      </Show>
+      <Show when={isPending()}>
+        <div style={loadingMessageStyle} role="status">
+          {link() ? 'AI is reviewing the argument...' : 'AI is matching markets...'}
+        </div>
+      </Show>
+      <Show when={critiques().length > 0}>
+        <details class="post-ai-critiques" style={{
+          "margin-top": "8px", border: "1px solid var(--border-color, #999)",
+          "border-radius": "0", padding: "8px 10px", "font-size": "0.85em",
+          "overflow-wrap": "anywhere"
+        }}>
+          <summary style={{ cursor: "pointer", "font-weight": "600" }}>
+            AI critique · {critiques().length}
+          </summary>
+          <p style={{ color: "var(--text-muted, #888)", margin: "8px 0" }}>
+            AI-generated feedback on the argument. It may be mistaken.
+          </p>
+          <ul style={{ margin: "8px 0 0", "padding-left": "20px" }}>
+            <For each={critiques()}>{(critique) => (
+              <li style={{ "margin-top": "8px" }}>
+                <strong>{critiqueLabel(critique.critique_type)}</strong>
+                <p style={{ margin: "4px 0", "white-space": "pre-wrap" }}>{critique.description}</p>
+              </li>
+            )}</For>
+          </ul>
+        </details>
       </Show>
     </div>
   );

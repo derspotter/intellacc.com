@@ -6,6 +6,49 @@ const metadata = (id, status = 'complete', title = 'Linked market') => ({
     ? { event_id: 90, title, confirmed: true, match_method: 'manual', market_prob: 0.6 } : null,
   markets: [], signal: { episode_count: 0 }
 });
+test('critiques render without a market and treat model output as text', async ({ page }) => {
+  const description = '<img src=x onerror=alert(1)> Explain why this sample represents the electorate.';
+  await page.route('**/api/**', (route) => {
+    if (!route.request().url().endsWith('/posts/metadata')) return route.fulfill({ json: {} });
+    return route.fulfill({ json: { posts: route.request().postDataJSON().post_ids.map((id) => ({
+      ...metadata(id), link: null, critiques: id === 2 ? [{ id: 10,
+        critique_type: 'unsupported_assumption', description, severity: 'warning' }] : []
+    })) } });
+  });
+  await page.goto('/test/post-metadata.html');
+  const summary = page.getByText('AI critique · 1', { exact: true });
+  await expect(summary).toHaveCount(1);
+  await expect(page.getByText(description, { exact: true })).toBeHidden();
+  await summary.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText(description, { exact: true })).toBeVisible();
+  await expect(page.locator('.post-ai-critiques img')).toHaveCount(0);
+  await expect(page.getByText('Unsupported assumption', { exact: true })).toBeVisible();
+  await page.evaluate(() => window.setAccount(null));
+  await expect(summary).toHaveCount(0);
+});
+
+test('Jev link arrives during reasoning and critiques arrive on completion', async ({ page }) => {
+  let stage = 'retrieving';
+  let polls = 0;
+  await page.route('**/api/**', (route) => {
+    if (!route.request().url().endsWith('/posts/metadata')) return route.fulfill({ json: {} });
+    const body = route.request().postDataJSON();
+    if (body.status_only) { polls++; stage = polls === 1 ? 'reasoning' : 'complete'; }
+    return route.fulfill({ json: { posts: body.post_ids.map((id) => id !== 1 ? metadata(id) : body.status_only
+      ? { post_id: id, status: { processing_status: stage } }
+      : { ...metadata(id, stage), link: stage === 'retrieving' ? null : metadata(id).link,
+        critiques: stage === 'complete' ? [{ id: 10, critique_type: 'logical_leap', description: 'Explain the causal step.' }] : [] }
+    ) } });
+  });
+  await page.goto('/test/post-metadata.html');
+  await expect(page.getByText('AI is matching markets...', { exact: true })).toHaveCount(1);
+  await expect(page.getByText('Linked market', { exact: true })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('AI is reviewing the argument...', { exact: true })).toBeVisible();
+  await expect(page.getByText('AI critique · 1', { exact: true })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('AI is reviewing the argument...', { exact: true })).toHaveCount(0);
+  expect(polls).toBe(2);
+});
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((value) => localStorage.setItem('token', value), token(42));
 });
