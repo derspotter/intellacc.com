@@ -1,5 +1,8 @@
 # Jev post-to-market comparison
 
+This document describes `shadow` mode. Production primary matching and its
+fallback policy are documented in [jev-primary-matching.md](jev-primary-matching.md).
+
 Jev observes the existing matcher in `shadow` mode. It cannot create or remove
 market links, change critiques, reward authors, settle markets or trade. The
 default is `off`; unknown mode values also disable it. This is an evaluation
@@ -71,7 +74,8 @@ docker exec -i intellacc_db psql -U intellacc_user -d intellaccdb \
   < backend/scripts/jev-shadow-report.sql
 ```
 
-The report includes OpenRouter-reported USD cost and a separate estimate using
+The report excludes primary-mode observations so they are not treated as
+independent agreement with an LLM baseline. It includes OpenRouter-reported USD cost and a separate estimate using
 the published $0.042 per million input tokens. Neither is a complete account
 invoice. Missing usage or cost remains unknown. Compare latency, failure/skip rate,
 claim misses and match disagreements. Human-label a held-out set including

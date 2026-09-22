@@ -5,6 +5,7 @@ const { runSafeGate } = require('./claimGate');
 const { retrieveCandidateMarkets } = require('./marketRetrieval');
 const { runSafeReasoner } = require('./argumentExtractor');
 const jevShadow = require('./jevShadow');
+const jevPrimary = require('./jevPrimary');
 const { extractFirstUrl, fetchArticleContent } = require('../metadata/metadataService');
 
 const MAX_ERROR_MESSAGE_LENGTH = 400;
@@ -409,7 +410,7 @@ const clearDerivedMatchState = async (client, postId) => {
   await client.query(
     `DELETE FROM post_market_links
       WHERE post_id = $1
-        AND source = 'auto_match'`,
+        AND source = 'auto_match' AND confirmed = FALSE`,
     [postId]
   );
 
@@ -607,7 +608,7 @@ const storeCritiques = async (client, postId, critiques, propositionByLabel) => 
   }
 };
 
-const persistReasonerOutput = async (client, postId, argumentResult, candidates) => {
+const persistReasonerOutput = async (client, postId, argumentResult, candidates, { matchOnly = false, requireLive = false, linkConclusion = true } = {}) => {
   await client.query('SAVEPOINT reasoner_output');
 
   try {
@@ -615,6 +616,21 @@ const persistReasonerOutput = async (client, postId, argumentResult, candidates)
     if (!argumentResult) {
       await client.query('ROLLBACK TO SAVEPOINT reasoner_output');
       return { hasMatch: false };
+    }
+
+    if (requireLive && argumentResult.best_market) {
+      const live = await client.query(`SELECT id FROM events WHERE id = $1
+        AND outcome IS NULL AND closing_date > NOW() AND hidden_at IS NULL FOR SHARE`,
+      [argumentResult.best_market.event_id]);
+      if (!live.rows.length) throw new Error('Selected market is no longer live');
+    }
+
+    if (matchOnly) {
+      await client.query("DELETE FROM post_market_links WHERE post_id=$1 AND source='auto_match' AND confirmed=FALSE", [postId]);
+      const linkedMarket = argumentResult.best_market
+        ? await storeMarketLink(client, postId, argumentResult.best_market, candidateMap, null) : null;
+      await client.query('RELEASE SAVEPOINT reasoner_output');
+      return { hasMatch: !!linkedMarket, linkedMarket };
     }
 
     await clearDerivedMatchState(client, postId);
@@ -631,7 +647,7 @@ const persistReasonerOutput = async (client, postId, argumentResult, candidates)
         postId,
         argumentResult.best_market,
         candidateMap,
-        conclusionPropId
+        linkConclusion ? conclusionPropId : null
       )
       : null;
 
@@ -652,14 +668,16 @@ const persistReasonerOutput = async (client, postId, argumentResult, candidates)
 
 // Acquire a client only for final database writes. The row locks fence out a
 // newer run and a concurrent post edit until the result commits.
-const persistPipelineResult = async ({ postId, run, analysis, candidates, argumentResult, shadowResult, reasonerAttempted }) => {
+const persistPipelineResult = async ({ postId, run, analysis, candidates, argumentResult, shadowResult, reasonerAttempted, primaryDecision }) => {
   const client = await db.getPool().connect();
   try {
     await client.query('BEGIN');
     // Always lock the post before its analysis, matching progress/claim writes.
     const post = await client.query(
-      "SELECT id FROM posts WHERE id = $1 AND COALESCE(content, '') = $2 FOR UPDATE",
-      [postId, run.content]
+      `SELECT id FROM posts WHERE id = $1 AND COALESCE(content, '') = $2
+        AND ($3::boolean = FALSE OR (community_group_id IS NULL AND parent_id IS NULL
+          AND COALESCE(is_hidden, FALSE) = FALSE)) FOR UPDATE`,
+      [postId, run.content, Boolean(primaryDecision)]
     );
     const current = await client.query(
       `SELECT post_id FROM post_analysis
@@ -673,9 +691,13 @@ const persistPipelineResult = async ({ postId, run, analysis, candidates, argume
 
     analysis.candidates_count = await updateCandidates(client, postId, candidates);
     let hasMatch = false;
-    if (argumentResult !== undefined) {
+    if (argumentResult !== undefined || primaryDecision) {
       try {
-        const result = await persistReasonerOutput(client, postId, argumentResult, candidates);
+        const matchOnly = Boolean(primaryDecision && !argumentResult);
+        const result = await persistReasonerOutput(client, postId,
+          matchOnly ? { best_market: primaryDecision.bestMarket } : argumentResult,
+          candidates, { matchOnly, requireLive: Boolean(primaryDecision),
+            linkConclusion: !primaryDecision || argumentResult?.conclusionMatchesMarket === true });
         hasMatch = result.hasMatch;
       } catch (error) {
         // persistReasonerOutput rolls back its savepoint, preserving candidates.
@@ -683,6 +705,11 @@ const persistPipelineResult = async ({ postId, run, analysis, candidates, argume
         analysis.processing_errors = analysis.processing_errors
           ? `${analysis.processing_errors}; ${reasonError}` : reasonError;
       }
+    }
+    if (primaryDecision?.bestMarket && !hasMatch) {
+      // A failed critique savepoint leaves the earlier Jev link intact.
+      hasMatch = (await client.query('SELECT 1 FROM post_market_links WHERE post_id=$1 AND event_id=$2',
+        [postId, primaryDecision.bestMarket.event_id])).rows.length > 0;
     }
     await upsertAnalysis(client, postId, analysis, run);
     await jevShadow.persist(client, { postId, run, result: shadowResult, baseline: {
@@ -692,7 +719,7 @@ const persistPipelineResult = async ({ postId, run, analysis, candidates, argume
       gate_latency_ms: analysis.gate_latency_ms,
       reason_latency_ms: analysis.reason_latency_ms,
       reasoner_attempted: reasonerAttempted,
-      proposed_event_id: argumentResult?.best_market?.event_id || null,
+      proposed_event_id: primaryDecision?.bestMarket?.event_id || argumentResult?.best_market?.event_id || null,
       persisted_match: hasMatch,
       processing_error: Boolean(analysis.processing_errors),
       usage: {
@@ -773,6 +800,7 @@ const runPipeline = async (postId, content) => {
     let candidates = [];
     let argumentResult;
     let shadowPromise;
+    let primaryDecision;
 
     if (normalizedContent) {
       let augmentedContent = normalizedContent;
@@ -789,61 +817,123 @@ const runPipeline = async (postId, content) => {
         }
       }
 
-      analysis.processing_status = 'retrieving';
-      analysis.gate_model = config.gate.model;
-      if (!await progress()) return finish('superseded');
-      let gateResult = { has_claim: false };
-      try {
-        const gateStart = Date.now();
-        gateResult = await runSafeGate({ postContent: augmentedContent, usageRecorder });
-        analysis.gate_latency_ms = Date.now() - gateStart;
-      } catch (error) {
-        analysis.processing_errors = normalizeResultError(error, 'gate failed');
-      }
-
-      if (gateResult.has_claim) {
-        analysis.has_claim = true;
-        analysis.domain = gateResult.domain || null;
-        analysis.claim_summary = gateResult.claim_summary || null;
-        analysis.entities = gateResult.entities || [];
+      if (jevPrimary.primaryEnabled() && canPersistReasoning(capabilities)) {
+        analysis.processing_status = 'retrieving';
         if (!await progress()) return finish('superseded');
-        candidates = withMatchMethod(await retrieveCandidateMarkets(
-          gateResult.claim_summary || augmentedContent, gateResult.entities,
-          gateResult.domain, { usageRecorder }
-        ), matchMethod);
-        analysis.candidates_count = normalizeCandidates(candidates).length;
-
-        const shouldReason = candidates.length > 0 && config.reasoner.enabled && canPersistReasoning(capabilities);
-        analysis.processing_status = shouldReason ? 'reasoning' : 'retrieving';
-        analysis.reason_model = shouldReason ? config.reasoner.model : null;
-        if (!await progress()) return finish('superseded');
-        shadowPromise = jevShadow.evaluate({
+        candidates = withMatchMethod(await retrieveCandidateMarkets(augmentedContent, [], null, { usageRecorder }), 'jev_v1');
+        const jevResult = await jevShadow.evaluate({
           postId: normalizedPostId, content: run.content, postContent: augmentedContent, candidates
         });
-        if (shouldReason) {
-          reasonerAttempted = true;
-          const isHeavy = augmentedContent.split(/\s+/).filter(Boolean).length > 400;
-          analysis.reason_model = isHeavy ? config.reasoner.heavyModel : config.reasoner.model;
-          try {
-            const reasonStart = Date.now();
-            argumentResult = await runSafeReasoner({
-              postContent: augmentedContent, candidates,
-              overrideModel: isHeavy ? config.reasoner.heavyModel : null,
-              overrideFallbackModels: isHeavy ? config.reasoner.heavyFallbackModels : null,
-              usageRecorder
-            });
-            analysis.reason_latency_ms = Date.now() - reasonStart;
-          } catch (error) {
-            const reasonError = normalizeResultError(error, 'reasoner failed');
-            analysis.processing_errors = analysis.processing_errors
-              ? `${analysis.processing_errors}; ${reasonError}` : reasonError;
+        const decision = jevPrimary.decide(jevResult, candidates);
+        if (jevResult) {
+          jevResult.routing = decision.accepted ? 'primary' : 'llm_fallback';
+          jevResult.fallback_reason = decision.accepted ? null : decision.reason;
+          shadowPromise = Promise.resolve(jevResult);
+          if (jevResult.latency_ms !== null) await usageRecorder({
+            stage: 'jev', operation: 'decisions', requestedModel: jevResult.requested_model,
+            usedModel: jevResult.used_model, success: jevResult.status === 'ok', latencyMs: jevResult.latency_ms,
+            promptTokens: jevResult.input_tokens, completionTokens: jevResult.output_tokens,
+            totalTokens: (jevResult.input_tokens || 0) + (jevResult.output_tokens || 0),
+            costCredits: jevResult.cost_usd, errorClass: jevResult.error_code
+          });
+        }
+        if (decision.accepted) {
+          const critiqueCandidates = candidates;
+          // Do not expose topic-only retrieval hits as suggestions after Jev
+          // has explicitly rejected them.
+          candidates = decision.bestMarket ? candidates.filter((candidate) =>
+            jevResult.answers[`relevant_${candidate.event_id}`]?.noul >= 0.8
+          ).map((candidate) => ({ ...candidate, match_method: 'jev_v1' })) : [];
+          primaryDecision = decision;
+          analysis.has_claim = decision.hasClaim;
+          analysis.gate_model = jevResult.used_model;
+          analysis.reason_model = jevResult.used_model;
+          analysis.gate_latency_ms = jevResult.latency_ms;
+          analysis.reason_latency_ms = jevResult.latency_ms;
+          analysis.candidates_count = candidates.length;
+          const shouldCritique = decision.hasClaim && critiqueCandidates.length > 0 && config.reasoner.enabled;
+          analysis.processing_status = shouldCritique ? 'reasoning' : decision.hasClaim ? 'complete' : 'gated_out';
+          Object.assign(analysis, currentUsageSummary());
+          // Publish the decision before awaiting text generation. The same
+          // post/version fence also protects the later critique write.
+          const early = await persistPipelineResult({ postId: normalizedPostId, run, analysis,
+            candidates, primaryDecision, shadowResult: jevResult, reasonerAttempted: false });
+          if (!early) return finish('superseded');
+          hasReasonerMatch = early.hasMatch;
+          if (shouldCritique) {
+            reasonerAttempted = true;
+            try {
+              const isHeavy = augmentedContent.split(/\s+/).filter(Boolean).length > 400;
+              const critique = await runSafeReasoner({ postContent: augmentedContent, candidates: critiqueCandidates,
+                overrideModel: isHeavy ? config.reasoner.heavyModel : null,
+                overrideFallbackModels: isHeavy ? config.reasoner.heavyFallbackModels : null,
+                usageRecorder: (record) => usageRecorder({ ...record, stage: 'critique' }) });
+              if (critique) argumentResult = { ...critique, best_market: decision.bestMarket,
+                conclusionMatchesMarket: critique.best_market?.event_id === decision.bestMarket?.event_id };
+            } catch (error) {
+              analysis.processing_errors = normalizeResultError(error, 'critique failed');
+            }
           }
         }
       }
-      if (!shadowPromise) {
-        shadowPromise = jevShadow.evaluate({
-          postId: normalizedPostId, content: run.content, postContent: augmentedContent, candidates
-        });
+
+      if (!primaryDecision) {
+        analysis.processing_status = 'retrieving';
+        analysis.gate_model = config.gate.model;
+        if (!await progress()) return finish('superseded');
+        let gateResult = { has_claim: false };
+        try {
+          const gateStart = Date.now();
+          gateResult = await runSafeGate({ postContent: augmentedContent, usageRecorder });
+          analysis.gate_latency_ms = Date.now() - gateStart;
+        } catch (error) {
+          analysis.processing_errors = normalizeResultError(error, 'gate failed');
+        }
+
+        if (gateResult.has_claim) {
+          analysis.has_claim = true;
+          analysis.domain = gateResult.domain || null;
+          analysis.claim_summary = gateResult.claim_summary || null;
+          analysis.entities = gateResult.entities || [];
+          if (!await progress()) return finish('superseded');
+          candidates = withMatchMethod(await retrieveCandidateMarkets(
+            gateResult.claim_summary || augmentedContent, gateResult.entities,
+            gateResult.domain, { usageRecorder }
+          ), matchMethod);
+          analysis.candidates_count = normalizeCandidates(candidates).length;
+
+          const shouldReason = candidates.length > 0 && config.reasoner.enabled && canPersistReasoning(capabilities);
+          analysis.processing_status = shouldReason ? 'reasoning' : 'retrieving';
+          analysis.reason_model = shouldReason ? config.reasoner.model : null;
+          if (!await progress()) return finish('superseded');
+          if (!shadowPromise) shadowPromise = jevShadow.evaluate({
+            postId: normalizedPostId, content: run.content, postContent: augmentedContent, candidates
+          });
+          if (shouldReason) {
+            reasonerAttempted = true;
+            const isHeavy = augmentedContent.split(/\s+/).filter(Boolean).length > 400;
+            analysis.reason_model = isHeavy ? config.reasoner.heavyModel : config.reasoner.model;
+            try {
+              const reasonStart = Date.now();
+              argumentResult = await runSafeReasoner({
+                postContent: augmentedContent, candidates,
+                overrideModel: isHeavy ? config.reasoner.heavyModel : null,
+                overrideFallbackModels: isHeavy ? config.reasoner.heavyFallbackModels : null,
+                usageRecorder
+              });
+              analysis.reason_latency_ms = Date.now() - reasonStart;
+            } catch (error) {
+              const reasonError = normalizeResultError(error, 'reasoner failed');
+              analysis.processing_errors = analysis.processing_errors
+                ? `${analysis.processing_errors}; ${reasonError}` : reasonError;
+            }
+          }
+        }
+        if (!shadowPromise) {
+          shadowPromise = jevShadow.evaluate({
+            postId: normalizedPostId, content: run.content, postContent: augmentedContent, candidates
+          });
+        }
       }
     }
 
@@ -851,7 +941,7 @@ const runPipeline = async (postId, content) => {
     analysis.processing_status = analysis.has_claim ? 'complete' : 'gated_out';
     Object.assign(analysis, currentUsageSummary());
     const persisted = await persistPipelineResult({
-      postId: normalizedPostId, run, analysis, candidates, argumentResult, shadowResult, reasonerAttempted
+      postId: normalizedPostId, run, analysis, candidates, argumentResult, shadowResult, reasonerAttempted, primaryDecision
     });
     if (!persisted) return finish('superseded');
     hasReasonerMatch = persisted.hasMatch;

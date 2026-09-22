@@ -4,7 +4,7 @@ WITH current_jev_shadow AS (
 SELECT s.* FROM post_match_jev_shadow s
 JOIN post_analysis a ON a.post_id = s.post_id AND a.processing_run_id = s.processing_run_id
 JOIN posts p ON p.id = s.post_id
-WHERE s.content_hash = encode(sha256(convert_to(COALESCE(p.content, ''), 'UTF8')), 'hex')
+WHERE COALESCE(s.result->>'mode', 'shadow') = 'shadow' AND s.content_hash = encode(sha256(convert_to(COALESCE(p.content, ''), 'UTF8')), 'hex')
 )
 
 SELECT status, result->>'error_code' AS error_code,
@@ -15,7 +15,7 @@ WITH current_jev_shadow AS (
 SELECT s.* FROM post_match_jev_shadow s
 JOIN post_analysis a ON a.post_id = s.post_id AND a.processing_run_id = s.processing_run_id
 JOIN posts p ON p.id = s.post_id
-WHERE s.content_hash = encode(sha256(convert_to(COALESCE(p.content, ''), 'UTF8')), 'hex')
+WHERE COALESCE(s.result->>'mode', 'shadow') = 'shadow' AND s.content_hash = encode(sha256(convert_to(COALESCE(p.content, ''), 'UTF8')), 'hex')
 )
 SELECT result->>'used_model' AS model, result->>'prompt_version' AS prompt_version,
        COUNT(*) AS successful_posts,
@@ -34,7 +34,7 @@ WITH current_jev_shadow AS (
 SELECT s.* FROM post_match_jev_shadow s
 JOIN post_analysis a ON a.post_id = s.post_id AND a.processing_run_id = s.processing_run_id
 JOIN posts p ON p.id = s.post_id
-WHERE s.content_hash = encode(sha256(convert_to(COALESCE(p.content, ''), 'UTF8')), 'hex')
+WHERE COALESCE(s.result->>'mode', 'shadow') = 'shadow' AND s.content_hash = encode(sha256(convert_to(COALESCE(p.content, ''), 'UTF8')), 'hex')
 )
 SELECT post_id, baseline->>'has_claim' AS baseline_claim,
        result #>> '{answers,has_claim,noul}' AS jev_claim_probability,

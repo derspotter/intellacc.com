@@ -135,7 +135,7 @@ services:
       POST_SIGNAL_MATCH_REASONING_MAX_TOKENS: ${POST_SIGNAL_MATCH_REASONING_MAX_TOKENS:-256}
       POST_SIGNAL_MATCH_REASONER_TIMEOUT_MS: ${POST_SIGNAL_MATCH_REASONER_TIMEOUT_MS:-20000}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-      # Optional Jev comparison only; does not control visible market links.
+      # off | shadow (comparison) | primary (market/stance decisions + LLM fallback).
       POST_SIGNAL_JEV_MODE: ${POST_SIGNAL_JEV_MODE:-off}
       POST_SIGNAL_JEV_MODEL: ${POST_SIGNAL_JEV_MODEL:-typesafe/jev-1.13}
       POST_SIGNAL_MARKET_EMBEDDING_PROVIDER: ${POST_SIGNAL_MARKET_EMBEDDING_PROVIDER:-openrouter}
