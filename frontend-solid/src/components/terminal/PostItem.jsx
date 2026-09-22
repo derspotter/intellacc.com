@@ -8,6 +8,8 @@ import LinkPreviews from '../posts/LinkPreviews';
 import { RenderTextWithLinks } from '../../utils/text';
 import ai from '../../store/aiStore';
 import AiReplyStatus from '../ai/AiReplyStatus';
+import PostCritiques from '../posts/PostCritiques';
+import { usePostMetadata } from '../../services/postMetadata';
 
 const CommentItem = (props) => (
     <div data-testid="comment-row" class="pl-3 border-l border-bb-border/40 py-1">
@@ -32,6 +34,10 @@ const CommentItem = (props) => (
 );
 
 const PostItem = (props) => {
+    const [metadata, refreshMetadata] = usePostMetadata(
+        () => props.post.is_temp ? null : props.post.id,
+        () => props.post.updated_at
+    );
     const [localLiked, setLocalLiked] = createSignal(null);
     const [likeBusy, setLikeBusy] = createSignal(false);
 
@@ -150,6 +156,8 @@ const PostItem = (props) => {
             <p class="text-bb-text mb-2 break-words whitespace-pre-wrap"><RenderTextWithLinks text={props.post.content || ''} /></p>
             <LinkPreviews post={props.post} />
             <AiReplyStatus post={props.post} />
+            <PostCritiques postId={props.post.id} authorId={props.post.user_id}
+                data={metadata()} onRefresh={refreshMetadata} />
             <Show when={attachmentSrc()}>
                 <img src={attachmentSrc()} alt="" class="max-w-full max-h-64 border border-bb-border my-1" />
             </Show>

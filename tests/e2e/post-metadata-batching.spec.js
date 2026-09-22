@@ -6,6 +6,8 @@ const metadata = (id, status = 'complete', title = 'Linked market') => ({
     ? { event_id: 90, title, confirmed: true, match_method: 'manual', market_prob: 0.6 } : null,
   markets: [], signal: { episode_count: 0 }
 });
+for (const skin of ['van', 'terminal']) {
+test.describe(skin, () => {
 test('critiques render without a market and treat model output as text', async ({ page }) => {
   const description = '<img src=x onerror=alert(1)> Explain why this sample represents the electorate.';
   await page.route('**/api/**', (route) => {
@@ -50,6 +52,7 @@ test('Jev link arrives during reasoning and critiques arrive on completion', asy
   expect(polls).toBe(2);
 });
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript((value) => localStorage.setItem('metadata-fixture-skin', value), skin);
   await page.addInitScript((value) => localStorage.setItem('token', value), token(42));
 });
 
@@ -157,4 +160,6 @@ for (const status of [403, 500]) {
     await page.waitForTimeout(100);
     expect(count).toBe(status === 500 ? 4 : 1);
   });
+}
+});
 }
