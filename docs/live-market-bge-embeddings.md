@@ -74,3 +74,21 @@ Small sequential measurements before rollout: Debian's first request took
 96ms, then 20–26ms including the server-to-Debian SSH network path; OpenRouter
 took 1464ms then 359–419ms on the same short synthetic/public queries. These are
 not production load-test figures or proof of equal retrieval quality.
+
+## Verified rollout, 2026-09-22
+
+Backfill selected and updated 21 live markets, with zero failures. Database
+verification found zero BGE vectors on ineligible markets and zero missing/stale
+live vectors. A checksum of all existing OpenAI event vectors was unchanged.
+
+Twelve English/German paraphrases of ten actual live markets ranked the expected
+market first with both retrieval providers. BGE's warm median full retrieval
+time was 66ms (57–80ms); OpenRouter's was 429ms (310–10077ms, including one
+embedding timeout that successfully used keyword fallback). BGE's first full
+retrieval took 119ms. This small check supports rollout; it is not a broad
+accuracy or load benchmark.
+
+All 92 backend test suites passed: 643 tests passed and one was skipped. Tests
+include concurrent hide/close/resolve/edit rejection, model/vector validation,
+unhide/edit sweep behavior, legacy-vector preservation, keyword-only candidates
+and keyword fallback on embedding errors and timeouts.
