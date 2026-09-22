@@ -7,6 +7,7 @@ const { runSafeReasoner } = require('./argumentExtractor');
 const jevShadow = require('./jevShadow');
 const jevPrimary = require('./jevPrimary');
 const critiqueSettings = require('../ai/postCritiqueSettings');
+const critiqueService = require('../ai/postCritiqueService');
 const { extractFirstUrl, fetchArticleContent } = require('../metadata/metadataService');
 
 const MAX_ERROR_MESSAGE_LENGTH = 400;
@@ -802,11 +803,9 @@ const runPipeline = async (postId, content) => {
     let argumentResult;
     let shadowPromise;
     let primaryDecision;
-    let critiqueModel;
-    const review = async (postContent, reviewCandidates) => runSafeReasoner({
-      postContent, candidates: reviewCandidates, purpose: 'critique',
-      overrideModel: critiqueModel, overrideFallbackModels: [],
-      usageRecorder: (record) => usageRecorder({ ...record, stage: 'critique' })
+    let critiqueOwner;
+    const review = async (postContent) => critiqueService.review({
+      postId: normalizedPostId, content: run.content, postContent
     });
 
     if (normalizedContent) {
@@ -824,7 +823,7 @@ const runPipeline = async (postId, content) => {
         }
       }
 
-      if (canPersistReasoning(capabilities)) critiqueModel = await critiqueSettings.forPost(normalizedPostId);
+      if (canPersistReasoning(capabilities)) critiqueOwner = await critiqueSettings.forPost(normalizedPostId);
 
       if (jevPrimary.primaryEnabled() && canPersistReasoning(capabilities)) {
         analysis.processing_status = 'retrieving';
@@ -860,7 +859,7 @@ const runPipeline = async (postId, content) => {
           analysis.gate_latency_ms = jevResult.latency_ms;
           analysis.reason_latency_ms = jevResult.latency_ms;
           analysis.candidates_count = candidates.length;
-          const shouldCritique = decision.hasClaim && critiqueCandidates.length > 0 && config.reasoner.enabled && critiqueModel !== 'off';
+          const shouldCritique = decision.hasClaim && critiqueCandidates.length > 0 && config.reasoner.enabled && Boolean(critiqueOwner);
           analysis.processing_status = shouldCritique ? 'reasoning' : decision.hasClaim ? 'complete' : 'gated_out';
           Object.assign(analysis, currentUsageSummary());
           // Publish the decision before awaiting text generation. The same
@@ -872,7 +871,7 @@ const runPipeline = async (postId, content) => {
           if (shouldCritique) {
             reasonerAttempted = true;
             try {
-              const critique = await review(augmentedContent, critiqueCandidates);
+              const critique = await review(augmentedContent);
               if (critique) argumentResult = { ...critique, best_market: decision.bestMarket,
                 conclusionMatchesMarket: critique.best_market?.event_id === decision.bestMarket?.event_id };
             } catch (error) {
@@ -929,9 +928,9 @@ const runPipeline = async (postId, content) => {
               analysis.reason_latency_ms = Date.now() - reasonStart;
               if (argumentResult) {
                 argumentResult.critiques = [];
-                if (critiqueModel !== 'off') {
+                if (Boolean(critiqueOwner)) {
                   try {
-                    const reviewed = await review(augmentedContent, candidates);
+                    const reviewed = await review(augmentedContent);
                     argumentResult.critiques = (reviewed?.critiques || []).map((item) => ({ ...item, related_prop: null }));
                     argumentResult.critique_model = reviewed?.critique_model || null;
                   } catch (error) {

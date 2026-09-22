@@ -1342,7 +1342,7 @@ export const updateMarketQuestion = (id, payload) => api.marketQuestions.update(
 
 export const aiApi = {
   critiqueSettings: () => request('/ai/critique-settings'),
-  saveCritiqueSettings: (model) => request('/ai/critique-settings', { method: 'PUT', body: { model } }),
+  saveCritiqueSettings: (body) => request('/ai/critique-settings', { method: 'PUT', body }),
   publicReply: (postId) => request(`/ai/public-replies/${encodeURIComponent(postId)}`),
   settings: () => request('/ai/settings'),
   saveSettings: (body) => request('/ai/settings', { method: 'PUT', body }),

@@ -5,7 +5,8 @@ async function mockAi(page, { configured = true, failOnce = false } = {}) {
   await page.addInitScript(t => localStorage.setItem('token', t), token);
   const calls = [];
   let settings = { available: true, configured, provider: 'openrouter', model: configured ? 'example/model' : '', keyHint: '…test', publicReplies: true };
-  let critiqueModel = 'anthropic/claude-opus-5.5';
+  let critiqueModel = '';
+  let critiquesEnabled = false;
   let conversations = [];
   const history = new Map();
   await page.route('**/api/**', async route => {
@@ -16,11 +17,8 @@ async function mockAi(page, { configured = true, failOnce = false } = {}) {
     const json = (value, status = 200) => route.fulfill({ status, json: value });
     if (url.pathname.startsWith('/api/ai/')) calls.push({ path: url.pathname, method, body });
     if (url.pathname === '/api/ai/critique-settings') {
-      if (method === 'PUT') critiqueModel = body.model;
-      return json({ model: critiqueModel, options: [
-        { id: 'anthropic/claude-opus-5.5', label: 'Claude Opus 5.5' },
-        { id: 'openai/gpt-6-luna', label: 'GPT-6 Luna' }, { id: 'off', label: 'Off' }
-      ] });
+      if (method === 'PUT') { critiqueModel = body.model; critiquesEnabled = body.enabled; }
+      return json({ model: critiqueModel, enabled: critiquesEnabled, configured: settings.configured, provider: settings.provider });
     }
     if (url.pathname === '/api/ai/settings') {
       if (method === 'PUT') settings = { ...settings, ...body, configured: true, apiKey: undefined };
@@ -101,17 +99,34 @@ for (const terminal of [false, true]) {
   });
 }
 
-test('public review choice saves independently of personal credentials and persists on reload', async ({ page }) => {
-  const calls = await mockAi(page, { configured: false });
+test('public reviews accept any model on the saved provider and persist the opt-in', async ({ page }) => {
+  const calls = await mockAi(page);
   await page.goto('/test/ai-assistant.html#settings');
-  await expect(page.getByLabel('Public critique model')).toHaveValue('anthropic/claude-opus-5.5');
-  await expect(page.getByLabel('Model ID', { exact: true })).toHaveValue('anthropic/claude-opus-5.5');
-  await page.getByLabel('Public critique model').selectOption('off');
+  const enabled = page.getByLabel('Automatically critique my new posts publicly using my API key');
+  await expect(enabled).not.toBeChecked();
+  await page.getByLabel('Public critique model ID', { exact: true }).fill('custom/any-model-123');
+  await enabled.check();
   await page.getByRole('button', { name: 'Save critique settings', exact: true }).click();
   await expect(page.getByText('Critique settings saved. Applies to future reviews.')).toBeVisible();
   expect(calls.filter(c => c.path === '/api/ai/settings' && c.method === 'PUT')).toHaveLength(0);
   await page.reload();
-  await expect(page.getByLabel('Public critique model')).toHaveValue('off');
+  await expect(page.getByLabel('Public critique model ID', { exact: true })).toHaveValue('custom/any-model-123');
+  await expect(enabled).toBeChecked();
+  await expect(page.getByLabel('Model ID', { exact: true })).toHaveValue('example/model');
+});
+
+test('public reviews require a personal key and have no global Opus default', async ({ page }) => {
+  await mockAi(page, { configured: false });
+  await page.goto('/test/ai-assistant.html#settings');
+  await expect(page.getByLabel('Model ID', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('Public critique model ID', { exact: true })).toHaveValue('');
+  await page.getByLabel('Automatically critique my new posts publicly using my API key').check();
+  await expect(page.getByRole('button', { name: 'Save critique settings', exact: true })).toBeDisabled();
+  await page.getByLabel('Model ID', { exact: true }).fill('custom/my-own-model');
+  await page.getByLabel('API key', { exact: true }).fill('test-own-key-no-network');
+  await page.getByRole('button', { name: 'Save AI settings', exact: true }).click();
+  await expect(page.getByText('AI settings saved.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save critique settings', exact: true })).toBeEnabled();
 });
 
 test('starting a private critique preserves an existing draft', async ({ page }) => {

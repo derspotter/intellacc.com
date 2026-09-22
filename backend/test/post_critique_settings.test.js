@@ -24,27 +24,24 @@ beforeAll(async () => {
   }
 });
 afterAll(async () => { await db.query('DELETE FROM users WHERE id=ANY($1::int[])', [users]); await releaseTestServer(); });
-test('defaults to Opus without requiring a personal API key', async () => {
-  expect(await call(0)).toMatchObject({ status: 200, body: { model: 'anthropic/claude-opus-5.5' } });
+test('defaults to disabled without a model or personal key', async () => {
+  expect(await call(0)).toMatchObject({ status: 200, body: { model: '', enabled: false, configured: false } });
+  expect((await call(0, { enabled: true, model: 'custom/anything' })).status).toBe(400);
 });
-test('the authenticated owner controls their setting, not the supplied user id', async () => {
-  expect(await call(0, { model: 'off', userId: users[1] })).toMatchObject({ status: 200, body: { model: 'off' } });
-  expect((await call(1)).body.model).toBe(settings.DEFAULT_MODEL);
-  expect((await call(0, { model: 'openai/gpt-6-luna' })).body.model).toBe('openai/gpt-6-luna');
+test('any valid model can be saved without modifying another user', async () => {
+  expect(await call(0, { enabled: false, model: 'custom/any-model-v999', userId: users[1] }))
+    .toMatchObject({ status: 200, body: { model: 'custom/any-model-v999' } });
+  expect((await call(1)).body).toMatchObject({ model: '', enabled: false });
 });
-test('rejects arbitrary models and requires authentication', async () => {
-  expect((await call(0, { model: 'expensive/unapproved' })).status).toBe(400);
-  expect((await call(0)).body.model).toBe('openai/gpt-6-luna');
+test('rejects malformed model IDs and requires authentication', async () => {
+  expect((await call(0, { enabled: false, model: 'invalid model' })).status).toBe(400);
+  expect((await call(0, { model: 'custom/model' })).status).toBe(400);
   expect((await call(99)).status).toBe(401);
 });
-test('post selection uses the author preference and excludes hidden posts', async () => {
+test('missing keys cannot use the platform key even if a preference is enabled', async () => {
   const id = (await db.query("INSERT INTO posts (user_id,content) VALUES ($1,'A prediction') RETURNING id", [users[0]])).rows[0].id;
   try {
-    expect(await settings.forPost(id)).toBe('openai/gpt-6-luna');
-    await settings.saveSettings(users[0], 'off');
-    expect(await settings.forPost(id)).toBe('off');
-    await settings.saveSettings(users[0], settings.DEFAULT_MODEL);
-    await db.query('UPDATE posts SET is_hidden=TRUE WHERE id=$1', [id]);
-    expect(await settings.forPost(id)).toBe('off');
+    await db.query('UPDATE user_post_critique_settings SET enabled=TRUE WHERE user_id=$1', [users[0]]);
+    expect(await settings.forPost(id)).toBeNull();
   } finally { await db.query('DELETE FROM posts WHERE id=$1', [id]); }
 });

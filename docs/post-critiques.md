@@ -1,63 +1,67 @@
 # Post critiques
 
 Public posts with stored critiques show an expandable **AI critique · N** section
-below their market links in both feed layouts. Critiques also appear when no
-market matches. Feedback is labelled as AI-generated, displayed as plain text,
-and does not change the author's post or Jev's market decision.
+below market links in both layouts. Text is rendered safely and labelled as AI
+feedback. New critiques show the model that produced them. Legacy critiques
+have no model attribution.
 
-The authenticated batched `/api/posts/metadata` response includes a `critiques`
-array (id, critique_type, description, severity), limited to 10 items per post.
-Hidden and blocked posts are excluded by the existing visibility checks.
-Community-group critiques are excluded. Status-only polls omit critiques and
-their database join. A transition into reasoning refreshes the early Jev link;
-completion refreshes the finished critique. There are no per-post requests.
+## Personal keys and model choice
 
-Jev remains the primary market/stance matcher with Debian BGE hybrid retrieval.
-Claude Opus 5.5 is the default public reviewer. Users can choose Opus, GPT-6 Luna,
-or Off under **Settings → Public critiques on my posts**. The choice controls
-future reviews of the author's public top-level posts and uses Intellacc's
-OpenRouter account. Existing reviews are retained until normal reanalysis.
+Critiques always use the requesting user's own saved provider/API key. Model IDs
+are free text, validated for syntax, with no fixed model allowlist. The four
+supported provider connections are OpenRouter, OpenAI, Anthropic and xAI.
+There is no default critique model or platform-funded critique fallback.
 
-Matching retains its inexpensive Luna/DeepSeek fallback:
+Users first save a provider, API key and model under **Your AI assistant**.
+Private critiques use that model. Public critiques on the author's own new
+posts require a separate opt-in under **Public critiques on my posts**. An
+optional public model ID overrides the assistant model using the same provider
+and credential. Blank means inherit the assistant model. Saving model choices
+or disabling reviews does not generate a paid request or alter existing reviews.
 
-```dotenv
-POST_SIGNAL_JEV_MODE=primary
-POST_SIGNAL_MATCH_REASONER_MODEL=openai/gpt-6-luna
-POST_SIGNAL_MATCH_REASONER_FALLBACK_MODELS=deepseek/deepseek-v4.1-flash
-```
+`GET/PUT /api/ai/critique-settings` is session-only and owner-scoped. The update
+body is `{ enabled: boolean, model: string }`. Enabling requires an available
+personal credential. Removing that credential immediately prevents new reviews.
+Existing opt-ins from the former platform-funded implementation default to off
+through `20260922_user_funded_critiques.sql`; they are not permission to bill a
+personal key. Any account-specific Opus choice is stored in that account's
+settings, never in a global model default.
 
-Long posts inherit that matching model unless explicitly overridden. Uncertain
-Jev decisions use the inexpensive matching reasoner, followed by the author's
-chosen reviewer. Reviewer failure never substitutes a cheaper public critique.
-The review has a 60-second request timeout, 4000 output tokens and medium
-reasoning for Opus. A malformed response can receive one format-repair attempt.
-Existing confirmed links remain protected.
-Critiques are generated after submission for eligible predictive posts with
-retrieved candidates. Casual posts do not incur a critique request. An empty
-critique array means no feedback to display, not a verified factual endorsement.
-Existing stored critiques become visible without bulk regeneration.
+## Generation and matching
 
-New reviews record the actual provider model and show it in the expanded panel.
-Legacy critiques have no model attribution. The authenticated session-only
-`GET/PUT /api/ai/critique-settings` API uses the caller's identity, accepts only
-the offered models, and does not require or change personal AI credentials.
-Settings are stored in `user_post_critique_settings` by the additive migration
-`20260922_post_critique_preferences.sql`.
+Jev remains the primary market matcher using the platform's OpenRouter key and
+Debian BGE hybrid retrieval. Its inexpensive matching fallback remains Luna and
+DeepSeek. The matching reasoner cannot produce public critiques. A missing key,
+opt-out or critique failure does not prevent matching or remove a Jev link.
+
+The public critique service independently loads the author's encrypted
+credential, rechecks the current public post content and opt-in, and reserves
+an attempt against the existing personal AI budget. It uses the same fixed
+provider endpoints, bounded inputs/responses and sanitized errors as AI chats.
+No provider request holds a database connection. It requests at most three
+constructive critiques, with no minimum quota and no claimed web fact checking.
+Malformed output is rejected without a paid repair or fallback.
+
+`ai_post_critique_requests` deduplicates by post, content hash, provider and model.
+Completed results can be reused. Running/failed attempts do not automatically
+retry or charge again. Public review reservations count toward the shared
+personal AI request and concurrency limits. Pipeline version/visibility checks
+protect the final publication against edits and hidden posts.
 
 **Critique privately** opens a prepared question in the reader's private AI
-conversation about the post. The reader presses Send to generate it using their
-personal provider, model and API key from **Your AI assistant** settings.
-Unconfigured OpenRouter settings suggest Opus 5.5, while saved choices remain
-unchanged. Private feedback stays in owner-scoped AI history and never updates
-the public critique. Existing request budgets, idempotency and visibility checks
-apply. Opening the draft alone makes no paid request.
+conversation. Pressing Send invokes their personal model/key. This path retains
+private-chat owner isolation, request idempotency and budgets and never changes
+the public critique. Opening the draft makes no paid request.
 
-The prompt requests at most three substantive, constructive critiques in the
-post's language, with no minimum quota and no claims of external fact checking.
-The migration `20260922_expand_post_critique_types.sql` aligns fresh-database
-constraints with the categories already accepted by the reasoner.
+## Presentation and deployment
 
-Deploy the backend with the migration and updated environment, then build and
-publish `frontend-solid`. Retain previous hashed assets for existing sessions.
-Validation covers batched visibility and defaults, keyboard expansion, text-only
-rendering, logout clearing, and Jev-link/critique completion polling.
+The authenticated batched `/api/posts/metadata` endpoint returns up to ten stored
+critiques per visible post. Hidden/blocked posts and community-group critiques
+are excluded. Status-only polling omits the critique join. Jev's early link and
+completed critiques refresh without per-post requests.
+
+Deploy backend migrations before the frontend. Preserve prior hashed assets and
+verify the public index and lazy assets. Tests cover arbitrary model selection,
+key ownership, opt-in/missing-key behavior, budget enforcement, concurrent
+request deduplication, provider failure, matching independence, safe rendering,
+private drafts, and persistence of account settings.

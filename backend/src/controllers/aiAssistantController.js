@@ -33,7 +33,7 @@ exports.getCritiqueSettings = async (req, res) => {
   catch (error) { sendError(res, error, 'Failed to load critique settings'); }
 };
 exports.saveCritiqueSettings = async (req, res) => {
-  try { res.json(await critiqueSettings.saveSettings(req.user.id, req.body?.model)); }
+  try { res.json(await critiqueSettings.saveSettings(req.user.id, req.body)); }
   catch (error) { sendError(res, error, 'Failed to save critique settings'); }
 };
 

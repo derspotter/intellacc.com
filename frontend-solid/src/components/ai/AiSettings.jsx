@@ -16,7 +16,7 @@ export default function AiSettings() {
   const [confirmRemove, setConfirmRemove] = createSignal(false);
   const apply = (data) => {
     setSaved(data); setProvider(data.provider || 'openrouter');
-    setModel(data.model || ((data.provider || 'openrouter') === 'openrouter' ? 'anthropic/claude-opus-5.5' : ''));
+    setModel(data.model || '');
     setPublicReplies(data.publicReplies !== false); setApiKey('');
   };
   const run = async (action) => {
@@ -29,11 +29,10 @@ export default function AiSettings() {
   const dirty = () => apiKey() || provider() !== saved()?.provider || model() !== saved()?.model || publicReplies() !== saved()?.publicReplies;
   return (
     <>
-    <PostCritiqueSettings />
     <section class="ai-settings settings-section">
       <h3 class="settings-section-title">Your AI assistant</h3>
       <p>Use your own API key and choose your model. Provider usage is billed to your account.</p>
-      <p>Private critiques use this model and stay in your private AI conversation. Claude Opus 5.5 is the suggested starting choice.</p>
+      <p>Private critiques use this model and stay in your private AI conversation. Enter any model ID supported by your provider.</p>
       <form onSubmit={(e) => { e.preventDefault(); void run(async () => {
         await aiApi.saveSettings({ provider: provider(), model: model().trim(), publicReplies: publicReplies(), ...(apiKey().trim() ? { apiKey: apiKey().trim() } : {}) });
         apply(await ai.refreshSettings()); setMessage('AI settings saved.');
@@ -80,6 +79,7 @@ export default function AiSettings() {
       <Show when={message()}><p role="status">{message()}</p></Show>
       <Show when={error()}><p role="alert" class="ai-error">{error()}</p></Show>
     </section>
+    <PostCritiqueSettings />
     </>
   );
 }

@@ -471,15 +471,14 @@ const runReasoner = async ({
   const runCall = (extraParams) => callLLMWithFallback(
     {
       messages,
-      maxTokens: purpose === 'critique' ? 4000 : config.reasoner.maxTokens,
+      maxTokens: config.reasoner.maxTokens,
       temperature: config.reasoner.temperature,
-      timeoutMs: purpose === 'critique' ? 60000 : config.reasoner.timeoutMs,
+      timeoutMs: config.reasoner.timeoutMs,
       extraParams,
       // DeepSeek exposes effort levels, not a hard reasoning-token budget.
       // Keep its fallback from using the provider's high-effort default.
       extraParamsByModel: {
-        'deepseek/deepseek-v4.1-flash': { reasoning: { effort: 'low' } },
-        ...(purpose === 'critique' ? { 'anthropic/claude-opus-5.5': { reasoning: { effort: 'medium' } } } : {})
+        'deepseek/deepseek-v4.1-flash': { reasoning: { effort: 'low' } }
       },
       usageRecorder,
       usageContext: {
@@ -501,7 +500,6 @@ const runReasoner = async ({
       }));
       const output = validateAndNormalize(rawResult?.output ?? rawResult, candidates);
       if (purpose === 'match') output.critiques = [];
-      if (purpose === 'critique') output.critique_model = rawResult.usedModel || primaryModel;
       return output;
     } catch (error) {
       const schemaUnavailable = isDataPolicySchemaError(error);
@@ -529,6 +527,7 @@ const runSafeReasoner = async ({
   purpose,
   usageRecorder
 }) => {
+  if (purpose === 'critique') throw new Error('Public critiques require the user-funded critique service');
   if (!config.reasoner.enabled) {
     return null;
   }

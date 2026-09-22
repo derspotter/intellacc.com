@@ -105,14 +105,9 @@ test('malformed text is not echoed in the repair prompt', async () => {
   expect(JSON.stringify(callLLMWithFallback.mock.calls[1][0].messages)).not.toContain('UNTRUSTED_PROVIDER_TEXT');
 });
 
-test('critique requests use the chosen model, retain provenance and allow deeper reasoning', async () => {
-  callLLMWithFallback.mockResolvedValue({ output: valid(), usedModel: 'anthropic/claude-opus-5.5' });
-  const result = await runSafeReasoner({ ...input, purpose: 'critique', overrideModel: 'anthropic/claude-opus-5.5', overrideFallbackModels: [] });
-  expect(result.critique_model).toBe('anthropic/claude-opus-5.5');
-  const [options, models] = callLLMWithFallback.mock.calls[0];
-  expect(models).toEqual({ primaryModel: 'anthropic/claude-opus-5.5', fallbackModels: [] });
-  expect(options).toMatchObject({ maxTokens: 4000, timeoutMs: 60000 });
-  expect(options.extraParamsByModel['anthropic/claude-opus-5.5'].reasoning).toEqual({ effort: 'medium' });
+test('the platform-funded reasoner refuses public critique requests', async () => {
+  await expect(runSafeReasoner({ ...input, purpose: 'critique' })).rejects.toThrow('user-funded critique service');
+  expect(callLLMWithFallback).not.toHaveBeenCalled();
 });
 test('matching-only calls cannot publish cheap-model critiques', async () => {
   const raw = valid();
