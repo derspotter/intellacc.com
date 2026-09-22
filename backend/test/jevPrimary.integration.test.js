@@ -30,6 +30,7 @@ beforeAll(async () => {
   }
 });
 beforeEach(async () => {
+  await db.query('DELETE FROM user_post_critique_settings WHERE user_id=$1', [userId]);
   process.env.POST_SIGNAL_JEV_MODE = 'primary'; process.env.OPENROUTER_API_KEY = 'test-only';
   postId = (await db.query('INSERT INTO posts (user_id,content) VALUES ($1,$2) RETURNING id', [userId, content])).rows[0].id;
   await db.query("UPDATE events SET hidden_at=NULL,closing_date=NOW()+INTERVAL '1 year' WHERE id=ANY($1::int[])", [[eventId, otherId]]);
@@ -106,7 +107,9 @@ test('confident no-claim makes no LLM calls and hides irrelevant candidates', as
 test.each(['error', 'timeout', 'invalid', 'uncertain'])('%s uses the LLM fallback once and retains diagnostics', async (mode) => {
   responseMode = mode;
   await pipeline.processPost(postId, content);
-  expect(gate.runSafeGate).toHaveBeenCalledTimes(1); expect(reasoner.runSafeReasoner).toHaveBeenCalledTimes(1);
+  expect(gate.runSafeGate).toHaveBeenCalledTimes(1); expect(reasoner.runSafeReasoner).toHaveBeenCalledTimes(2);
+  expect(reasoner.runSafeReasoner.mock.calls[0][0].purpose).toBe('match');
+  expect(reasoner.runSafeReasoner.mock.calls[1][0]).toMatchObject({ purpose: 'critique', overrideModel: 'anthropic/claude-opus-5.5', overrideFallbackModels: [] });
   expect(global.fetch).toHaveBeenCalledTimes(1);
   expect((await links())[0].event_id).toBe(otherId);
   const diagnostic = (await db.query('SELECT result FROM post_match_jev_shadow WHERE post_id=$1', [postId])).rows[0].result;
@@ -140,4 +143,19 @@ test('a delayed old critique cannot overwrite the match for a newer edit', async
   } finally { release.resolve(); }
   expect(await pending).toMatchObject({ status: 'superseded' });
   expect((await links())[0].event_id).toBe(otherId);
+});
+
+test('author model choice is used and its provenance is saved', async () => {
+  await db.query('INSERT INTO user_post_critique_settings (user_id,model) VALUES ($1,$2)', [userId, 'openai/gpt-6-luna']);
+  reasoner.runSafeReasoner.mockResolvedValue({ ...critique(), critique_model: 'openai/gpt-6-luna' });
+  await pipeline.processPost(postId, content);
+  expect(reasoner.runSafeReasoner.mock.calls[0][0]).toMatchObject({ purpose: 'critique', overrideModel: 'openai/gpt-6-luna', overrideFallbackModels: [] });
+  expect((await db.query('SELECT model FROM post_critiques WHERE post_id=$1', [postId])).rows[0].model).toBe('openai/gpt-6-luna');
+});
+test.each(['ok', 'uncertain'])('turning critiques off preserves matching (%s)', async (mode) => {
+  responseMode = mode;
+  await db.query("INSERT INTO user_post_critique_settings (user_id,model) VALUES ($1,'off')", [userId]);
+  expect(await pipeline.processPost(postId, content)).toMatchObject({ reasoner_match: true });
+  expect(reasoner.runSafeReasoner).toHaveBeenCalledTimes(mode === 'ok' ? 0 : 1);
+  expect((await db.query('SELECT id FROM post_critiques WHERE post_id=$1', [postId])).rows).toHaveLength(0);
 });

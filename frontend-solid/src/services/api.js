@@ -1341,6 +1341,8 @@ export const rejectAdminMarket = (id) => request(`/admin/markets/proposals/${id}
 export const updateMarketQuestion = (id, payload) => api.marketQuestions.update(id, payload);
 
 export const aiApi = {
+  critiqueSettings: () => request('/ai/critique-settings'),
+  saveCritiqueSettings: (model) => request('/ai/critique-settings', { method: 'PUT', body: { model } }),
   publicReply: (postId) => request(`/ai/public-replies/${encodeURIComponent(postId)}`),
   settings: () => request('/ai/settings'),
   saveSettings: (body) => request('/ai/settings', { method: 'PUT', body }),

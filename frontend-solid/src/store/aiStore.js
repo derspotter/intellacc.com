@@ -78,15 +78,27 @@ const initialize = async (postId) => {
   }
 };
 
-const open = (postId) => {
+const open = (postId, { draft } = {}) => {
+  const version = epoch;
   opener = document.activeElement;
   setState('open', true);
   if (postId && (state.sending || state.loading) && Number(state.conversation?.post_id) !== Number(postId)) {
     setState('notice', 'Wait for the current AI request before switching posts.');
     return;
   }
-  void initialize(postId);
+  void initialize(postId).then(() => {
+    if (!draft || version !== epoch || Number(state.conversation?.post_id) !== Number(postId)) return;
+    if (state.draft.trim() || state.sending || state.loading) {
+      setState('notice', 'Your current draft is still here. Send or clear it before starting a critique.');
+      return;
+    }
+    setState('draft', draft);
+  });
 };
+
+const critique = (postId) => open(postId, {
+  draft: 'Give me a careful, constructive critique of this post. Identify only substantive weaknesses supported by the text, explain uncertainty and suggest what evidence would strengthen the argument. Distinguish a personal forecast from a claim of certainty. Do not invent flaws or claim external fact checking. It is fine to find no substantive issue. Respond in the post’s language.'
+});
 
 const close = () => {
   setState('open', false);
@@ -140,7 +152,7 @@ const remove = async () => {
   }
 };
 
-export default { state, resetForUser, refreshSettings, initialize, open, close, select, start, send, remove,
+export default { state, resetForUser, refreshSettings, initialize, open, critique, close, select, start, send, remove,
   newAttempt: () => { setState('pending', null); return send(); },
   showDm: (value = true) => setState('dm', value),
   setDraft: (draft) => setState('draft', draft),

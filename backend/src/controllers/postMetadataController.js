@@ -50,7 +50,7 @@ exports.getBatch = async (req, res) => {
       ) markets ON TRUE
       LEFT JOIN LATERAL (
         SELECT jsonb_agg(critique ORDER BY critique.id) AS data FROM (
-          SELECT pc.id, pc.critique_type, pc.description, pc.severity
+          SELECT pc.id, pc.critique_type, pc.description, pc.severity, pc.model
           FROM post_critiques pc WHERE pc.post_id = p.id
             AND p.community_group_id IS NULL
           ORDER BY pc.id LIMIT 10

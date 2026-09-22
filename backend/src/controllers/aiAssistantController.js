@@ -3,6 +3,7 @@
 const settingsService = require('../services/ai/aiSettingsService');
 const conversationService = require('../services/ai/aiConversationService');
 const publicReplyService = require('../services/ai/aiPublicReplyService');
+const critiqueSettings = require('../services/ai/postCritiqueSettings');
 
 const { AiValidationError } = settingsService;
 const { AiRequestError, AiBudgetError } = conversationService;
@@ -25,6 +26,15 @@ exports.getSettings = async (req, res) => {
   } catch (error) {
     sendError(res, error, 'Failed to load AI settings');
   }
+};
+
+exports.getCritiqueSettings = async (req, res) => {
+  try { res.json(await critiqueSettings.getSettings(req.user.id)); }
+  catch (error) { sendError(res, error, 'Failed to load critique settings'); }
+};
+exports.saveCritiqueSettings = async (req, res) => {
+  try { res.json(await critiqueSettings.saveSettings(req.user.id, req.body?.model)); }
+  catch (error) { sendError(res, error, 'Failed to save critique settings'); }
 };
 
 exports.saveSettings = async (req, res) => {

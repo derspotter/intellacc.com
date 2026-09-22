@@ -1,6 +1,7 @@
 import { createSignal, Show, For } from 'solid-js';
 import api from '../../services/api';
 import { getCurrentUserId } from '../../services/auth';
+import ai from '../../store/aiStore';
 
 export default function PostCritiques(props) {
   const [isConfirming, setIsConfirming] = createSignal(false);
@@ -183,6 +184,11 @@ export default function PostCritiques(props) {
           <p style={{ color: "var(--text-muted, #888)", margin: "8px 0" }}>
             AI-generated feedback on the argument. It may be mistaken.
           </p>
+          <Show when={critiques().some((item) => item.model)}>
+            <p style={{ color: "var(--text-muted, #888)", margin: "8px 0" }}>
+              Model: {[...new Set(critiques().map((item) => item.model).filter(Boolean))].join(', ')}
+            </p>
+          </Show>
           <ul style={{ margin: "8px 0 0", "padding-left": "20px" }}>
             <For each={critiques()}>{(critique) => (
               <li style={{ "margin-top": "8px" }}>
@@ -192,6 +198,10 @@ export default function PostCritiques(props) {
             )}</For>
           </ul>
         </details>
+      </Show>
+      <Show when={getCurrentUserId() && Number(props.postId) > 0}>
+        <button type="button" style={{ ...chipActionStyle, "border-left": "none", padding: "4px 0", "font-size": "0.85em" }}
+          onClick={() => ai.critique(props.postId)}>Critique privately</button>
       </Show>
     </div>
   );

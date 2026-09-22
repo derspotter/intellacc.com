@@ -5,6 +5,7 @@ async function mockAi(page, { configured = true, failOnce = false } = {}) {
   await page.addInitScript(t => localStorage.setItem('token', t), token);
   const calls = [];
   let settings = { available: true, configured, provider: 'openrouter', model: configured ? 'example/model' : '', keyHint: '…test', publicReplies: true };
+  let critiqueModel = 'anthropic/claude-opus-5.5';
   let conversations = [];
   const history = new Map();
   await page.route('**/api/**', async route => {
@@ -14,6 +15,13 @@ async function mockAi(page, { configured = true, failOnce = false } = {}) {
     const body = req.postDataJSON();
     const json = (value, status = 200) => route.fulfill({ status, json: value });
     if (url.pathname.startsWith('/api/ai/')) calls.push({ path: url.pathname, method, body });
+    if (url.pathname === '/api/ai/critique-settings') {
+      if (method === 'PUT') critiqueModel = body.model;
+      return json({ model: critiqueModel, options: [
+        { id: 'anthropic/claude-opus-5.5', label: 'Claude Opus 5.5' },
+        { id: 'openai/gpt-6-luna', label: 'GPT-6 Luna' }, { id: 'off', label: 'Off' }
+      ] });
+    }
     if (url.pathname === '/api/ai/settings') {
       if (method === 'PUT') settings = { ...settings, ...body, configured: true, apiKey: undefined };
       if (method === 'DELETE') settings = { ...settings, configured: false, model: '' };
@@ -49,6 +57,18 @@ async function mockAi(page, { configured = true, failOnce = false } = {}) {
 }
 
 for (const terminal of [false, true]) {
+  test(`private critique stays in the reader's selected AI conversation (${terminal ? 'terminal' : 'van'})`, async ({ page }) => {
+    const calls = await mockAi(page);
+    await page.goto(`/test/ai-assistant.html${terminal ? '?terminal' : ''}`);
+    await page.getByRole('button', { name: 'Critique privately', exact: true }).click();
+    const drawer = page.getByRole('dialog', { name: 'AI assistant' });
+    await expect(drawer.getByRole('textbox', { name: 'Message AI' })).toHaveValue(/careful, constructive critique/);
+    expect(calls.filter(c => c.path.endsWith('/messages'))).toHaveLength(0);
+    await drawer.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(drawer.getByText('AI · example/model', { exact: true })).toBeVisible();
+    expect(calls.filter(c => c.path.endsWith('/messages'))).toHaveLength(1);
+    expect(calls.some(c => c.path.includes('public-replies') && c.method === 'POST')).toBe(false);
+  });
   test(`post opens private bottom-right drawer and continues in Messages (${terminal ? 'terminal' : 'van'})`, async ({ page }) => {
     const calls = await mockAi(page);
     await page.goto(`/test/ai-assistant.html${terminal ? '?terminal' : ''}`);
@@ -80,6 +100,31 @@ for (const terminal of [false, true]) {
     await expect(page.getByText('What evidence matters?', { exact: true })).not.toBeVisible();
   });
 }
+
+test('public review choice saves independently of personal credentials and persists on reload', async ({ page }) => {
+  const calls = await mockAi(page, { configured: false });
+  await page.goto('/test/ai-assistant.html#settings');
+  await expect(page.getByLabel('Public critique model')).toHaveValue('anthropic/claude-opus-5.5');
+  await expect(page.getByLabel('Model ID', { exact: true })).toHaveValue('anthropic/claude-opus-5.5');
+  await page.getByLabel('Public critique model').selectOption('off');
+  await page.getByRole('button', { name: 'Save critique settings', exact: true }).click();
+  await expect(page.getByText('Critique settings saved. Applies to future reviews.')).toBeVisible();
+  expect(calls.filter(c => c.path === '/api/ai/settings' && c.method === 'PUT')).toHaveLength(0);
+  await page.reload();
+  await expect(page.getByLabel('Public critique model')).toHaveValue('off');
+});
+
+test('starting a private critique preserves an existing draft', async ({ page }) => {
+  await mockAi(page);
+  await page.goto('/test/ai-assistant.html');
+  await page.getByRole('button', { name: 'Ask AI about this post' }).click();
+  const draft = page.getByRole('textbox', { name: 'Message AI' });
+  await expect(draft).toBeEnabled();
+  await draft.fill('My unfinished question');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Critique privately', exact: true }).click();
+  await expect(draft).toHaveValue('My unfinished question');
+});
 
 test('mobile sheet stays inside viewport and retry reuses its request ID', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

@@ -29,6 +29,8 @@ const settingsRateLimit = rateLimit({
 });
 
 router.get('/settings', controller.getSettings);
+router.get('/critique-settings', controller.getCritiqueSettings);
+router.put('/critique-settings', settingsRateLimit, controller.saveCritiqueSettings);
 router.put('/settings', settingsRateLimit, controller.saveSettings);
 router.delete('/settings', settingsRateLimit, controller.deleteSettings);
 router.post('/test', generationRateLimit, controller.testSettings);

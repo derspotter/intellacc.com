@@ -456,11 +456,13 @@ const runReasoner = async ({
   candidates,
   overrideModel,
   overrideFallbackModels,
+  purpose,
   usageRecorder
 }) => {
   const messages = [{
     role: 'user',
-    content: buildPrompt(postContent, candidates)
+    content: buildPrompt(postContent, candidates) + (purpose === 'match'
+      ? '\nFor this matching-only request, return critiques: []. A separate reviewer handles critiques.' : '')
   }];
 
   const primaryModel = overrideModel || config.reasoner.model;
@@ -469,14 +471,15 @@ const runReasoner = async ({
   const runCall = (extraParams) => callLLMWithFallback(
     {
       messages,
-      maxTokens: config.reasoner.maxTokens,
+      maxTokens: purpose === 'critique' ? 4000 : config.reasoner.maxTokens,
       temperature: config.reasoner.temperature,
-      timeoutMs: config.reasoner.timeoutMs,
+      timeoutMs: purpose === 'critique' ? 60000 : config.reasoner.timeoutMs,
       extraParams,
       // DeepSeek exposes effort levels, not a hard reasoning-token budget.
       // Keep its fallback from using the provider's high-effort default.
       extraParamsByModel: {
-        'deepseek/deepseek-v4.1-flash': { reasoning: { effort: 'low' } }
+        'deepseek/deepseek-v4.1-flash': { reasoning: { effort: 'low' } },
+        ...(purpose === 'critique' ? { 'anthropic/claude-opus-5.5': { reasoning: { effort: 'medium' } } } : {})
       },
       usageRecorder,
       usageContext: {
@@ -496,7 +499,10 @@ const runReasoner = async ({
       const rawResult = await runCall(buildReasonerExtraParams({
         useSchema, includeReasoning: attempt === 0
       }));
-      return validateAndNormalize(rawResult?.output ?? rawResult, candidates);
+      const output = validateAndNormalize(rawResult?.output ?? rawResult, candidates);
+      if (purpose === 'match') output.critiques = [];
+      if (purpose === 'critique') output.critique_model = rawResult.usedModel || primaryModel;
+      return output;
     } catch (error) {
       const schemaUnavailable = isDataPolicySchemaError(error);
       const invalidOutput = error instanceof InvalidReasonerOutput
@@ -520,6 +526,7 @@ const runSafeReasoner = async ({
   candidates,
   overrideModel,
   overrideFallbackModels,
+  purpose,
   usageRecorder
 }) => {
   if (!config.reasoner.enabled) {
@@ -547,6 +554,7 @@ const runSafeReasoner = async ({
     candidates,
     overrideModel,
     overrideFallbackModels,
+    purpose,
     usageRecorder
   });
 };

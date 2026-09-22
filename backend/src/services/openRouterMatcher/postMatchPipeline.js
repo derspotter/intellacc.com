@@ -6,6 +6,7 @@ const { retrieveCandidateMarkets } = require('./marketRetrieval');
 const { runSafeReasoner } = require('./argumentExtractor');
 const jevShadow = require('./jevShadow');
 const jevPrimary = require('./jevPrimary');
+const critiqueSettings = require('../ai/postCritiqueSettings');
 const { extractFirstUrl, fetchArticleContent } = require('../metadata/metadataService');
 
 const MAX_ERROR_MESSAGE_LENGTH = 400;
@@ -578,7 +579,7 @@ const storeConditionalFlags = async (client, postId, conditionalFlags) => {
   }
 };
 
-const storeCritiques = async (client, postId, critiques, propositionByLabel) => {
+const storeCritiques = async (client, postId, critiques, propositionByLabel, model = null) => {
   if (!Array.isArray(critiques) || critiques.length === 0) {
     return;
   }
@@ -594,15 +595,15 @@ const storeCritiques = async (client, postId, critiques, propositionByLabel) => 
          critique_type,
          description,
          severity,
-         related_prop_id
-       ) VALUES ($1, $2, $3, $4, $5)
+         related_prop_id, model
+       ) VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT DO NOTHING`,
       [
         postId,
         critique.critique_type,
         critique.description,
         critique.severity,
-        relatedPropId
+        relatedPropId, model
       ]
     );
   }
@@ -652,7 +653,7 @@ const persistReasonerOutput = async (client, postId, argumentResult, candidates,
       : null;
 
     await storeConditionalFlags(client, postId, argumentResult.conditional_flags);
-    await storeCritiques(client, postId, argumentResult.critiques, propositionsByLabel);
+    await storeCritiques(client, postId, argumentResult.critiques, propositionsByLabel, argumentResult.critique_model);
 
     await client.query('RELEASE SAVEPOINT reasoner_output');
 
@@ -801,6 +802,12 @@ const runPipeline = async (postId, content) => {
     let argumentResult;
     let shadowPromise;
     let primaryDecision;
+    let critiqueModel;
+    const review = async (postContent, reviewCandidates) => runSafeReasoner({
+      postContent, candidates: reviewCandidates, purpose: 'critique',
+      overrideModel: critiqueModel, overrideFallbackModels: [],
+      usageRecorder: (record) => usageRecorder({ ...record, stage: 'critique' })
+    });
 
     if (normalizedContent) {
       let augmentedContent = normalizedContent;
@@ -816,6 +823,8 @@ const runPipeline = async (postId, content) => {
           console.warn('[PostMatchPipeline] Failed to augment content with article:', error.message);
         }
       }
+
+      if (canPersistReasoning(capabilities)) critiqueModel = await critiqueSettings.forPost(normalizedPostId);
 
       if (jevPrimary.primaryEnabled() && canPersistReasoning(capabilities)) {
         analysis.processing_status = 'retrieving';
@@ -851,7 +860,7 @@ const runPipeline = async (postId, content) => {
           analysis.gate_latency_ms = jevResult.latency_ms;
           analysis.reason_latency_ms = jevResult.latency_ms;
           analysis.candidates_count = candidates.length;
-          const shouldCritique = decision.hasClaim && critiqueCandidates.length > 0 && config.reasoner.enabled;
+          const shouldCritique = decision.hasClaim && critiqueCandidates.length > 0 && config.reasoner.enabled && critiqueModel !== 'off';
           analysis.processing_status = shouldCritique ? 'reasoning' : decision.hasClaim ? 'complete' : 'gated_out';
           Object.assign(analysis, currentUsageSummary());
           // Publish the decision before awaiting text generation. The same
@@ -863,11 +872,7 @@ const runPipeline = async (postId, content) => {
           if (shouldCritique) {
             reasonerAttempted = true;
             try {
-              const isHeavy = augmentedContent.split(/\s+/).filter(Boolean).length > 400;
-              const critique = await runSafeReasoner({ postContent: augmentedContent, candidates: critiqueCandidates,
-                overrideModel: isHeavy ? config.reasoner.heavyModel : null,
-                overrideFallbackModels: isHeavy ? config.reasoner.heavyFallbackModels : null,
-                usageRecorder: (record) => usageRecorder({ ...record, stage: 'critique' }) });
+              const critique = await review(augmentedContent, critiqueCandidates);
               if (critique) argumentResult = { ...critique, best_market: decision.bestMarket,
                 conclusionMatchesMarket: critique.best_market?.event_id === decision.bestMarket?.event_id };
             } catch (error) {
@@ -916,12 +921,24 @@ const runPipeline = async (postId, content) => {
             try {
               const reasonStart = Date.now();
               argumentResult = await runSafeReasoner({
-                postContent: augmentedContent, candidates,
+                postContent: augmentedContent, candidates, purpose: 'match',
                 overrideModel: isHeavy ? config.reasoner.heavyModel : null,
                 overrideFallbackModels: isHeavy ? config.reasoner.heavyFallbackModels : null,
                 usageRecorder
               });
               analysis.reason_latency_ms = Date.now() - reasonStart;
+              if (argumentResult) {
+                argumentResult.critiques = [];
+                if (critiqueModel !== 'off') {
+                  try {
+                    const reviewed = await review(augmentedContent, candidates);
+                    argumentResult.critiques = (reviewed?.critiques || []).map((item) => ({ ...item, related_prop: null }));
+                    argumentResult.critique_model = reviewed?.critique_model || null;
+                  } catch (error) {
+                    analysis.processing_errors = normalizeResultError(error, 'critique failed');
+                  }
+                }
+              }
             } catch (error) {
               const reasonError = normalizeResultError(error, 'reasoner failed');
               analysis.processing_errors = analysis.processing_errors
