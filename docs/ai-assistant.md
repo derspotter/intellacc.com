@@ -77,7 +77,14 @@ at deploy time only.
 - The model id is whatever the user types: 1–128 chars of letters, digits and
   `. _ : / -`. Nothing is hard-coded, no "latest" defaults.
 - No tools, search or browsing are requested, and the system prompt tells the
-  model it cannot browse or read private messages.
+  model it cannot independently browse or read private messages. Private post
+  chats retrieve the selected visible post's first linked article server-side
+  using the existing SSRF checks, redirect checks, size limit and deadline.
+  Up to 8,000 characters are supplied as untrusted source context, not saved as
+  article text in the database. Fetches run outside database transactions and
+  access/content are rechecked afterwards. Unavailable/blocked articles are
+  explicitly identified as missing context; the model must not invent a critique
+  of unseen text. No paywalls, logins, or site access restrictions are bypassed.
 - Responses are read with a 1 MiB cap and assistant text is truncated at 16 000
   characters. Errors are mapped to short codes (`auth`, `rate_limited`,
   `model_not_found`, `billing`, `bad_request`, `upstream`, `timeout`,

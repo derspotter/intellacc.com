@@ -10,6 +10,7 @@ const providers = require('./providers');
 const { loadCredentials } = require('./aiSettingsService');
 const { BUDGET, AiBudgetError, reserve } = require('./aiBudgetService');
 const { PROMPT_LIMITS, clip, buildPrivateSystemPrompt, buildPrivateTurns } = require('./prompts');
+const { loadArticleContext } = require('./articleContext');
 
 const { AiProviderError } = providers;
 const LIST_LIMIT = 50;
@@ -255,11 +256,15 @@ const sendMessage = async (userId, conversationId, { message, requestId } = {}, 
   const { credentials, userMessage, history, post } = claim;
   let completion;
   try {
+    const article = await loadArticleContext(post);
+    // Network retrieval holds no DB connection. Recheck access/content after
+    // it finishes so a hidden or edited post does not supply a stale article.
+    const currentPost = article ? await loadVisiblePost(db, post.id, userId) : post;
     completion = await complete({
       provider: credentials.provider,
       model: credentials.model,
       apiKey: credentials.apiKey,
-      system: buildPrivateSystemPrompt({ post }),
+      system: buildPrivateSystemPrompt({ post: currentPost, article: currentPost?.content === post?.content ? article : null }),
       messages: buildPrivateTurns(history, text)
     });
   } catch (error) {
