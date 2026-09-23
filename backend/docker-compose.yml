@@ -217,6 +217,9 @@ services:
 networks:
   article-reader-private:
     internal: true
+    ipam:
+      config:
+        - subnet: ${ARTICLE_READER_PRIVATE_SUBNET:-10.233.241.0/28}
   article-reader-egress:
   intellacc-network:
     external: true

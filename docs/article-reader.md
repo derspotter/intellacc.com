@@ -39,6 +39,9 @@ docker compose up -d --no-deps --force-recreate backend
 ```
 
 `ARTICLE_BROWSER_URL=http://article-reader:3012` is set by production compose.
+The private network uses `10.233.241.0/28` because this host's automatic Docker
+address pool is exhausted. `ARTICLE_READER_PRIVATE_SUBNET` can override it on
+hosts with a conflicting LAN/VPN subnet.
 Omitting this variable disables browser fallback in other stacks. The service
 returns `GET /health` and accepts `POST /read` with `{ "url": "https://..." }`.
 It returns `{ text, url }`, or a generic error without article or URL logging.
