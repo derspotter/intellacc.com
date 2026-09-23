@@ -48,10 +48,10 @@ retry or charge again. Public review reservations count toward the shared
 personal AI request and concurrency limits. Pipeline version/visibility checks
 protect the final publication against edits and hidden posts.
 
-**Critique privately** opens a prepared question in the reader's private AI
-conversation. Pressing Send invokes their personal model/key. This path retains
+The post's **AI** button opens the reader's private AI conversation, where they
+can ask for a critique. Pressing Send invokes their personal model/key. This path retains
 private-chat owner isolation, request idempotency and budgets and never changes
-the public critique. Opening the draft makes no paid request.
+the public critique. Opening the chat makes no paid request.
 
 ## Presentation and deployment
 

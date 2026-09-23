@@ -58,9 +58,9 @@ for (const terminal of [false, true]) {
   test(`private critique stays in the reader's selected AI conversation (${terminal ? 'terminal' : 'van'})`, async ({ page }) => {
     const calls = await mockAi(page);
     await page.goto(`/test/ai-assistant.html${terminal ? '?terminal' : ''}`);
-    await page.getByRole('button', { name: 'Critique privately', exact: true }).click();
+    await page.getByRole('button', { name: 'Ask AI about this post' }).click();
     const drawer = page.getByRole('dialog', { name: 'AI assistant' });
-    await expect(drawer.getByRole('textbox', { name: 'Message AI' })).toHaveValue(/careful, constructive critique/);
+    await drawer.getByRole('textbox', { name: 'Message AI' }).fill('Give me a careful, constructive critique of this post.');
     expect(calls.filter(c => c.path.endsWith('/messages'))).toHaveLength(0);
     await drawer.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(drawer.getByText('AI · example/model', { exact: true })).toBeVisible();
@@ -129,7 +129,7 @@ test('public reviews require a personal key and have no global Opus default', as
   await expect(page.getByRole('button', { name: 'Save critique settings', exact: true })).toBeEnabled();
 });
 
-test('starting a private critique preserves an existing draft', async ({ page }) => {
+test('reopening the post AI chat preserves an existing draft', async ({ page }) => {
   await mockAi(page);
   await page.goto('/test/ai-assistant.html');
   await page.getByRole('button', { name: 'Ask AI about this post' }).click();
@@ -137,7 +137,7 @@ test('starting a private critique preserves an existing draft', async ({ page })
   await expect(draft).toBeEnabled();
   await draft.fill('My unfinished question');
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Critique privately', exact: true }).click();
+  await page.getByRole('button', { name: 'Ask AI about this post' }).click();
   await expect(draft).toHaveValue('My unfinished question');
 });
 

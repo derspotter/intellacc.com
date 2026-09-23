@@ -1,7 +1,6 @@
 import { createSignal, Show, For } from 'solid-js';
 import api from '../../services/api';
 import { getCurrentUserId } from '../../services/auth';
-import ai from '../../store/aiStore';
 
 export default function PostCritiques(props) {
   const [isConfirming, setIsConfirming] = createSignal(false);
@@ -198,10 +197,6 @@ export default function PostCritiques(props) {
             )}</For>
           </ul>
         </details>
-      </Show>
-      <Show when={getCurrentUserId() && Number(props.postId) > 0}>
-        <button type="button" style={{ ...chipActionStyle, "border-left": "none", padding: "4px 0", "font-size": "0.85em" }}
-          onClick={() => ai.critique(props.postId)}>Critique privately</button>
       </Show>
     </div>
   );
