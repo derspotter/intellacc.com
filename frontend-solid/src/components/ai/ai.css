@@ -45,6 +45,32 @@
 .ai-message-user { padding: 12px; background: var(--ai-secondary); }
 .ai-message-label { font-size: 11px; color: var(--ai-muted); margin-bottom: 6px; overflow-wrap: anywhere; }
 .ai-message-content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.ai-markdown { white-space: normal; min-width: 0; }
+.ai-markdown > :first-child { margin-top: 0; }
+.ai-markdown > :last-child { margin-bottom: 0; }
+.ai-markdown p, .ai-markdown ul, .ai-markdown ol, .ai-markdown blockquote, .ai-markdown pre, .ai-markdown table { margin: 0.75em 0; }
+.ai-markdown h1, .ai-markdown h2, .ai-markdown h3, .ai-markdown h4, .ai-markdown h5, .ai-markdown h6 {
+  font-family: inherit; font-weight: 700; line-height: 1.3; margin: 1em 0 0.5em; color: inherit;
+}
+.ai-markdown h1 { font-size: 1.3em; }
+.ai-markdown h2 { font-size: 1.2em; }
+.ai-markdown h3 { font-size: 1.1em; }
+.ai-markdown h4, .ai-markdown h5, .ai-markdown h6 { font-size: 1em; }
+.ai-markdown ul { list-style: disc; padding-left: 1.5em; }
+.ai-markdown ol { list-style: decimal; padding-left: 1.5em; }
+.ai-markdown li { margin: 0.3em 0; }
+.ai-markdown li > p { margin: 0.3em 0; }
+.ai-markdown strong { font-weight: 700; }
+.ai-markdown em { font-style: italic; }
+.ai-markdown a[href] { color: inherit; text-decoration: underline; }
+.ai-markdown blockquote { border-left: 2px solid var(--ai-border); padding-left: 12px; color: var(--ai-muted); }
+.ai-markdown code { font-family: monospace; font-size: 0.9em; background: var(--ai-secondary); padding: 0.1em 0.3em; }
+.ai-markdown pre { max-width: 100%; overflow-x: auto; white-space: pre; padding: 10px; background: var(--ai-secondary); border: 1px solid var(--ai-border); border-radius: 0; }
+.ai-markdown pre code { padding: 0; background: transparent; }
+.ai-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.ai-markdown th, .ai-markdown td { border: 1px solid var(--ai-border); padding: 5px 8px; text-align: left; }
+.ai-markdown th { font-weight: 700; }
+.ai-markdown hr { border: 0; border-top: 1px solid var(--ai-border); margin: 1em 0; }
 .ai-empty, .ai-setup { padding: 18px 12px; line-height: 1.6; }
 .ai-empty p, .ai-setup p { color: var(--ai-muted); margin: 8px 0 16px; }
 .ai-suggestions { display: flex; flex-wrap: wrap; gap: 6px; }

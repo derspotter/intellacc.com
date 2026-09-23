@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-async function mockAi(page, { configured = true, failOnce = false } = {}) {
+async function mockAi(page, { configured = true, failOnce = false, assistantText = 'Renewable electricity depends on deployment, grid capacity, and demand.' } = {}) {
   const token = `e30.${Buffer.from(JSON.stringify({ userId: 42, exp: 9999999999 })).toString('base64url')}.test`;
   await page.addInitScript(t => localStorage.setItem('token', t), token);
   const calls = [];
@@ -40,7 +40,7 @@ async function mockAi(page, { configured = true, failOnce = false } = {}) {
       const id = match[1];
       if (match[2]) {
         if (failOnce) { failOnce = false; return route.abort(); }
-        const messages = [{ id: 1, role: 'user', content: body.message }, { id: 2, role: 'assistant', model: settings.model, content: 'Renewable electricity depends on deployment, grid capacity, and demand.' }];
+        const messages = [{ id: 1, role: 'user', content: body.message }, { id: 2, role: 'assistant', model: settings.model, content: assistantText }];
         history.set(id, [...history.get(id), ...messages]);
         return json({ messages });
       }
@@ -55,6 +55,39 @@ async function mockAi(page, { configured = true, failOnce = false } = {}) {
 }
 
 for (const terminal of [false, true]) {
+  test(`AI Markdown renders in the drawer and saved Messages history (${terminal ? 'terminal mobile' : 'van'})`, async ({ page }) => {
+    if (terminal) await page.setViewportSize({ width: 390, height: 844 });
+    const assistantText = [
+      '## Critique of @der\\_spotter', '', '**Scope:** Only the supplied text.', '',
+      '### Substantive observations', '', '1. **Evidence:** Explain the uncertainty.', '2. A *personal forecast* is not certainty.', '',
+      '- Include sources.', '- Consider alternatives.', '', '> A useful qualification.', '',
+      '[Source](https://example.com/article)', '', '`inline code`', '',
+      '```js', 'const value = "<strong>literal</strong>";', '```', '',
+      '| Claim | Evidence |', '| --- | --- |', '| Forecast | Limited |'
+    ].join('\n');
+    const calls = await mockAi(page, { assistantText });
+    await page.goto(`/test/ai-assistant.html${terminal ? '?terminal' : ''}`);
+    await page.getByRole('button', { name: 'Ask AI about this post' }).click();
+    const drawer = page.getByRole('dialog', { name: 'AI assistant' });
+    await drawer.getByRole('textbox', { name: 'Message AI' }).fill('Please critique this.');
+    await drawer.getByRole('button', { name: 'Send', exact: true }).click();
+    const reply = drawer.locator('.ai-markdown');
+    await expect(reply.getByRole('heading', { level: 2, name: 'Critique of @der_spotter' })).toBeVisible();
+    await expect(reply.locator('strong').first()).toHaveText('Scope:');
+    await expect(reply.locator('ol > li')).toHaveCount(2);
+    await expect(reply.locator('ul > li')).toHaveCount(2);
+    await expect(reply.locator('pre code')).toContainText('<strong>literal</strong>');
+    await expect(reply.locator('pre strong')).toHaveCount(0);
+    await expect(reply.getByRole('table')).toContainText('Forecast');
+    await expect(reply.getByRole('link', { name: 'Source', exact: true })).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(await drawer.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await drawer.locator('.ai-messages').evaluate(el => { el.scrollTop = 0; });
+    await page.screenshot({ path: test.info().outputPath(`ai-markdown-${terminal ? 'terminal' : 'van'}.png`) });
+    await drawer.getByRole('link', { name: 'Messages', exact: true }).click();
+    await expect(page.getByRole('log', { name: 'Private AI messages' }).getByRole('heading', { level: 2 })).toHaveText('Critique of @der_spotter');
+    expect(calls.filter(c => c.path.endsWith('/messages'))).toHaveLength(1);
+  });
+
   test(`private critique stays in the reader's selected AI conversation (${terminal ? 'terminal' : 'van'})`, async ({ page }) => {
     const calls = await mockAi(page);
     await page.goto(`/test/ai-assistant.html${terminal ? '?terminal' : ''}`);
@@ -98,6 +131,35 @@ for (const terminal of [false, true]) {
     await expect(page.getByText('What evidence matters?', { exact: true })).not.toBeVisible();
   });
 }
+
+test('AI Markdown blocks executable HTML, unsafe links and remote embeds', async ({ page }) => {
+  const attempts = [];
+  page.on('request', req => { if (req.url().includes('tracker.invalid')) attempts.push(req.url()); });
+  await mockAi(page, { assistantText: [
+    '## Safe heading', '',
+    '<script>window.aiMarkdownExecuted = true</script>',
+    '<img src="https://tracker.invalid/pixel" onerror="window.aiMarkdownExecuted = true">',
+    '<svg onload="window.aiMarkdownExecuted = true"></svg>',
+    '<iframe src="https://tracker.invalid/embed"></iframe>',
+    '<form><input name="token"></form>',
+    '<p id="spoof" style="position:fixed" onclick="window.aiMarkdownExecuted = true">Safe text</p>', '',
+    '[Unsafe](javascript:alert%281%29)', '', '[Data](data:text/html,unsafe)', '',
+    '<a href="java&#x73;cript:alert(1)">Encoded unsafe</a>', '',
+    '![remote image](https://tracker.invalid/markdown-image)'
+  ].join('\n') });
+  await page.goto('/test/ai-assistant.html');
+  await page.getByRole('button', { name: 'Open private AI chat' }).click();
+  const drawer = page.getByRole('dialog', { name: 'AI assistant' });
+  await drawer.getByRole('textbox', { name: 'Message AI' }).fill('**Keep my input literal**');
+  await drawer.getByRole('button', { name: 'Send', exact: true }).click();
+  const reply = drawer.locator('.ai-markdown');
+  await expect(reply.getByRole('heading')).toHaveText('Safe heading');
+  await expect(reply.locator('script, img, svg, iframe, form, input, [onclick], [onerror], [style], [id]')).toHaveCount(0);
+  await expect(reply.locator('a[href]')).toHaveCount(0);
+  expect(await page.evaluate(() => window.aiMarkdownExecuted)).toBeUndefined();
+  expect(attempts).toEqual([]);
+  await expect(drawer.locator('.ai-message-user .ai-message-content')).toHaveText('**Keep my input literal**');
+});
 
 test('public reviews accept any model on the saved provider and persist the opt-in', async ({ page }) => {
   const calls = await mockAi(page);

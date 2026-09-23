@@ -12,6 +12,8 @@
     "@simplewebauthn/browser": "^10.0.0",
     "@solidjs/router": "^0.15.3",
     "clsx": "^2.1.1",
+    "dompurify": "3.4.16",
+    "marked": "18.0.14",
     "socket.io-client": "^4.7.5",
     "solid-js": "^1.9.10",
     "solid-transition-group": "^0.2.3",
