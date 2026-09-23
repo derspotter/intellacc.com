@@ -80,6 +80,8 @@ at deploy time only.
   model it cannot independently browse or read private messages. Private post
   chats retrieve the selected visible post's first linked article server-side
   using the existing SSRF checks, redirect checks, size limit and deadline.
+  Failed HTTP retrieval or an empty extraction tries the isolated Playwright
+  reader described in [article-reader.md](article-reader.md).
   Up to 8,000 characters are supplied as untrusted source context, not saved as
   article text in the database. Fetches run outside database transactions and
   access/content are rechecked afterwards. Unavailable/blocked articles are

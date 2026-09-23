@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { assertSsrfSafeUrl } = require('../activitypub/ssrf');
+const { fetchBrowserArticle } = require('./browserArticleClient');
 const metascraper = require('metascraper')([
   require('metascraper-author')(),
   require('metascraper-date')(),
@@ -129,17 +130,22 @@ const fetchMetadata = async (url, options) => {
 const fetchArticleContent = async (url, options) => {
   try {
     return await withDeadline(async (signal) => {
-      const { html, finalUrl } = await fetchPublicHttpText(url, signal);
-      const { JSDOM, Readability } = getReadabilityDeps();
-      const doc = new JSDOM(html, { url: finalUrl });
-      const reader = new Readability(doc.window.document);
-      const article = reader.parse();
-
-      if (article && article.textContent) {
-        return article.textContent.replace(/\n\s*\n/g, '\n\n').trim();
+      await abortable(assertSsrfSafeUrl(url), signal);
+      try {
+        const { html, finalUrl } = await fetchPublicHttpText(url, signal);
+        const { JSDOM, Readability } = getReadabilityDeps();
+        const doc = new JSDOM(html, { url: finalUrl });
+        try {
+          const article = new Readability(doc.window.document).parse();
+          const text = article?.textContent?.replace(/\n\s*\n/g, '\n\n').trim();
+          if (text?.length >= 100) return text;
+        } finally { doc.window.close(); }
+      } catch (error) {
+        if (signal.aborted || /SSRF blocked|Unsupported URL|Invalid URL/.test(error.message)) throw error;
       }
-      return null;
-    }, options);
+      // The same total deadline includes the ordinary request and browser.
+      return await fetchBrowserArticle(url, signal);
+    }, { timeoutMs: 25000, ...options });
   } catch (error) {
     console.warn(`Failed to fetch ephemeral article content for ${url}:`, error.message);
     return null;

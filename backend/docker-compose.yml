@@ -62,6 +62,7 @@ services:
       AI_MAX_CONCURRENT: ${AI_MAX_CONCURRENT:-2}
       AI_MAX_OUTPUT_TOKENS: ${AI_MAX_OUTPUT_TOKENS:-1024}
       AI_PROVIDER_TIMEOUT_MS: ${AI_PROVIDER_TIMEOUT_MS:-60000}
+      ARTICLE_BROWSER_URL: http://article-reader:3012
       ATPROTO_WORKER_INTERVAL_MS: ${ATPROTO_WORKER_INTERVAL_MS:-15000}
       FRONTEND_URL: ${FRONTEND_URL}
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION}
@@ -168,6 +169,30 @@ services:
     networks:
       - intellacc-network
       - proxy-intellacc
+      - article-reader-private
+
+  article-reader:
+    restart: unless-stopped
+    build: ../article-reader
+    container_name: intellacc_article_reader
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    shm_size: 256mb
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 192
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3012/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - article-reader-private
+      - article-reader-egress
 
   # caddy:
   #   image: caddy:latest
@@ -190,6 +215,9 @@ services:
   #     - intellacc-network
 
 networks:
+  article-reader-private:
+    internal: true
+  article-reader-egress:
   intellacc-network:
     external: true
   proxy-intellacc:
