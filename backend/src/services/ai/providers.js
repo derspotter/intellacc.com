@@ -29,11 +29,12 @@ const clampInt = (value, fallback, min, max) => {
 };
 
 const LIMITS = Object.freeze({
-  maxOutputTokens: clampInt(process.env.AI_MAX_OUTPUT_TOKENS, 1024, 64, 4096),
-  timeoutMs: clampInt(process.env.AI_PROVIDER_TIMEOUT_MS, 60000, 5000, 120000),
+  maxOutputTokens: clampInt(process.env.AI_MAX_OUTPUT_TOKENS, 8192, 64, 16384),
+  timeoutMs: clampInt(process.env.AI_PROVIDER_TIMEOUT_MS, 120000, 5000, 120000),
   maxResponseBytes: 1024 * 1024,
-  maxAssistantChars: 16000,
-  maxRequestChars: 60000
+  maxAssistantChars: 32000,
+  // Includes JSON escaping of bounded article, thread and history text.
+  maxRequestChars: 512000
 });
 
 class AiProviderError extends Error {
@@ -124,9 +125,20 @@ const parseResponse = (style, data) => {
     const message = Array.isArray(data.choices) ? data.choices[0]?.message : null;
     text = message ? textFromParts(message.content, 'text') : '';
   }
+  const outputLimitReached = style === 'responses'
+    ? data.status === 'incomplete' && data.incomplete_details?.reason === 'max_output_tokens'
+    : style === 'anthropic'
+      ? data.stop_reason === 'max_tokens'
+      : data.choices?.[0]?.finish_reason === 'length';
   text = String(text || '').trim();
+  if (!text && outputLimitReached) {
+    text = 'The model reached its response limit before producing visible text. You can send a new message asking for a shorter answer.';
+  }
   if (!text) throw new AiProviderError('empty_response', 'The model returned no text');
-  if (text.length > LIMITS.maxAssistantChars) text = `${text.slice(0, LIMITS.maxAssistantChars)}\n\n[response truncated]`;
+  const locallyTruncated = text.length > LIMITS.maxAssistantChars;
+  if (locallyTruncated || outputLimitReached) {
+    text = `${text.slice(0, LIMITS.maxAssistantChars)}\n\n[Response incomplete: the ${locallyTruncated ? 'display' : 'model output'} limit was reached. Ask me to continue.]`;
+  }
   return { text, model: typeof data.model === 'string' && data.model.length <= 128 ? data.model : null };
 };
 

@@ -8,7 +8,12 @@ const loadArticleContext = async (post) => {
   if (!url) return null;
   let text;
   try { text = await fetchArticleContent(url); } catch { /* Continue with explicit missing context. */ }
-  return { url: clip(url, 1000), text: text?.trim().length > 50 ? clip(text.trim(), PROMPT_LIMITS.articleChars) : null };
+  const extracted = typeof text === 'string' ? text.trim() : '';
+  return {
+    url: clip(url, 1000),
+    text: extracted.length > 50 ? clip(extracted, PROMPT_LIMITS.articleChars) : null,
+    truncated: extracted.length > PROMPT_LIMITS.articleChars
+  };
 };
 
 module.exports = { loadArticleContext };

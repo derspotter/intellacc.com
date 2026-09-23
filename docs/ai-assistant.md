@@ -69,8 +69,8 @@ at deploy time only.
 | `AI_MAX_REQUESTS_PER_HOUR` | 30 | 1–1000 | Durable per-user budget (all kinds) |
 | `AI_MAX_REQUESTS_PER_DAY` | 200 | 1–10000 | Durable per-user budget (all kinds) |
 | `AI_MAX_CONCURRENT` | 2 | 1–10 | Simultaneous generations per user |
-| `AI_MAX_OUTPUT_TOKENS` | 1024 | 64–4096 | Provider `max_tokens` cap |
-| `AI_PROVIDER_TIMEOUT_MS` | 60000 | 5000–120000 | Abort timeout per provider call |
+| `AI_MAX_OUTPUT_TOKENS` | 8192 | 64–16384 | Provider `max_tokens` cap |
+| `AI_PROVIDER_TIMEOUT_MS` | 120000 | 5000–120000 | Abort timeout per provider call |
 
 ## Providers
 
@@ -90,15 +90,20 @@ at deploy time only.
   using the existing SSRF checks, redirect checks, size limit and deadline.
   Failed HTTP retrieval or an empty extraction tries the isolated Playwright
   reader described in [article-reader.md](article-reader.md).
-  Up to 8,000 characters are supplied as untrusted source context, not saved as
-  article text in the database. Fetches run outside database transactions and
+  Up to 32,000 characters are supplied as untrusted source context, not saved as
+  article text in the database. The prompt distinguishes all extracted text from
+  excerpts shortened by this limit. Fetches run outside database transactions and
   access/content are rechecked afterwards. Unavailable/blocked articles are
   explicitly identified as missing context; the model must not invent a critique
   of unseen text. No paywalls, logins, or site access restrictions are bypassed.
-- Responses are read with a 1 MiB cap and assistant text is truncated at 16 000
+- Responses are read with a 1 MiB cap and assistant text is truncated at 32 000
   characters. Errors are mapped to short codes (`auth`, `rate_limited`,
   `model_not_found`, `billing`, `bad_request`, `upstream`, `timeout`,
   `network`, `invalid_response`, `empty_response`, `response_too_large`).
+  Provider output-limit stops (including reasoning-only responses) and the local
+  text cap produce an explicit incomplete-response notice in the saved reply.
+  There is no automatic retry or extra paid generation. Output budgets may
+  include reasoning as well as visible text.
   Provider bodies, prompts and keys are never logged or returned.
 
 ## API

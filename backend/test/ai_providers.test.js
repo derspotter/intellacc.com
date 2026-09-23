@@ -171,10 +171,10 @@ describe('error mapping never leaks provider bodies, prompts or keys', () => {
   });
 
   test('an over-long assistant text is truncated, not rejected', async () => {
-    const fetchImpl = fetchReturning(200, { choices: [{ message: { content: 'y'.repeat(LIMITS.maxAssistantChars + 500) } }] });
+    const fetchImpl = fetchReturning(200, { choices: [{ message: { content: 'y'.repeat(LIMITS.maxAssistantChars + 1500) } }] });
     const result = await complete({ ...base, provider: 'openrouter', model: 'm' }, { fetchImpl });
-    expect(result.text.length).toBeLessThan(LIMITS.maxAssistantChars + 50);
-    expect(result.text).toMatch(/\[response truncated\]$/);
+    expect(result.text.length).toBeLessThan(LIMITS.maxAssistantChars + 150);
+    expect(result.text).toMatch(/\[Response incomplete: the display limit was reached\. Ask me to continue\.\]$/);
   });
 
   test('a hung provider is aborted and reported as a timeout, not retried', async () => {
@@ -192,5 +192,39 @@ describe('error mapping never leaks provider bodies, prompts or keys', () => {
     try { await complete({ ...base, provider: 'openai', model: 'm' }, { fetchImpl }); } catch (error) { caught = error; }
     expect(caught.code).toBe('network');
     expect(caught.message).not.toContain(SECRET_BODY);
+  });
+});
+
+
+describe('incomplete completions', () => {
+  test.each([
+    ['openrouter', { choices: [{ finish_reason: 'length', message: { content: 'Cut off mid' } }] }],
+    ['anthropic', { stop_reason: 'max_tokens', content: [{ type: 'text', text: 'Cut off mid' }] }],
+    ['openai', { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output_text: 'Cut off mid' }]
+  ])('%s reports output limits without silently retrying', async (provider, data) => {
+    const fetchImpl = fetchReturning(200, data);
+    const result = await complete({ ...base, provider, model: 'm' }, { fetchImpl });
+    expect(result.text).toContain('Cut off mid');
+    expect(result.text).toContain('Response incomplete: the model output limit');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test('reasoning-only length stop explains why there is no visible answer', async () => {
+    const fetchImpl = fetchReturning(200, { choices: [{ finish_reason: 'length', message: { content: '', reasoning: 'PRIVATE_REASONING' } }] });
+    const result = await complete({ ...base, provider: 'openrouter', model: 'm' }, { fetchImpl });
+    expect(result.text).toContain('before producing visible text');
+    expect(result.text).not.toContain('PRIVATE_REASONING');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test('a full bounded private prompt fits after JSON escaping', () => {
+    const { PROMPT_LIMITS: limits, buildPrivateSystemPrompt, buildPrivateTurns } = require('../src/services/ai/prompts');
+    const fill = (length) => '\u0001'.repeat(length);
+    const post = { username: 'alice', content: fill(limits.postChars), ancestors: Array.from({ length: 8 }, () => ({ username: 'bob', content: fill(limits.postChars) })) };
+    const article = { url: 'https://example.org/article', text: fill(limits.articleChars) };
+    const history = Array.from({ length: 20 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: fill(limits.userMessageChars) }));
+    const request = buildRequest({ ...base, provider: 'openrouter', model: 'm', system: buildPrivateSystemPrompt({ post, article }), messages: buildPrivateTurns(history, fill(limits.userMessageChars)) });
+    expect(request.body.length).toBeLessThan(LIMITS.maxRequestChars);
+    expect(JSON.parse(request.body).max_tokens).toBe(8192);
   });
 });
