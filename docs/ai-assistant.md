@@ -12,7 +12,8 @@ three places:
 Every inference is billed to the **invoking user's own key**. There is no
 platform key and no fallback: without a saved key the assistant simply refuses.
 
-Assistant replies render Markdown in both the post drawer and Messages,
+Assistant replies use the shared `RenderTextWithLinks` renderer with its opt-in
+Markdown mode in both the post drawer and Messages,
 including existing saved history. Headings, emphasis, lists, quotes, code,
 tables and links are supported. Marked output is sanitized with DOMPurify
 against a limited tag/attribute list; scripts, remote images, embeds, forms,

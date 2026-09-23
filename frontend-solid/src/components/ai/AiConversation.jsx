@@ -1,6 +1,6 @@
 import { createEffect, createSignal, For, onMount, Show } from 'solid-js';
 import ai from '../../store/aiStore';
-import AiMarkdown from './AiMarkdown';
+import { RenderTextWithLinks } from '../../utils/text';
 import './ai.css';
 
 export default function AiConversation(props) {
@@ -67,7 +67,7 @@ export default function AiConversation(props) {
           <article class="ai-message" classList={{ 'ai-message-user': message.role === 'user' }}>
             <div class="ai-message-label">{message.role === 'user' ? 'You' : `AI · ${message.model || state.settings?.model || ''}`}</div>
             <Show when={message.role === 'assistant'} fallback={<div class="ai-message-content">{message.content}</div>}>
-              <AiMarkdown content={message.content} />
+              <RenderTextWithLinks text={message.content} markdown class="ai-message-content" />
             </Show>
             <Show when={message.status === 'failed'}><p class="ai-error">This request failed. No answer was saved.</p></Show>
           </article>

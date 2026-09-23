@@ -1,9 +1,8 @@
-import { createMemo } from 'solid-js';
 import { Marked } from 'marked';
 import DOMPurify from 'dompurify';
 
 const markdown = new Marked({ gfm: true, breaks: true });
-const renderMarkdown = (content) => {
+export const renderMarkdown = (content) => {
   // Provider output is untrusted. Keep formatting, never executable HTML,
   // remote images, embeds, forms, styles or model-supplied element IDs.
   const fragment = DOMPurify.sanitize(markdown.parse(String(content || '')), {
@@ -31,7 +30,3 @@ const renderMarkdown = (content) => {
   return container.innerHTML;
 };
 
-export default function AiMarkdown(props) {
-  const html = createMemo(() => renderMarkdown(props.content));
-  return <div class="ai-message-content ai-markdown" innerHTML={html()} />;
-}

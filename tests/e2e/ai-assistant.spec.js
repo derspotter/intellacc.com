@@ -71,7 +71,7 @@ for (const terminal of [false, true]) {
     const drawer = page.getByRole('dialog', { name: 'AI assistant' });
     await drawer.getByRole('textbox', { name: 'Message AI' }).fill('Please critique this.');
     await drawer.getByRole('button', { name: 'Send', exact: true }).click();
-    const reply = drawer.locator('.ai-markdown');
+    const reply = drawer.locator('.formatted-markdown');
     await expect(reply.getByRole('heading', { level: 2, name: 'Critique of @der_spotter' })).toBeVisible();
     await expect(reply.locator('strong').first()).toHaveText('Scope:');
     await expect(reply.locator('ol > li')).toHaveCount(2);
@@ -152,7 +152,7 @@ test('AI Markdown blocks executable HTML, unsafe links and remote embeds', async
   const drawer = page.getByRole('dialog', { name: 'AI assistant' });
   await drawer.getByRole('textbox', { name: 'Message AI' }).fill('**Keep my input literal**');
   await drawer.getByRole('button', { name: 'Send', exact: true }).click();
-  const reply = drawer.locator('.ai-markdown');
+  const reply = drawer.locator('.formatted-markdown');
   await expect(reply.getByRole('heading')).toHaveText('Safe heading');
   await expect(reply.locator('script, img, svg, iframe, form, input, [onclick], [onerror], [style], [id]')).toHaveCount(0);
   await expect(reply.locator('a[href]')).toHaveCount(0);
