@@ -103,7 +103,7 @@ export default function MarketPicker(props) {
     <div
       class="market-picker"
       style={{
-        border: '1px solid var(--border-color, #ccc)', 'border-radius': '6px',
+        border: '1px solid var(--border-color, #ccc)', 'border-radius': '0',
         padding: '8px', 'margin-top': '8px', background: 'var(--bg-secondary, #fafafa)'
       }}
     >
@@ -114,7 +114,7 @@ export default function MarketPicker(props) {
           placeholder="Search markets…"
           value={query()}
           onInput={handleQueryInput}
-          style={{ flex: 1, padding: '4px 8px', 'font-size': '0.9em' }}
+          style={{ flex: 1, padding: '4px 8px', 'font-size': '0.9em', 'border-radius': '0' }}
         />
         <button type="button" class="post-action" onClick={() => props.onClose?.()}>
           Cancel
@@ -129,7 +129,7 @@ export default function MarketPicker(props) {
               type="button"
               onClick={() => setStance(option)}
               style={{
-                padding: '2px 8px', 'border-radius': '10px', cursor: 'pointer',
+                padding: '2px 8px', 'border-radius': '0', cursor: 'pointer',
                 border: '1px solid var(--border-color, #ccc)',
                 background: stance() === option ? 'var(--text-link, #007bff)' : 'transparent',
                 color: stance() === option ? '#fff' : 'inherit'
