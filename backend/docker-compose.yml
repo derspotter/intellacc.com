@@ -6,6 +6,9 @@ services:
     environment:
       HOSTNAME: mail.intellacc.com
       ALLOWED_SENDER_DOMAINS: intellacc.com
+      # Relay only for loopback + intellacc-network (external, 172.19.0.0/16); the
+      # image default trusts all RFC1918 ranges, i.e. every container on the host.
+      POSTFIX_mynetworks: 127.0.0.0/8,172.19.0.0/16
     volumes:
       - ./postfix/keys:/etc/opendkim/keys:ro
     networks:
