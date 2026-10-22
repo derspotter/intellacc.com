@@ -3,6 +3,7 @@
 const db = require('../db');
 const { verifyToken } = require('../utils/jwt');
 const passwordResetService = require('../services/passwordResetService');
+const { normalizeEmail } = require('../utils/emailIdentity');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
@@ -17,14 +18,17 @@ const TEST_RESET_EMAILS = new Set(
 const TEST_RESET_PASSWORD = process.env.PASSWORD_RESET_TEST_PASSWORD || 'password123';
 
 const isValidUUID = (str) => str && UUID_REGEX.test(str);
-const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
 const createTestUserForResetFlow = async (email) => {
   const normalizedEmail = normalizeEmail(email);
   if (process.env.NODE_ENV === 'production') return null;
   if (!TEST_RESET_EMAILS.has(normalizedEmail)) return null;
 
-  const existing = await db.query('SELECT id, username, email FROM users WHERE lower(email) = $1', [normalizedEmail]);
+  const existing = await db.query(
+    `SELECT id, username, email FROM users
+     WHERE deleted_at IS NULL AND email_identity_key(email) = email_identity_key($1)`,
+    [normalizedEmail]
+  );
   if (existing.rows.length > 0) {
     return existing.rows[0];
   }
@@ -94,7 +98,17 @@ exports.forgotPassword = async (req, res) => {
 
   try {
     const normalized = normalizeEmail(email);
-    const userResult = await db.query('SELECT id, email FROM users WHERE email = $1', [normalized]);
+    // Match on mailbox identity, and send the link to the address on file --
+    // for a gmail alias that is the same inbox, so the reset still reaches the
+    // person who asked. Soft-deleted accounts are never resolved.
+    const userResult = await db.query(
+      `SELECT id, email FROM users
+       WHERE deleted_at IS NULL
+         AND email_identity_key(email) = email_identity_key($1)
+       ORDER BY (LOWER(BTRIM(email)) = $1) DESC, id ASC
+       LIMIT 1`,
+      [normalized]
+    );
     let targetUser = userResult.rows[0];
 
     if (!targetUser) {

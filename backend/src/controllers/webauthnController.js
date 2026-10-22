@@ -161,7 +161,16 @@ exports.generateAuthenticationOptions = async (req, res) => {
     let userId = null;
 
     if (email) {
-       const userRes = await db.query('SELECT id FROM users WHERE email = $1', [email]);
+       // Same mailbox identity as login: a gmail alias resolves to the one
+       // account, and soft-deleted rows are never offered credentials.
+       const userRes = await db.query(
+         `SELECT id FROM users
+          WHERE deleted_at IS NULL
+            AND email_identity_key(email) = email_identity_key($1)
+          ORDER BY (LOWER(BTRIM(email)) = LOWER(BTRIM($1))) DESC, id ASC
+          LIMIT 1`,
+         [email]
+       );
        if (userRes.rows.length > 0) {
            userId = userRes.rows[0].id;
            const creds = await db.query('SELECT credential_id FROM webauthn_credentials WHERE user_id = $1', [userId]);

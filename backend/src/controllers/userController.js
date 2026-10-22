@@ -13,6 +13,7 @@ const {
   REGISTRATION_APPROVAL_MESSAGE,
   getMaxPendingRegistrationApprovals
 } = require('../utils/registration');
+const { normalizeEmail } = require('../utils/emailIdentity');
 const notificationService = require('../services/notificationService');
 const emailVerificationService = require('../services/emailVerificationService');
 const {
@@ -188,14 +189,19 @@ exports.createUser = async (req, res) => {
     });
   }
 
+  // Store the address the person typed, trimmed and case folded. This is still
+  // the deliverable address (a gmail plus suffix is kept); only the identity
+  // comparison below folds it away. See src/utils/emailIdentity.js.
+  const normalizedEmail = normalizeEmail(email);
+
   // Validate email format
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
-    return res.status(400).json({ 
-      message: 'Please provide a valid email address' 
+  if (!emailRegex.test(normalizedEmail)) {
+    return res.status(400).json({
+      message: 'Please provide a valid email address'
     });
   }
-  
+
   // Validate password length
   if (password.length < 6) {
     return res.status(400).json({ 
@@ -204,10 +210,15 @@ exports.createUser = async (req, res) => {
   }
   
   try {
-    // Check if user already exists
+    // Check if user already exists. The email side compares mailbox identities
+    // (so foo+tag@gmail.com is foo@gmail.com) and only against live accounts --
+    // a soft-deleted row has had its address rewritten and must not hold the
+    // identity hostage. Username matching is unchanged.
     const existingUser = await db.query(
-      'SELECT id FROM users WHERE email = $1 OR username = $2',
-      [email, username]
+      `SELECT id FROM users
+       WHERE (deleted_at IS NULL AND email_identity_key(email) = email_identity_key($1))
+          OR username = $2`,
+      [normalizedEmail, username]
     );
     
     if (existingUser.rows.length > 0) {
@@ -245,14 +256,14 @@ exports.createUser = async (req, res) => {
     try {
       result = await db.query(
         insertQuery,
-        [username, email, hashedPassword]
+        [username, normalizedEmail, hashedPassword]
       );
     } catch (err) {
       if (approvalRequired && err.code === '42703') {
         approvalRequired = false;
         const fallback = await db.query(
           'INSERT INTO users (username, email, password_hash, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, username, email, FALSE as is_approved, created_at',
-          [username, email, hashedPassword]
+          [username, normalizedEmail, hashedPassword]
         );
         result = fallback;
       } else {
@@ -480,10 +491,14 @@ exports.loginUser = async (req, res) => {
     }
 
     // Resolve credentials deterministically:
-    // 1) email match (case-insensitive), 2) username match (case-insensitive).
+    // 1) email match (by mailbox identity), 2) username match (case-insensitive).
     // This avoids ambiguous OR-matches returning the wrong user row.
     let result = await db.query(
-      'SELECT * FROM users WHERE deleted_at IS NULL AND LOWER(email) = LOWER($1) LIMIT 1',
+      `SELECT * FROM users
+       WHERE deleted_at IS NULL
+         AND email_identity_key(email) = email_identity_key($1)
+       ORDER BY (LOWER(BTRIM(email)) = LOWER(BTRIM($1))) DESC, id ASC
+       LIMIT 1`,
       [identifier]
     );
 

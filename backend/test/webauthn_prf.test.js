@@ -20,7 +20,9 @@ describe('WebAuthn PRF contract', () => {
 
     beforeEach(() => {
         queryMock = jest.spyOn(db, 'query').mockImplementation(async (sql) => {
-            if (sql.includes('SELECT id FROM users WHERE email')) {
+            // The email lookup resolves mailbox identity (gmail aliases fold
+            // onto one account) rather than matching the address literally.
+            if (sql.includes('FROM users') && sql.includes('email_identity_key')) {
                 return { rows: [{ id: 42 }] };
             }
             if (sql.includes('SELECT credential_id FROM webauthn_credentials WHERE user_id')) {
